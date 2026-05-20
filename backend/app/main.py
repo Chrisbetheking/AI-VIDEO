@@ -27,7 +27,7 @@ from app.schemas import (
     TTSResponse,
 )
 from app.services.ad_analysis import analyze_ad
-from app.services.deepseek import DeepSeekError, generate_copy
+from app.services.deepseek import DeepSeekError, generate_copy, test_deepseek
 from app.services.kb import KnowledgeBase
 from app.services.tts import synthesize_tts
 from app.services.video import IMAGE_EXTS, VIDEO_EXTS, compose_video
@@ -83,6 +83,19 @@ def health(settings: Settings = Depends(get_settings)) -> dict:
         "data_dir": str(settings.data_dir),
         "time": datetime.now(timezone.utc).isoformat(),
     }
+
+
+
+
+@app.post("/api/ai-test")
+async def api_ai_test(payload: dict | None = None, settings: Settings = Depends(get_settings)) -> dict:
+    api_key = ""
+    if payload and isinstance(payload, dict):
+        api_key = str(payload.get("api_key") or "")
+    try:
+        return await test_deepseek(settings, api_key_override=api_key)
+    except DeepSeekError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
 @app.post("/api/generate-copy", response_model=GeneratedCopy)
