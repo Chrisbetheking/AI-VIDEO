@@ -93,3 +93,19 @@ export interface AdAnalysisResponse {
   optimization_tips: string[]
   next_actions: string[]
 }
+
+export interface VoiceSegment {
+  text: string
+  emotion: string
+  speed_ratio: number
+  volume_ratio: number
+  pitch_ratio: number
+  pause_after_ms: number
+}
+
+export interface VoiceDirectorResponse {
+  style: string
+  director_notes: string[]
+  rewritten_script: string
+  segments: VoiceSegment[]
+}

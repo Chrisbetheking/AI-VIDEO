@@ -61,6 +61,39 @@ class TTSResponse(BaseModel):
     warning: Optional[str] = None
 
 
+
+
+class VoiceSegment(BaseModel):
+    text: str = Field(..., min_length=1, max_length=800)
+    emotion: str = Field(default='自然可信', max_length=80)
+    speed_ratio: float = Field(default=1.0, ge=0.5, le=2.0)
+    volume_ratio: float = Field(default=1.0, ge=0.2, le=3.0)
+    pitch_ratio: float = Field(default=1.0, ge=0.5, le=2.0)
+    pause_after_ms: int = Field(default=350, ge=0, le=3000)
+
+
+class VoiceDirectorRequest(BaseModel):
+    script: str = Field(..., min_length=1, max_length=12000)
+    style: str = Field(default='老板压迫感', max_length=120)
+    intensity: str = Field(default='标准', max_length=40)
+    target_seconds: int = Field(default=35, ge=5, le=180)
+    audience: str = Field(default='', max_length=200)
+    selling_points: str = Field(default='', max_length=1000)
+
+
+class VoiceDirectorResponse(BaseModel):
+    style: str
+    director_notes: List[str] = Field(default_factory=list)
+    rewritten_script: str
+    segments: List[VoiceSegment]
+
+
+class TTSSegmentsRequest(BaseModel):
+    segments: List[VoiceSegment] = Field(..., min_length=1, max_length=30)
+    voice: Optional[str] = None
+    overall_rate: Optional[str] = None
+
+
 class AssetItem(BaseModel):
     id: str
     filename: str

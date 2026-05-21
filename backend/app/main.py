@@ -34,15 +34,18 @@ from app.schemas import (
     TTSRequest,
     TTSResponse,
     TTSVoice,
+    TTSSegmentsRequest,
+    VoiceDirectorRequest,
+    VoiceDirectorResponse,
 )
 from app.services.ad_analysis import analyze_ad
 from app.services.cover import create_cover
-from app.services.deepseek import DeepSeekError, generate_copy, generate_edit_plan, rewrite_from_inspiration, test_deepseek
+from app.services.deepseek import DeepSeekError, generate_copy, generate_edit_plan, generate_voice_director, rewrite_from_inspiration, test_deepseek
 from app.services.doubao import extract_with_doubao
 from app.services.kb import KnowledgeBase
 from app.services.publisher import create_publish_package
 from app.services.storage import maybe_upload_to_r2
-from app.services.tts import get_tts_voices, synthesize_tts
+from app.services.tts import get_tts_voices, synthesize_tts, synthesize_tts_segments
 from app.services.video import IMAGE_EXTS, VIDEO_EXTS, compose_video
 
 app = FastAPI(title='AI-VIDEO 正式版 API', version='1.0.0')
@@ -148,6 +151,14 @@ async def api_edit_plan(req: EditPlanRequest, settings: Settings = Depends(get_s
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
+@app.post('/api/voice-director', response_model=VoiceDirectorResponse)
+async def api_voice_director(req: VoiceDirectorRequest, settings: Settings = Depends(get_settings)) -> VoiceDirectorResponse:
+    try:
+        return await generate_voice_director(settings, req)
+    except DeepSeekError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
 @app.get('/api/tts/voices', response_model=List[TTSVoice])
 def api_tts_voices(settings: Settings = Depends(get_settings)) -> List[TTSVoice]:
     return get_tts_voices(settings)
@@ -157,6 +168,16 @@ def api_tts_voices(settings: Settings = Depends(get_settings)) -> List[TTSVoice]
 async def api_tts(req: TTSRequest, request: Request, settings: Settings = Depends(get_settings)) -> TTSResponse:
     try:
         path, duration, warning = await synthesize_tts(settings, req.text, voice=req.voice, rate=req.rate)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    public_url = maybe_upload_to_r2(settings, path, prefix='audio')
+    return TTSResponse(file_url=file_url(request, path.name, public_url), file_name=path.name, duration_seconds=duration, warning=warning)
+
+
+@app.post('/api/tts-segments', response_model=TTSResponse)
+async def api_tts_segments(req: TTSSegmentsRequest, request: Request, settings: Settings = Depends(get_settings)) -> TTSResponse:
+    try:
+        path, duration, warning = await synthesize_tts_segments(settings, req.segments, voice=req.voice, overall_rate=req.overall_rate)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     public_url = maybe_upload_to_r2(settings, path, prefix='audio')

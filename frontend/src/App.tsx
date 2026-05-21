@@ -11,6 +11,8 @@ import {
   PublishPackageResponse,
   TTSResponse,
   TTSVoice,
+  VoiceDirectorResponse,
+  VoiceSegment,
   apiGet,
   apiPost,
   uploadAssets
@@ -46,6 +48,10 @@ export default function App() {
   const [editPlan, setEditPlan] = useState<EditPlanResponse | null>(null)
   const [voices, setVoices] = useState<TTSVoice[]>([])
   const [voice, setVoice] = useState('')
+  const [voiceStyle, setVoiceStyle] = useState('老板压迫感')
+  const [voiceIntensity, setVoiceIntensity] = useState('标准')
+  const [voiceSegments, setVoiceSegments] = useState<VoiceSegment[]>([])
+  const [voiceNotes, setVoiceNotes] = useState<string[]>([])
   const [audio, setAudio] = useState<TTSResponse | null>(null)
   const [video, setVideo] = useState<ComposeResponse | null>(null)
   const [cover, setCover] = useState<CoverResponse | null>(null)
@@ -125,9 +131,42 @@ export default function App() {
     setEditPlan(res!)
   }
 
+  function updateVoiceSegment(index: number, patch: Partial<VoiceSegment>) {
+    setVoiceSegments(prev => prev.map((seg, i) => i === index ? { ...seg, ...patch } : seg))
+  }
+
+  async function makeVoiceDirector() {
+    if (!copy) return
+    const res = await run('生成配音导演稿', () => apiPost<VoiceDirectorResponse>('/api/voice-director', {
+      script: copy.script,
+      style: voiceStyle,
+      intensity: voiceIntensity,
+      target_seconds: duration,
+      audience,
+      selling_points: sellingPoints
+    }))
+    setVoiceSegments(Array.isArray(res!.segments) ? res!.segments : [])
+    setVoiceNotes(Array.isArray(res!.director_notes) ? res!.director_notes : [])
+    setCopy({ ...copy, script: res!.rewritten_script || copy.script })
+  }
+
   async function makeTTS() {
     if (!copy) return
     const res = await run('生成豆包配音', () => apiPost<TTSResponse>('/api/tts', { text: copy.script, voice, rate: '+0%' }))
+    setAudio(res!)
+  }
+
+  async function makeSegmentTTS() {
+    if (!copy) return
+    if (!voiceSegments.length) {
+      await makeVoiceDirector()
+      return
+    }
+    const res = await run('生成分段情绪配音', () => apiPost<TTSResponse>('/api/tts-segments', {
+      segments: voiceSegments,
+      voice,
+      overall_rate: '+0%'
+    }))
     setAudio(res!)
   }
 
@@ -220,9 +259,35 @@ export default function App() {
 
     <section className="grid two">
       <div className="card">
-        <h2>5. 豆包配音</h2>
+        <h2>5. 豆包配音 / 配音导演</h2>
         <Field label="云端音色"><select value={voice} onChange={e => setVoice(e.target.value)}>{voices.map(v => <option key={v.id} value={v.id}>{v.name} · {v.id}</option>)}</select></Field>
-        <button onClick={makeTTS} disabled={!copy}>生成配音</button>
+        <div className="miniGrid">
+          <Field label="配音风格"><select value={voiceStyle} onChange={e => setVoiceStyle(e.target.value)}>
+            <option>老板压迫感</option>
+            <option>真实聊天感</option>
+            <option>短视频强钩子</option>
+            <option>销售转化感</option>
+            <option>案例讲述感</option>
+            <option>沉稳信任感</option>
+          </select></Field>
+          <Field label="情绪强度"><select value={voiceIntensity} onChange={e => setVoiceIntensity(e.target.value)}>
+            <option>轻微</option>
+            <option>标准</option>
+            <option>强烈</option>
+          </select></Field>
+        </div>
+        <div className="actions"><button onClick={makeVoiceDirector} disabled={!copy}>生成配音导演稿</button><button onClick={makeSegmentTTS} disabled={!copy}>生成分段情绪配音</button><button onClick={makeTTS} disabled={!copy}>普通配音</button></div>
+        {voiceNotes.length > 0 && <ul className="mutedList">{voiceNotes.map(n => <li key={n}>{n}</li>)}</ul>}
+        {voiceSegments.length > 0 && <details open className="segmentsBox"><summary>分段配音稿，可手动微调</summary>{voiceSegments.map((seg, i) => <div className="segmentCard" key={i}>
+          <div className="segmentHead"><b>第 {i + 1} 段</b><span>{seg.emotion}</span></div>
+          <textarea value={seg.text} onChange={e => updateVoiceSegment(i, { text: e.target.value })} />
+          <div className="segmentControls">
+            <label>语速<input type="number" step="0.01" min="0.5" max="2" value={seg.speed_ratio} onChange={e => updateVoiceSegment(i, { speed_ratio: Number(e.target.value || 1) })} /></label>
+            <label>音高<input type="number" step="0.01" min="0.5" max="2" value={seg.pitch_ratio} onChange={e => updateVoiceSegment(i, { pitch_ratio: Number(e.target.value || 1) })} /></label>
+            <label>音量<input type="number" step="0.01" min="0.2" max="3" value={seg.volume_ratio} onChange={e => updateVoiceSegment(i, { volume_ratio: Number(e.target.value || 1) })} /></label>
+            <label>停顿ms<input type="number" step="50" min="0" max="3000" value={seg.pause_after_ms} onChange={e => updateVoiceSegment(i, { pause_after_ms: Number(e.target.value || 0) })} /></label>
+          </div>
+        </div>)}</details>}
         {audio && <><audio controls src={audio.file_url} /><p>{audio.duration_seconds.toFixed(1)} 秒</p><Alert text={audio.warning} /></>}
       </div>
 

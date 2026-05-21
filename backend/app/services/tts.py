@@ -7,12 +7,12 @@ import subprocess
 import tempfile
 import uuid
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Iterable
 
 import httpx
 
 from app.config import Settings
-from app.schemas import TTSVoice
+from app.schemas import TTSVoice, VoiceSegment
 
 
 def run_cmd(cmd: list[str], timeout: int = 120) -> subprocess.CompletedProcess[str]:
@@ -89,7 +89,7 @@ def get_tts_voices(settings: Settings) -> list[TTSVoice]:
     return _configured_voices(settings)
 
 
-async def synthesize_volcengine_v1(settings: Settings, text: str, voice: Optional[str], rate: Optional[str]) -> Path:
+async def synthesize_volcengine_v1(settings: Settings, text: str, voice: Optional[str], rate: Optional[str], speed_ratio: Optional[float] = None, volume_ratio: float = 1.0, pitch_ratio: float = 1.0) -> Path:
     if not settings.volcengine_app_id.strip() or not settings.volcengine_access_token.strip():
         raise RuntimeError('缺少豆包语音配置：VOLCENGINE_APP_ID / VOLCENGINE_ACCESS_TOKEN。')
     voice_type = (voice or settings.volcengine_voice_type or '').strip()
@@ -107,9 +107,9 @@ async def synthesize_volcengine_v1(settings: Settings, text: str, voice: Optiona
         'audio': {
             'voice_type': voice_type,
             'encoding': 'mp3',
-            'speed_ratio': _speed_ratio(rate),
-            'volume_ratio': 1.0,
-            'pitch_ratio': 1.0,
+            'speed_ratio': max(0.5, min(2.0, float(speed_ratio if speed_ratio is not None else _speed_ratio(rate)))),
+            'volume_ratio': max(0.2, min(3.0, float(volume_ratio))),
+            'pitch_ratio': max(0.5, min(2.0, float(pitch_ratio))),
         },
         'request': {
             'reqid': reqid,
@@ -179,6 +179,98 @@ $synth.Dispose()
         if proc.returncode != 0:
             raise RuntimeError(f'Windows SAPI 配音失败：{proc.stderr[-1200:] or proc.stdout[-1200:]}')
 
+
+
+
+def _make_silence_wav(path: Path, milliseconds: int) -> None:
+    seconds = max(0.05, milliseconds / 1000)
+    cmd = [
+        'ffmpeg', '-y', '-f', 'lavfi', '-i', 'anullsrc=channel_layout=stereo:sample_rate=44100',
+        '-t', f'{seconds:.3f}', '-c:a', 'pcm_s16le', str(path),
+    ]
+    proc = run_cmd(cmd, timeout=60)
+    if proc.returncode != 0:
+        raise RuntimeError(f'生成停顿音频失败：{proc.stderr[-800:]}')
+
+
+def _convert_to_standard_wav(src: Path, dst: Path) -> None:
+    cmd = ['ffmpeg', '-y', '-i', str(src), '-ar', '44100', '-ac', '2', '-c:a', 'pcm_s16le', str(dst)]
+    proc = run_cmd(cmd, timeout=120)
+    if proc.returncode != 0:
+        raise RuntimeError(f'音频标准化失败：{proc.stderr[-1000:]}')
+
+
+def _concat_wavs(parts: Iterable[Path], output: Path) -> None:
+    part_list = [p for p in parts if p.exists() and p.stat().st_size > 0]
+    if not part_list:
+        raise RuntimeError('没有可合并的分段音频。')
+    list_path = output.parent / f'concat_{uuid.uuid4().hex}.txt'
+    list_path.write_text('\n'.join("file '" + str(p).replace("'", "'\\''") + "'" for p in part_list), encoding='utf-8')
+    cmd = ['ffmpeg', '-y', '-f', 'concat', '-safe', '0', '-i', str(list_path), '-c:a', 'pcm_s16le', str(output)]
+    proc = run_cmd(cmd, timeout=240)
+    list_path.unlink(missing_ok=True)
+    if proc.returncode != 0:
+        raise RuntimeError(f'分段音频合并失败：{proc.stderr[-1200:]}')
+
+
+async def synthesize_tts_segments(settings: Settings, segments: list[VoiceSegment], voice: Optional[str] = None, overall_rate: Optional[str] = None) -> Tuple[Path, float, Optional[str]]:
+    if not segments:
+        raise RuntimeError('缺少分段配音内容。')
+
+    provider = settings.tts_provider.lower().strip()
+    tmp_dir = settings.tmp_dir / f'tts_segments_{uuid.uuid4().hex}'
+    tmp_dir.mkdir(parents=True, exist_ok=True)
+    wav_parts: list[Path] = []
+    warnings: list[str] = []
+
+    try:
+        for index, segment in enumerate(segments[:30], start=1):
+            text = segment.text.strip()
+            if not text:
+                continue
+            try:
+                if provider in {'volcengine', 'doubao', 'bytedance'}:
+                    raw = await synthesize_volcengine_v1(
+                        settings,
+                        text,
+                        voice,
+                        overall_rate,
+                        speed_ratio=segment.speed_ratio,
+                        volume_ratio=segment.volume_ratio,
+                        pitch_ratio=segment.pitch_ratio,
+                    )
+                    wav = tmp_dir / f'{index:02d}_voice.wav'
+                    await asyncio.to_thread(_convert_to_standard_wav, raw, wav)
+                elif provider in {'sapi', 'windows', 'local'}:
+                    wav = tmp_dir / f'{index:02d}_voice.wav'
+                    await asyncio.to_thread(synthesize_sapi_to_wav, wav, text, voice or 'default', str(segment.speed_ratio))
+                else:
+                    raise RuntimeError(f'未知 TTS_PROVIDER={settings.tts_provider}')
+                wav_parts.append(wav)
+                if segment.pause_after_ms > 0 and index < len(segments):
+                    pause = tmp_dir / f'{index:02d}_pause.wav'
+                    await asyncio.to_thread(_make_silence_wav, pause, segment.pause_after_ms)
+                    wav_parts.append(pause)
+            except Exception as exc:
+                warnings.append(f'第 {index} 段配音失败：{exc}')
+                if not settings.allow_mock_tts:
+                    raise
+                silent = tmp_dir / f'{index:02d}_silent.wav'
+                await asyncio.to_thread(_make_silence_wav, silent, int(estimate_speech_duration(text) * 1000))
+                wav_parts.append(silent)
+
+        output = settings.outputs_dir / f'tts_segments_{uuid.uuid4().hex}.wav'
+        await asyncio.to_thread(_concat_wavs, wav_parts, output)
+        duration = probe_duration(output) or sum(estimate_speech_duration(seg.text) + seg.pause_after_ms / 1000 for seg in segments)
+        warning = '；'.join(warnings) if warnings else None
+        return output, duration, warning
+    finally:
+        # 保留最终输出，清理临时分段文件。
+        try:
+            import shutil
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+        except Exception:
+            pass
 
 async def synthesize_tts(settings: Settings, text: str, voice: Optional[str] = None, rate: Optional[str] = None) -> Tuple[Path, float, Optional[str]]:
     provider = settings.tts_provider.lower().strip()

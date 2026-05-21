@@ -43,3 +43,16 @@ ul { line-height: 1.8; }
   border-radius: 14px;
   background: #000;
 }
+
+.miniGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.segmentsBox { margin-top: 14px; border: 1px solid #dbeafe; border-radius: 18px; padding: 14px; background: #f8fbff; }
+.segmentsBox summary { cursor: pointer; font-weight: 900; color: #1d4ed8; margin-bottom: 12px; }
+.segmentCard { margin: 12px 0; padding: 14px; border-radius: 16px; background: white; border: 1px solid #e2e8f0; }
+.segmentHead { display: flex; justify-content: space-between; gap: 10px; align-items: center; margin-bottom: 8px; color: #334155; }
+.segmentHead span { color: #2563eb; font-weight: 800; font-size: 13px; }
+.segmentCard textarea { min-height: 82px; }
+.segmentControls { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-top: 10px; }
+.segmentControls label { font-size: 13px; font-weight: 800; color: #475569; }
+.segmentControls input { margin-top: 5px; padding: 9px 10px; border-radius: 10px; }
+.mutedList { margin: 8px 0 0; padding-left: 18px; color: #475569; }
+@media (max-width: 980px) { .miniGrid, .segmentControls { grid-template-columns: 1fr; } }

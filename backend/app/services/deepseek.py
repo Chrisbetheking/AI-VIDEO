@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Optional
 import httpx
 
 from app.config import Settings
-from app.schemas import CopyRequest, EditPlanRequest, EditPlanResponse, GeneratedCopy, RewriteFromInspirationRequest
+from app.schemas import CopyRequest, EditPlanRequest, EditPlanResponse, GeneratedCopy, RewriteFromInspirationRequest, VoiceDirectorRequest, VoiceDirectorResponse
 
 
 class DeepSeekError(RuntimeError):
@@ -203,4 +203,139 @@ async def generate_edit_plan(settings: Settings, req: EditPlanRequest) -> EditPl
         subtitle_style=_as_str(payload, 'subtitle_style', '大号白字，关键词高亮，底部居中'),
         music_style=_as_str(payload, 'music_style', '轻快、专业、低音量铺底'),
         cover_ideas=_as_list(payload, 'cover_ideas') or ['老板头像+痛点标题+品牌色背景'],
+    )
+
+
+def _clamp_float(value: Any, default: float, low: float, high: float) -> float:
+    try:
+        number = float(value)
+    except Exception:
+        number = default
+    return max(low, min(high, number))
+
+
+def _clamp_int(value: Any, default: int, low: int, high: int) -> int:
+    try:
+        number = int(value)
+    except Exception:
+        number = default
+    return max(low, min(high, number))
+
+
+def _fallback_voice_segments(script: str, style: str, intensity: str) -> Dict[str, Any]:
+    from re import split
+
+    raw_parts = [x.strip() for x in split(r'(?<=[。！？!?；;\n])', script.replace('\r', '\n')) if x.strip()]
+    if not raw_parts:
+        raw_parts = [script.strip() or '今天先简单跟大家说一件事。']
+
+    segments = []
+    for index, text in enumerate(raw_parts[:18]):
+        if index == 0:
+            emotion = '开场钩子，有冲击力'
+            speed = 1.08 if '快' in style or '钩子' in style else 1.03
+            pause = 520
+        elif index >= len(raw_parts[:18]) - 2:
+            emotion = '收束转化，坚定可信'
+            speed = 0.98
+            pause = 650
+        else:
+            emotion = '痛点推进，真实有压迫感' if '压迫' in style or '老板' in style else '自然讲述'
+            speed = 1.0
+            pause = 420
+        if intensity == '强烈':
+            pause += 120
+            speed += 0.03
+        elif intensity == '轻微':
+            pause = max(250, pause - 120)
+            speed -= 0.03
+        segments.append({
+            'text': text,
+            'emotion': emotion,
+            'speed_ratio': round(max(0.85, min(1.2, speed)), 2),
+            'volume_ratio': 1.08 if index == 0 else 1.0,
+            'pitch_ratio': 1.0,
+            'pause_after_ms': pause,
+        })
+    return {
+        'style': style,
+        'director_notes': ['DeepSeek 配音导演不可用时生成的兜底分段。', '已尽量按短句、停顿和情绪递进处理。'],
+        'rewritten_script': '\n'.join(x['text'] for x in segments),
+        'segments': segments,
+    }
+
+
+async def generate_voice_director(settings: Settings, req: 'VoiceDirectorRequest') -> 'VoiceDirectorResponse':
+    from app.schemas import VoiceDirectorRequest, VoiceDirectorResponse, VoiceSegment
+
+    system = (
+        '你是短视频配音导演，专门把普通口播稿改成更像真人老板口播的分段配音稿。'
+        '你必须输出严格 JSON。不要输出 Markdown。不要照抄长书面句。'
+    )
+    user = f'''
+请把下面口播稿改造成“更有语调、更有停顿、更有情绪递进”的配音导演稿。
+
+原始口播稿：
+{req.script}
+
+配音风格：{req.style}
+情绪强度：{req.intensity}
+目标时长：{req.target_seconds} 秒
+目标客户：{req.audience or '未填写'}
+核心卖点：{req.selling_points or '未填写'}
+
+要求：
+1. 不要变成广告腔，要像真人老板在镜头前说话。
+2. 使用短句，适合 TTS 分段生成。
+3. 第一段必须是强钩子；中段痛点逐步推进；结尾给明确行动引导。
+4. 不要添加 [停顿]、括号、SSML 标签，因为这些会被读出来。
+5. 每段 text 控制在 8 到 45 个汉字左右。
+6. speed_ratio 范围 0.85-1.20；pitch_ratio 范围 0.92-1.08；volume_ratio 范围 0.90-1.20；pause_after_ms 范围 200-1200。
+
+输出 JSON：
+{{
+  "style": "风格名",
+  "director_notes": ["给操作者看的配音建议"],
+  "rewritten_script": "所有分段合并后的最终口播稿",
+  "segments": [
+    {{"text":"分段口播文本","emotion":"这一段的情绪/说法","speed_ratio":1.05,"volume_ratio":1.05,"pitch_ratio":1.0,"pause_after_ms":500}}
+  ]
+}}
+'''.strip()
+    try:
+        payload = await _chat_json(settings, system, user, temperature=0.72, timeout=90)
+    except Exception:
+        payload = _fallback_voice_segments(req.script, req.style, req.intensity)
+
+    raw_segments = payload.get('segments') or []
+    segments: list[VoiceSegment] = []
+    if isinstance(raw_segments, list):
+        for item in raw_segments[:24]:
+            if not isinstance(item, dict):
+                continue
+            text = str(item.get('text') or '').strip()
+            if not text:
+                continue
+            segments.append(VoiceSegment(
+                text=text,
+                emotion=str(item.get('emotion') or '自然可信')[:80],
+                speed_ratio=_clamp_float(item.get('speed_ratio'), 1.0, 0.5, 2.0),
+                volume_ratio=_clamp_float(item.get('volume_ratio'), 1.0, 0.2, 3.0),
+                pitch_ratio=_clamp_float(item.get('pitch_ratio'), 1.0, 0.5, 2.0),
+                pause_after_ms=_clamp_int(item.get('pause_after_ms'), 350, 0, 3000),
+            ))
+    if not segments:
+        payload = _fallback_voice_segments(req.script, req.style, req.intensity)
+        segments = [VoiceSegment(**x) for x in payload['segments']]
+
+    rewritten_script = str(payload.get('rewritten_script') or '\n'.join(seg.text for seg in segments)).strip()
+    notes = payload.get('director_notes') or []
+    if isinstance(notes, str):
+        notes = [notes]
+    notes = [str(x) for x in notes if str(x).strip()][:8]
+    return VoiceDirectorResponse(
+        style=str(payload.get('style') or req.style),
+        director_notes=notes,
+        rewritten_script=rewritten_script,
+        segments=segments,
     )
