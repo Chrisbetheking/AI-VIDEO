@@ -81,7 +81,7 @@ export default function App() {
   }
 
   async function extractVideo() {
-    const res = await run('豆包提取视频文案', () => apiPost<InspirationExtractResponse>('/api/inspiration/extract', {
+    const res = await run('同行采集与豆包拆解', () => apiPost<InspirationExtractResponse>('/api/inspiration/extract', {
       asset_id: selectedAssetId || undefined,
       source_url: sourceUrl,
       manual_text: manualText
@@ -199,16 +199,16 @@ export default function App() {
       </div>
 
       <div className="card">
-        <h2>2. 竞品视频 / 文案提取</h2>
+        <h2>2. 同行采集 / 竞品拆解</h2>
         <Field label="上传参考视频或素材"><input type="file" multiple accept="video/*,image/*" onChange={e => handleUpload(e.target.files)} /></Field>
         <Field label="选择参考视频"><select value={selectedAssetId} onChange={e => setSelectedAssetId(e.target.value)}><option value="">不选择</option>{assets.map(a => <option key={a.id} value={a.id}>{a.kind} · {a.original_name}</option>)}</select></Field>
-        <Field label="视频 URL（可选）"><input value={sourceUrl} onChange={e => setSourceUrl(e.target.value)} placeholder="公开视频地址或素材 CDN 地址" /></Field>
-        <Field label="手动粘贴豆包/竞品文案（可选）"><textarea value={manualText} onChange={e => setManualText(e.target.value)} placeholder="如果豆包视频理解还没配置，可先粘贴文案直接改写" /></Field>
-        <button onClick={extractVideo}>提取/拆解参考视频</button>
+        <Field label="抖音分享口令 / 视频 URL（可选）"><input value={sourceUrl} onChange={e => setSourceUrl(e.target.value)} placeholder="可直接粘贴抖音复制链接整段；系统会自动提取链接和钩子文案" /></Field>
+        <Field label="手动粘贴竞品文案（可选）"><textarea value={manualText} onChange={e => setManualText(e.target.value)} placeholder="只有文案时粘这里；抖音分享整段也可以粘到上面的口令框" /></Field>
+        <button onClick={extractVideo}>采集/拆解同行内容</button>
       </div>
     </section>
 
-    {extract && <section className="card"><h2>提取结果</h2><p><b>状态：</b>{extract.status}</p><p>{extract.summary}</p><pre>{extract.transcript || '暂无 transcript'}</pre>{safeExtractWarnings.map(w => <Alert key={w} text={w} />)}</section>}
+    {extract && <section className="card"><h2>提取结果</h2><p><b>状态：</b>{extract.status}</p><p>{extract.summary}</p><pre>{extract.transcript || '暂无 transcript'}</pre><p className="small-note">提示：抖音分享口令会优先提取其中的标题、话题和短链；若要分析画面节奏，请上传下载后的 MP4。</p>{safeExtractWarnings.map(w => <Alert key={w} text={w} />)}</section>}
 
     <section className="card">
       <h2>3. 文案生成与原创改写</h2>
