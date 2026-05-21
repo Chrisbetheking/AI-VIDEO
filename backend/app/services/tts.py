@@ -110,25 +110,40 @@ async def synthesize_volcengine_v1(settings: Settings, text: str, voice: Optiona
             'speed_ratio': max(0.5, min(2.0, float(speed_ratio if speed_ratio is not None else _speed_ratio(rate)))),
             'volume_ratio': max(0.2, min(3.0, float(volume_ratio))),
             'pitch_ratio': max(0.5, min(2.0, float(pitch_ratio))),
+            'language': 'cn',
         },
         'request': {
             'reqid': reqid,
             'text': text,
             'text_type': 'plain',
             'operation': 'query',
+            'silence_duration': 125,
+            'split_sentence': 1,
             'with_frontend': 1,
             'frontend_type': 'unitTson',
         },
     }
-    headers = {'Authorization': f'Bearer;{settings.volcengine_access_token}', 'Content-Type': 'application/json'}
+    headers = {
+        'Authorization': f'Bearer;{settings.volcengine_access_token}',
+        'Content-Type': 'application/json',
+    }
+    resource_id = getattr(settings, 'volcengine_resource_id', '').strip()
+    if resource_id:
+        # V3 大模型语音合成/声音复刻接口需要用 X-Api-Resource-Id 选择版本效果，例如 seed-icl-2.0。
+        headers['X-Api-Resource-Id'] = resource_id
     async with httpx.AsyncClient(timeout=180) as client:
         resp = await client.post(settings.volcengine_tts_endpoint, headers=headers, json=body)
     if resp.status_code >= 400:
         raise RuntimeError(f'豆包语音合成失败 HTTP {resp.status_code}：{resp.text[:1000]}')
     data = resp.json()
     # 常见成功码 3000；兼容部分网关只返回 data/audio 字段
-    if str(data.get('code', '3000')) not in {'3000', '0', 'success'} and not data.get('data'):
-        raise RuntimeError(f'豆包语音合成失败：{json.dumps(data, ensure_ascii=False)[:1000]}')
+    code = str(data.get('code', '3000'))
+    if code not in {'3000', '0', 'success'} and not data.get('data'):
+        message = str(data.get('message') or '')
+        hint = ''
+        if code in {'3031', '3050'} or 'Init Engine Instance failed' in message:
+            hint = '；请检查 VOLCENGINE_CLUSTER、VOLCENGINE_RESOURCE_ID、VOLCENGINE_VOICE_TYPE 是否匹配。声音复刻 ICL2.0 字符版通常是 CLUSTER=volcano_icl、RESOURCE_ID=seed-icl-2.0、VOICE_TYPE=控制台声音ID/speaker_id。不要把 Doubao-Seed 视频模型 ID 填到 VOICE_TYPE。'
+        raise RuntimeError(f'豆包语音合成失败：{json.dumps(data, ensure_ascii=False)[:1000]}{hint}')
     audio_b64 = data.get('data') or data.get('audio') or data.get('result', {}).get('audio')
     if not audio_b64:
         raise RuntimeError(f'豆包语音返回中没有音频 data 字段：{json.dumps(data, ensure_ascii=False)[:1000]}')

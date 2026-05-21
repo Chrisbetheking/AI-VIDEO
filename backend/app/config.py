@@ -27,22 +27,17 @@ class Settings(BaseSettings):
     tts_voice: str = 'default'
     tts_rate: str = '+0%'
     tts_voices_json: str = ''
-    volcengine_tts_endpoint: str = 'https://openspeech.bytedance.com/api/v1/tts'
+    volcengine_tts_endpoint: str = 'https://openspeech.bytedance.com/api/v3/tts/unidirectional'
     volcengine_app_id: str = ''
     volcengine_access_token: str = ''
-    volcengine_cluster: str = 'volcano_tts'
+    # 声音复刻 ICL 2.0 字符版一般使用 volcano_icl + seed-icl-2.0；普通 TTS 音色可按控制台文档改回 volcano_tts。
+    volcengine_cluster: str = 'volcano_icl'
+    volcengine_resource_id: str = 'seed-icl-2.0'
     volcengine_voice_type: str = ''
     volcengine_uid: str = 'ai-video-user'
 
     # 兼容本地 Demo；Render/Linux 上不要依赖 sapi
     allow_mock_tts: bool = False
-
-    # 同行视频采集：先尝试公开直连/页面 meta；可选启用 yt-dlp 做 best-effort。
-    enable_video_collector: bool = True
-    enable_ytdlp_collector: bool = True
-    collector_max_mb: int = 25
-    collector_timeout_seconds: int = 120
-    collector_user_agent: str = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36'
 
     # Web / 文件 / 部署
     cors_origins: str = '*'
