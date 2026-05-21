@@ -12,6 +12,7 @@ import httpx
 
 from app.config import Settings
 from app.schemas import InspirationExtractResponse
+from app.services.collector import collect_public_video_best_effort
 
 
 VIDEO_EXTS = {'.mp4', '.mov', '.m4v', '.webm'}
@@ -137,6 +138,19 @@ def _manual_response(reference_text: str, source_name: str, warnings: list[str])
 
 async def extract_with_doubao(settings: Settings, video_path: Optional[Path], source_url: str = '', manual_text: str = '') -> InspirationExtractResponse:
     parsed_url, reference_text, warnings = parse_competitor_input(source_url, manual_text)
+    collected = None
+
+    # App 式采集：用户粘贴抖音分享口令/短链时，先尽力把公开视频采集成 MP4。
+    # 采集失败不报错，自动降级为分享文案/钩子采集。
+    if not video_path and parsed_url:
+        collected, collector_warnings = await collect_public_video_best_effort(settings, parsed_url)
+        warnings.extend(collector_warnings)
+        if collected and collected.path.exists():
+            video_path = collected.path
+            warnings.append(f'已采集到视频文件：{collected.path.name}，将尝试用豆包视频理解提取口播/画面。')
+            extra_text = ' '.join(x for x in [collected.title, collected.description] if x).strip()
+            if extra_text and extra_text not in reference_text:
+                reference_text = (reference_text + '\n' + extra_text).strip()
 
     if reference_text and not video_path:
         # 抖音复制口令/同行文案：先当作竞品采集文本使用。
@@ -212,4 +226,8 @@ async def extract_with_doubao(settings: Settings, video_path: Optional[Path], so
         hooks=[str(x) for x in payload.get('hooks', [])][:12],
         selling_points=[str(x) for x in payload.get('selling_points', [])][:12],
         warnings=warnings,
+        collected_asset_id=collected.asset_id if collected else None,
+        collected_video_name=collected.path.name if collected else None,
+        collected_video_url=(f'/files/uploads/{collected.path.name}' if collected else None),
+        collector_status=collected.method if collected else ('share_text_only' if reference_text else ''),
     )

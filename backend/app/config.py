@@ -37,6 +37,13 @@ class Settings(BaseSettings):
     # 兼容本地 Demo；Render/Linux 上不要依赖 sapi
     allow_mock_tts: bool = False
 
+    # 同行视频采集：先尝试公开直连/页面 meta；可选启用 yt-dlp 做 best-effort。
+    enable_video_collector: bool = True
+    enable_ytdlp_collector: bool = True
+    collector_max_mb: int = 25
+    collector_timeout_seconds: int = 120
+    collector_user_agent: str = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36'
+
     # Web / 文件 / 部署
     cors_origins: str = '*'
     app_data_dir: str = Field(default='./data')

@@ -105,6 +105,10 @@ class InspirationExtractResponse(BaseModel):
     hooks: List[str] = Field(default_factory=list)
     selling_points: List[str] = Field(default_factory=list)
     warnings: List[str] = Field(default_factory=list)
+    collected_asset_id: Optional[str] = None
+    collected_video_name: Optional[str] = None
+    collected_video_url: Optional[str] = None
+    collector_status: str = ''
 
 
 class RewriteFromInspirationRequest(BaseModel):

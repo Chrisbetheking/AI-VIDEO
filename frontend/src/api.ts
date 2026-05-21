@@ -66,6 +66,10 @@ export interface InspirationExtractResponse {
   hooks: string[]
   selling_points: string[]
   warnings: string[]
+  collected_asset_id?: string
+  collected_video_name?: string
+  collected_video_url?: string
+  collector_status?: string
 }
 
 export interface EditPlanResponse {
