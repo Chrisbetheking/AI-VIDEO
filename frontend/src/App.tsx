@@ -54,6 +54,14 @@ export default function App() {
 
   const referenceText = useMemo(() => extract?.transcript || manualText, [extract, manualText])
 
+  const safeTags = Array.isArray(copy?.tags) ? copy!.tags : []
+  const safeShots = Array.isArray(copy?.shots) ? copy!.shots : []
+  const safeExtractWarnings = Array.isArray(extract?.warnings) ? extract!.warnings : []
+  const safeTimeline = Array.isArray(editPlan?.timeline) ? editPlan!.timeline : []
+  const safeBroll = Array.isArray(editPlan?.broll_keywords) ? editPlan!.broll_keywords : []
+  const safeTips = Array.isArray(ad?.optimization_tips) ? ad!.optimization_tips : []
+  const safeChecklist = Array.isArray(publishPackage?.checklist) ? publishPackage!.checklist : []
+
   async function run<T>(label: string, fn: () => Promise<T>) {
     setBusy(label); setError('')
     try { return await fn() } catch (e: any) { setError(e.message || String(e)); throw e } finally { setBusy('') }
@@ -61,8 +69,8 @@ export default function App() {
 
   useEffect(() => {
     apiGet('/api/health').then(setHealth).catch(() => null)
-    apiGet<TTSVoice[]>('/api/tts/voices').then(v => { setVoices(v); setVoice(v[0]?.id || '') }).catch(() => null)
-    apiGet<AssetItem[]>('/api/assets').then(setAssets).catch(() => null)
+    apiGet<TTSVoice[]>('/api/tts/voices').then(v => { const list = Array.isArray(v) ? v : []; setVoices(list); setVoice(list[0]?.id || '') }).catch(() => null)
+    apiGet<AssetItem[]>('/api/assets').then(v => setAssets(Array.isArray(v) ? v : [])).catch(() => null)
   }, [])
 
   async function handleUpload(files: FileList | null) {
@@ -200,15 +208,15 @@ export default function App() {
       </div>
     </section>
 
-    {extract && <section className="card"><h2>提取结果</h2><p><b>状态：</b>{extract.status}</p><p>{extract.summary}</p><pre>{extract.transcript || '暂无 transcript'}</pre>{extract.warnings.map(w => <Alert key={w} text={w} />)}</section>}
+    {extract && <section className="card"><h2>提取结果</h2><p><b>状态：</b>{extract.status}</p><p>{extract.summary}</p><pre>{extract.transcript || '暂无 transcript'}</pre>{safeExtractWarnings.map(w => <Alert key={w} text={w} />)}</section>}
 
     <section className="card">
       <h2>3. 文案生成与原创改写</h2>
       <div className="actions"><button onClick={generateDirectCopy}>直接生成文案</button><button onClick={rewrite}>基于参考原创改写</button><button onClick={planEdit} disabled={!copy}>生成深度剪辑方案</button></div>
-      {copy && <div className="result"><h3>{copy.title}</h3><p className="hook">{copy.hook}</p><textarea value={copy.script} onChange={e => setCopy({ ...copy, script: e.target.value })} /><p>{copy.description}</p><div className="chips">{copy.tags.map(t => <span key={t}>#{t}</span>)}</div><details><summary>镜头建议</summary><ul>{copy.shots.map(s => <li key={s}>{s}</li>)}</ul></details></div>}
+      {copy && <div className="result"><h3>{copy.title}</h3><p className="hook">{copy.hook}</p><textarea value={copy.script} onChange={e => setCopy({ ...copy, script: e.target.value })} /><p>{copy.description}</p><div className="chips">{safeTags.map(t => <span key={t}>#{t}</span>)}</div><details><summary>镜头建议</summary><ul>{safeShots.map(s => <li key={s}>{s}</li>)}</ul></details></div>}
     </section>
 
-    {editPlan && <section className="card"><h2>4. 深度剪辑方案</h2><p>{editPlan.rhythm}</p><ul>{editPlan.timeline.map(x => <li key={x}>{x}</li>)}</ul><div className="chips">{editPlan.broll_keywords.map(x => <span key={x}>{x}</span>)}</div><p><b>字幕：</b>{editPlan.subtitle_style}</p><p><b>音乐：</b>{editPlan.music_style}</p></section>}
+    {editPlan && <section className="card"><h2>4. 深度剪辑方案</h2><p>{editPlan.rhythm}</p><ul>{safeTimeline.map(x => <li key={x}>{x}</li>)}</ul><div className="chips">{safeBroll.map(x => <span key={x}>{x}</span>)}</div><p><b>字幕：</b>{editPlan.subtitle_style}</p><p><b>音乐：</b>{editPlan.music_style}</p></section>}
 
     <section className="grid two">
       <div className="card">
@@ -227,8 +235,8 @@ export default function App() {
     </section>
 
     <section className="grid two">
-      <div className="card"><h2>7. 投流分析</h2><button onClick={analyzeAd} disabled={!copy}>刷新投流分析</button>{ad && <div><h3>{ad.decision} · 置信度 {(ad.confidence * 100).toFixed(0)}%</h3><p>{ad.suggested_budget}</p><ul>{ad.optimization_tips.map(t => <li key={t}>{t}</li>)}</ul></div>}</div>
-      <div className="card"><h2>8. 发布包</h2><button onClick={makePackage} disabled={!copy}>生成发布包 ZIP</button>{publishPackage && <div><a className="download" href={publishPackage.package_url}>下载发布包</a><ul>{publishPackage.checklist.map(i => <li key={i}>{i}</li>)}</ul></div>}</div>
+      <div className="card"><h2>7. 投流分析</h2><button onClick={analyzeAd} disabled={!copy}>刷新投流分析</button>{ad && <div><h3>{ad.decision} · 置信度 {(ad.confidence * 100).toFixed(0)}%</h3><p>{ad.suggested_budget}</p><ul>{safeTips.map(t => <li key={t}>{t}</li>)}</ul></div>}</div>
+      <div className="card"><h2>8. 发布包</h2><button onClick={makePackage} disabled={!copy}>生成发布包 ZIP</button>{publishPackage && <div><a className="download" href={publishPackage.package_url}>下载发布包</a><ul>{safeChecklist.map(i => <li key={i}>{i}</li>)}</ul></div>}</div>
     </section>
   </main>
 }

@@ -15,7 +15,8 @@ async function parseResponse<T>(res: Response): Promise<T> {
     throw new Error(detail)
   }
   if (contentType.includes('application/json')) return res.json() as Promise<T>
-  return (await res.text()) as T
+  const text = await res.text()
+  throw new Error(`后端没有返回 JSON。请检查 VITE_API_BASE 是否指向 Render 后端，而不是 Cloudflare Pages 前端。返回内容：${text.slice(0, 120)}`)
 }
 
 export async function apiGet<T>(path: string): Promise<T> {
