@@ -302,6 +302,48 @@ def api_list_collected_videos(request: Request, settings: Settings = Depends(get
     return [item for item in items if item.kind == 'video' and item.filename.startswith('collected_')][:100]
 
 
+@app.get('/api/collector/status')
+def api_collector_status(settings: Settings = Depends(get_settings)) -> dict:
+    cookie_path = settings.collector_cookie_path
+    return {
+        'enabled': settings.enable_video_collector,
+        'ytdlp_enabled': settings.enable_ytdlp_collector,
+        'has_cookies': cookie_path.exists() and cookie_path.is_file() and cookie_path.stat().st_size > 0,
+        'cookie_file_name': cookie_path.name if cookie_path.exists() else '',
+        'max_mb': settings.collector_max_mb,
+        'timeout_seconds': settings.collector_timeout_seconds,
+        'mode': 'yt-dlp + cookies.txt + metadata fallback',
+    }
+
+
+@app.post('/api/collector/cookies')
+async def api_upload_collector_cookies(file: UploadFile = File(...), settings: Settings = Depends(get_settings)) -> dict:
+    original = file.filename or 'cookies.txt'
+    if not original.lower().endswith('.txt'):
+        raise HTTPException(status_code=400, detail='请上传 cookies.txt 文本文件')
+
+    content = await file.read(2 * 1024 * 1024)
+    if not content:
+        raise HTTPException(status_code=400, detail='cookies.txt 是空文件')
+    if len(content) > 2 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail='cookies.txt 太大，请重新导出精简版本')
+
+    text = content.decode('utf-8', errors='ignore')
+    lowered = text.lower()
+    if 'douyin' not in lowered and 'tiktok' not in lowered and 'cookie' not in lowered and '# netscape' not in lowered:
+        raise HTTPException(status_code=400, detail='这个文件不像浏览器导出的 cookies.txt，请确认格式')
+
+    path = settings.collector_cookie_path
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding='utf-8')
+    return {
+        'ok': True,
+        'has_cookies': True,
+        'cookie_file_name': path.name,
+        'message': 'cookies.txt 已保存。重新采集时会优先用开源视频采集器尝试获取公开视频。',
+    }
+
+
 @app.post('/api/compose-video', response_model=ComposeResponse)
 async def api_compose_video(req: ComposeRequest, request: Request, settings: Settings = Depends(get_settings)) -> ComposeResponse:
     asset_paths: List[Path] = []

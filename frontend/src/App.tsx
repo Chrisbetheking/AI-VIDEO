@@ -14,9 +14,11 @@ import {
   VideoEditChatResponse,
   VoiceDirectorResponse,
   VoiceSegment,
+  CollectorStatus,
   apiGet,
   apiPost,
-  uploadAssets
+  uploadAssets,
+  uploadCollectorCookies
 } from './api'
 
 function Field({ label, children, hint }: { label: string; children: React.ReactNode; hint?: string }) {
@@ -44,6 +46,7 @@ export default function App() {
   const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
   const [health, setHealth] = useState<any>(null)
+  const [collectorStatus, setCollectorStatus] = useState<CollectorStatus | null>(null)
 
   const [industry, setIndustry] = useState('企业服务')
   const [audience, setAudience] = useState('老板、企业负责人、需要获客的本地商家')
@@ -96,6 +99,7 @@ export default function App() {
 
   useEffect(() => {
     apiGet('/api/health').then(setHealth).catch((e) => setError(e.message || 'API 未连接'))
+    apiGet<CollectorStatus>('/api/collector/status').then(setCollectorStatus).catch(() => null)
     apiGet<TTSVoice[]>('/api/tts/voices').then(v => { const list = Array.isArray(v) ? v : []; setVoices(list); setVoice(list[0]?.id || '') }).catch(() => null)
     reloadAssets().catch(() => null)
   }, [])
@@ -106,6 +110,13 @@ export default function App() {
     setAssets(prev => [...(res || []), ...prev])
     const ids = (res || []).filter(a => !a.filename.startsWith('collected_')).map(a => a.id)
     if (ids.length) setSelectedMaterialIds(prev => Array.from(new Set([...ids, ...prev])))
+  }
+
+  async function handleCookieUpload(files: FileList | null) {
+    const file = files?.[0]
+    if (!file) return
+    const res = await run('上传采集凭证', () => uploadCollectorCookies(file))
+    setCollectorStatus(res!)
   }
 
   function toggleMaterial(id: string) {
@@ -295,7 +306,13 @@ export default function App() {
 
         <section className="card compact">
           <h2>采集视频库</h2>
-          <p>这里是从抖音分享口令/短链尽力采集到的视频，和素材库分开。</p>
+          <p>先用开源采集器提取视频，成功后再交给 AI 识别拆解；失败则保留文案钩子。</p>
+          <div className="collectorBox">
+            <div className="collectorLine"><span>插件</span><b>{collectorStatus?.ytdlp_enabled ? 'yt-dlp 已启用' : '未启用'}</b></div>
+            <div className="collectorLine"><span>登录凭证</span><b>{collectorStatus?.has_cookies ? 'cookies.txt 已上传' : '未上传'}</b></div>
+            <input type="file" accept=".txt,text/plain" onChange={e => handleCookieUpload(e.target.files)} />
+            <p className="smallHint">如果出现 Fresh cookies needed，就上传自己浏览器导出的 cookies.txt 后重试。只用于自己可正常访问的公开视频。</p>
+          </div>
           <div className="assetList">
             {collectedVideos.length === 0 && <div className="empty">暂时没有采集到视频。</div>}
             {collectedVideos.map(a => <button key={a.id} className={`assetButton ${selectedReferenceAssetId === a.id ? 'selected' : ''}`} onClick={() => setSelectedReferenceAssetId(a.id)}>

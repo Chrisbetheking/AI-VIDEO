@@ -33,6 +33,14 @@ export async function apiPost<T>(path: string, body: unknown): Promise<T> {
   return parseResponse<T>(res)
 }
 
+
+export async function uploadCollectorCookies(file: File): Promise<CollectorStatus> {
+  const form = new FormData()
+  form.append('file', file)
+  const res = await fetch(`${API_BASE}/api/collector/cookies`, { method: 'POST', body: form })
+  return parseResponse<CollectorStatus>(res)
+}
+
 export async function uploadAssets(files: FileList): Promise<AssetItem[]> {
   const form = new FormData()
   Array.from(files).forEach(file => form.append('files', file))
@@ -124,4 +132,16 @@ export interface PlatformPublishResponse {
   status: string
   message: string
   checklist: string[]
+}
+
+
+export interface CollectorStatus {
+  enabled: boolean
+  ytdlp_enabled: boolean
+  has_cookies: boolean
+  cookie_file_name?: string
+  max_mb?: number
+  timeout_seconds?: number
+  mode?: string
+  message?: string
 }
