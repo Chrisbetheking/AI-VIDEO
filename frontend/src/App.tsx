@@ -17,6 +17,7 @@ import {
   GrowthMetricInput,
   MemoryContextResponse,
   CollectorCookieStatus,
+  DigitalHumanCreateResponse,
   TTSResponse,
   TTSVoice,
   VideoEditChatResponse,
@@ -29,7 +30,7 @@ import {
   uploadAssets
 } from './api'
 
-type ModuleKey = 'dashboard' | 'monitor' | 'collector' | 'copy' | 'voice' | 'assets' | 'video' | 'subtitleCover' | 'publish' | 'strategy' | 'competitor' | 'trend' | 'shooting' | 'growth'
+type ModuleKey = 'dashboard' | 'monitor' | 'collector' | 'copy' | 'voice' | 'digitalHuman' | 'assets' | 'video' | 'subtitleCover' | 'publish' | 'strategy' | 'competitor' | 'trend' | 'shooting' | 'growth'
 
 function Field({ label, children, hint }: { label: string; children: ReactNode; hint?: string }) {
   return <label className="field"><span>{label}</span>{children}{hint && <em>{hint}</em>}</label>
@@ -62,6 +63,7 @@ const modules: { key: ModuleKey; icon: string; title: string; desc: string; tag:
   { key: 'collector', icon: '🔎', title: '1. 同行采集', desc: '采集同行视频、口令和钩子结构', tag: '采集' },
   { key: 'copy', icon: '✍️', title: '2. 文案生产', desc: '仿写改写、细改、入知识库', tag: '文案' },
   { key: 'voice', icon: '🎙️', title: '3. 配音导演', desc: '克隆音色、分段情绪、语速停顿', tag: '配音' },
+  { key: 'digitalHuman', icon: '🧑‍💼', title: '数字人', desc: '上传本人形象，生成老板口播片段', tag: '数字人' },
   { key: 'assets', icon: '🗂️', title: '4. 素材选择', desc: '自有素材和采集视频分开管理', tag: '素材' },
   { key: 'video', icon: '🎬', title: '5. 剪辑合成', desc: '分段衔接、转场、贴片、字幕', tag: '剪辑' },
   { key: 'subtitleCover', icon: '🅰️', title: '6. 字幕封面', desc: '重点词高亮、封面样式、下载', tag: '视觉' },
@@ -78,6 +80,7 @@ const workflowSteps: { key: ModuleKey; step: string; title: string; desc: string
   { key: 'copy', step: '02', title: '仿写改写', desc: '基于同行结构做原创改写，保留打法，不照抄原文。', action: '去仿写' },
   { key: 'copy', step: '03', title: '文案细改', desc: '细调黄金三秒、标题、口播稿、违禁词和发布简介。', action: '改文案' },
   { key: 'voice', step: '04', title: '配音分段', desc: '选择叔叔音色，分段控制情绪、语速、停顿和语气。', action: '去配音' },
+  { key: 'digitalHuman', step: '04B', title: '数字人片段', desc: '可选：上传授权照片/视频，用配音生成老板数字人口播素材。', action: '做数字人' },
   { key: 'assets', step: '05', title: '选择视频素材', desc: '选择老板、办公室、产品、案例素材；采集视频只作为学习参考。', action: '选素材' },
   { key: 'video', step: '06', title: '剪辑与合成', desc: '每段匹配素材，设置叠化/虚化/快切/贴片/字幕，生成 MP4。', action: '去剪辑' },
   { key: 'publish', step: '07', title: '平台发布', desc: '生成平台发布草稿，后续接抖音、视频号、快手、小红书开放平台。', action: '去发布' }
@@ -90,12 +93,13 @@ const pluginMatrix = [
   { name: '文案智能体', desc: '读取行业档案、同行库、爆点雷达和知识库', status: 'deepseek' },
   { name: '声音导演', desc: '克隆音色、分段情绪、语速停顿、自动合并', status: 'tts' },
   { name: '剪辑插件', desc: 'FFmpeg 合成、转场、字幕、AI 指令重剪', status: 'ffmpeg' },
+  { name: '数字人引擎', desc: '预览模式 + 外部 GPU/API 口型同步预留', status: 'digital-human' },
   { name: '记忆数据库', desc: 'Supabase 保存账号、采集、文案、投流复盘', status: 'supabase' },
   { name: '平台发布', desc: '抖音/视频号/快手/小红书开放平台预留', status: 'publish' }
 ]
 
 function nextStepOf(active: ModuleKey): ModuleKey {
-  const order: ModuleKey[] = ['collector','copy','voice','assets','video','subtitleCover','publish']
+  const order: ModuleKey[] = ['collector','copy','voice','digitalHuman','assets','video','subtitleCover','publish']
   const idx = order.indexOf(active)
   return idx >= 0 && idx < order.length - 1 ? order[idx + 1] : active
 }
@@ -161,6 +165,12 @@ export default function App() {
   const [voiceSegments, setVoiceSegments] = useState<VoiceSegment[]>([])
   const [voiceNotes, setVoiceNotes] = useState<string[]>([])
   const [audio, setAudio] = useState<TTSResponse | null>(null)
+
+  const [digitalHumanEngine, setDigitalHumanEngine] = useState('auto')
+  const [digitalHumanAvatarId, setDigitalHumanAvatarId] = useState('')
+  const [digitalHumanDriverId, setDigitalHumanDriverId] = useState('')
+  const [digitalHumanConsent, setDigitalHumanConsent] = useState(false)
+  const [digitalHuman, setDigitalHuman] = useState<DigitalHumanCreateResponse | null>(null)
 
   const [segmentSeconds, setSegmentSeconds] = useState<Record<number, number>>({})
   const [segmentTransitions, setSegmentTransitions] = useState<Record<number, string>>({})
@@ -521,7 +531,25 @@ ${manualText || ''}`.trim()
     const segments = voiceSegments.length ? voiceSegments : [{ ...defaultSegment, text: currentScript || defaultSegment.text }]
     const res = await run('生成分段情绪配音', () => apiPost<TTSResponse>('/api/tts-segments', { segments, voice, overall_rate: '+0%' }))
     setAudio(res!)
-    setLastHandoff('配音已生成。素材选择和剪辑合成会自动读取这条音频。')
+    setLastHandoff('配音已生成。可以继续做数字人片段，或直接进入素材选择和剪辑合成。')
+    if (autoAdvance) setActive('assets')
+  }
+
+
+  async function makeDigitalHuman() {
+    if (!audio?.file_name) { setError('请先在配音导演里生成配音音频。'); setActive('voice'); return }
+    if (!digitalHumanAvatarId) { setError('请先选择数字人形象素材：正脸照片、半身照片或本人视频。'); setActive('digitalHuman'); return }
+    const res = await run('生成数字人片段', () => apiPost<DigitalHumanCreateResponse>('/api/digital-human/create', {
+      avatar_asset_id: digitalHumanAvatarId,
+      driver_video_asset_id: digitalHumanDriverId || undefined,
+      audio_file_name: audio.file_name,
+      title: copy.title,
+      script: currentScript,
+      engine: digitalHumanEngine,
+      consent_confirmed: digitalHumanConsent
+    }))
+    setDigitalHuman(res!)
+    setLastHandoff('数字人片段已生成。可以把它作为素材进入素材选择和剪辑合成。')
     if (autoAdvance) setActive('assets')
   }
 
@@ -766,6 +794,18 @@ ${manualText || ''}`.trim()
         <div className="buttonRow"><button className="addSegment" onClick={addVoiceSegment}>+ 手动添加空白分段</button><button className="addSegment" onClick={addSelectedScriptAsSegment}>+ 把选中文案加入分段</button></div>
         <div className="segments">{voiceSegments.map((seg, i) => <div className="segmentCard" key={i}><div className="segmentHead"><strong>第 {i + 1} 段 · {segmentSeconds[i] || estimateSeconds(seg.text, seg.speed_ratio)} 秒</strong><div><button onClick={() => moveVoiceSegment(i, -1)}>↑</button><button onClick={() => moveVoiceSegment(i, 1)}>↓</button><button onClick={() => removeVoiceSegment(i)}>删除</button></div></div><textarea value={seg.text} onChange={e => updateVoiceSegment(i, { text: e.target.value })} /><div className="segmentGrid"><Field label="情绪"><input value={seg.emotion} onChange={e => updateVoiceSegment(i, { emotion: e.target.value })} /></Field><Field label={`语速 ${seg.speed_ratio}`}><input type="range" min="0.75" max="1.35" step="0.01" value={seg.speed_ratio} onChange={e => updateVoiceSegment(i, { speed_ratio: Number(e.target.value) })} /></Field><Field label={`音量 ${seg.volume_ratio}`}><input type="range" min="0.7" max="1.4" step="0.01" value={seg.volume_ratio} onChange={e => updateVoiceSegment(i, { volume_ratio: Number(e.target.value) })} /></Field><Field label={`停顿 ${seg.pause_after_ms}ms`}><input type="range" min="0" max="1500" step="50" value={seg.pause_after_ms} onChange={e => updateVoiceSegment(i, { pause_after_ms: Number(e.target.value) })} /></Field></div></div>)}</div>
         {audio && <div className="mediaBox"><audio controls src={audio.file_url} /><a href={audio.file_url} target="_blank">下载配音</a>{audio.warning && <div className="warn">{audio.warning}</div>}</div>}
+      </section>}
+
+      {active === 'digitalHuman' && <section className="card modulePanel">
+        <div className="sectionHeader"><div><h2>数字人工作台</h2><p>上传授权的本人照片或视频，用当前豆包配音生成老板数字人口播片段。未接 GPU/API 时会先生成静态头像预览。</p></div><Button busy={busy === '生成数字人片段' ? busy : ''} label="生成数字人片段" onClick={makeDigitalHuman} disabled={!audio?.file_name || !digitalHumanAvatarId || !digitalHumanConsent} /></div>
+        <div className="grid3">
+          <Field label="数字人形象素材" hint="建议上传本人授权的正脸/半身照片，或 5-15 秒自然说话视频。"><select value={digitalHumanAvatarId} onChange={e => setDigitalHumanAvatarId(e.target.value)}><option value="">选择已上传照片/视频</option>{assets.map(a => <option key={a.id} value={a.id}>{a.kind} · {a.original_name || a.filename}</option>)}</select></Field>
+          <Field label="动作参考视频（可选）" hint="后续接 LivePortrait/MuseTalk 时可参考表情和头部动作。"><select value={digitalHumanDriverId} onChange={e => setDigitalHumanDriverId(e.target.value)}><option value="">不用动作参考</option>{assets.filter(a => a.kind === 'video').map(a => <option key={a.id} value={a.id}>{a.original_name || a.filename}</option>)}</select></Field>
+          <Field label="数字人引擎" hint="preview 不需要 URL/TOKEN；真实口型同步接外部 GPU/API。"><select value={digitalHumanEngine} onChange={e => setDigitalHumanEngine(e.target.value)}><option value="auto">自动</option><option value="preview">静态预览</option><option value="webhook">外部 Webhook/API</option><option value="sadtalker">SadTalker</option><option value="musetalk">MuseTalk</option><option value="wav2lip">Wav2Lip</option><option value="liveportrait">LivePortrait</option></select></Field>
+        </div>
+        <label className="checkline"><input type="checkbox" checked={digitalHumanConsent} onChange={e => setDigitalHumanConsent(e.target.checked)} /> 我确认已获得本人形象和声音授权，仅用于合法商业内容。</label>
+        <div className="infoGrid"><div><strong>当前输入</strong><p>形象素材：{digitalHumanAvatarId || '未选择'}<br />配音音频：{audio?.file_name || '未生成'}<br />脚本：{shortText(currentScript || '', 90) || '未生成'}</p></div><div><strong>接入建议</strong><p>先用 preview 跑流程；后续可接火山虚拟数字人、HeyGen、SadTalker/MuseTalk GPU worker。</p></div></div>
+        {digitalHuman && <div className="resultBox"><h3>数字人结果</h3><p>{digitalHuman.message}</p>{digitalHuman.warnings?.map(w => <div className="warn" key={w}>{w}</div>)}{digitalHuman.video_url && <video controls src={digitalHuman.video_url} className="previewVideo" />}{digitalHuman.video_url && <a className="download" href={digitalHuman.video_url} target="_blank">下载/打开数字人片段</a>}</div>}
       </section>}
 
       {active === 'assets' && <section className="card modulePanel">

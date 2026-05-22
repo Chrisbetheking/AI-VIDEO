@@ -452,3 +452,26 @@ class ScriptVersionSave(BaseModel):
     tags: List[str] = Field(default_factory=list)
     source: str = Field(default='manual', max_length=120)
     raw: dict = Field(default_factory=dict)
+
+
+
+class DigitalHumanCreateRequest(BaseModel):
+    avatar_asset_id: Optional[str] = None
+    avatar_file_name: Optional[str] = None
+    audio_file_name: str = Field(..., min_length=1, max_length=500)
+    driver_video_asset_id: Optional[str] = None
+    title: str = Field(default='', max_length=200)
+    script: str = Field(default='', max_length=12000)
+    engine: str = Field(default='auto', max_length=80)
+    consent_confirmed: bool = False
+
+
+class DigitalHumanCreateResponse(BaseModel):
+    status: str
+    engine: str
+    message: str
+    video_url: Optional[str] = None
+    video_name: Optional[str] = None
+    job_id: Optional[str] = None
+    warnings: List[str] = Field(default_factory=list)
+    raw: dict = Field(default_factory=dict)

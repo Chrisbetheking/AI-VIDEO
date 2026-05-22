@@ -57,11 +57,14 @@ from app.schemas import (
     CollectorCookieStatus,
     CollectorCookieUploadRequest,
     ScriptVersionSave,
+    DigitalHumanCreateRequest,
+    DigitalHumanCreateResponse,
 )
 from app.services.ad_analysis import analyze_ad
 from app.services.cover import create_cover
 from app.services.deepseek import DeepSeekError, generate_copy, generate_edit_plan, generate_growth_decision, generate_shooting_plan, generate_subtitle_emphasis, generate_trend_radar, generate_voice_director, refine_copy_with_instruction, rewrite_from_inspiration, test_deepseek, video_edit_chat_advice
 from app.services.doubao import extract_with_doubao
+from app.services.digital_human import call_external_digital_human_worker, create_static_avatar_preview
 from app.services.collector import get_collector_cookie_status, save_collector_cookie_text
 from app.services.kb import KnowledgeBase
 from app.services.memory import MemoryStore
@@ -148,6 +151,7 @@ def health(settings: Settings = Depends(get_settings)) -> dict:
         'tts_provider': settings.tts_provider,
         'r2_enabled': settings.r2_enabled,
         'memory_enabled': bool(settings.supabase_url and settings.supabase_service_role_key),
+        'digital_human_enabled': settings.enable_digital_human,
         'workspace_id': settings.workspace_id,
         'data_dir': str(settings.data_dir),
         'time': datetime.now(timezone.utc).isoformat(),
@@ -457,6 +461,88 @@ def api_publish_package(req: PublishPackageRequest, request: Request, settings: 
     path, checklist = create_publish_package(settings, req.title, req.description, req.tags, video_path, cover_path)
     public_url = maybe_upload_to_r2(settings, path, prefix='packages')
     return PublishPackageResponse(package_url=file_url(request, path.name, public_url), package_name=path.name, status='manual_publish_ready', checklist=checklist)
+
+
+
+
+@app.post('/api/digital-human/create', response_model=DigitalHumanCreateResponse)
+async def api_digital_human_create(
+    req: DigitalHumanCreateRequest,
+    request: Request,
+    settings: Settings = Depends(get_settings),
+    memory: MemoryStore = Depends(get_memory),
+) -> DigitalHumanCreateResponse:
+    if not settings.enable_digital_human:
+        raise HTTPException(status_code=400, detail='数字人功能未启用。')
+    if not req.consent_confirmed:
+        raise HTTPException(status_code=400, detail='请先确认已获得本人形象和声音授权。')
+
+    avatar_path = find_asset_path(settings, req.avatar_asset_id) or find_media_file(settings, req.avatar_file_name)
+    audio_path = find_media_file(settings, req.audio_file_name)
+    driver_video_path = find_asset_path(settings, req.driver_video_asset_id)
+
+    if avatar_path is None:
+        raise HTTPException(status_code=400, detail='请先上传或选择数字人形象素材：正脸照片、半身照片或一段本人视频。')
+    if audio_path is None:
+        raise HTTPException(status_code=400, detail='请先生成或选择配音音频。')
+
+    engine = (req.engine or 'auto').strip().lower()
+    if engine == 'auto':
+        engine = settings.digital_human_engine.strip().lower() or 'preview'
+
+    avatar_public = maybe_upload_to_r2(settings, avatar_path, prefix='digital-human/avatar')
+    audio_public = maybe_upload_to_r2(settings, audio_path, prefix='digital-human/audio')
+    driver_public = maybe_upload_to_r2(settings, driver_video_path, prefix='digital-human/driver') if driver_video_path else None
+    avatar_url_value = upload_url(request, avatar_path.name, avatar_public)
+    audio_url_value = file_url(request, audio_path.name, audio_public)
+    driver_url_value = upload_url(request, driver_video_path.name, driver_public) if driver_video_path else ''
+
+    warnings: List[str] = []
+    try:
+        if engine in {'webhook', 'sadtalker', 'wav2lip', 'musetalk', 'liveportrait'} and settings.digital_human_webhook_url:
+            result = await call_external_digital_human_worker(
+                settings,
+                avatar_url=avatar_url_value,
+                audio_url=audio_url_value,
+                driver_video_url=driver_url_value,
+                script=req.script,
+                title=req.title,
+                engine=engine,
+            )
+            memory.save_learning_event({
+                'event_type': 'digital_human',
+                'title': req.title or '数字人任务',
+                'payload': {'engine': result.engine, 'status': result.status, 'video_url': result.video_url, 'job_id': result.job_id},
+            })
+            return DigitalHumanCreateResponse(
+                status=result.status,
+                engine=result.engine,
+                message=result.message,
+                video_url=result.video_url,
+                job_id=result.job_id,
+                warnings=result.warnings or [],
+                raw=result.raw or {},
+            )
+
+        preview = create_static_avatar_preview(settings, avatar_path, audio_path, title=req.title)
+        public_url = maybe_upload_to_r2(settings, preview, prefix='digital-human/preview')
+        warnings.append('当前未配置真实数字人 GPU/API 引擎，已生成静态头像预览视频。要真实口型同步，请配置 DIGITAL_HUMAN_WEBHOOK_URL。')
+        warnings.append('推荐引擎：火山虚拟数字人 / HeyGen API / SadTalker / MuseTalk / Wav2Lip / LivePortrait。')
+        memory.save_learning_event({
+            'event_type': 'digital_human_preview',
+            'title': req.title or '数字人预览',
+            'payload': {'engine': engine, 'file_name': preview.name},
+        })
+        return DigitalHumanCreateResponse(
+            status='preview_ready',
+            engine='preview',
+            message='已生成数字人静态预览视频。',
+            video_url=file_url(request, preview.name, public_url),
+            video_name=preview.name,
+            warnings=warnings,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @app.post('/api/platform-publish', response_model=PlatformPublishResponse)

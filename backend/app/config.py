@@ -72,6 +72,13 @@ class Settings(BaseSettings):
     # 平台发布：先保留入口，等开放平台权限下来再接真实发布
     enable_platform_publish: bool = False
 
+    # 数字人：Render 默认只做静态头像预览；真实口型同步建议接 GPU Worker / API
+    enable_digital_human: bool = True
+    digital_human_engine: str = 'preview'
+    digital_human_webhook_url: str = ''
+    digital_human_webhook_token: str = ''
+    digital_human_timeout_seconds: int = 900
+
 
     # Supabase / AI 记忆库
     supabase_url: str = ''
