@@ -57,6 +57,16 @@ class Settings(BaseSettings):
     douyin_client_secret: str = ''
     douyin_redirect_uri: str = ''
 
+    # 尽力视频采集：抖音分享口令/短链会先采公开视频，失败则降级为文案钩子采集
+    enable_video_collector: bool = True
+    enable_ytdlp_collector: bool = True
+    collector_max_mb: int = 80
+    collector_timeout_seconds: int = 180
+    collector_user_agent: str = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36'
+
+    # 平台发布：先保留入口，等开放平台权限下来再接真实发布
+    enable_platform_publish: bool = False
+
     @property
     def data_dir(self) -> Path:
         path = Path(self.app_data_dir).resolve()

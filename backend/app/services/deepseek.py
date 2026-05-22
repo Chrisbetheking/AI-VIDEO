@@ -339,3 +339,72 @@ async def generate_voice_director(settings: Settings, req: 'VoiceDirectorRequest
         rewritten_script=rewritten_script,
         segments=segments,
     )
+
+
+async def refine_copy_with_instruction(settings: Settings, req: 'CopyRefineRequest') -> GeneratedCopy:
+    from app.schemas import CopyRefineRequest
+
+    system = '你是短视频文案总监，负责按用户细节要求精修文案。必须输出严格 JSON，不要 Markdown。'
+    user = f'''
+请按用户修改要求精修下面短视频文案。
+
+用户修改要求：{req.instruction}
+行业：{req.industry or '未填写'}
+目标客户：{req.audience or '未填写'}
+核心卖点：{req.selling_points or '未填写'}
+
+当前标题：{req.title}
+当前开头钩子：{req.hook}
+当前口播稿：
+{req.script}
+
+当前简介：{req.description}
+当前标签：{', '.join(req.tags)}
+当前镜头建议：{', '.join(req.shots)}
+
+要求：
+1. 可以细改标题、钩子、口播、简介、标签和镜头建议。
+2. 不要变书面稿，要像真人老板短视频口播。
+3. 不要增加无法证明的夸大承诺。
+4. 输出 JSON 字段：title, hook, script, description, tags, shots, kb_refs。
+'''.strip()
+    payload = await _chat_json(settings, system, user, temperature=0.68, timeout=90)
+    result = normalize_copy(payload, req.title or '精修短视频文案')
+    result.kb_refs = (result.kb_refs or []) + [f'已按要求精修：{req.instruction[:80]}']
+    return result
+
+
+async def video_edit_chat_advice(settings: Settings, instruction: str, title: str = '', script: str = '', asset_summary: str = '') -> dict:
+    system = '你是短视频后期剪辑导演，会把用户自然语言修改要求转成可执行剪辑动作和人工建议。必须输出严格 JSON。'
+    user = f'''
+当前视频标题：{title or '未填写'}
+当前口播稿：
+{script or '未填写'}
+可用素材：{asset_summary or '未填写'}
+用户修改要求：{instruction}
+
+请输出 JSON：
+{{
+  "assistant_message": "给用户看的简短回复",
+  "summary": "本次修改/建议摘要",
+  "actions": ["执行或建议的动作"],
+  "warnings": ["限制或风险提示"]
+}}
+
+注意：如果用户要求自动发布、下载非授权视频、搬运，请提醒只做授权素材和原创改写。
+'''.strip()
+    try:
+        payload = await _chat_json(settings, system, user, temperature=0.55, timeout=60)
+    except Exception:
+        payload = {
+            'assistant_message': '我会按你的要求尽量用插件修改视频；复杂剪辑会先给出可执行建议。',
+            'summary': '已接收剪辑修改要求。',
+            'actions': ['根据关键词尝试裁剪、调速、加字幕或重新导出 9:16 视频'],
+            'warnings': [],
+        }
+    return {
+        'assistant_message': str(payload.get('assistant_message') or '已收到剪辑修改要求。'),
+        'summary': str(payload.get('summary') or '已生成剪辑建议。'),
+        'actions': [str(x) for x in (payload.get('actions') or []) if str(x).strip()][:10],
+        'warnings': [str(x) for x in (payload.get('warnings') or []) if str(x).strip()][:10],
+    }

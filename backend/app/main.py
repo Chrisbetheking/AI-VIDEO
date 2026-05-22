@@ -19,6 +19,7 @@ from app.schemas import (
     ComposeRequest,
     ComposeResponse,
     CopyRequest,
+    CopyRefineRequest,
     CoverRequest,
     CoverResponse,
     EditPlanRequest,
@@ -28,6 +29,8 @@ from app.schemas import (
     InspirationExtractResponse,
     KnowledgeCreate,
     KnowledgeItem,
+    PlatformPublishRequest,
+    PlatformPublishResponse,
     PublishPackageRequest,
     PublishPackageResponse,
     RewriteFromInspirationRequest,
@@ -35,18 +38,21 @@ from app.schemas import (
     TTSResponse,
     TTSVoice,
     TTSSegmentsRequest,
+    VideoEditChatRequest,
+    VideoEditChatResponse,
     VoiceDirectorRequest,
     VoiceDirectorResponse,
 )
 from app.services.ad_analysis import analyze_ad
 from app.services.cover import create_cover
-from app.services.deepseek import DeepSeekError, generate_copy, generate_edit_plan, generate_voice_director, rewrite_from_inspiration, test_deepseek
+from app.services.deepseek import DeepSeekError, generate_copy, generate_edit_plan, generate_voice_director, refine_copy_with_instruction, rewrite_from_inspiration, test_deepseek, video_edit_chat_advice
 from app.services.doubao import extract_with_doubao
 from app.services.kb import KnowledgeBase
 from app.services.publisher import create_publish_package
 from app.services.storage import maybe_upload_to_r2
 from app.services.tts import get_tts_voices, synthesize_tts, synthesize_tts_segments
 from app.services.video import IMAGE_EXTS, VIDEO_EXTS, compose_video
+from app.services.video_edit import apply_video_edit
 
 app = FastAPI(title='AI-VIDEO 正式版 API', version='1.0.0')
 settings = get_settings()
@@ -96,6 +102,22 @@ def find_asset_path(settings: Settings, asset_id: str | None) -> Optional[Path]:
     return matches[0] if matches else None
 
 
+def find_media_file(settings: Settings, file_name: str | None) -> Optional[Path]:
+    if not file_name:
+        return None
+    safe_name = Path(file_name).name
+    for root in (settings.outputs_dir, settings.uploads_dir):
+        candidate = (root / safe_name).resolve()
+        if candidate.exists() and candidate.is_file():
+            return candidate
+    stem = Path(safe_name).stem
+    for root in (settings.outputs_dir, settings.uploads_dir):
+        matches = list(root.glob(f'{stem}.*'))
+        if matches:
+            return matches[0]
+    return None
+
+
 @app.get('/api/health')
 def health(settings: Settings = Depends(get_settings)) -> dict:
     return {
@@ -141,6 +163,44 @@ async def api_rewrite_from_inspiration(req: RewriteFromInspirationRequest, setti
         return await rewrite_from_inspiration(settings, req)
     except DeepSeekError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@app.post('/api/refine-copy', response_model=GeneratedCopy)
+async def api_refine_copy(req: CopyRefineRequest, settings: Settings = Depends(get_settings)) -> GeneratedCopy:
+    try:
+        return await refine_copy_with_instruction(settings, req)
+    except DeepSeekError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@app.post('/api/video-edit-chat', response_model=VideoEditChatResponse)
+async def api_video_edit_chat(req: VideoEditChatRequest, request: Request, settings: Settings = Depends(get_settings)) -> VideoEditChatResponse:
+    source_video = find_media_file(settings, req.video_file_name)
+    ai = await video_edit_chat_advice(settings, req.instruction, title=req.title, script=req.script, asset_summary=req.asset_summary)
+    warnings: List[str] = list(ai.get('warnings') or [])
+    actions: List[str] = list(ai.get('actions') or [])
+    new_video_url: Optional[str] = None
+    new_video_name: Optional[str] = None
+
+    if source_video is None:
+        warnings.append('没有找到可修改的视频。请先合成视频，或选择已采集/上传的视频。')
+    else:
+        edit_result = apply_video_edit(settings, source_video, req.instruction, script=req.script)
+        actions.extend(edit_result.actions)
+        warnings.extend(edit_result.warnings)
+        if edit_result.output_path:
+            public_url = maybe_upload_to_r2(settings, edit_result.output_path, prefix='edited-videos')
+            new_video_url = file_url(request, edit_result.output_path.name, public_url)
+            new_video_name = edit_result.output_path.name
+
+    return VideoEditChatResponse(
+        assistant_message=str(ai.get('assistant_message') or '已收到修改要求。'),
+        summary=str(ai.get('summary') or '已生成修改建议。'),
+        actions=actions[:20],
+        new_video_url=new_video_url,
+        new_video_name=new_video_name,
+        warnings=warnings[:20],
+    )
 
 
 @app.post('/api/edit-plan', response_model=EditPlanResponse)
@@ -236,6 +296,12 @@ def api_list_assets(request: Request, settings: Settings = Depends(get_settings)
     return items[:100]
 
 
+@app.get('/api/collected-videos', response_model=List[AssetItem])
+def api_list_collected_videos(request: Request, settings: Settings = Depends(get_settings)) -> List[AssetItem]:
+    items = api_list_assets(request, settings)
+    return [item for item in items if item.kind == 'video' and item.filename.startswith('collected_')][:100]
+
+
 @app.post('/api/compose-video', response_model=ComposeResponse)
 async def api_compose_video(req: ComposeRequest, request: Request, settings: Settings = Depends(get_settings)) -> ComposeResponse:
     asset_paths: List[Path] = []
@@ -281,6 +347,26 @@ def api_publish_package(req: PublishPackageRequest, request: Request, settings: 
     path, checklist = create_publish_package(settings, req.title, req.description, req.tags, video_path, cover_path)
     public_url = maybe_upload_to_r2(settings, path, prefix='packages')
     return PublishPackageResponse(package_url=file_url(request, path.name, public_url), package_name=path.name, status='manual_publish_ready', checklist=checklist)
+
+
+@app.post('/api/platform-publish', response_model=PlatformPublishResponse)
+def api_platform_publish(req: PlatformPublishRequest, settings: Settings = Depends(get_settings)) -> PlatformPublishResponse:
+    platform_map = {
+        'douyin': '抖音',
+        'shipinhao': '视频号',
+        'kuaishou': '快手',
+        'xiaohongshu': '小红书',
+    }
+    platform_name = platform_map.get(req.platform, req.platform)
+    checklist = [
+        '当前版本先保留平台发布入口，不自动发布。',
+        '等开放平台应用审核通过后，接入 OAuth 授权、视频上传、发布状态查询。',
+        '发布前请确认视频、封面、配音、素材均已授权。',
+        '建议先下载视频和封面，人工发布测试转化数据。',
+    ]
+    if not settings.enable_platform_publish:
+        return PlatformPublishResponse(platform=platform_name, status='pending_open_platform', message=f'{platform_name} 自动发布接口未启用：等待开放平台权限申请通过。', checklist=checklist)
+    return PlatformPublishResponse(platform=platform_name, status='not_implemented', message=f'{platform_name} 自动发布权限已开启，但当前适配器尚未配置。', checklist=checklist)
 
 
 @app.post('/api/ad-analysis', response_model=AdAnalysisResponse)

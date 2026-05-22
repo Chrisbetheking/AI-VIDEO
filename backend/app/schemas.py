@@ -225,3 +225,49 @@ class AdAnalysisResponse(BaseModel):
 
 class ApiError(BaseModel):
     detail: Any
+
+
+class CopyRefineRequest(BaseModel):
+    title: str = Field(default='', max_length=200)
+    hook: str = Field(default='', max_length=1000)
+    script: str = Field(..., min_length=1, max_length=12000)
+    description: str = Field(default='', max_length=5000)
+    tags: List[str] = Field(default_factory=list)
+    shots: List[str] = Field(default_factory=list)
+    instruction: str = Field(..., min_length=1, max_length=2000)
+    industry: str = Field(default='', max_length=120)
+    audience: str = Field(default='', max_length=200)
+    selling_points: str = Field(default='', max_length=1000)
+
+
+class VideoEditChatRequest(BaseModel):
+    video_file_name: Optional[str] = None
+    instruction: str = Field(..., min_length=1, max_length=2000)
+    title: str = Field(default='', max_length=200)
+    script: str = Field(default='', max_length=12000)
+    asset_summary: str = Field(default='', max_length=2000)
+
+
+class VideoEditChatResponse(BaseModel):
+    assistant_message: str
+    summary: str
+    actions: List[str] = Field(default_factory=list)
+    new_video_url: Optional[str] = None
+    new_video_name: Optional[str] = None
+    warnings: List[str] = Field(default_factory=list)
+
+
+class PlatformPublishRequest(BaseModel):
+    platform: str = Field(default='douyin', max_length=80)
+    title: str = Field(default='', max_length=200)
+    description: str = Field(default='', max_length=5000)
+    tags: List[str] = Field(default_factory=list)
+    video_file_name: Optional[str] = None
+    cover_file_name: Optional[str] = None
+
+
+class PlatformPublishResponse(BaseModel):
+    platform: str
+    status: str
+    message: str
+    checklist: List[str] = Field(default_factory=list)

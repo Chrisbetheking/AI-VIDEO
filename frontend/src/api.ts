@@ -16,7 +16,7 @@ async function parseResponse<T>(res: Response): Promise<T> {
   }
   if (contentType.includes('application/json')) return res.json() as Promise<T>
   const text = await res.text()
-  throw new Error(`后端没有返回 JSON。请检查 VITE_API_BASE 是否指向 Render 后端，而不是 Cloudflare Pages 前端。返回内容：${text.slice(0, 120)}`)
+  throw new Error(`后端没有返回 JSON，请检查 VITE_API_BASE 是否指向 Render 后端。返回：${text.slice(0, 180)}`)
 }
 
 export async function apiGet<T>(path: string): Promise<T> {
@@ -108,4 +108,20 @@ export interface VoiceDirectorResponse {
   director_notes: string[]
   rewritten_script: string
   segments: VoiceSegment[]
+}
+
+export interface VideoEditChatResponse {
+  assistant_message: string
+  summary: string
+  actions: string[]
+  new_video_url?: string
+  new_video_name?: string
+  warnings: string[]
+}
+
+export interface PlatformPublishResponse {
+  platform: string
+  status: string
+  message: string
+  checklist: string[]
 }
