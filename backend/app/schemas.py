@@ -382,3 +382,58 @@ class GrowthDecisionResponse(BaseModel):
     actions: List[str] = Field(default_factory=list)
     alerts: List[str] = Field(default_factory=list)
     next_test: List[str] = Field(default_factory=list)
+
+
+class CustomerProfileSave(BaseModel):
+    industry: str = Field(default='', max_length=120)
+    audience: str = Field(default='', max_length=300)
+    selling_points: str = Field(default='', max_length=2000)
+    style: str = Field(default='', max_length=300)
+    lead_region: str = Field(default='', max_length=200)
+    conversion_goal: str = Field(default='', max_length=200)
+    trend_keywords: str = Field(default='', max_length=1000)
+
+
+class MemoryEventInput(BaseModel):
+    event_type: str = Field(default='note', max_length=120)
+    title: str = Field(default='', max_length=300)
+    payload: dict = Field(default_factory=dict)
+
+
+class CompetitorVideoSave(BaseModel):
+    source_name: str = Field(default='', max_length=300)
+    platform: str = Field(default='douyin', max_length=80)
+    source_url: str = Field(default='', max_length=1200)
+    manual_text: str = Field(default='', max_length=12000)
+    transcript: str = Field(default='', max_length=20000)
+    summary: str = Field(default='', max_length=5000)
+    structure: List[str] = Field(default_factory=list)
+    hooks: List[str] = Field(default_factory=list)
+    selling_points: List[str] = Field(default_factory=list)
+    status: str = Field(default='', max_length=120)
+    collector_status: str = Field(default='', max_length=120)
+    collected_video_url: str = Field(default='', max_length=1200)
+    raw: dict = Field(default_factory=dict)
+
+
+class MemoryContextResponse(BaseModel):
+    workspace_id: str
+    memory_enabled: bool
+    storage: str
+    profile: dict = Field(default_factory=dict)
+    competitors: List[dict] = Field(default_factory=list)
+    videos: List[dict] = Field(default_factory=list)
+    trends: List[dict] = Field(default_factory=list)
+    scripts: List[dict] = Field(default_factory=list)
+    events: List[dict] = Field(default_factory=list)
+    learning_summary: str = ''
+
+
+class ScriptVersionSave(BaseModel):
+    title: str = Field(default='', max_length=300)
+    hook: str = Field(default='', max_length=2000)
+    script: str = Field(default='', max_length=20000)
+    description: str = Field(default='', max_length=8000)
+    tags: List[str] = Field(default_factory=list)
+    source: str = Field(default='manual', max_length=120)
+    raw: dict = Field(default_factory=dict)

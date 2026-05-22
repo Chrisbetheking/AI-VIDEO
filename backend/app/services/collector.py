@@ -186,16 +186,6 @@ def _find_downloaded_file(before: set[Path], output_dir: Path) -> Optional[Path]
     return None
 
 
-
-
-def _cookiefile_for_ytdlp(settings: Settings, warnings: list[str]) -> Optional[str]:
-    path = settings.collector_cookie_path
-    if path.exists() and path.is_file() and path.stat().st_size > 0:
-        warnings.append('已检测到采集 cookies.txt，将使用授权浏览凭证尝试获取公开视频。')
-        return str(path)
-    warnings.append('未上传 cookies.txt；如遇 Fresh cookies needed，可在左侧上传 cookies.txt 后重试。')
-    return None
-
 def _collect_with_ytdlp(settings: Settings, source_url: str, warnings: list[str]) -> Optional[CollectedVideo]:
     if not settings.enable_ytdlp_collector:
         warnings.append('未启用 ENABLE_YTDLP_COLLECTOR，跳过备用视频采集器。')
@@ -218,41 +208,25 @@ def _collect_with_ytdlp(settings: Settings, source_url: str, warnings: list[str]
             if downloaded > max_bytes:
                 raise RuntimeError(f'视频超过 {settings.collector_max_mb}MB，停止采集。')
 
-    cookiefile = _cookiefile_for_ytdlp(settings, warnings)
     opts = {
         'outtmpl': outtmpl,
         'format': 'bv*[ext=mp4]+ba/b[ext=mp4]/best',
         'merge_output_format': 'mp4',
         'noplaylist': True,
         'quiet': True,
-        'no_warnings': False,
+        'no_warnings': True,
         'socket_timeout': settings.collector_timeout_seconds,
-        'retries': 2,
-        'fragment_retries': 2,
+        'retries': 1,
+        'fragment_retries': 1,
         'progress_hooks': [progress_hook],
-        'geo_bypass': True,
-        'nocheckcertificate': True,
-        'force_ipv4': True,
-        'http_headers': {
-            'User-Agent': settings.collector_user_agent,
-            'Referer': 'https://www.douyin.com/',
-            'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
-        },
-        # 不删除原平台水印、不绕过私密/付费/登录不可见内容；只尽力采集用户自己可访问的公开视频。
+        'http_headers': {'User-Agent': settings.collector_user_agent, 'Referer': 'https://www.douyin.com/'},
     }
-    if cookiefile:
-        opts['cookiefile'] = cookiefile
 
     try:
         with yt_dlp.YoutubeDL(opts) as ydl:
             info = ydl.extract_info(source_url, download=True)
     except Exception as exc:
-        
-        msg = str(exc)[:500]
-        if 'Fresh cookies' in msg or 'cookies' in msg.lower():
-            warnings.append('备用视频采集失败：平台要求有效 cookies。请上传从自己浏览器导出的 cookies.txt 后重试。')
-        else:
-            warnings.append(f'备用视频采集失败：{msg}')
+        warnings.append(f'备用视频采集失败：{str(exc)[:300]}')
         return None
 
     path = None

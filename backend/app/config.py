@@ -63,12 +63,17 @@ class Settings(BaseSettings):
     collector_max_mb: int = 80
     collector_timeout_seconds: int = 180
     collector_user_agent: str = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36'
-    # 可选：上传 cookies.txt 后，yt-dlp 会用该凭证尝试采集公开视频。
-    # 只建议用于用户自己可正常访问的公开视频，不保证所有平台都可用。
-    collector_cookies_file: str = ''
 
     # 平台发布：先保留入口，等开放平台权限下来再接真实发布
     enable_platform_publish: bool = False
+
+
+    # Supabase / AI 记忆库
+    supabase_url: str = ''
+    supabase_service_role_key: str = ''
+    workspace_id: str = 'default'
+    enable_learning_memory: bool = True
+    industry_radar_auto_save: bool = True
 
     @property
     def data_dir(self) -> Path:
@@ -90,19 +95,6 @@ class Settings(BaseSettings):
     @property
     def tmp_dir(self) -> Path:
         return self.data_dir / 'tmp'
-
-    @property
-    def cookies_dir(self) -> Path:
-        path = self.data_dir / 'cookies'
-        path.mkdir(parents=True, exist_ok=True)
-        return path
-
-    @property
-    def collector_cookie_path(self) -> Path:
-        configured = (self.collector_cookies_file or '').strip()
-        if configured:
-            return Path(configured).expanduser().resolve()
-        return self.cookies_dir / 'douyin_cookies.txt'
 
     @property
     def db_path(self) -> Path:
@@ -127,3 +119,6 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
+
+# Supabase / AI 记忆库：账号库、采集记录、行业档案、投流数据
+# 不配置时自动降级为 Render 本地 JSON，适合调试；正式建议配置 Supabase。

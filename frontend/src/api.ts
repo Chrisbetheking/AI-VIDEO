@@ -199,3 +199,26 @@ export interface GrowthDecisionResponse {
   alerts: string[]
   next_test: string[]
 }
+
+export interface MemoryContextResponse {
+  workspace_id: string
+  memory_enabled: boolean
+  storage: string
+  profile: Record<string, any>
+  competitors: any[]
+  videos: any[]
+  trends: any[]
+  scripts: any[]
+  events: any[]
+  learning_summary: string
+}
+
+export interface CustomerProfileSave {
+  industry: string
+  audience: string
+  selling_points: string
+  style: string
+  lead_region: string
+  conversion_goal: string
+  trend_keywords: string
+}

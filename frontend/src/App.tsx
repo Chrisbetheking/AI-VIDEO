@@ -15,6 +15,7 @@ import {
   SubtitleEmphasisResponse,
   GrowthDecisionResponse,
   GrowthMetricInput,
+  MemoryContextResponse,
   TTSResponse,
   TTSVoice,
   VideoEditChatResponse,
@@ -25,7 +26,7 @@ import {
   uploadAssets
 } from './api'
 
-type ModuleKey = 'dashboard' | 'strategy' | 'trend' | 'competitor' | 'collector' | 'copy' | 'voice' | 'assets' | 'shooting' | 'video' | 'subtitleCover' | 'growth' | 'publish'
+type ModuleKey = 'dashboard' | 'monitor' | 'collector' | 'copy' | 'voice' | 'assets' | 'video' | 'subtitleCover' | 'publish' | 'strategy' | 'competitor' | 'trend' | 'shooting' | 'growth'
 
 function Field({ label, children, hint }: { label: string; children: ReactNode; hint?: string }) {
   return <label className="field"><span>{label}</span>{children}{hint && <em>{hint}</em>}</label>
@@ -53,19 +54,20 @@ const defaultSegment: VoiceSegment = {
 }
 
 const modules: { key: ModuleKey; icon: string; title: string; desc: string; tag: string }[] = [
-  { key: 'dashboard', icon: '🏠', title: '流程总览', desc: '按步骤完成一条获客视频', tag: '总览' },
-  { key: 'strategy', icon: '🎯', title: '客户定位', desc: '先定目标客户、痛点和成交动作', tag: '0' },
-  { key: 'collector', icon: '🔎', title: '1. 同行视频采集', desc: '上传/粘贴同行视频，拆钩子和结构', tag: '采集' },
-  { key: 'competitor', icon: '👀', title: '竞品账号库', desc: '长期沉淀同行账号和爆款特征', tag: '库' },
-  { key: 'trend', icon: '📡', title: '行业爆点', desc: '选题雷达、热点关键词、拍摄方向', tag: '雷达' },
-  { key: 'copy', icon: '✍️', title: '2. 仿写改写 / 文案生成', desc: '先仿写结构，再细改成原创口播稿', tag: '文案' },
+  { key: 'dashboard', icon: '🏠', title: '流程总览', desc: '一条视频从采集到发布的主流程', tag: '总览' },
+  { key: 'monitor', icon: '🧭', title: '运营中控台', desc: '总览进度、数据库、插件和待办', tag: '监控' },
+  { key: 'collector', icon: '🔎', title: '1. 同行采集', desc: '采集同行视频、口令和钩子结构', tag: '采集' },
+  { key: 'copy', icon: '✍️', title: '2. 文案生产', desc: '仿写改写、细改、入知识库', tag: '文案' },
   { key: 'voice', icon: '🎙️', title: '3. 配音导演', desc: '克隆音色、分段情绪、语速停顿', tag: '配音' },
-  { key: 'assets', icon: '🗂️', title: '4. 选择素材', desc: '自有素材和采集视频分开管理', tag: '素材' },
+  { key: 'assets', icon: '🗂️', title: '4. 素材选择', desc: '自有素材和采集视频分开管理', tag: '素材' },
+  { key: 'video', icon: '🎬', title: '5. 剪辑合成', desc: '分段衔接、转场、贴片、字幕', tag: '剪辑' },
+  { key: 'subtitleCover', icon: '🅰️', title: '6. 字幕封面', desc: '重点词高亮、封面样式、下载', tag: '视觉' },
+  { key: 'publish', icon: '🚀', title: '7. 平台发布', desc: '发布草稿、平台适配、开放接口预留', tag: '发布' },
+  { key: 'strategy', icon: '🎯', title: '客户定位', desc: '行业、目标客户、成交路径、老板人设', tag: '定位' },
+  { key: 'competitor', icon: '👀', title: '竞品账号库', desc: '长期沉淀同行账号和爆款特征', tag: '账号' },
+  { key: 'trend', icon: '📡', title: '行业爆点', desc: '选题雷达、热点关键词、拍摄方向', tag: '雷达' },
   { key: 'shooting', icon: '🎥', title: '运营拍摄', desc: '拍摄任务单、提词器、B-roll 清单', tag: '拍摄' },
-  { key: 'video', icon: '🎬', title: '5. 剪辑合成', desc: '分段衔接、叠化转场、贴片字幕', tag: '剪辑' },
-  { key: 'subtitleCover', icon: '🅰️', title: '6. 字幕封面', desc: '重点字幕、封面样式、下载', tag: '视觉' },
-  { key: 'publish', icon: '🚀', title: '7. 平台发布', desc: '抖音/视频号/快手/小红书发布草稿', tag: '发布' },
-  { key: 'growth', icon: '📈', title: '流量监控', desc: '实时数据、机器学习投流、优化动作', tag: '增长' }
+  { key: 'growth', icon: '📈', title: '增长投流细节', desc: '流量数据、机器学习投流、优化动作', tag: '增长' }
 ]
 
 const workflowSteps: { key: ModuleKey; step: string; title: string; desc: string; action: string }[] = [
@@ -79,6 +81,26 @@ const workflowSteps: { key: ModuleKey; step: string; title: string; desc: string
 ]
 
 const badWords = ['最', '第一', '保证', '包赚', '稳赚', '绝对', '唯一', '国家级', '100%', '躺赚', '无风险']
+
+const pluginMatrix = [
+  { name: '采集插件', desc: '抖音口令、短链、MP4、页面元信息尽力采集', status: 'collector' },
+  { name: '文案智能体', desc: '读取行业档案、同行库、爆点雷达和知识库', status: 'deepseek' },
+  { name: '声音导演', desc: '克隆音色、分段情绪、语速停顿、自动合并', status: 'tts' },
+  { name: '剪辑插件', desc: 'FFmpeg 合成、转场、字幕、AI 指令重剪', status: 'ffmpeg' },
+  { name: '记忆数据库', desc: 'Supabase 保存账号、采集、文案、投流复盘', status: 'supabase' },
+  { name: '平台发布', desc: '抖音/视频号/快手/小红书开放平台预留', status: 'publish' }
+]
+
+function nextStepOf(active: ModuleKey): ModuleKey {
+  const order: ModuleKey[] = ['collector','copy','voice','assets','video','subtitleCover','publish']
+  const idx = order.indexOf(active)
+  return idx >= 0 && idx < order.length - 1 ? order[idx + 1] : active
+}
+
+function shortText(value: string, limit = 68) {
+  const clean = (value || '').replace(/\s+/g, ' ').trim()
+  return clean.length > limit ? clean.slice(0, limit) + '...' : clean
+}
 
 function estimateSeconds(text: string, speed = 1) {
   const chars = (text || '').replace(/\s/g, '').length
@@ -112,6 +134,8 @@ export default function App() {
   const [subtitleAI, setSubtitleAI] = useState<SubtitleEmphasisResponse | null>(null)
   const [growthMetrics, setGrowthMetrics] = useState<GrowthMetricInput>({ views: 0, likes: 0, comments: 0, shares: 0, follows: 0, leads: 0, completion_rate: 0, spend: 0, hours_after_publish: 3 })
   const [growthDecision, setGrowthDecision] = useState<GrowthDecisionResponse | null>(null)
+  const [memoryContext, setMemoryContext] = useState<MemoryContextResponse | null>(null)
+  const [memoryStatus, setMemoryStatus] = useState('未同步')
 
   const [assets, setAssets] = useState<AssetItem[]>([])
   const [selectedMaterialIds, setSelectedMaterialIds] = useState<string[]>([])
@@ -146,11 +170,15 @@ export default function App() {
   const [ad, setAd] = useState<AdAnalysisResponse | null>(null)
   const [platform, setPlatform] = useState('douyin')
   const [publish, setPublish] = useState<PlatformPublishResponse | null>(null)
+  const [lastHandoff, setLastHandoff] = useState('系统会把上一模块结果自动带到下一模块。')
+  const [autoAdvance, setAutoAdvance] = useState(true)
+  const [knowledgeDialog, setKnowledgeDialog] = useState({ open: false, source: '', title: '', content: '', tags: '老板口播,获客,短视频' })
 
   const materialAssets = useMemo(() => assets.filter(a => !a.filename.startsWith('collected_')), [assets])
   const collectedVideos = useMemo(() => assets.filter(a => a.kind === 'video' && a.filename.startsWith('collected_')), [assets])
   const referenceText = useMemo(() => extract?.transcript || manualText || sourceUrl, [extract, manualText, sourceUrl])
   const competitorNotes = useMemo(() => competitors.map(c => `${c.platform}｜${c.name}｜${c.positioning}｜${c.notes}`).join('\n'), [competitors])
+  const learningSummary = memoryContext?.learning_summary || '保存客户定位、竞品账号和采集结果后，AI 会在文案、雷达、投流建议里自动读取。'
   const currentScript = copy.script || ''
   const currentVideoName = video?.video_name || extract?.collected_video_name || ''
   const selectedVoiceName = voices.find(v => v.id === voice)?.name || voice || '未选择音色'
@@ -165,9 +193,100 @@ export default function App() {
     return Math.min(100, score)
   }, [extract, copy.hook, voiceSegments.length, selectedMaterialIds.length, video])
 
+  const pipelineTodos = useMemo(() => [
+    { ok: Boolean(industry && audience), text: '保存客户定位，让 AI 记住行业和客户画像', go: 'strategy' as ModuleKey },
+    { ok: Boolean(extract), text: '采集 1 条同行视频或口令，沉淀钩子结构', go: 'collector' as ModuleKey },
+    { ok: Boolean(copy.script), text: '生成并细改口播文案，确认是否入知识库', go: 'copy' as ModuleKey },
+    { ok: Boolean(audio), text: '生成分段情绪配音，确认语速和停顿', go: 'voice' as ModuleKey },
+    { ok: selectedMaterialIds.length > 0, text: '选择自有素材，避免直接搬运采集视频', go: 'assets' as ModuleKey },
+    { ok: Boolean(video?.video_url), text: '合成视频并下载检查音画字幕', go: 'video' as ModuleKey },
+    { ok: Boolean(publish), text: '生成平台发布草稿，后续接开放平台', go: 'publish' as ModuleKey },
+  ], [industry, audience, extract, copy.script, audio, selectedMaterialIds, video, publish])
+  const nextTodo = pipelineTodos.find(x => !x.ok)
+
+  function openKnowledgeSave(source: string, item: GeneratedCopy) {
+    const content = [
+      `标题：${item.title || ''}`,
+      `黄金三秒：${item.hook || ''}`,
+      `口播稿：\n${item.script || ''}`,
+      `发布简介：\n${item.description || ''}`,
+      `标签：${(item.tags || []).join(', ')}`,
+    ].join('\n\n')
+    setKnowledgeDialog({
+      open: true,
+      source,
+      title: item.title || `${industry}短视频文案`,
+      content,
+      tags: ['老板口播', industry, '获客', ...(item.tags || [])].filter(Boolean).slice(0, 8).join(','),
+    })
+  }
+
+  async function saveKnowledgeDialog() {
+    const tags = knowledgeDialog.tags.split(/[,，\s]+/).map(x => x.trim()).filter(Boolean)
+    await run('保存文案到知识库', async () => {
+      await apiPost('/api/knowledge', { title: knowledgeDialog.title, content: knowledgeDialog.content, tags })
+      await apiPost('/api/memory/scripts', {
+        title: copy.title,
+        hook: copy.hook,
+        script: copy.script,
+        description: copy.description,
+        tags: copy.tags || tags,
+        source: knowledgeDialog.source,
+        raw: { content: knowledgeDialog.content, saved_from: 'knowledge_dialog' }
+      }).catch(() => null)
+    })
+    setKnowledgeDialog({ open: false, source: '', title: '', content: '', tags: '老板口播,获客,短视频' })
+    await reloadMemoryContext()
+    setLastHandoff('文案已保存到知识库。后续文案生成、行业雷达和投流建议会优先读取这些样本。')
+  }
+
+  function skipKnowledgeDialog() {
+    setKnowledgeDialog(prev => ({ ...prev, open: false }))
+    setLastHandoff('文案未入知识库，但已经进入当前项目流程；可以继续配音分段。')
+  }
+
   async function run<T>(label: string, fn: () => Promise<T>) {
     setBusy(label); setError('')
     try { return await fn() } catch (e: any) { setError(e.message || String(e)); throw e } finally { setBusy('') }
+  }
+
+  async function reloadMemoryContext(applyProfile = false) {
+    const ctx = await apiGet<MemoryContextResponse>('/api/memory/context')
+    setMemoryContext(ctx)
+    setMemoryStatus(ctx.memory_enabled ? 'Supabase 已连接' : '本地记忆模式')
+    const profile = ctx.profile || {}
+    if (applyProfile && Object.keys(profile).length) {
+      if (profile.industry) setIndustry(profile.industry)
+      if (profile.audience) setAudience(profile.audience)
+      if (profile.selling_points) setSellingPoints(profile.selling_points)
+      if (profile.style) setStyle(profile.style)
+      if (profile.lead_region) setLeadRegion(profile.lead_region)
+      if (profile.conversion_goal) setConversionGoal(profile.conversion_goal)
+      if (profile.trend_keywords) setTrendKeywords(profile.trend_keywords)
+    }
+    if (Array.isArray(ctx.competitors)) {
+      setCompetitors(ctx.competitors.map((x: any) => ({
+        name: x.name || '',
+        platform: x.platform || 'douyin',
+        url: x.url || '',
+        positioning: x.positioning || '',
+        notes: x.notes || ''
+      })))
+    }
+    return ctx
+  }
+
+  async function saveCustomerProfile() {
+    await run('保存行业档案', () => apiPost('/api/memory/customer-profile', {
+      industry,
+      audience,
+      selling_points: sellingPoints,
+      style,
+      lead_region: leadRegion,
+      conversion_goal: conversionGoal,
+      trend_keywords: trendKeywords
+    }))
+    await reloadMemoryContext(true)
   }
 
   async function reloadAssets() {
@@ -179,6 +298,7 @@ export default function App() {
     apiGet('/api/health').then(setHealth).catch((e) => setError(e.message || 'API 未连接'))
     apiGet<TTSVoice[]>('/api/tts/voices').then(v => { const list = Array.isArray(v) ? v : []; setVoices(list); setVoice(list[0]?.id || '') }).catch(() => null)
     reloadAssets().catch(() => null)
+    reloadMemoryContext(true).catch(() => null)
   }, [])
 
   useEffect(() => {
@@ -212,19 +332,22 @@ export default function App() {
     setExtract(res!)
     if (res?.collected_asset_id) setSelectedReferenceAssetId(res.collected_asset_id)
     await reloadAssets()
-    setActive('collector')
+    await reloadMemoryContext()
+    setLastHandoff('同行采集结果已入库。下一步可以直接仿写改写，文案模块会自动读取这条采集内容。')
+    if (autoAdvance) setActive('copy')
   }
 
 
-  function addCompetitor() {
+  async function addCompetitor() {
     const draft = { ...competitorDraft, name: competitorDraft.name.trim(), url: competitorDraft.url.trim(), positioning: competitorDraft.positioning.trim(), notes: competitorDraft.notes.trim() }
     if (!draft.name && !draft.url && !draft.notes) return
-    setCompetitors(prev => [draft, ...prev])
+    await run('保存竞品账号', () => apiPost('/api/memory/competitors', draft))
+    await reloadMemoryContext()
     setCompetitorDraft({ name: '', platform: 'douyin', url: '', positioning: '', notes: '' })
   }
 
   async function makeTrendRadar() {
-    const res = await run('生成行业爆点雷达', () => apiPost<TrendRadarResponse>('/api/trend-radar', {
+    const res = await run('生成行业爆点雷达', () => apiPost<TrendRadarResponse>('/api/trend-radar/auto', {
       industry,
       audience,
       region: leadRegion,
@@ -234,6 +357,8 @@ ${extract?.summary || ''}
 ${manualText || ''}`.trim()
     }))
     setTrendRadar(res!)
+    await reloadMemoryContext()
+    setLastHandoff('行业雷达已保存到数据库。文案生成会自动读取这些选题和关键词。')
     setActive('trend')
   }
 
@@ -285,6 +410,8 @@ ${manualText || ''}`.trim()
       knowledge_examples: manualText ? [manualText] : []
     }))
     setCopy(res!)
+    openKnowledgeSave('直接生成文案', res!)
+    setLastHandoff('新文案已生成。确认入知识库后，可以继续进入配音导演。')
     setActive('copy')
   }
 
@@ -298,6 +425,8 @@ ${manualText || ''}`.trim()
       duration_seconds: duration
     }))
     setCopy(res!)
+    openKnowledgeSave('同行仿写改写', res!)
+    setLastHandoff('仿写改写已完成。系统已带入同行结构、客户定位和数据库记忆。')
     setActive('copy')
   }
 
@@ -310,6 +439,8 @@ ${manualText || ''}`.trim()
       selling_points: sellingPoints
     }))
     setCopy(res!)
+    openKnowledgeSave('文案细改版本', res!)
+    setLastHandoff('细改文案已更新。建议保存到知识库，再进入配音分段。')
   }
 
   async function planEdit() {
@@ -320,6 +451,7 @@ ${manualText || ''}`.trim()
       asset_summary: [...materialAssets, ...collectedVideos].map(a => `${a.kind}:${a.original_name}`).join('；')
     }))
     setEditPlan(res!)
+    setLastHandoff('剪辑方案已生成。视频合成模块会读取文案、素材和配音分段。')
     setActive('video')
   }
 
@@ -337,6 +469,7 @@ ${manualText || ''}`.trim()
     setSegmentSeconds(Object.fromEntries(segments.map((seg, idx) => [idx, estimateSeconds(seg.text, seg.speed_ratio)])))
     setVoiceNotes(Array.isArray(res!.director_notes) ? res!.director_notes : [])
     setCopy(prev => ({ ...prev, script: res!.rewritten_script || prev.script }))
+    setLastHandoff('配音分段已生成。下一步可以试听配音，或者直接选择素材进行合成。')
     setActive('voice')
   }
 
@@ -367,7 +500,8 @@ ${manualText || ''}`.trim()
     const segments = voiceSegments.length ? voiceSegments : [{ ...defaultSegment, text: currentScript || defaultSegment.text }]
     const res = await run('生成分段情绪配音', () => apiPost<TTSResponse>('/api/tts-segments', { segments, voice, overall_rate: '+0%' }))
     setAudio(res!)
-    setActive('voice')
+    setLastHandoff('配音已生成。素材选择和剪辑合成会自动读取这条音频。')
+    if (autoAdvance) setActive('assets')
   }
 
   async function composeVideo() {
@@ -382,7 +516,8 @@ ${manualText || ''}`.trim()
       rate: '+0%'
     }))
     setVideo(res!)
-    setActive('video')
+    setLastHandoff('视频已合成。字幕封面和平台发布会自动读取这条成片。')
+    if (autoAdvance) setActive('subtitleCover')
   }
 
   async function chatEditVideo() {
@@ -409,6 +544,7 @@ ${manualText || ''}`.trim()
       brand: industry
     }))
     setCover(res!)
+    setLastHandoff('封面已生成。平台发布模块会自动读取视频、封面、标题和简介。')
     setActive('subtitleCover')
   }
 
@@ -474,6 +610,21 @@ ${manualText || ''}`.trim()
 
       {error && <div className="globalError">{error}</div>}
       {busy && <div className="busy">正在执行：{busy}</div>}
+      <div className="handoffBar">
+        <div><strong>当前联动</strong><span>{lastHandoff}</span></div>
+        <label><input type="checkbox" checked={autoAdvance} onChange={e => setAutoAdvance(e.target.checked)} /> 完成后自动切到下一步</label>
+        {nextTodo && <button onClick={() => setActive(nextTodo.go)}>下一件事：{nextTodo.text}</button>}
+      </div>
+
+      {knowledgeDialog.open && <div className="modalMask">
+        <div className="knowledgeModal">
+          <div className="sectionHeader"><div><h2>是否放进知识库？</h2><p>保存后，后续文案、行业雷达、投流判断会自动读取这条样本。</p></div><button className="modalClose" onClick={skipKnowledgeDialog}>×</button></div>
+          <Field label="知识标题"><input value={knowledgeDialog.title} onChange={e => setKnowledgeDialog({ ...knowledgeDialog, title: e.target.value })} /></Field>
+          <Field label="标签"><input value={knowledgeDialog.tags} onChange={e => setKnowledgeDialog({ ...knowledgeDialog, tags: e.target.value })} /></Field>
+          <Field label="入库内容"><textarea className="scriptArea" value={knowledgeDialog.content} onChange={e => setKnowledgeDialog({ ...knowledgeDialog, content: e.target.value })} /></Field>
+          <div className="buttonRow"><Button busy={busy === '保存文案到知识库' ? busy : ''} label="保存到知识库" onClick={saveKnowledgeDialog} /><Button label="这次不保存，继续下一步" onClick={skipKnowledgeDialog} kind="ghost" /></div>
+        </div>
+      </div>}
 
       <section className="progressRail">
         {stageCards.map((s, idx) => <div key={s.label} className={`stage ${s.done ? 'done' : ''}`}>
@@ -492,7 +643,7 @@ ${manualText || ''}`.trim()
           </button>)}
         </div>
         <div className="opsGrid">
-          {modules.filter(x => ['strategy','trend','competitor','shooting','growth'].includes(x.key)).map(item => <button className="moduleCard compact" key={item.key} onClick={() => setActive(item.key)}>
+          {modules.filter(x => ['monitor','strategy','competitor','trend','shooting','growth'].includes(x.key)).map(item => <button className="moduleCard compact" key={item.key} onClick={() => setActive(item.key)}>
             <span className="moduleIcon">{item.icon}</span>
             <strong>{item.title}</strong>
             <p>{item.desc}</p>
@@ -501,8 +652,20 @@ ${manualText || ''}`.trim()
         </div>
       </section>}
 
+      {active === 'monitor' && <section className="card modulePanel">
+        <div className="sectionHeader"><div><h2>运营中控台</h2><p>这里是总览监控：看流程进度、数据库记忆、插件状态和下一步待办。详细数据和投流判断放在最后的增长模块。</p></div><div className="headerActions"><Button label="刷新数据库记忆" onClick={() => reloadMemoryContext(true)} kind="ghost" /><Button busy={busy === '生成行业爆点雷达' ? busy : ''} label="自动跑一次行业雷达" onClick={makeTrendRadar} kind="soft" /></div></div>
+        <div className="monitorGrid">
+          <div className="monitorCard"><span>流程完成度</span><strong>{leadScore}%</strong><p>{nextTodo ? nextTodo.text : '当前流程已基本闭环，可以进入发布和复盘。'}</p></div>
+          <div className="monitorCard"><span>数据库记忆</span><strong>{memoryStatus}</strong><p>{memoryContext?.storage || '未连接'} · 账号 {(memoryContext?.competitors || []).length} · 采集 {(memoryContext?.videos || []).length} · 文案 {(memoryContext?.scripts || []).length}</p></div>
+          <div className="monitorCard"><span>API 状态</span><strong>{health?.ok ? '在线' : '未连接'}</strong><p>{health?.tts_provider || '-'} · {health?.ark_video_model || '-'}</p></div>
+        </div>
+        <div className="pluginGrid">{pluginMatrix.map(p => <div className="pluginCard" key={p.name}><strong>{p.name}</strong><p>{p.desc}</p><em>{p.status}</em></div>)}</div>
+        <div className="todoPanel"><h3>下一步待办</h3>{pipelineTodos.map(item => <button key={item.text} className={item.ok ? 'done' : ''} onClick={() => setActive(item.go)}><span>{item.ok ? '✓' : '•'}</span>{item.text}</button>)}</div>
+        <div className="memoryBox"><strong>AI 学习摘要</strong><p>{learningSummary}</p></div>
+      </section>}
+
       {active === 'strategy' && <section className="card modulePanel">
-        <div className="sectionHeader"><div><h2>获客定位</h2><p>先定客户，再学同行。文案、投流、素材匹配都会读取这里的定位。</p></div><Button busy={busy === '投流分析' ? busy : ''} label="投流/获客方向分析" onClick={analyzeAd} kind="soft" /></div>
+        <div className="sectionHeader"><div><h2>获客定位</h2><p>先定客户，再学同行。保存后会写入数据库，后续每一步都会读取这里的行业和目标客户。</p></div><div className="headerActions"><Button busy={busy === '保存行业档案' ? busy : ''} label="保存行业档案" onClick={saveCustomerProfile} kind="soft" /><Button busy={busy === '投流分析' ? busy : ''} label="投流/获客方向分析" onClick={analyzeAd} kind="ghost" /></div></div>
         <div className="grid2">
           <Field label="行业"><input value={industry} onChange={e => setIndustry(e.target.value)} /></Field>
           <Field label="目标客户"><input value={audience} onChange={e => setAudience(e.target.value)} /></Field>
@@ -511,20 +674,21 @@ ${manualText || ''}`.trim()
         </div>
         <Field label="核心卖点"><textarea value={sellingPoints} onChange={e => setSellingPoints(e.target.value)} /></Field>
         <Field label="视频风格"><input value={style} onChange={e => setStyle(e.target.value)} /></Field>
+        <div className="memoryBox"><strong>AI 学习状态：{memoryStatus}</strong><p>{learningSummary}</p><button onClick={() => reloadMemoryContext(true)}>刷新数据库记忆</button></div>
         {ad && <div className="resultBox"><h3>{ad.decision}</h3><p>建议预算：{ad.suggested_budget} · 置信度：{Math.round(ad.confidence * 100)}%</p><div className="chips">{ad.target_audience?.map(x => <Pill key={x}>{x}</Pill>)}</div>{ad.optimization_tips?.map(x => <p key={x}>· {x}</p>)}</div>}
       </section>}
 
       {active === 'trend' && <section className="card modulePanel">
-        <div className="sectionHeader"><div><h2>行业爆点与选题雷达</h2><p>根据行业、目标客户、同行账号和采集内容，生成可拍选题、监控关键词和下一步动作。</p></div><Button busy={busy === '生成行业爆点雷达' ? busy : ''} label="生成行业爆点雷达" onClick={makeTrendRadar} /></div>
+        <div className="sectionHeader"><div><h2>行业爆点与选题雷达</h2><p>根据行业、目标客户、同行账号和采集内容，生成可拍选题、监控关键词和下一步动作。</p></div><Button busy={busy === '生成行业爆点雷达' ? busy : ''} label="自动采集/生成行业雷达" onClick={makeTrendRadar} /></div>
         <div className="grid2">
           <Field label="监控关键词"><input value={trendKeywords} onChange={e => setTrendKeywords(e.target.value)} placeholder="获客,投流,同城,客户转化" /></Field>
           <Field label="同行备注汇总"><textarea value={`${competitorNotes}${extract?.summary ? '\n' + extract.summary : ''}`} readOnly placeholder="竞品账号库和同行采集结果会自动汇总到这里" /></Field>
         </div>
-        {trendRadar ? <div className="resultBox"><h3>{trendRadar.summary}</h3><div className="trendGrid">{trendRadar.hot_topics?.map(item => <div className="trendCard" key={item.title}><div className="heat"><span>{item.heat}</span><em>热度</em></div><strong>{item.title}</strong><p>{item.reason}</p><small>角度：{item.angle}</small><small>钩子：{item.suggested_hook}</small>{item.risk && <div className="warn">{item.risk}</div>}</div>)}</div><div className="splitGrid"><div><h4>内容角度</h4>{trendRadar.content_angles?.map(x => <p key={x}>· {x}</p>)}</div><div><h4>拍摄建议</h4>{trendRadar.shooting_suggestions?.map(x => <p key={x}>· {x}</p>)}</div><div><h4>监控词</h4><div className="chips">{trendRadar.monitor_keywords?.map(x => <Pill key={x}>{x}</Pill>)}</div></div></div></div> : <Empty>先生成一次行业雷达。后续可以接真实平台热点 API。</Empty>}
+        {trendRadar ? <div className="resultBox"><h3>{trendRadar.summary}</h3><div className="trendGrid">{trendRadar.hot_topics?.map(item => <div className="trendCard" key={item.title}><div className="heat"><span>{item.heat}</span><em>热度</em></div><strong>{item.title}</strong><p>{item.reason}</p><small>角度：{item.angle}</small><small>钩子：{item.suggested_hook}</small>{item.risk && <div className="warn">{item.risk}</div>}</div>)}</div><div className="splitGrid"><div><h4>内容角度</h4>{trendRadar.content_angles?.map(x => <p key={x}>· {x}</p>)}</div><div><h4>拍摄建议</h4>{trendRadar.shooting_suggestions?.map(x => <p key={x}>· {x}</p>)}</div><div><h4>监控词</h4><div className="chips">{trendRadar.monitor_keywords?.map(x => <Pill key={x}>{x}</Pill>)}</div></div></div></div> : <Empty>保存客户定位、账号库和采集结果后，系统会自动读取数据库生成行业雷达。</Empty>}
       </section>}
 
       {active === 'competitor' && <section className="card modulePanel">
-        <div className="sectionHeader"><div><h2>竞品账号库</h2><p>把同行账号、定位、爆款特点沉淀下来，行业雷达和文案改写会读取这些信息。</p></div><Button label="加入账号库" onClick={addCompetitor} kind="soft" /></div>
+        <div className="sectionHeader"><div><h2>竞品账号库</h2><p>把同行账号、定位、爆款特点沉淀到数据库。行业雷达、仿写改写、投流决策都会读取这些信息。</p></div><div className="headerActions"><Button label="刷新账号库" onClick={() => reloadMemoryContext()} kind="ghost" /><Button busy={busy === '保存竞品账号' ? busy : ''} label="加入账号库" onClick={addCompetitor} kind="soft" /></div></div>
         <div className="grid4"><Field label="账号名称"><input value={competitorDraft.name} onChange={e => setCompetitorDraft({ ...competitorDraft, name: e.target.value })} placeholder="例如：天诺老吴" /></Field><Field label="平台"><select value={competitorDraft.platform} onChange={e => setCompetitorDraft({ ...competitorDraft, platform: e.target.value })}><option value="douyin">抖音</option><option value="shipinhao">视频号</option><option value="kuaishou">快手</option><option value="xiaohongshu">小红书</option></select></Field><Field label="主页/视频链接"><input value={competitorDraft.url} onChange={e => setCompetitorDraft({ ...competitorDraft, url: e.target.value })} placeholder="账号主页或爆款链接" /></Field><Field label="账号定位"><input value={competitorDraft.positioning} onChange={e => setCompetitorDraft({ ...competitorDraft, positioning: e.target.value })} placeholder="同城获客/投流/电商创业" /></Field></div>
         <Field label="爆款特点 / 观察备注"><textarea value={competitorDraft.notes} onChange={e => setCompetitorDraft({ ...competitorDraft, notes: e.target.value })} placeholder="常用钩子、客户痛点、封面风格、评论区反馈、发布时间等" /></Field>
         <div className="competitorList">{competitors.length === 0 && <Empty>还没有竞品账号。先加 3-5 个同行账号，系统会更懂行业。</Empty>}{competitors.map((c, i) => <div className="competitorCard" key={`${c.name}-${i}`}><div><strong>{c.name || '未命名账号'}</strong><Pill tone="purple">{c.platform}</Pill></div><p>{c.positioning || '未填写定位'}</p><small>{c.url}</small><em>{c.notes}</em><button onClick={() => setCompetitors(prev => prev.filter((_, idx) => idx !== i))}>删除</button></div>)}</div>
@@ -542,12 +706,14 @@ ${manualText || ''}`.trim()
           <div className="splitGrid"><div><h4>黄金三秒/钩子</h4>{extract.hooks?.map(x => <p key={x}>· {x}</p>)}</div><div><h4>卖点/痛点</h4>{extract.selling_points?.map(x => <p key={x}>· {x}</p>)}</div><div><h4>结构</h4>{extract.structure?.map(x => <p key={x}>· {x}</p>)}</div></div>
           {extract.warnings?.map(w => <div className="warn" key={w}>{w}</div>)}
         </div>}
+        <div className="memoryList"><h3>数据库已采集同行内容</h3>{(memoryContext?.videos || []).slice(0, 6).map((v: any) => <div className="memoryItem" key={v.id || v.created_at}><strong>{v.source_name || v.summary || '同行采集记录'}</strong><p>{v.summary || v.transcript || v.manual_text}</p><small>{v.status} · {v.collector_status} · {v.created_at}</small></div>)}{!(memoryContext?.videos || []).length && <Empty>还没有入库采集记录。每次采集会自动保存，后续 AI 会读取。</Empty>}</div>
       </section>}
 
       {active === 'copy' && <section className="card modulePanel">
         <div className="sectionHeader"><div><h2>第二步：仿写改写 / 第三步：文案细改</h2><p>先学习同行视频的钩子和结构，再生成自己的原创文案。下面可以细改标题、开头、口播稿和发布简介。</p></div></div>
         <div className="grid4"><Field label="视频时长"><input type="number" min={5} max={180} value={duration} onChange={e => setDuration(Number(e.target.value || 35))} /></Field><Field label="标题字数方向"><input value="短、狠、直给" readOnly /></Field><Field label="开头策略"><input value="痛点/反差/警告/结果" readOnly /></Field><Field label="当前风险"><input value={matchedBadWords.length ? `${matchedBadWords.length} 个敏感词` : '暂无明显风险'} readOnly /></Field></div>
-        <div className="buttonRow"><Button busy={busy === '生成文案' ? busy : ''} label="第三步：生成新文案" onClick={generateDirectCopy} kind="ghost" /><Button busy={busy === '原创改写' ? busy : ''} label="第二步：仿写改写" onClick={rewrite} /><Button busy={busy === '文案细改' ? busy : ''} label="打开细改/优化文案" onClick={refineCopy} kind="soft" disabled={!currentScript} /></div>
+        <div className="buttonRow"><Button busy={busy === '原创改写' ? busy : ''} label="第二步：仿写改写" onClick={rewrite} /><Button busy={busy === '生成文案' ? busy : ''} label="直接生成新文案" onClick={generateDirectCopy} kind="ghost" /><Button busy={busy === '文案细改' ? busy : ''} label="细改/优化文案" onClick={refineCopy} kind="soft" disabled={!currentScript} /><Button label="把当前文案放进知识库" onClick={() => openKnowledgeSave('手动保存当前文案', copy)} kind="ghost" disabled={!currentScript} /><Button label="继续去配音分段" onClick={() => setActive('voice')} kind="soft" disabled={!currentScript} /></div>
+        <div className="flowSource"><strong>自动带入来源</strong><span>客户定位：{industry} / {audience}</span><span>同行采集：{extract?.summary ? shortText(extract.summary) : '暂无'}</span><span>数据库记忆：{memoryContext?.memory_enabled ? 'Supabase 已启用' : '本地调试记忆'}</span></div>
         <div className="copyEditor"><Field label="标题"><input value={copy.title} onChange={e => setCopy({ ...copy, title: e.target.value })} /></Field><Field label="黄金三秒钩子"><textarea value={copy.hook} onChange={e => setCopy({ ...copy, hook: e.target.value })} /></Field><Field label="完整口播稿"><textarea className="scriptArea" value={copy.script} onChange={e => setCopy({ ...copy, script: e.target.value })} placeholder="这里可以精修口播稿；选中文本后点“加入分段”。" /></Field><Field label="发布简介"><textarea value={copy.description} onChange={e => setCopy({ ...copy, description: e.target.value })} /></Field><Field label="细改要求"><input value={refineInstruction} onChange={e => setRefineInstruction(e.target.value)} /></Field></div>
         <div className="chips">{matchedBadWords.length ? matchedBadWords.map(x => <Pill key={x} tone="red">风险词：{x}</Pill>) : <Pill tone="green">违禁词初筛通过</Pill>}</div>
       </section>}

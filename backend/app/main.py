@@ -50,12 +50,18 @@ from app.schemas import (
     VideoEditChatResponse,
     VoiceDirectorRequest,
     VoiceDirectorResponse,
+    CustomerProfileSave,
+    CompetitorVideoSave,
+    MemoryContextResponse,
+    MemoryEventInput,
+    ScriptVersionSave,
 )
 from app.services.ad_analysis import analyze_ad
 from app.services.cover import create_cover
 from app.services.deepseek import DeepSeekError, generate_copy, generate_edit_plan, generate_growth_decision, generate_shooting_plan, generate_subtitle_emphasis, generate_trend_radar, generate_voice_director, refine_copy_with_instruction, rewrite_from_inspiration, test_deepseek, video_edit_chat_advice
 from app.services.doubao import extract_with_doubao
 from app.services.kb import KnowledgeBase
+from app.services.memory import MemoryStore
 from app.services.publisher import create_publish_package
 from app.services.storage import maybe_upload_to_r2
 from app.services.tts import get_tts_voices, synthesize_tts, synthesize_tts_segments
@@ -75,6 +81,10 @@ app.add_middleware(
 
 def get_kb(settings: Settings = Depends(get_settings)) -> KnowledgeBase:
     return KnowledgeBase(settings.db_path)
+
+
+def get_memory(settings: Settings = Depends(get_settings)) -> MemoryStore:
+    return MemoryStore(settings)
 
 
 def file_url(request: Request, name: str, public_url: Optional[str] = None) -> str:
@@ -134,6 +144,8 @@ def health(settings: Settings = Depends(get_settings)) -> dict:
         'ark_video_model': settings.ark_video_model,
         'tts_provider': settings.tts_provider,
         'r2_enabled': settings.r2_enabled,
+        'memory_enabled': bool(settings.supabase_url and settings.supabase_service_role_key),
+        'workspace_id': settings.workspace_id,
         'data_dir': str(settings.data_dir),
         'time': datetime.now(timezone.utc).isoformat(),
     }
@@ -147,28 +159,101 @@ async def api_ai_test(payload: dict | None = None, settings: Settings = Depends(
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
+@app.get('/api/memory/context', response_model=MemoryContextResponse)
+def api_memory_context(memory: MemoryStore = Depends(get_memory)) -> dict:
+    return memory.context()
+
+
+@app.post('/api/memory/customer-profile')
+def api_memory_customer_profile(req: CustomerProfileSave, memory: MemoryStore = Depends(get_memory)) -> dict:
+    item = req.model_dump()
+    item['raw'] = req.model_dump()
+    return memory.save_customer_profile(item)
+
+
+@app.get('/api/memory/competitors')
+def api_memory_competitors(memory: MemoryStore = Depends(get_memory)) -> list[dict]:
+    return memory.list('competitor_accounts', limit=80)
+
+
+@app.post('/api/memory/competitors')
+def api_memory_add_competitor(req: CompetitorAccount, memory: MemoryStore = Depends(get_memory)) -> dict:
+    item = req.model_dump()
+    item['raw'] = req.model_dump()
+    return memory.save_competitor(item)
+
+
+@app.get('/api/memory/competitor-videos')
+def api_memory_competitor_videos(memory: MemoryStore = Depends(get_memory)) -> list[dict]:
+    return memory.list('competitor_videos', limit=80)
+
+
+@app.post('/api/memory/competitor-videos')
+def api_memory_add_competitor_video(req: CompetitorVideoSave, memory: MemoryStore = Depends(get_memory)) -> dict:
+    item = req.model_dump()
+    return memory.save_competitor_video(item)
+
+
+
+
+@app.post('/api/memory/scripts')
+def api_memory_script_version(req: ScriptVersionSave, memory: MemoryStore = Depends(get_memory)) -> dict:
+    item = req.model_dump()
+    return memory.save_script_version(item)
+
+@app.post('/api/memory/events')
+def api_memory_event(req: MemoryEventInput, memory: MemoryStore = Depends(get_memory)) -> dict:
+    return memory.save_learning_event(req.model_dump())
+
+
 @app.post('/api/generate-copy', response_model=GeneratedCopy)
-async def api_generate_copy(req: CopyRequest, settings: Settings = Depends(get_settings), kb: KnowledgeBase = Depends(get_kb)) -> GeneratedCopy:
+async def api_generate_copy(req: CopyRequest, settings: Settings = Depends(get_settings), kb: KnowledgeBase = Depends(get_kb), memory: MemoryStore = Depends(get_memory)) -> GeneratedCopy:
     knowledge = kb.search_texts(' '.join([req.topic, req.industry, req.selling_points]), limit=8)
+    ctx = memory.context()
+    if ctx.get('learning_summary'):
+        knowledge.insert(0, 'AI 记忆库上下文：\n' + ctx['learning_summary'])
     try:
-        return await generate_copy(settings, req, knowledge)
+        result = await generate_copy(settings, req, knowledge)
+        memory.save_script_version({**result.model_dump(), 'source': 'generate_copy', 'raw': {'request': req.model_dump(), 'learning_context': ctx.get('learning_summary','')[:4000]}})
+        return result
     except DeepSeekError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
 @app.post('/api/inspiration/extract', response_model=InspirationExtractResponse)
-async def api_extract_inspiration(req: InspirationExtractRequest, settings: Settings = Depends(get_settings)) -> InspirationExtractResponse:
+async def api_extract_inspiration(req: InspirationExtractRequest, settings: Settings = Depends(get_settings), memory: MemoryStore = Depends(get_memory)) -> InspirationExtractResponse:
     video_path = find_asset_path(settings, req.asset_id)
     try:
-        return await extract_with_doubao(settings, video_path, source_url=req.source_url, manual_text=req.manual_text)
+        result = await extract_with_doubao(settings, video_path, source_url=req.source_url, manual_text=req.manual_text)
+        memory.save_competitor_video({
+            'source_name': result.source_name,
+            'platform': 'douyin' if 'douyin' in (req.source_url or '').lower() else 'unknown',
+            'source_url': req.source_url,
+            'manual_text': req.manual_text,
+            'transcript': result.transcript,
+            'summary': result.summary,
+            'structure': result.structure,
+            'hooks': result.hooks,
+            'selling_points': result.selling_points,
+            'status': result.status,
+            'collector_status': result.collector_status,
+            'collected_video_url': result.collected_video_url or '',
+            'raw': result.model_dump(),
+        })
+        return result
     except Exception as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
 @app.post('/api/rewrite-from-inspiration', response_model=GeneratedCopy)
-async def api_rewrite_from_inspiration(req: RewriteFromInspirationRequest, settings: Settings = Depends(get_settings)) -> GeneratedCopy:
+async def api_rewrite_from_inspiration(req: RewriteFromInspirationRequest, settings: Settings = Depends(get_settings), memory: MemoryStore = Depends(get_memory)) -> GeneratedCopy:
     try:
-        return await rewrite_from_inspiration(settings, req)
+        ctx = memory.context()
+        if ctx.get('learning_summary') and 'AI 记忆库上下文' not in req.reference_text:
+            req.reference_text = req.reference_text + '\n\nAI 记忆库上下文：\n' + ctx['learning_summary'][:5000]
+        result = await rewrite_from_inspiration(settings, req)
+        memory.save_script_version({**result.model_dump(), 'source': 'rewrite_from_inspiration', 'raw': {'request': req.model_dump()}})
+        return result
     except DeepSeekError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
@@ -383,11 +468,53 @@ def api_ad_analysis(req: AdAnalysisRequest) -> AdAnalysisResponse:
 
 
 @app.post('/api/trend-radar', response_model=TrendRadarResponse)
-async def api_trend_radar(req: TrendRadarRequest, settings: Settings = Depends(get_settings)) -> TrendRadarResponse:
+async def api_trend_radar(req: TrendRadarRequest, settings: Settings = Depends(get_settings), memory: MemoryStore = Depends(get_memory)) -> TrendRadarResponse:
     try:
-        return await generate_trend_radar(settings, req)
+        ctx = memory.context()
+        if ctx.get('learning_summary'):
+            req.competitor_notes = (req.competitor_notes + '\n\n数据库已沉淀上下文：\n' + ctx['learning_summary'][:6000]).strip()
+        result = await generate_trend_radar(settings, req)
+        if settings.industry_radar_auto_save:
+            memory.save_trend_radar({
+                'industry': req.industry,
+                'audience': req.audience,
+                'region': req.region,
+                'keywords': req.keywords,
+                **result.model_dump(),
+                'raw': {'request': req.model_dump(), 'response': result.model_dump()},
+            })
+        return result
     except DeepSeekError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+
+
+@app.post('/api/trend-radar/auto', response_model=TrendRadarResponse)
+async def api_trend_radar_auto(req: TrendRadarRequest, settings: Settings = Depends(get_settings), memory: MemoryStore = Depends(get_memory)) -> TrendRadarResponse:
+    ctx = memory.context()
+    profile = ctx.get('profile') or {}
+    if not req.industry:
+        req.industry = profile.get('industry', '')
+    if not req.audience:
+        req.audience = profile.get('audience', '')
+    if not req.region:
+        req.region = profile.get('lead_region', '')
+    if not req.keywords:
+        raw = profile.get('trend_keywords', '') or '获客,投流,同城,客户转化,短视频获客'
+        req.keywords = [x.strip() for x in raw.replace('，', ',').split(',') if x.strip()]
+    req.competitor_notes = (req.competitor_notes + '\n\n自动读取数据库上下文：\n' + (ctx.get('learning_summary') or '')[:7000]).strip()
+    result = await generate_trend_radar(settings, req)
+    memory.save_trend_radar({
+        'industry': req.industry,
+        'audience': req.audience,
+        'region': req.region,
+        'keywords': req.keywords,
+        **result.model_dump(),
+        'raw': {'mode': 'auto', 'request': req.model_dump(), 'context': ctx},
+    })
+    memory.save_learning_event({'event_type': 'auto_trend_radar', 'title': '自动生成行业爆点雷达', 'payload': result.model_dump()})
+    return result
 
 
 @app.post('/api/shooting-plan', response_model=ShootingPlanResponse)
