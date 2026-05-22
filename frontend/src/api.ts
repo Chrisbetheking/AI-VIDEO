@@ -222,3 +222,25 @@ export interface CustomerProfileSave {
   conversion_goal: string
   trend_keywords: string
 }
+
+export interface DigitalHumanCreateRequest {
+  avatar_asset_id?: string
+  avatar_file_name?: string
+  audio_file_name: string
+  driver_video_asset_id?: string
+  title?: string
+  script?: string
+  engine?: string
+  consent_confirmed: boolean
+}
+
+export interface DigitalHumanCreateResponse {
+  status: string
+  engine: string
+  message: string
+  video_url?: string
+  video_name?: string
+  job_id?: string
+  warnings: string[]
+  raw?: Record<string, any>
+}

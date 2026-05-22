@@ -68,6 +68,15 @@ class Settings(BaseSettings):
     enable_platform_publish: bool = False
 
 
+    # 数字人 / 口型驱动：Render 只做控制台和任务转发；真实开源引擎建议放到 GPU worker / Mac mini / RunPod。
+    # engine 可填：preview / sadtalker / wav2lip / musetalk / liveportrait / webhook
+    enable_digital_human: bool = True
+    digital_human_engine: str = 'preview'
+    digital_human_webhook_url: str = ''
+    digital_human_webhook_token: str = ''
+    digital_human_timeout_seconds: int = 900
+
+
     # Supabase / AI 记忆库
     supabase_url: str = ''
     supabase_service_role_key: str = ''

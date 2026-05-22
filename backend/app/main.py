@@ -51,6 +51,8 @@ from app.schemas import (
     VoiceDirectorRequest,
     VoiceDirectorResponse,
     CustomerProfileSave,
+    DigitalHumanCreateRequest,
+    DigitalHumanCreateResponse,
     CompetitorVideoSave,
     MemoryContextResponse,
     MemoryEventInput,
@@ -67,6 +69,7 @@ from app.services.storage import maybe_upload_to_r2
 from app.services.tts import get_tts_voices, synthesize_tts, synthesize_tts_segments
 from app.services.video import IMAGE_EXTS, VIDEO_EXTS, compose_video
 from app.services.video_edit import apply_video_edit
+from app.services.digital_human import call_external_digital_human_worker, create_static_avatar_preview
 
 app = FastAPI(title='AI-VIDEO 正式版 API', version='1.0.0')
 settings = get_settings()
@@ -432,6 +435,59 @@ def api_cover(req: CoverRequest, request: Request, settings: Settings = Depends(
     public_url = maybe_upload_to_r2(settings, path, prefix='covers')
     return CoverResponse(cover_url=file_url(request, path.name, public_url), cover_name=path.name, prompt=prompt)
 
+
+
+@app.post('/api/digital-human/create', response_model=DigitalHumanCreateResponse)
+async def api_digital_human_create(req: DigitalHumanCreateRequest, request: Request, settings: Settings = Depends(get_settings), memory: MemoryStore = Depends(get_memory)) -> DigitalHumanCreateResponse:
+    if not settings.enable_digital_human:
+        raise HTTPException(status_code=400, detail='数字人功能未启用。')
+    if not req.consent_confirmed:
+        raise HTTPException(status_code=400, detail='请先确认已获得本人形象和声音授权。')
+
+    avatar_path = find_asset_path(settings, req.avatar_asset_id) or find_media_file(settings, req.avatar_file_name)
+    audio_path = find_media_file(settings, req.audio_file_name)
+    driver_video_path = find_asset_path(settings, req.driver_video_asset_id)
+
+    if avatar_path is None:
+        raise HTTPException(status_code=400, detail='请先上传或选择数字人形象素材：正脸照片、半身照片或一段本人视频。')
+    if audio_path is None:
+        raise HTTPException(status_code=400, detail='请先生成或选择配音音频。')
+
+    engine = (req.engine or 'auto').strip().lower()
+    if engine == 'auto':
+        engine = settings.digital_human_engine.strip().lower() or 'preview'
+
+    avatar_public = maybe_upload_to_r2(settings, avatar_path, prefix='digital-human/avatar')
+    audio_public = maybe_upload_to_r2(settings, audio_path, prefix='digital-human/audio')
+    driver_public = maybe_upload_to_r2(settings, driver_video_path, prefix='digital-human/driver') if driver_video_path else None
+    avatar_url_value = upload_url(request, avatar_path.name, avatar_public)
+    audio_url_value = file_url(request, audio_path.name, audio_public)
+    driver_url_value = upload_url(request, driver_video_path.name, driver_public) if driver_video_path else ''
+
+    warnings: List[str] = []
+    try:
+        if engine in {'webhook', 'sadtalker', 'wav2lip', 'musetalk', 'liveportrait'} and settings.digital_human_webhook_url:
+            result = await call_external_digital_human_worker(
+                settings,
+                avatar_url=avatar_url_value,
+                audio_url=audio_url_value,
+                driver_video_url=driver_url_value,
+                script=req.script,
+                title=req.title,
+                engine=engine,
+            )
+            memory.save_learning_event({'event_type': 'digital_human', 'title': req.title or '数字人任务', 'payload': {'engine': result.engine, 'status': result.status, 'video_url': result.video_url, 'job_id': result.job_id}})
+            return DigitalHumanCreateResponse(status=result.status, engine=result.engine, message=result.message, video_url=result.video_url, job_id=result.job_id, warnings=result.warnings or [], raw=result.raw or {})
+
+        # 没有 GPU worker 时，先生成静态头像视频预览，不伪装成真实口型数字人。
+        preview = create_static_avatar_preview(settings, avatar_path, audio_path, title=req.title)
+        public_url = maybe_upload_to_r2(settings, preview, prefix='digital-human/preview')
+        warnings.append('当前未配置真实数字人 GPU 引擎，已生成静态头像预览视频。要真实口型同步，请配置 DIGITAL_HUMAN_WEBHOOK_URL。')
+        warnings.append('推荐引擎：SadTalker 单图口播、MuseTalk 高质量口型、Wav2Lip 视频口型同步、LivePortrait 表情驱动。')
+        memory.save_learning_event({'event_type': 'digital_human_preview', 'title': req.title or '数字人预览', 'payload': {'engine': engine, 'file_name': preview.name}})
+        return DigitalHumanCreateResponse(status='preview_ready', engine='preview', message='已生成数字人静态预览视频。', video_url=file_url(request, preview.name, public_url), video_name=preview.name, warnings=warnings)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 @app.post('/api/publish-package', response_model=PublishPackageResponse)
 def api_publish_package(req: PublishPackageRequest, request: Request, settings: Settings = Depends(get_settings)) -> PublishPackageResponse:
