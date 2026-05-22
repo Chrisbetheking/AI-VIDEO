@@ -53,19 +53,29 @@ const defaultSegment: VoiceSegment = {
 }
 
 const modules: { key: ModuleKey; icon: string; title: string; desc: string; tag: string }[] = [
-  { key: 'dashboard', icon: '🏠', title: '总览', desc: '项目进度、联动关系、下一步动作', tag: '目录' },
-  { key: 'strategy', icon: '🎯', title: '获客定位', desc: '目标客户画像、痛点、投流方向', tag: '获客' },
+  { key: 'dashboard', icon: '🏠', title: '流程总览', desc: '按步骤完成一条获客视频', tag: '总览' },
+  { key: 'strategy', icon: '🎯', title: '客户定位', desc: '先定目标客户、痛点和成交动作', tag: '0' },
+  { key: 'collector', icon: '🔎', title: '1. 同行视频采集', desc: '上传/粘贴同行视频，拆钩子和结构', tag: '采集' },
+  { key: 'competitor', icon: '👀', title: '竞品账号库', desc: '长期沉淀同行账号和爆款特征', tag: '库' },
   { key: 'trend', icon: '📡', title: '行业爆点', desc: '选题雷达、热点关键词、拍摄方向', tag: '雷达' },
-  { key: 'competitor', icon: '👀', title: '竞品账号库', desc: '同行账号画像、爆款记录、钩子沉淀', tag: '竞品' },
-  { key: 'collector', icon: '🔎', title: '同行采集', desc: '抖音口令/视频/文案采集拆解', tag: '采集' },
-  { key: 'copy', icon: '✍️', title: '文案工作台', desc: '黄金三秒、细改、违禁词检查', tag: '文案' },
-  { key: 'voice', icon: '🎙️', title: '声音导演', desc: '克隆音色、分段情绪、语速停顿', tag: '配音' },
-  { key: 'assets', icon: '🗂️', title: '素材工作台', desc: '素材库、采集视频库、素材匹配', tag: '素材' },
+  { key: 'copy', icon: '✍️', title: '2. 仿写改写 / 文案生成', desc: '先仿写结构，再细改成原创口播稿', tag: '文案' },
+  { key: 'voice', icon: '🎙️', title: '3. 配音导演', desc: '克隆音色、分段情绪、语速停顿', tag: '配音' },
+  { key: 'assets', icon: '🗂️', title: '4. 选择素材', desc: '自有素材和采集视频分开管理', tag: '素材' },
   { key: 'shooting', icon: '🎥', title: '运营拍摄', desc: '拍摄任务单、提词器、B-roll 清单', tag: '拍摄' },
-  { key: 'video', icon: '🎬', title: '视频工作台', desc: '分段衔接、转场、AI 插件深度剪辑', tag: '剪辑' },
-  { key: 'subtitleCover', icon: '🅰️', title: '字幕封面', desc: '字幕重点字、封面样式、下载', tag: '视觉' },
-  { key: 'growth', icon: '📈', title: '流量监控', desc: '实时数据、机器学习投流、优化动作', tag: '增长' },
-  { key: 'publish', icon: '🚀', title: '发布中心', desc: '平台发布草稿、发布记录、复盘', tag: '发布' }
+  { key: 'video', icon: '🎬', title: '5. 剪辑合成', desc: '分段衔接、叠化转场、贴片字幕', tag: '剪辑' },
+  { key: 'subtitleCover', icon: '🅰️', title: '6. 字幕封面', desc: '重点字幕、封面样式、下载', tag: '视觉' },
+  { key: 'publish', icon: '🚀', title: '7. 平台发布', desc: '抖音/视频号/快手/小红书发布草稿', tag: '发布' },
+  { key: 'growth', icon: '📈', title: '流量监控', desc: '实时数据、机器学习投流、优化动作', tag: '增长' }
+]
+
+const workflowSteps: { key: ModuleKey; step: string; title: string; desc: string; action: string }[] = [
+  { key: 'collector', step: '01', title: '采集同行视频', desc: '上传参考视频，或粘贴抖音分享口令；先学习钩子、结构、话题和人群。', action: '去采集' },
+  { key: 'copy', step: '02', title: '仿写改写', desc: '基于同行结构做原创改写，保留打法，不照抄原文。', action: '去仿写' },
+  { key: 'copy', step: '03', title: '文案细改', desc: '细调黄金三秒、标题、口播稿、违禁词和发布简介。', action: '改文案' },
+  { key: 'voice', step: '04', title: '配音分段', desc: '选择叔叔音色，分段控制情绪、语速、停顿和语气。', action: '去配音' },
+  { key: 'assets', step: '05', title: '选择视频素材', desc: '选择老板、办公室、产品、案例素材；采集视频只作为学习参考。', action: '选素材' },
+  { key: 'video', step: '06', title: '剪辑与合成', desc: '每段匹配素材，设置叠化/虚化/快切/贴片/字幕，生成 MP4。', action: '去剪辑' },
+  { key: 'publish', step: '07', title: '平台发布', desc: '生成平台发布草稿，后续接抖音、视频号、快手、小红书开放平台。', action: '去发布' }
 ]
 
 const badWords = ['最', '第一', '保证', '包赚', '稳赚', '绝对', '唯一', '国家级', '100%', '躺赚', '无风险']
@@ -428,18 +438,20 @@ ${manualText || ''}`.trim()
   }
 
   const stageCards = [
-    { label: '同行采集', done: Boolean(extract), value: extract?.collector_status || extract?.status || '待采集' },
-    { label: '文案钩子', done: Boolean(copy.hook), value: copy.title || '待生成' },
-    { label: '声音分段', done: Boolean(audio), value: voiceSegments.length ? `${voiceSegments.length} 段 · ${selectedVoiceName}` : '待配音' },
-    { label: '视频成品', done: Boolean(video?.video_url), value: video?.video_name || '待合成' },
-    { label: '平台发布', done: Boolean(publish), value: publish?.status || '草稿预留' }
+    { label: '1 同行采集', done: Boolean(extract), value: extract?.collector_status || extract?.status || '待采集' },
+    { label: '2 仿写改写', done: Boolean(copy.hook || copy.script), value: copy.title || '待生成' },
+    { label: '3 配音分段', done: Boolean(audio), value: voiceSegments.length ? `${voiceSegments.length} 段 · ${selectedVoiceName}` : '待配音' },
+    { label: '4 素材选择', done: selectedMaterialIds.length > 0, value: selectedMaterialIds.length ? `已选 ${selectedMaterialIds.length} 个素材` : '待选择' },
+    { label: '5 剪辑合成', done: Boolean(video?.video_url), value: video?.video_name || '待合成' },
+    { label: '6 字幕封面', done: Boolean(cover || subtitleAI), value: cover?.cover_name || (subtitleAI ? '重点字幕已生成' : '待处理') },
+    { label: '7 平台发布', done: Boolean(publish), value: publish?.status || '草稿预留' }
   ]
 
   return <div className="appShell">
     <aside className="studioNav">
       <div className="brandMark">
         <div className="logo">抖</div>
-        <div><strong>AI抖音流量获客</strong><span>采集 · 创作 · 发布</span></div>
+        <div><strong>AI视频获客系统</strong><span>采集 · 仿写 · 配音 · 剪辑 · 发布</span></div>
       </div>
       <button className="startButton" onClick={() => setActive('dashboard')}>开始使用</button>
       <nav>
@@ -454,8 +466,8 @@ ${manualText || ''}`.trim()
       <header className="heroHeader">
         <div>
           <span className="eyebrow">短视频获客工作台</span>
-          <h1>采集同行 → 定位客户 → 打磨文案 → 配音剪辑 → 发布复盘</h1>
-          <p>把采集、文案、配音、素材、剪辑和发布拆开管理；每一步都能接着上一环继续做。</p>
+          <h1>采集同行视频 → 仿写改写 → 文案细改 → 配音分段 → 选素材 → 剪辑合成 → 平台发布</h1>
+          <p>按真实运营流程走：先学同行，再做原创，再配音剪辑。每个模块独立，但结果会自动流转到下一步。</p>
         </div>
         <div className="scoreCard"><span>当前进度</span><strong>{leadScore}%</strong><small>{leadScore >= 80 ? '可以进入发布前检查' : '继续补齐内容和素材'}</small></div>
       </header>
@@ -469,13 +481,24 @@ ${manualText || ''}`.trim()
         </div>)}
       </section>
 
-      {active === 'dashboard' && <section className="moduleGrid">
-        {modules.filter(x => x.key !== 'dashboard').map(item => <button className="moduleCard" key={item.key} onClick={() => setActive(item.key)}>
-          <span className="moduleIcon">{item.icon}</span>
-          <strong>{item.title}</strong>
-          <p>{item.desc}</p>
-          <em>进入</em>
-        </button>)}
+      {active === 'dashboard' && <section className="dashboardStack">
+        <div className="workflowBoard">
+          {workflowSteps.map((step, idx) => <button className="workflowCard" key={`${step.step}-${step.title}`} onClick={() => setActive(step.key)}>
+            <span>{step.step}</span>
+            <strong>{step.title}</strong>
+            <p>{step.desc}</p>
+            <em>{step.action}</em>
+            {idx < workflowSteps.length - 1 && <b>→</b>}
+          </button>)}
+        </div>
+        <div className="opsGrid">
+          {modules.filter(x => ['strategy','trend','competitor','shooting','growth'].includes(x.key)).map(item => <button className="moduleCard compact" key={item.key} onClick={() => setActive(item.key)}>
+            <span className="moduleIcon">{item.icon}</span>
+            <strong>{item.title}</strong>
+            <p>{item.desc}</p>
+            <em>进入</em>
+          </button>)}
+        </div>
       </section>}
 
       {active === 'strategy' && <section className="card modulePanel">
@@ -508,7 +531,7 @@ ${manualText || ''}`.trim()
       </section>}
 
       {active === 'collector' && <section className="card modulePanel">
-        <div className="sectionHeader"><div><h2>同行采集</h2><p>粘抖音整段分享口令；系统尽力采视频，失败也会拆标题、钩子、话题。</p></div><Button busy={busy === '采集/拆解同行内容' ? busy : ''} label="采集/拆解同行内容" onClick={collectCompetitor} /></div>
+        <div className="sectionHeader"><div><h2>第一步：采集同行视频</h2><p>文件上传后先采集同行视频。可以上传 MP4，也可以粘抖音分享口令；采不到视频时先拆标题、钩子和话题。</p></div><Button busy={busy === '采集/拆解同行内容' ? busy : ''} label="采集同行视频/口令" onClick={collectCompetitor} /></div>
         <div className="grid2">
           <Field label="抖音分享口令 / 视频链接"><textarea value={sourceUrl} onChange={e => setSourceUrl(e.target.value)} placeholder="直接粘贴：1.58 ... https://v.douyin.com/... 复制此链接..." /></Field>
           <Field label="手动粘贴竞品文案 / 豆包 App 识别稿"><textarea value={manualText} onChange={e => setManualText(e.target.value)} placeholder="如果已经有真实口播稿，粘这里。" /></Field>
@@ -522,15 +545,15 @@ ${manualText || ''}`.trim()
       </section>}
 
       {active === 'copy' && <section className="card modulePanel">
-        <div className="sectionHeader"><div><h2>文案工作台</h2><p>目标客户 + 热门脚本结合；支持黄金三秒、细改、违禁词检查。</p></div></div>
+        <div className="sectionHeader"><div><h2>第二步：仿写改写 / 第三步：文案细改</h2><p>先学习同行视频的钩子和结构，再生成自己的原创文案。下面可以细改标题、开头、口播稿和发布简介。</p></div></div>
         <div className="grid4"><Field label="视频时长"><input type="number" min={5} max={180} value={duration} onChange={e => setDuration(Number(e.target.value || 35))} /></Field><Field label="标题字数方向"><input value="短、狠、直给" readOnly /></Field><Field label="开头策略"><input value="痛点/反差/警告/结果" readOnly /></Field><Field label="当前风险"><input value={matchedBadWords.length ? `${matchedBadWords.length} 个敏感词` : '暂无明显风险'} readOnly /></Field></div>
-        <div className="buttonRow"><Button busy={busy === '生成文案' ? busy : ''} label="直接生成文案" onClick={generateDirectCopy} kind="ghost" /><Button busy={busy === '原创改写' ? busy : ''} label="基于同行原创改写" onClick={rewrite} /><Button busy={busy === '文案细改' ? busy : ''} label="按要求细改文案" onClick={refineCopy} kind="soft" disabled={!currentScript} /></div>
+        <div className="buttonRow"><Button busy={busy === '生成文案' ? busy : ''} label="第三步：生成新文案" onClick={generateDirectCopy} kind="ghost" /><Button busy={busy === '原创改写' ? busy : ''} label="第二步：仿写改写" onClick={rewrite} /><Button busy={busy === '文案细改' ? busy : ''} label="打开细改/优化文案" onClick={refineCopy} kind="soft" disabled={!currentScript} /></div>
         <div className="copyEditor"><Field label="标题"><input value={copy.title} onChange={e => setCopy({ ...copy, title: e.target.value })} /></Field><Field label="黄金三秒钩子"><textarea value={copy.hook} onChange={e => setCopy({ ...copy, hook: e.target.value })} /></Field><Field label="完整口播稿"><textarea className="scriptArea" value={copy.script} onChange={e => setCopy({ ...copy, script: e.target.value })} placeholder="这里可以精修口播稿；选中文本后点“加入分段”。" /></Field><Field label="发布简介"><textarea value={copy.description} onChange={e => setCopy({ ...copy, description: e.target.value })} /></Field><Field label="细改要求"><input value={refineInstruction} onChange={e => setRefineInstruction(e.target.value)} /></Field></div>
         <div className="chips">{matchedBadWords.length ? matchedBadWords.map(x => <Pill key={x} tone="red">风险词：{x}</Pill>) : <Pill tone="green">违禁词初筛通过</Pill>}</div>
       </section>}
 
       {active === 'voice' && <section className="card modulePanel">
-        <div className="sectionHeader"><div><h2>声音导演</h2><p>克隆音色 + 分段情绪强化 + 语速停顿调节。分段可以自己添加。</p></div></div>
+        <div className="sectionHeader"><div><h2>第四步：配音导演</h2><p>选择克隆音色，把口播稿拆成多段。每段可以自己加文案、调情绪、语速、音量和停顿。</p></div></div>
         <div className="grid4"><Field label="音色"><select value={voice} onChange={e => setVoice(e.target.value)}>{voices.map(v => <option key={v.id} value={v.id}>{v.name || v.id}</option>)}</select></Field><Field label="配音风格"><select value={voiceStyle} onChange={e => setVoiceStyle(e.target.value)}>{['老板压迫感','真实聊天感','短视频强钩子','销售转化感','案例讲述感','沉稳信任感'].map(x => <option key={x}>{x}</option>)}</select></Field><Field label="情绪强度"><select value={voiceIntensity} onChange={e => setVoiceIntensity(e.target.value)}>{['轻微','标准','强烈'].map(x => <option key={x}>{x}</option>)}</select></Field><div className="stackButtons"><Button busy={busy === '生成配音导演稿' ? busy : ''} label="生成配音导演稿" onClick={makeVoiceDirector} kind="ghost" disabled={!currentScript} /><Button busy={busy === '生成分段情绪配音' ? busy : ''} label="生成分段情绪配音" onClick={makeSegmentTTS} disabled={!currentScript} /></div></div>
         {voiceNotes.length > 0 && <div className="tips">{voiceNotes.map(x => <span key={x}>{x}</span>)}</div>}
         <div className="buttonRow"><button className="addSegment" onClick={addVoiceSegment}>+ 手动添加空白分段</button><button className="addSegment" onClick={addSelectedScriptAsSegment}>+ 把选中文案加入分段</button></div>
@@ -539,7 +562,7 @@ ${manualText || ''}`.trim()
       </section>}
 
       {active === 'assets' && <section className="card modulePanel">
-        <div className="sectionHeader"><div><h2>素材工作台</h2><p>素材库和采集视频库分开管理；素材用于合成，采集视频用于学习。</p></div><input type="file" multiple accept="image/*,video/*" onChange={e => handleUpload(e.target.files)} /></div>
+        <div className="sectionHeader"><div><h2>第五步：选择视频素材</h2><p>素材库是你自己的可用视频/图片，采集视频库只用于学习同行结构；合成时优先选自有素材。</p></div><input type="file" multiple accept="image/*,video/*" onChange={e => handleUpload(e.target.files)} /></div>
         <div className="grid2"><div><h3>素材库</h3><div className="assetList">{materialAssets.length === 0 && <Empty>还没有素材。</Empty>}{materialAssets.map(a => <label key={a.id} className="assetRow"><input type="checkbox" checked={selectedMaterialIds.includes(a.id)} onChange={() => toggleMaterial(a.id)} /><span>{a.kind === 'video' ? '🎬' : '🖼️'} {a.original_name}</span><em>{formatBytes(a.size_bytes)}</em></label>)}</div></div><div><h3>采集视频库</h3><div className="assetList">{collectedVideos.length === 0 && <Empty>暂时没有采集到视频。</Empty>}{collectedVideos.map(a => <button key={a.id} className={`assetButton ${selectedReferenceAssetId === a.id ? 'selected' : ''}`} onClick={() => setSelectedReferenceAssetId(a.id)}>🎯 {a.original_name}<em>{formatBytes(a.size_bytes)}</em></button>)}</div></div></div>
         <div className="resultBox"><h3>素材匹配建议</h3><p>优先把老板出镜、办公室、客户交流、产品细节、服务流程素材分别对应到口播分段。没有匹配素材时，先用采集视频的结构做 B-roll 参考，不直接照搬原画面。</p></div>
       </section>}
@@ -550,14 +573,14 @@ ${manualText || ''}`.trim()
       </section>}
 
       {active === 'video' && <section className="card modulePanel">
-        <div className="sectionHeader"><div><h2>视频工作台</h2><p>分段时长、转场、字幕和 AI 插件修改都在这里集中处理。</p></div><Button busy={busy === '合成视频并烧字幕' ? busy : ''} label="合成并下载 9:16 MP4" onClick={composeVideo} disabled={!currentScript} /></div>
+        <div className="sectionHeader"><div><h2>第六步：剪辑、转场、贴片与合成</h2><p>给每段分配时长和转场，后续可接贴片、叠化、虚化、快切、重点字幕和 AI 指令重剪。</p></div><Button busy={busy === '合成视频并烧字幕' ? busy : ''} label="生成视频并下载 MP4" onClick={composeVideo} disabled={!currentScript} /></div>
         <div className="timelineEditor"><h3>分段时长 / 转场</h3>{voiceSegments.length === 0 && <Empty>先生成配音导演稿，或手动添加分段。</Empty>}{voiceSegments.map((seg, i) => <div className="timelineRow" key={i}><span>第{i + 1}段</span><input type="number" min="1" max="60" step="0.5" value={segmentSeconds[i] || estimateSeconds(seg.text, seg.speed_ratio)} onChange={e => setSegmentSeconds(prev => ({ ...prev, [i]: Number(e.target.value) }))} /><select value={segmentTransitions[i] || '叠化'} onChange={e => setSegmentTransitions(prev => ({ ...prev, [i]: e.target.value }))}><option>叠化</option><option>虚化</option><option>快切</option><option>推近</option><option>闪白</option></select><em>{seg.text.slice(0, 28)}...</em></div>)}</div>
         {video && <div className="videoGrid"><video controls src={video.video_url} /><div className="downloadPanel"><a className="download" href={video.video_url} target="_blank">下载视频 MP4</a>{video.subtitle_url && <a href={video.subtitle_url} target="_blank">下载字幕 SRT</a>}{video.audio_url && <a href={video.audio_url} target="_blank">下载音频</a>}{video.warnings?.map(w => <div className="warn" key={w}>{w}</div>)}</div></div>}
         <div className="editChatBox"><Field label="AI + 插件剪辑指令"><textarea value={editInstruction} onChange={e => setEditInstruction(e.target.value)} placeholder="例如：去掉开头2秒、整体加速1.1倍、重新加字幕、转成9:16。" /></Field><Button busy={busy === 'AI + 插件修改视频' ? busy : ''} label="AI + 插件修改视频" onClick={chatEditVideo} kind="ghost" disabled={!currentVideoName} />{editChat.map((msg, i) => <div className="chatMsg" key={i}><strong>AI：</strong>{msg.assistant_message}<p>{msg.summary}</p><div className="chips">{msg.actions?.map(x => <Pill key={x}>{x}</Pill>)}</div>{msg.new_video_url && <a href={msg.new_video_url} target="_blank">打开修改后视频</a>}{msg.warnings?.map(w => <div className="warn" key={w}>{w}</div>)}</div>)}</div>
       </section>}
 
       {active === 'subtitleCover' && <section className="card modulePanel">
-        <div className="sectionHeader"><div><h2>字幕与封面</h2><p>自动识别重点词，生成字幕强调方案、封面大字方案，并支持封面生成。</p></div><div className="stackButtons"><Button busy={busy === '智能字幕重点' ? busy : ''} label="智能识别重点字幕" onClick={makeSubtitleAI} disabled={!currentScript} kind="ghost" /><Button busy={busy === '生成封面' ? busy : ''} label="生成封面" onClick={makeCover} /></div></div>
+        <div className="sectionHeader"><div><h2>字幕重点与封面</h2><p>自动识别重点词，生成放大、高亮、描边字幕方案，并输出封面样式。</p></div><div className="stackButtons"><Button busy={busy === '智能字幕重点' ? busy : ''} label="智能识别重点字幕" onClick={makeSubtitleAI} disabled={!currentScript} kind="ghost" /><Button busy={busy === '生成封面' ? busy : ''} label="生成封面" onClick={makeCover} /></div></div>
         <div className="grid4"><Field label="字幕字号"><input type="number" value={subtitleSize} onChange={e => setSubtitleSize(Number(e.target.value || 58))} /></Field><Field label="字幕颜色"><input type="color" value={subtitleColor} onChange={e => setSubtitleColor(e.target.value)} /></Field><Field label="重点词"><input value={subtitleHighlight} onChange={e => setSubtitleHighlight(e.target.value)} /></Field><Field label="封面样式"><select value={coverStyle} onChange={e => setCoverStyle(e.target.value)}><option>老板口播强钩子封面</option><option>痛点警告型封面</option><option>案例结果型封面</option><option>产品服务型封面</option><option>同城获客型封面</option></select></Field></div>
         {subtitleAI && <div className="resultBox"><h3>{subtitleAI.template}</h3><div className="chips">{subtitleAI.keywords?.map(k => <Pill key={k.word} tone="orange">{k.word} · {k.effect}</Pill>)}</div><div className="splitGrid"><div><h4>字幕建议</h4>{subtitleAI.srt_tips?.map(x => <p key={x}>· {x}</p>)}</div><div><h4>封面大字</h4>{subtitleAI.cover_text_options?.map(x => <p key={x}>· {x}</p>)}</div><div><h4>已写入重点词</h4><p>{subtitleHighlight}</p></div></div></div>}
         {cover && <div className="coverPreview"><img src={cover.cover_url} /><div><h3>封面已生成</h3><p>{cover.prompt}</p><a className="download" href={cover.cover_url} target="_blank">下载封面</a></div></div>}
@@ -580,7 +603,7 @@ ${manualText || ''}`.trim()
       </section>}
 
       {active === 'publish' && <section className="card modulePanel">
-        <div className="sectionHeader"><div><h2>平台发布与投流</h2><p>发布入口先做草稿；等抖音/视频号开放平台权限下来再接真实发布。</p></div></div>
+        <div className="sectionHeader"><div><h2>第七步：平台发布</h2><p>先生成抖音、视频号、快手、小红书发布草稿。开放平台权限下来后再接真实发布和数据回流。</p></div></div>
         <div className="buttonRow"><Button busy={busy === '投流分析' ? busy : ''} label="投流分析" onClick={analyzeAd} kind="ghost" /><select value={platform} onChange={e => setPlatform(e.target.value)}><option value="douyin">抖音</option><option value="shipinhao">视频号</option><option value="kuaishou">快手</option><option value="xiaohongshu">小红书</option></select><Button busy={busy === '生成平台发布草稿' ? busy : ''} label="生成平台发布草稿" onClick={platformPublish} /></div>
         <div className="grid2">{ad && <div className="miniResult"><h3>{ad.decision}</h3><p>预算：{ad.suggested_budget}</p>{ad.optimization_tips?.map(x => <p key={x}>· {x}</p>)}</div>}{publish && <div className="miniResult"><h3>{publish.platform}：{publish.status}</h3><p>{publish.message}</p>{publish.checklist?.map(x => <p key={x}>· {x}</p>)}</div>}</div>
       </section>}

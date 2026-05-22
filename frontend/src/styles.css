@@ -144,3 +144,111 @@ button{cursor:pointer}
   .shotRow p, .shotRow small { grid-column: auto; }
   .growthResult { grid-template-columns: 1fr; }
 }
+
+/* Workflow-first UI polish */
+.progressRail{
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+}
+.dashboardStack{
+  display:grid;
+  gap:18px;
+}
+.workflowBoard{
+  display:grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap:12px;
+}
+.workflowCard{
+  position:relative;
+  min-height:190px;
+  border:1px solid rgba(207,224,255,.9);
+  background:linear-gradient(180deg,#ffffff,#f7fbff);
+  border-radius:24px;
+  padding:18px;
+  text-align:left;
+  color:var(--ink);
+  box-shadow:0 15px 35px rgba(31,57,112,.09);
+  display:flex;
+  flex-direction:column;
+  gap:9px;
+  transition:.18s ease;
+}
+.workflowCard:hover{
+  transform:translateY(-3px);
+  border-color:#8bb5ff;
+  box-shadow:0 22px 48px rgba(31,57,112,.15);
+}
+.workflowCard span{
+  width:42px;
+  height:42px;
+  border-radius:14px;
+  display:grid;
+  place-items:center;
+  background:linear-gradient(135deg,#2563eb,#7c3aed);
+  color:#fff;
+  font-weight:900;
+}
+.workflowCard strong{
+  font-size:19px;
+  line-height:1.25;
+}
+.workflowCard p{
+  margin:0;
+  color:var(--muted);
+  font-size:13px;
+  line-height:1.55;
+}
+.workflowCard em{
+  margin-top:auto;
+  font-style:normal;
+  font-weight:900;
+  color:#1d4ed8;
+}
+.workflowCard b{
+  position:absolute;
+  right:-16px;
+  top:50%;
+  transform:translateY(-50%);
+  z-index:2;
+  color:#2563eb;
+  background:#eef5ff;
+  border:1px solid #cfe0ff;
+  width:28px;
+  height:28px;
+  border-radius:50%;
+  display:grid;
+  place-items:center;
+}
+.opsGrid{
+  display:grid;
+  grid-template-columns:repeat(5,minmax(0,1fr));
+  gap:14px;
+}
+.moduleCard.compact{
+  min-height:150px;
+}
+.moduleCard.compact strong{
+  font-size:19px;
+}
+@media (max-width:1400px){
+  .workflowBoard{grid-template-columns:repeat(4,minmax(0,1fr));}
+  .workflowCard b{display:none;}
+  .progressRail{grid-template-columns:repeat(4,1fr);}
+  .opsGrid{grid-template-columns:repeat(3,minmax(0,1fr));}
+}
+@media (max-width:900px){
+  .workflowBoard,.opsGrid{grid-template-columns:repeat(2,minmax(0,1fr));}
+  .progressRail{grid-template-columns:repeat(2,1fr);}
+}
+@media (max-width:720px){
+  .workflowBoard{
+    display:flex;
+    overflow-x:auto;
+    padding-bottom:6px;
+  }
+  .workflowCard{
+    min-width:240px;
+  }
+  .opsGrid{grid-template-columns:1fr;}
+  .progressRail{display:flex;}
+}
