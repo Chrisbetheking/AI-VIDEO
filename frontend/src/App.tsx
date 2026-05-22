@@ -375,11 +375,11 @@ export default function App() {
     <main className="studioMain">
       <header className="heroHeader">
         <div>
-          <span className="eyebrow">AI-VIDEO 正式版</span>
-          <h1>竞品拆解 → 获客定位 → 原创文案 → 情绪配音 → 视频剪辑 → 平台发布</h1>
-          <p>每个功能独立成目录，同时共享同一个项目上下文：客户画像、同行采集、文案、音频、素材、成品视频。</p>
+          <span className="eyebrow">短视频获客工作台</span>
+          <h1>采集同行 → 定位客户 → 打磨文案 → 配音剪辑 → 发布复盘</h1>
+          <p>把采集、文案、配音、素材、剪辑和发布拆开管理；每一步都能接着上一环继续做。</p>
         </div>
-        <div className="scoreCard"><span>项目成熟度</span><strong>{leadScore}%</strong><small>{leadScore >= 80 ? '可以进入发布测试' : '继续补齐采集/配音/素材'}</small></div>
+        <div className="scoreCard"><span>当前进度</span><strong>{leadScore}%</strong><small>{leadScore >= 80 ? '可以进入发布前检查' : '继续补齐内容和素材'}</small></div>
       </header>
 
       {error && <div className="globalError">{error}</div>}
@@ -398,12 +398,6 @@ export default function App() {
           <p>{item.desc}</p>
           <em>进入</em>
         </button>)}
-        <section className="card wideCard">
-          <h2>本次按反馈重点优化</h2>
-          <div className="featureList">
-            <span>目标客户 + 热门脚本结合</span><span>黄金三秒钩子</span><span>违禁词检查</span><span>克隆音色 + 普通话增强</span><span>分段情绪/语速</span><span>文案匹配素材</span><span>转场衔接</span><span>分段时长手调</span><span>字幕重点字</span><span>封面样式选择</span>
-          </div>
-        </section>
       </section>}
 
       {active === 'strategy' && <section className="card modulePanel">
