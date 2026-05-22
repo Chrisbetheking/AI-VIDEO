@@ -9,6 +9,12 @@ import {
   GeneratedCopy,
   InspirationExtractResponse,
   PlatformPublishResponse,
+  TrendRadarResponse,
+  CompetitorAccount,
+  ShootingPlanResponse,
+  SubtitleEmphasisResponse,
+  GrowthDecisionResponse,
+  GrowthMetricInput,
   TTSResponse,
   TTSVoice,
   VideoEditChatResponse,
@@ -19,7 +25,7 @@ import {
   uploadAssets
 } from './api'
 
-type ModuleKey = 'dashboard' | 'strategy' | 'collector' | 'copy' | 'voice' | 'assets' | 'video' | 'subtitleCover' | 'publish'
+type ModuleKey = 'dashboard' | 'strategy' | 'trend' | 'competitor' | 'collector' | 'copy' | 'voice' | 'assets' | 'shooting' | 'video' | 'subtitleCover' | 'growth' | 'publish'
 
 function Field({ label, children, hint }: { label: string; children: ReactNode; hint?: string }) {
   return <label className="field"><span>{label}</span>{children}{hint && <em>{hint}</em>}</label>
@@ -49,13 +55,17 @@ const defaultSegment: VoiceSegment = {
 const modules: { key: ModuleKey; icon: string; title: string; desc: string; tag: string }[] = [
   { key: 'dashboard', icon: '🏠', title: '总览', desc: '项目进度、联动关系、下一步动作', tag: '目录' },
   { key: 'strategy', icon: '🎯', title: '获客定位', desc: '目标客户画像、痛点、投流方向', tag: '获客' },
+  { key: 'trend', icon: '📡', title: '行业爆点', desc: '选题雷达、热点关键词、拍摄方向', tag: '雷达' },
+  { key: 'competitor', icon: '👀', title: '竞品账号库', desc: '同行账号画像、爆款记录、钩子沉淀', tag: '竞品' },
   { key: 'collector', icon: '🔎', title: '同行采集', desc: '抖音口令/视频/文案采集拆解', tag: '采集' },
   { key: 'copy', icon: '✍️', title: '文案工作台', desc: '黄金三秒、细改、违禁词检查', tag: '文案' },
   { key: 'voice', icon: '🎙️', title: '声音导演', desc: '克隆音色、分段情绪、语速停顿', tag: '配音' },
   { key: 'assets', icon: '🗂️', title: '素材工作台', desc: '素材库、采集视频库、素材匹配', tag: '素材' },
+  { key: 'shooting', icon: '🎥', title: '运营拍摄', desc: '拍摄任务单、提词器、B-roll 清单', tag: '拍摄' },
   { key: 'video', icon: '🎬', title: '视频工作台', desc: '分段衔接、转场、AI 插件深度剪辑', tag: '剪辑' },
   { key: 'subtitleCover', icon: '🅰️', title: '字幕封面', desc: '字幕重点字、封面样式、下载', tag: '视觉' },
-  { key: 'publish', icon: '🚀', title: '发布投流', desc: '平台发布草稿、投流判断、数据建议', tag: '发布' }
+  { key: 'growth', icon: '📈', title: '流量监控', desc: '实时数据、机器学习投流、优化动作', tag: '增长' },
+  { key: 'publish', icon: '🚀', title: '发布中心', desc: '平台发布草稿、发布记录、复盘', tag: '发布' }
 ]
 
 const badWords = ['最', '第一', '保证', '包赚', '稳赚', '绝对', '唯一', '国家级', '100%', '躺赚', '无风险']
@@ -84,6 +94,14 @@ export default function App() {
   const [duration, setDuration] = useState(35)
   const [leadRegion, setLeadRegion] = useState('本地同城老板 / 企业客户')
   const [conversionGoal, setConversionGoal] = useState('私信咨询 / 留资 / 加微信')
+  const [trendKeywords, setTrendKeywords] = useState('获客,投流,同城,客户转化,短视频获客')
+  const [trendRadar, setTrendRadar] = useState<TrendRadarResponse | null>(null)
+  const [competitors, setCompetitors] = useState<CompetitorAccount[]>([])
+  const [competitorDraft, setCompetitorDraft] = useState<CompetitorAccount>({ name: '', platform: 'douyin', url: '', positioning: '', notes: '' })
+  const [shootingPlan, setShootingPlan] = useState<ShootingPlanResponse | null>(null)
+  const [subtitleAI, setSubtitleAI] = useState<SubtitleEmphasisResponse | null>(null)
+  const [growthMetrics, setGrowthMetrics] = useState<GrowthMetricInput>({ views: 0, likes: 0, comments: 0, shares: 0, follows: 0, leads: 0, completion_rate: 0, spend: 0, hours_after_publish: 3 })
+  const [growthDecision, setGrowthDecision] = useState<GrowthDecisionResponse | null>(null)
 
   const [assets, setAssets] = useState<AssetItem[]>([])
   const [selectedMaterialIds, setSelectedMaterialIds] = useState<string[]>([])
@@ -122,6 +140,7 @@ export default function App() {
   const materialAssets = useMemo(() => assets.filter(a => !a.filename.startsWith('collected_')), [assets])
   const collectedVideos = useMemo(() => assets.filter(a => a.kind === 'video' && a.filename.startsWith('collected_')), [assets])
   const referenceText = useMemo(() => extract?.transcript || manualText || sourceUrl, [extract, manualText, sourceUrl])
+  const competitorNotes = useMemo(() => competitors.map(c => `${c.platform}｜${c.name}｜${c.positioning}｜${c.notes}`).join('\n'), [competitors])
   const currentScript = copy.script || ''
   const currentVideoName = video?.video_name || extract?.collected_video_name || ''
   const selectedVoiceName = voices.find(v => v.id === voice)?.name || voice || '未选择音色'
@@ -184,6 +203,65 @@ export default function App() {
     if (res?.collected_asset_id) setSelectedReferenceAssetId(res.collected_asset_id)
     await reloadAssets()
     setActive('collector')
+  }
+
+
+  function addCompetitor() {
+    const draft = { ...competitorDraft, name: competitorDraft.name.trim(), url: competitorDraft.url.trim(), positioning: competitorDraft.positioning.trim(), notes: competitorDraft.notes.trim() }
+    if (!draft.name && !draft.url && !draft.notes) return
+    setCompetitors(prev => [draft, ...prev])
+    setCompetitorDraft({ name: '', platform: 'douyin', url: '', positioning: '', notes: '' })
+  }
+
+  async function makeTrendRadar() {
+    const res = await run('生成行业爆点雷达', () => apiPost<TrendRadarResponse>('/api/trend-radar', {
+      industry,
+      audience,
+      region: leadRegion,
+      keywords: trendKeywords.split(/[,，\s]+/).map(x => x.trim()).filter(Boolean),
+      competitor_notes: `${competitorNotes}
+${extract?.summary || ''}
+${manualText || ''}`.trim()
+    }))
+    setTrendRadar(res!)
+    setActive('trend')
+  }
+
+  async function makeShootingPlan() {
+    const res = await run('生成运营拍摄任务', () => apiPost<ShootingPlanResponse>('/api/shooting-plan', {
+      title: copy.title,
+      script: currentScript,
+      industry,
+      audience,
+      selling_points: sellingPoints,
+      available_assets: [...materialAssets, ...collectedVideos].map(a => `${a.kind}:${a.original_name}`).join('；'),
+      duration_seconds: duration
+    }))
+    setShootingPlan(res!)
+    setActive('shooting')
+  }
+
+  async function makeSubtitleAI() {
+    const res = await run('智能字幕重点', () => apiPost<SubtitleEmphasisResponse>('/api/subtitle-emphasis', {
+      script: currentScript || copy.hook || copy.title,
+      style: '强转化短视频字幕，重点词放大，痛点词高亮',
+      brand_color: subtitleColor
+    }))
+    setSubtitleAI(res!)
+    if (res?.keywords?.length) setSubtitleHighlight(res.keywords.map(k => k.word).join(','))
+    setActive('subtitleCover')
+  }
+
+  async function makeGrowthDecision() {
+    const res = await run('机器学习投流判断', () => apiPost<GrowthDecisionResponse>('/api/growth-decision', {
+      title: copy.title,
+      script: currentScript,
+      industry,
+      objective: conversionGoal,
+      metrics: growthMetrics
+    }))
+    setGrowthDecision(res!)
+    setActive('growth')
   }
 
   async function generateDirectCopy() {
@@ -413,6 +491,22 @@ export default function App() {
         {ad && <div className="resultBox"><h3>{ad.decision}</h3><p>建议预算：{ad.suggested_budget} · 置信度：{Math.round(ad.confidence * 100)}%</p><div className="chips">{ad.target_audience?.map(x => <Pill key={x}>{x}</Pill>)}</div>{ad.optimization_tips?.map(x => <p key={x}>· {x}</p>)}</div>}
       </section>}
 
+      {active === 'trend' && <section className="card modulePanel">
+        <div className="sectionHeader"><div><h2>行业爆点与选题雷达</h2><p>根据行业、目标客户、同行账号和采集内容，生成可拍选题、监控关键词和下一步动作。</p></div><Button busy={busy === '生成行业爆点雷达' ? busy : ''} label="生成行业爆点雷达" onClick={makeTrendRadar} /></div>
+        <div className="grid2">
+          <Field label="监控关键词"><input value={trendKeywords} onChange={e => setTrendKeywords(e.target.value)} placeholder="获客,投流,同城,客户转化" /></Field>
+          <Field label="同行备注汇总"><textarea value={`${competitorNotes}${extract?.summary ? '\n' + extract.summary : ''}`} readOnly placeholder="竞品账号库和同行采集结果会自动汇总到这里" /></Field>
+        </div>
+        {trendRadar ? <div className="resultBox"><h3>{trendRadar.summary}</h3><div className="trendGrid">{trendRadar.hot_topics?.map(item => <div className="trendCard" key={item.title}><div className="heat"><span>{item.heat}</span><em>热度</em></div><strong>{item.title}</strong><p>{item.reason}</p><small>角度：{item.angle}</small><small>钩子：{item.suggested_hook}</small>{item.risk && <div className="warn">{item.risk}</div>}</div>)}</div><div className="splitGrid"><div><h4>内容角度</h4>{trendRadar.content_angles?.map(x => <p key={x}>· {x}</p>)}</div><div><h4>拍摄建议</h4>{trendRadar.shooting_suggestions?.map(x => <p key={x}>· {x}</p>)}</div><div><h4>监控词</h4><div className="chips">{trendRadar.monitor_keywords?.map(x => <Pill key={x}>{x}</Pill>)}</div></div></div></div> : <Empty>先生成一次行业雷达。后续可以接真实平台热点 API。</Empty>}
+      </section>}
+
+      {active === 'competitor' && <section className="card modulePanel">
+        <div className="sectionHeader"><div><h2>竞品账号库</h2><p>把同行账号、定位、爆款特点沉淀下来，行业雷达和文案改写会读取这些信息。</p></div><Button label="加入账号库" onClick={addCompetitor} kind="soft" /></div>
+        <div className="grid4"><Field label="账号名称"><input value={competitorDraft.name} onChange={e => setCompetitorDraft({ ...competitorDraft, name: e.target.value })} placeholder="例如：天诺老吴" /></Field><Field label="平台"><select value={competitorDraft.platform} onChange={e => setCompetitorDraft({ ...competitorDraft, platform: e.target.value })}><option value="douyin">抖音</option><option value="shipinhao">视频号</option><option value="kuaishou">快手</option><option value="xiaohongshu">小红书</option></select></Field><Field label="主页/视频链接"><input value={competitorDraft.url} onChange={e => setCompetitorDraft({ ...competitorDraft, url: e.target.value })} placeholder="账号主页或爆款链接" /></Field><Field label="账号定位"><input value={competitorDraft.positioning} onChange={e => setCompetitorDraft({ ...competitorDraft, positioning: e.target.value })} placeholder="同城获客/投流/电商创业" /></Field></div>
+        <Field label="爆款特点 / 观察备注"><textarea value={competitorDraft.notes} onChange={e => setCompetitorDraft({ ...competitorDraft, notes: e.target.value })} placeholder="常用钩子、客户痛点、封面风格、评论区反馈、发布时间等" /></Field>
+        <div className="competitorList">{competitors.length === 0 && <Empty>还没有竞品账号。先加 3-5 个同行账号，系统会更懂行业。</Empty>}{competitors.map((c, i) => <div className="competitorCard" key={`${c.name}-${i}`}><div><strong>{c.name || '未命名账号'}</strong><Pill tone="purple">{c.platform}</Pill></div><p>{c.positioning || '未填写定位'}</p><small>{c.url}</small><em>{c.notes}</em><button onClick={() => setCompetitors(prev => prev.filter((_, idx) => idx !== i))}>删除</button></div>)}</div>
+      </section>}
+
       {active === 'collector' && <section className="card modulePanel">
         <div className="sectionHeader"><div><h2>同行采集</h2><p>粘抖音整段分享口令；系统尽力采视频，失败也会拆标题、钩子、话题。</p></div><Button busy={busy === '采集/拆解同行内容' ? busy : ''} label="采集/拆解同行内容" onClick={collectCompetitor} /></div>
         <div className="grid2">
@@ -450,6 +544,11 @@ export default function App() {
         <div className="resultBox"><h3>素材匹配建议</h3><p>优先把老板出镜、办公室、客户交流、产品细节、服务流程素材分别对应到口播分段。没有匹配素材时，先用采集视频的结构做 B-roll 参考，不直接照搬原画面。</p></div>
       </section>}
 
+      {active === 'shooting' && <section className="card modulePanel">
+        <div className="sectionHeader"><div><h2>运营拍摄任务</h2><p>把文案变成老板、员工能直接照着拍的镜头清单、B-roll 清单和提词器。</p></div><Button busy={busy === '生成运营拍摄任务' ? busy : ''} label="生成拍摄任务单" onClick={makeShootingPlan} disabled={!currentScript} /></div>
+        {shootingPlan ? <div className="resultBox"><h3>{shootingPlan.summary}</h3><div className="shotTable">{shootingPlan.shot_tasks?.map((task, i) => <div className="shotRow" key={`${task.scene}-${i}`}><span>{task.priority}</span><strong>{task.scene}</strong><em>{task.duration}</em><p>{task.content}</p><small>{task.camera}</small><small>{task.props}</small></div>)}</div><div className="splitGrid"><div><h4>B-roll 补拍</h4>{shootingPlan.broll_list?.map(x => <p key={x}>· {x}</p>)}</div><div><h4>提词器短句</h4>{shootingPlan.teleprompter?.map(x => <p key={x}>· {x}</p>)}</div><div><h4>拍摄检查</h4>{shootingPlan.checklist?.map(x => <p key={x}>· {x}</p>)}</div></div></div> : <Empty>先生成文案，再生成拍摄任务单。</Empty>}
+      </section>}
+
       {active === 'video' && <section className="card modulePanel">
         <div className="sectionHeader"><div><h2>视频工作台</h2><p>分段时长、转场、字幕和 AI 插件修改都在这里集中处理。</p></div><Button busy={busy === '合成视频并烧字幕' ? busy : ''} label="合成并下载 9:16 MP4" onClick={composeVideo} disabled={!currentScript} /></div>
         <div className="timelineEditor"><h3>分段时长 / 转场</h3>{voiceSegments.length === 0 && <Empty>先生成配音导演稿，或手动添加分段。</Empty>}{voiceSegments.map((seg, i) => <div className="timelineRow" key={i}><span>第{i + 1}段</span><input type="number" min="1" max="60" step="0.5" value={segmentSeconds[i] || estimateSeconds(seg.text, seg.speed_ratio)} onChange={e => setSegmentSeconds(prev => ({ ...prev, [i]: Number(e.target.value) }))} /><select value={segmentTransitions[i] || '叠化'} onChange={e => setSegmentTransitions(prev => ({ ...prev, [i]: e.target.value }))}><option>叠化</option><option>虚化</option><option>快切</option><option>推近</option><option>闪白</option></select><em>{seg.text.slice(0, 28)}...</em></div>)}</div>
@@ -458,9 +557,26 @@ export default function App() {
       </section>}
 
       {active === 'subtitleCover' && <section className="card modulePanel">
-        <div className="sectionHeader"><div><h2>字幕与封面</h2><p>字幕重点字放大，封面样式可选；后续可接 AI 图片生成封面。</p></div><Button busy={busy === '生成封面' ? busy : ''} label="生成封面" onClick={makeCover} /></div>
+        <div className="sectionHeader"><div><h2>字幕与封面</h2><p>自动识别重点词，生成字幕强调方案、封面大字方案，并支持封面生成。</p></div><div className="stackButtons"><Button busy={busy === '智能字幕重点' ? busy : ''} label="智能识别重点字幕" onClick={makeSubtitleAI} disabled={!currentScript} kind="ghost" /><Button busy={busy === '生成封面' ? busy : ''} label="生成封面" onClick={makeCover} /></div></div>
         <div className="grid4"><Field label="字幕字号"><input type="number" value={subtitleSize} onChange={e => setSubtitleSize(Number(e.target.value || 58))} /></Field><Field label="字幕颜色"><input type="color" value={subtitleColor} onChange={e => setSubtitleColor(e.target.value)} /></Field><Field label="重点词"><input value={subtitleHighlight} onChange={e => setSubtitleHighlight(e.target.value)} /></Field><Field label="封面样式"><select value={coverStyle} onChange={e => setCoverStyle(e.target.value)}><option>老板口播强钩子封面</option><option>痛点警告型封面</option><option>案例结果型封面</option><option>产品服务型封面</option><option>同城获客型封面</option></select></Field></div>
+        {subtitleAI && <div className="resultBox"><h3>{subtitleAI.template}</h3><div className="chips">{subtitleAI.keywords?.map(k => <Pill key={k.word} tone="orange">{k.word} · {k.effect}</Pill>)}</div><div className="splitGrid"><div><h4>字幕建议</h4>{subtitleAI.srt_tips?.map(x => <p key={x}>· {x}</p>)}</div><div><h4>封面大字</h4>{subtitleAI.cover_text_options?.map(x => <p key={x}>· {x}</p>)}</div><div><h4>已写入重点词</h4><p>{subtitleHighlight}</p></div></div></div>}
         {cover && <div className="coverPreview"><img src={cover.cover_url} /><div><h3>封面已生成</h3><p>{cover.prompt}</p><a className="download" href={cover.cover_url} target="_blank">下载封面</a></div></div>}
+      </section>}
+
+      {active === 'growth' && <section className="card modulePanel">
+        <div className="sectionHeader"><div><h2>流量监控与投流决策</h2><p>先手动录入发布后的核心数据，系统会用规则 + AI 判断是否加热、换封面、重剪或停投。</p></div><Button busy={busy === '机器学习投流判断' ? busy : ''} label="生成投流决策" onClick={makeGrowthDecision} kind="soft" /></div>
+        <div className="metricGrid">
+          <Field label="播放量"><input type="number" value={growthMetrics.views} onChange={e => setGrowthMetrics({ ...growthMetrics, views: Number(e.target.value || 0) })} /></Field>
+          <Field label="点赞"><input type="number" value={growthMetrics.likes} onChange={e => setGrowthMetrics({ ...growthMetrics, likes: Number(e.target.value || 0) })} /></Field>
+          <Field label="评论"><input type="number" value={growthMetrics.comments} onChange={e => setGrowthMetrics({ ...growthMetrics, comments: Number(e.target.value || 0) })} /></Field>
+          <Field label="分享"><input type="number" value={growthMetrics.shares} onChange={e => setGrowthMetrics({ ...growthMetrics, shares: Number(e.target.value || 0) })} /></Field>
+          <Field label="关注"><input type="number" value={growthMetrics.follows} onChange={e => setGrowthMetrics({ ...growthMetrics, follows: Number(e.target.value || 0) })} /></Field>
+          <Field label="线索/私信"><input type="number" value={growthMetrics.leads} onChange={e => setGrowthMetrics({ ...growthMetrics, leads: Number(e.target.value || 0) })} /></Field>
+          <Field label="完播率 %"><input type="number" value={growthMetrics.completion_rate} onChange={e => setGrowthMetrics({ ...growthMetrics, completion_rate: Number(e.target.value || 0) })} /></Field>
+          <Field label="投流消耗"><input type="number" value={growthMetrics.spend} onChange={e => setGrowthMetrics({ ...growthMetrics, spend: Number(e.target.value || 0) })} /></Field>
+          <Field label="发布后小时"><input type="number" value={growthMetrics.hours_after_publish} onChange={e => setGrowthMetrics({ ...growthMetrics, hours_after_publish: Number(e.target.value || 0) })} /></Field>
+        </div>
+        {growthDecision ? <div className="resultBox growthResult"><div className="scoreRing"><strong>{growthDecision.score}</strong><span>投流分</span></div><div><h3>{growthDecision.decision}</h3><p>{growthDecision.reason}</p><p>预算建议：{growthDecision.recommended_budget}</p><div className="splitGrid"><div><h4>动作</h4>{growthDecision.actions?.map(x => <p key={x}>· {x}</p>)}</div><div><h4>风险</h4>{growthDecision.alerts?.map(x => <p key={x}>· {x}</p>)}</div><div><h4>下一轮测试</h4>{growthDecision.next_test?.map(x => <p key={x}>· {x}</p>)}</div></div></div></div> : <Empty>发布后录入数据，系统会给投流/停投/重剪建议。</Empty>}
       </section>}
 
       {active === 'publish' && <section className="card modulePanel">

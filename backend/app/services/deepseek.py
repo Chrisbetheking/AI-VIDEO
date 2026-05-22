@@ -408,3 +408,234 @@ async def video_edit_chat_advice(settings: Settings, instruction: str, title: st
         'actions': [str(x) for x in (payload.get('actions') or []) if str(x).strip()][:10],
         'warnings': [str(x) for x in (payload.get('warnings') or []) if str(x).strip()][:10],
     }
+
+
+async def generate_trend_radar(settings: Settings, req: 'TrendRadarRequest') -> 'TrendRadarResponse':
+    from app.schemas import TrendItem, TrendRadarRequest, TrendRadarResponse
+
+    system = '你是短视频行业趋势和本地获客运营分析师。必须输出严格 JSON，不要 Markdown。'
+    user = f'''
+请基于下面信息生成“行业爆点/选题雷达”。不要编造实时平台数据；如果没有实时数据，就基于行业常见趋势和用户提供的同行内容做可执行选题建议。
+
+行业：{req.industry or '未填写'}
+目标客户：{req.audience or '未填写'}
+地域/市场：{req.region or '未填写'}
+监控关键词：{', '.join(req.keywords) or '未填写'}
+同行备注/采集内容：
+{req.competitor_notes or '未填写'}
+
+输出 JSON：
+{{
+  "summary":"整体判断",
+  "hot_topics":[{{"title":"爆点/选题","reason":"为什么值得做","heat":80,"angle":"切入角度","suggested_hook":"前三秒钩子","risk":"风险提示"}}],
+  "content_angles":["可持续拍的内容角度"],
+  "shooting_suggestions":["今天/本周建议拍什么"],
+  "monitor_keywords":["后续监控关键词"],
+  "next_actions":["下一步动作"]
+}}
+'''.strip()
+    try:
+        payload = await _chat_json(settings, system, user, temperature=0.68, timeout=90)
+    except Exception:
+        payload = {
+            'summary': f'{req.industry or "当前行业"}建议围绕客户痛点、同行截流、降本增效和真实案例做选题。',
+            'hot_topics': [
+                {'title': '客户被同行截走', 'reason': '焦虑感强，适合本地老板获客场景', 'heat': 82, 'angle': '先指出损失，再给解决路径', 'suggested_hook': '不是客户少了，是他们还没找到你就被同行截走了。', 'risk': '避免夸大承诺'},
+                {'title': '自然流量不稳定', 'reason': '能引出内容+投流组合方案', 'heat': 76, 'angle': '对比等流量和主动获客', 'suggested_hook': '还在等自然流量？同行已经开始主动拿客户了。', 'risk': '不要暗示必须投流才有效'},
+            ],
+            'content_angles': ['老板口播痛点拆解', '客户案例复盘', '同行打法对比', '拍摄/投流误区纠正'],
+            'shooting_suggestions': ['拍老板正面口播 3 条', '补拍办公室/客户沟通/产品细节 B-roll', '拍一条真实案例流程'],
+            'monitor_keywords': req.keywords or ['获客', '投流', '同城', '客户', '转化'],
+            'next_actions': ['采集 5 条同行爆款', '生成 3 个钩子版本', '做 1 条低成本测试视频'],
+        }
+    items = []
+    for item in (payload.get('hot_topics') or [])[:12]:
+        if isinstance(item, dict):
+            items.append(TrendItem(
+                title=str(item.get('title') or '行业选题'),
+                reason=str(item.get('reason') or ''),
+                heat=_clamp_int(item.get('heat'), 60, 0, 100),
+                angle=str(item.get('angle') or ''),
+                suggested_hook=str(item.get('suggested_hook') or ''),
+                risk=str(item.get('risk') or ''),
+            ))
+    return TrendRadarResponse(
+        summary=str(payload.get('summary') or '已生成行业选题雷达。'),
+        hot_topics=items,
+        content_angles=[str(x) for x in (payload.get('content_angles') or []) if str(x).strip()][:12],
+        shooting_suggestions=[str(x) for x in (payload.get('shooting_suggestions') or []) if str(x).strip()][:12],
+        monitor_keywords=[str(x) for x in (payload.get('monitor_keywords') or []) if str(x).strip()][:20],
+        next_actions=[str(x) for x in (payload.get('next_actions') or []) if str(x).strip()][:12],
+    )
+
+
+async def generate_shooting_plan(settings: Settings, req: 'ShootingPlanRequest') -> 'ShootingPlanResponse':
+    from app.schemas import ShootingPlanRequest, ShootingPlanResponse, ShotTask
+
+    system = '你是短视频拍摄导演，负责把口播文案变成老板和员工能照着拍的拍摄任务单。必须输出严格 JSON。'
+    user = f'''
+请生成一份拍摄任务单。
+标题：{req.title or '未填写'}
+口播稿：
+{req.script or '未填写'}
+行业：{req.industry or '未填写'}
+目标客户：{req.audience or '未填写'}
+卖点：{req.selling_points or '未填写'}
+现有素材：{req.available_assets or '未填写'}
+目标时长：{req.duration_seconds} 秒
+
+输出 JSON：
+{{
+  "summary":"拍摄策略摘要",
+  "shot_tasks":[{{"scene":"镜头场景","duration":"建议时长","camera":"拍摄方式/构图","content":"拍什么/怎么演","props":"需要准备什么","priority":"必拍/可选"}}],
+  "broll_list":["补充素材清单"],
+  "teleprompter":["提词器短句"],
+  "checklist":["拍摄前检查"]
+}}
+'''.strip()
+    try:
+        payload = await _chat_json(settings, system, user, temperature=0.62, timeout=90)
+    except Exception:
+        payload = {
+            'summary': '先拍老板正面口播，再补产品、环境、客户沟通和案例画面，保证每句口播都有对应画面。',
+            'shot_tasks': [
+                {'scene': '老板正面口播', 'duration': '8-12秒', 'camera': '竖屏半身，眼睛看镜头', 'content': '说开头痛点和核心判断', 'props': '干净背景/品牌墙', 'priority': '必拍'},
+                {'scene': '办公室/门头环境', 'duration': '4-6秒', 'camera': '缓慢推进或横移', 'content': '展示公司真实环境', 'props': '门头/工位/会议室', 'priority': '必拍'},
+                {'scene': '客户沟通/服务流程', 'duration': '6-10秒', 'camera': '侧拍，避免隐私信息', 'content': '体现服务过程和可信度', 'props': '电脑/文件/沟通场景', 'priority': '必拍'},
+            ],
+            'broll_list': ['产品细节', '员工操作', '证书荣誉', '客户案例截图打码', '老板走路/看文件'],
+            'teleprompter': [req.script[:60] if req.script else '你有没有发现，最近客户越来越难找了？'],
+            'checklist': ['竖屏 9:16', '收音清楚', '背景干净', '避免客户隐私', '每个镜头多拍 2 遍'],
+        }
+    tasks = []
+    for item in (payload.get('shot_tasks') or [])[:20]:
+        if isinstance(item, dict):
+            tasks.append(ShotTask(
+                scene=str(item.get('scene') or '补充镜头'),
+                duration=str(item.get('duration') or '3-5秒'),
+                camera=str(item.get('camera') or '竖屏稳定拍摄'),
+                content=str(item.get('content') or ''),
+                props=str(item.get('props') or ''),
+                priority=str(item.get('priority') or '必拍'),
+            ))
+    return ShootingPlanResponse(
+        summary=str(payload.get('summary') or '已生成拍摄任务单。'),
+        shot_tasks=tasks,
+        broll_list=[str(x) for x in (payload.get('broll_list') or []) if str(x).strip()][:20],
+        teleprompter=[str(x) for x in (payload.get('teleprompter') or []) if str(x).strip()][:20],
+        checklist=[str(x) for x in (payload.get('checklist') or []) if str(x).strip()][:20],
+    )
+
+
+async def generate_subtitle_emphasis(settings: Settings, req: 'SubtitleEmphasisRequest') -> 'SubtitleEmphasisResponse':
+    from app.schemas import SubtitleEmphasisRequest, SubtitleEmphasisResponse, SubtitleKeyword
+
+    system = '你是短视频字幕设计师，负责识别需要高亮的重点字，并给出字幕和封面建议。必须输出严格 JSON。'
+    user = f'''
+请分析下面口播稿，自动挑出需要重点高亮的词句。
+字幕风格：{req.style}
+品牌色：{req.brand_color}
+口播稿：
+{req.script}
+
+输出 JSON：
+{{
+  "template":"字幕模板描述",
+  "keywords":[{{"word":"重点词","reason":"为什么突出","effect":"放大/变色/描边/震动/逐字出现"}}],
+  "srt_tips":["字幕制作建议"],
+  "cover_text_options":["封面大字方案"]
+}}
+'''.strip()
+    try:
+        payload = await _chat_json(settings, system, user, temperature=0.55, timeout=60)
+    except Exception:
+        words = []
+        for w in ['客户', '同行', '获客', '投流', '成本', '转化', '案例', '私信']:
+            if w in req.script:
+                words.append({'word': w, 'reason': '转化相关关键词', 'effect': '放大高亮'})
+        payload = {
+            'template': '大号白字底部居中，关键词使用品牌色描边，高痛点词轻微震动。',
+            'keywords': words or [{'word': '客户', 'reason': '目标结果关键词', 'effect': '放大高亮'}],
+            'srt_tips': ['每行不超过 16 个字', '重点词单独成行', '前三秒字幕更大'],
+            'cover_text_options': ['客户正在被同行截走', '别再等自然流量', '本地老板获客新打法'],
+        }
+    keywords = []
+    for item in (payload.get('keywords') or [])[:18]:
+        if isinstance(item, dict):
+            keywords.append(SubtitleKeyword(
+                word=str(item.get('word') or '').strip()[:40],
+                reason=str(item.get('reason') or ''),
+                effect=str(item.get('effect') or '放大高亮'),
+            ))
+    return SubtitleEmphasisResponse(
+        template=str(payload.get('template') or '大号白字，重点词高亮。'),
+        keywords=[k for k in keywords if k.word],
+        srt_tips=[str(x) for x in (payload.get('srt_tips') or []) if str(x).strip()][:12],
+        cover_text_options=[str(x) for x in (payload.get('cover_text_options') or []) if str(x).strip()][:12],
+    )
+
+
+async def generate_growth_decision(settings: Settings, req: 'GrowthDecisionRequest') -> 'GrowthDecisionResponse':
+    from app.schemas import GrowthDecisionRequest, GrowthDecisionResponse
+
+    m = req.metrics
+    engagement = 0.0
+    if m.views:
+        engagement = (m.likes + m.comments * 3 + m.shares * 4 + m.follows * 5 + m.leads * 12) / max(1, m.views) * 100
+    lead_cost = (m.spend / m.leads) if m.leads else None
+    system = '你是短视频投流增长分析师，负责根据早期数据判断是否加热、停投、改封面或重剪。必须输出严格 JSON。'
+    user = f'''
+请判断这条视频是否值得继续投流/加热。
+标题：{req.title or '未填写'}
+行业：{req.industry or '未填写'}
+目标：{req.objective}
+口播稿：
+{req.script or '未填写'}
+
+数据：
+播放 {m.views}，点赞 {m.likes}，评论 {m.comments}，分享 {m.shares}，关注 {m.follows}，线索 {m.leads}，完播率 {m.completion_rate}%，消耗 {m.spend}，发布后 {m.hours_after_publish} 小时。
+互动加权率约 {engagement:.2f}%，线索成本 {lead_cost if lead_cost is not None else '暂无'}。
+
+输出 JSON：
+{{
+  "score":0-100,
+  "decision":"继续观察/小额加热/加投/停投重剪/换封面再测",
+  "reason":"原因",
+  "recommended_budget":"预算建议",
+  "actions":["立即动作"],
+  "alerts":["风险提醒"],
+  "next_test":["下一轮测试建议"]
+}}
+'''.strip()
+    try:
+        payload = await _chat_json(settings, system, user, temperature=0.48, timeout=60)
+    except Exception:
+        score = 35
+        alerts = []
+        if m.views > 0:
+            score += min(20, int(m.completion_rate / 4))
+            if engagement > 1.5: score += 15
+            if m.leads > 0: score += 20
+        if m.views < 500 and m.hours_after_publish >= 3:
+            alerts.append('自然流量样本偏小，先不要大额投流。')
+        if m.completion_rate < 20 and m.views > 300:
+            alerts.append('完播率偏低，优先改前三秒和节奏。')
+        decision = '小额加热' if score >= 65 else ('换封面再测' if score >= 45 else '停投重剪')
+        payload = {
+            'score': max(0, min(100, score)),
+            'decision': decision,
+            'reason': '根据播放、完播、互动和线索数据给出的规则判断。',
+            'recommended_budget': '先 100-300 元小额测试' if score >= 45 else '暂不建议加投',
+            'actions': ['检查前三秒钩子', '换 2 张封面 A/B', '保留高互动评论词做下一条选题'],
+            'alerts': alerts,
+            'next_test': ['同钩子换素材', '同素材换标题', '同人群小额测试 3 小时'],
+        }
+    return GrowthDecisionResponse(
+        score=_clamp_int(payload.get('score'), 50, 0, 100),
+        decision=str(payload.get('decision') or '继续观察'),
+        reason=str(payload.get('reason') or '已生成投流判断。'),
+        recommended_budget=str(payload.get('recommended_budget') or '先小额测试'),
+        actions=[str(x) for x in (payload.get('actions') or []) if str(x).strip()][:12],
+        alerts=[str(x) for x in (payload.get('alerts') or []) if str(x).strip()][:12],
+        next_test=[str(x) for x in (payload.get('next_test') or []) if str(x).strip()][:12],
+    )

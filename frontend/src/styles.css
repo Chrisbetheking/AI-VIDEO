@@ -32,3 +32,115 @@ button{cursor:pointer}
 .copyEditor{margin-top:16px}.assetList{display:flex;flex-direction:column;gap:9px}.assetRow,.assetButton{border:1px solid var(--line);background:#fff;border-radius:16px;padding:11px;display:flex;align-items:center;gap:9px;text-align:left}.assetRow span,.assetButton{font-weight:800}.assetRow em,.assetButton em{margin-left:auto;color:var(--muted);font-size:12px;font-style:normal}.assetButton.selected{border-color:var(--blue);background:#eef5ff}.segments{display:flex;flex-direction:column;gap:14px;margin-top:14px}.segmentCard{border:1px solid #dbeafe;background:#fff;border-radius:20px;padding:16px}.segmentHead{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px}.segmentHead button{border:1px solid var(--line);background:#fff;border-radius:9px;padding:5px 8px;margin-left:5px}.segmentGrid{display:grid;grid-template-columns:1.4fr 1fr 1fr 1fr;gap:12px}.addSegment{border:1px solid #cfe0ff;border-radius:999px;background:#fff;color:#1d4ed8;padding:10px 14px;font-weight:900}.timelineRow{display:grid;grid-template-columns:70px 100px 120px 1fr;gap:10px;align-items:center;border:1px solid var(--line);background:#fff;border-radius:15px;padding:10px;margin-top:8px}.timelineRow em{color:var(--muted);font-style:normal}.videoGrid{display:grid;grid-template-columns:minmax(0,1.1fr) 320px;gap:18px;align-items:start}.videoGrid video{width:100%;max-height:620px;background:#020617;border-radius:22px}.downloadPanel{display:flex;flex-direction:column;gap:10px}.download{display:inline-flex;justify-content:center;border-radius:15px;background:linear-gradient(135deg,var(--blue),var(--violet));color:#fff;padding:13px 16px}.chatMsg{border:1px solid var(--line);background:#fff;border-radius:16px;padding:14px;margin-top:10px}.coverPreview{display:grid;grid-template-columns:260px 1fr;gap:20px;align-items:center}.coverPreview img,.miniResult img{width:100%;border-radius:18px;border:1px solid var(--line)}.miniResult{border:1px solid var(--line);background:#f8fbff;border-radius:18px;padding:16px}.miniResult h3{margin-top:0}
 @media (max-width:1200px){.appShell{grid-template-columns:1fr}.studioNav{position:relative;height:auto;top:auto}.studioNav nav{display:grid;grid-template-columns:repeat(3,1fr)}.heroHeader{grid-template-columns:1fr}.moduleGrid{grid-template-columns:repeat(2,1fr)}.progressRail{grid-template-columns:repeat(3,1fr)}.grid4{grid-template-columns:repeat(2,1fr)}.videoGrid{grid-template-columns:1fr}.coverPreview{grid-template-columns:1fr}}
 @media (max-width:720px){.appShell{padding:10px;gap:10px}.studioNav{border-radius:22px;padding:12px}.brandMark{align-items:flex-start}.studioNav nav{display:flex;flex-direction:row;overflow-x:auto;padding-bottom:4px}.studioNav nav button{min-width:142px;grid-template-columns:28px 1fr}.studioNav nav button em{display:none}.heroHeader{padding:22px;border-radius:22px;min-height:auto}.heroHeader h1{font-size:28px}.progressRail{display:flex;overflow-x:auto}.stage{min-width:185px}.moduleGrid,.grid2,.grid3,.grid4,.splitGrid,.segmentGrid,.timelineRow{grid-template-columns:1fr}.moduleCard{min-height:150px}.card{padding:18px;border-radius:22px}.sectionHeader{flex-direction:column}.timelineRow{align-items:stretch}.scoreCard strong{font-size:42px}.logo{width:48px;height:48px}.buttonRow{display:grid;grid-template-columns:1fr}.btn,.addSegment{width:100%}.segmentHead{align-items:flex-start;flex-direction:column}.heroHeader p{font-size:14px}}
+
+.trendGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 14px;
+  margin: 14px 0;
+}
+.trendCard {
+  border: 1px solid #dce8ff;
+  background: linear-gradient(180deg, #ffffff, #f7fbff);
+  border-radius: 18px;
+  padding: 16px;
+  display: grid;
+  gap: 8px;
+  position: relative;
+}
+.trendCard strong { font-size: 18px; color: #07204f; }
+.trendCard p { margin: 0; color: #334155; line-height: 1.65; }
+.trendCard small { color: #475569; line-height: 1.55; }
+.heat {
+  position: absolute;
+  right: 14px;
+  top: 14px;
+  width: 54px;
+  height: 54px;
+  border-radius: 16px;
+  display: grid;
+  place-items: center;
+  background: #eff6ff;
+  color: #1d4ed8;
+  border: 1px solid #bfdbfe;
+}
+.heat span { font-weight: 900; line-height: 1; }
+.heat em { font-size: 11px; font-style: normal; }
+.competitorList {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 14px;
+  margin-top: 16px;
+}
+.competitorCard {
+  border: 1px solid #e2e8f0;
+  border-radius: 18px;
+  padding: 16px;
+  background: #fff;
+  display: grid;
+  gap: 8px;
+}
+.competitorCard > div { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.competitorCard strong { font-size: 18px; color: #0f172a; }
+.competitorCard p, .competitorCard small, .competitorCard em { margin: 0; color: #475569; line-height: 1.55; }
+.competitorCard em { font-style: normal; white-space: pre-wrap; }
+.competitorCard button {
+  justify-self: start;
+  border: 0;
+  border-radius: 999px;
+  padding: 7px 12px;
+  color: #b91c1c;
+  background: #fee2e2;
+  cursor: pointer;
+}
+.shotTable { display: grid; gap: 12px; margin: 14px 0; }
+.shotRow {
+  display: grid;
+  grid-template-columns: 82px 1fr 90px;
+  gap: 10px;
+  align-items: start;
+  border: 1px solid #e2e8f0;
+  border-radius: 16px;
+  padding: 14px;
+  background: #fff;
+}
+.shotRow span {
+  background: #ecfeff;
+  color: #0e7490;
+  border-radius: 999px;
+  text-align: center;
+  padding: 5px 8px;
+  font-weight: 700;
+}
+.shotRow strong { color: #0f172a; }
+.shotRow em { font-style: normal; color: #2563eb; font-weight: 700; }
+.shotRow p { grid-column: 2 / -1; margin: 0; color: #334155; }
+.shotRow small { grid-column: 2 / -1; color: #64748b; }
+.metricGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px;
+}
+.growthResult {
+  display: grid;
+  grid-template-columns: 120px 1fr;
+  gap: 18px;
+  align-items: start;
+}
+.scoreRing {
+  width: 108px;
+  height: 108px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  background: conic-gradient(#2563eb 0 70%, #e5efff 70% 100%);
+  color: #fff;
+  box-shadow: 0 12px 28px rgba(37,99,235,.18);
+}
+.scoreRing strong { font-size: 34px; line-height: 1; }
+.scoreRing span { font-size: 12px; margin-top: -22px; }
+@media (max-width: 760px) {
+  .shotRow { grid-template-columns: 1fr; }
+  .shotRow p, .shotRow small { grid-column: auto; }
+  .growthResult { grid-template-columns: 1fr; }
+}

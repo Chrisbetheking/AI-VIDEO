@@ -271,3 +271,114 @@ class PlatformPublishResponse(BaseModel):
     status: str
     message: str
     checklist: List[str] = Field(default_factory=list)
+
+
+
+class TrendRadarRequest(BaseModel):
+    industry: str = Field(default='', max_length=120)
+    audience: str = Field(default='', max_length=200)
+    region: str = Field(default='', max_length=160)
+    keywords: List[str] = Field(default_factory=list, max_length=20)
+    competitor_notes: str = Field(default='', max_length=5000)
+
+
+class TrendItem(BaseModel):
+    title: str
+    reason: str
+    heat: int = Field(default=60, ge=0, le=100)
+    angle: str = ''
+    suggested_hook: str = ''
+    risk: str = ''
+
+
+class TrendRadarResponse(BaseModel):
+    summary: str
+    hot_topics: List[TrendItem] = Field(default_factory=list)
+    content_angles: List[str] = Field(default_factory=list)
+    shooting_suggestions: List[str] = Field(default_factory=list)
+    monitor_keywords: List[str] = Field(default_factory=list)
+    next_actions: List[str] = Field(default_factory=list)
+
+
+class CompetitorAccount(BaseModel):
+    name: str = Field(default='', max_length=120)
+    platform: str = Field(default='douyin', max_length=80)
+    url: str = Field(default='', max_length=1000)
+    positioning: str = Field(default='', max_length=500)
+    notes: str = Field(default='', max_length=2000)
+
+
+class ShootingPlanRequest(BaseModel):
+    title: str = Field(default='', max_length=200)
+    script: str = Field(default='', max_length=12000)
+    industry: str = Field(default='', max_length=120)
+    audience: str = Field(default='', max_length=200)
+    selling_points: str = Field(default='', max_length=1000)
+    available_assets: str = Field(default='', max_length=3000)
+    duration_seconds: int = Field(default=35, ge=5, le=180)
+
+
+class ShotTask(BaseModel):
+    scene: str
+    duration: str
+    camera: str
+    content: str
+    props: str = ''
+    priority: str = '必拍'
+
+
+class ShootingPlanResponse(BaseModel):
+    summary: str
+    shot_tasks: List[ShotTask] = Field(default_factory=list)
+    broll_list: List[str] = Field(default_factory=list)
+    teleprompter: List[str] = Field(default_factory=list)
+    checklist: List[str] = Field(default_factory=list)
+
+
+class SubtitleEmphasisRequest(BaseModel):
+    script: str = Field(..., min_length=1, max_length=12000)
+    style: str = Field(default='短视频强转化字幕', max_length=120)
+    brand_color: str = Field(default='#2f6bff', max_length=40)
+
+
+class SubtitleKeyword(BaseModel):
+    word: str
+    reason: str = ''
+    effect: str = '放大高亮'
+
+
+class SubtitleEmphasisResponse(BaseModel):
+    template: str
+    keywords: List[SubtitleKeyword] = Field(default_factory=list)
+    srt_tips: List[str] = Field(default_factory=list)
+    cover_text_options: List[str] = Field(default_factory=list)
+
+
+class GrowthMetricInput(BaseModel):
+    views: int = Field(default=0, ge=0)
+    likes: int = Field(default=0, ge=0)
+    comments: int = Field(default=0, ge=0)
+    shares: int = Field(default=0, ge=0)
+    follows: int = Field(default=0, ge=0)
+    leads: int = Field(default=0, ge=0)
+    completion_rate: float = Field(default=0, ge=0, le=100)
+    spend: float = Field(default=0, ge=0, le=1000000)
+    hours_after_publish: float = Field(default=3, ge=0, le=720)
+
+
+class GrowthDecisionRequest(BaseModel):
+    title: str = Field(default='', max_length=200)
+    script: str = Field(default='', max_length=12000)
+    industry: str = Field(default='', max_length=120)
+    objective: str = Field(default='线索/咨询', max_length=120)
+    metrics: GrowthMetricInput = Field(default_factory=GrowthMetricInput)
+
+
+class GrowthDecisionResponse(BaseModel):
+    score: int = Field(default=0, ge=0, le=100)
+    decision: str
+    reason: str
+    recommended_budget: str
+    actions: List[str] = Field(default_factory=list)
+    alerts: List[str] = Field(default_factory=list)
+    next_test: List[str] = Field(default_factory=list)

@@ -33,14 +33,6 @@ export async function apiPost<T>(path: string, body: unknown): Promise<T> {
   return parseResponse<T>(res)
 }
 
-
-export async function uploadCollectorCookies(file: File): Promise<CollectorStatus> {
-  const form = new FormData()
-  form.append('file', file)
-  const res = await fetch(`${API_BASE}/api/collector/cookies`, { method: 'POST', body: form })
-  return parseResponse<CollectorStatus>(res)
-}
-
 export async function uploadAssets(files: FileList): Promise<AssetItem[]> {
   const form = new FormData()
   Array.from(files).forEach(file => form.append('files', file))
@@ -134,14 +126,76 @@ export interface PlatformPublishResponse {
   checklist: string[]
 }
 
+export interface TrendItem {
+  title: string
+  reason: string
+  heat: number
+  angle: string
+  suggested_hook: string
+  risk: string
+}
+export interface TrendRadarResponse {
+  summary: string
+  hot_topics: TrendItem[]
+  content_angles: string[]
+  shooting_suggestions: string[]
+  monitor_keywords: string[]
+  next_actions: string[]
+}
 
-export interface CollectorStatus {
-  enabled: boolean
-  ytdlp_enabled: boolean
-  has_cookies: boolean
-  cookie_file_name?: string
-  max_mb?: number
-  timeout_seconds?: number
-  mode?: string
-  message?: string
+export interface CompetitorAccount {
+  name: string
+  platform: string
+  url: string
+  positioning: string
+  notes: string
+}
+
+export interface ShotTask {
+  scene: string
+  duration: string
+  camera: string
+  content: string
+  props: string
+  priority: string
+}
+export interface ShootingPlanResponse {
+  summary: string
+  shot_tasks: ShotTask[]
+  broll_list: string[]
+  teleprompter: string[]
+  checklist: string[]
+}
+
+export interface SubtitleKeyword {
+  word: string
+  reason: string
+  effect: string
+}
+export interface SubtitleEmphasisResponse {
+  template: string
+  keywords: SubtitleKeyword[]
+  srt_tips: string[]
+  cover_text_options: string[]
+}
+
+export interface GrowthMetricInput {
+  views: number
+  likes: number
+  comments: number
+  shares: number
+  follows: number
+  leads: number
+  completion_rate: number
+  spend: number
+  hours_after_publish: number
+}
+export interface GrowthDecisionResponse {
+  score: number
+  decision: string
+  reason: string
+  recommended_budget: string
+  actions: string[]
+  alerts: string[]
+  next_test: string[]
 }
