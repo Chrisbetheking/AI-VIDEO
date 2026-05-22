@@ -53,6 +53,24 @@ export interface GeneratedCopy {
 export interface TTSVoice { id: string; name: string; provider: string; language: string; note?: string }
 export interface TTSResponse { file_url: string; file_name: string; duration_seconds: number; warning?: string }
 export interface AssetItem { id: string; filename: string; original_name: string; kind: 'image' | 'video'; url: string; size_bytes: number; created_at: string }
+
+
+export interface CollectorCookieStatus {
+  enabled: boolean
+  cookie_upload_enabled: boolean
+  cookie_file: string
+  cookie_exists: boolean
+  cookie_size_bytes: number
+  hint: string
+}
+
+export async function getCollectorStatus(): Promise<CollectorCookieStatus> {
+  return apiGet<CollectorCookieStatus>('/api/collector/status')
+}
+
+export async function uploadCollectorCookies(cookie_text: string): Promise<CollectorCookieStatus> {
+  return apiPost<CollectorCookieStatus>('/api/collector/cookies', { cookie_text })
+}
 export interface ComposeResponse { video_url: string; video_name: string; subtitle_url?: string; audio_url?: string; duration_seconds: number; warnings: string[] }
 export interface CoverResponse { cover_url: string; cover_name: string; prompt: string }
 export interface PublishPackageResponse { package_url: string; package_name: string; status: string; checklist: string[] }
@@ -221,26 +239,4 @@ export interface CustomerProfileSave {
   lead_region: string
   conversion_goal: string
   trend_keywords: string
-}
-
-export interface DigitalHumanCreateRequest {
-  avatar_asset_id?: string
-  avatar_file_name?: string
-  audio_file_name: string
-  driver_video_asset_id?: string
-  title?: string
-  script?: string
-  engine?: string
-  consent_confirmed: boolean
-}
-
-export interface DigitalHumanCreateResponse {
-  status: string
-  engine: string
-  message: string
-  video_url?: string
-  video_name?: string
-  job_id?: string
-  warnings: string[]
-  raw?: Record<string, any>
 }

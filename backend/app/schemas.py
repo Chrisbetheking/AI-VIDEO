@@ -223,6 +223,21 @@ class AdAnalysisResponse(BaseModel):
     next_actions: List[str]
 
 
+
+
+class CollectorCookieStatus(BaseModel):
+    enabled: bool
+    cookie_upload_enabled: bool
+    cookie_file: str
+    cookie_exists: bool
+    cookie_size_bytes: int
+    hint: str
+
+
+class CollectorCookieUploadRequest(BaseModel):
+    cookie_text: str = Field(..., min_length=20, max_length=200000)
+
+
 class ApiError(BaseModel):
     detail: Any
 
@@ -436,26 +451,4 @@ class ScriptVersionSave(BaseModel):
     description: str = Field(default='', max_length=8000)
     tags: List[str] = Field(default_factory=list)
     source: str = Field(default='manual', max_length=120)
-    raw: dict = Field(default_factory=dict)
-
-
-class DigitalHumanCreateRequest(BaseModel):
-    avatar_asset_id: str = Field(default='', max_length=200)
-    avatar_file_name: str = Field(default='', max_length=500)
-    audio_file_name: str = Field(default='', max_length=500)
-    driver_video_asset_id: str = Field(default='', max_length=200)
-    title: str = Field(default='', max_length=200)
-    script: str = Field(default='', max_length=12000)
-    engine: str = Field(default='auto', max_length=80)
-    consent_confirmed: bool = False
-
-
-class DigitalHumanCreateResponse(BaseModel):
-    status: str
-    engine: str
-    message: str
-    video_url: Optional[str] = None
-    video_name: Optional[str] = None
-    job_id: Optional[str] = None
-    warnings: List[str] = Field(default_factory=list)
     raw: dict = Field(default_factory=dict)

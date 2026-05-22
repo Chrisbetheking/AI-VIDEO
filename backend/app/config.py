@@ -63,18 +63,14 @@ class Settings(BaseSettings):
     collector_max_mb: int = 80
     collector_timeout_seconds: int = 180
     collector_user_agent: str = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36'
+    # 抖音采集增强：可上传/配置 Netscape cookies，解决 yt-dlp 提示 Fresh cookies needed
+    # 推荐 Render Secret File 路径：/etc/secrets/douyin_cookies.txt
+    collector_cookie_file: str = ''
+    enable_collector_cookie_upload: bool = True
+    collector_cookies_max_chars: int = 200000
 
     # 平台发布：先保留入口，等开放平台权限下来再接真实发布
     enable_platform_publish: bool = False
-
-
-    # 数字人 / 口型驱动：Render 只做控制台和任务转发；真实开源引擎建议放到 GPU worker / Mac mini / RunPod。
-    # engine 可填：preview / sadtalker / wav2lip / musetalk / liveportrait / webhook
-    enable_digital_human: bool = True
-    digital_human_engine: str = 'preview'
-    digital_human_webhook_url: str = ''
-    digital_human_webhook_token: str = ''
-    digital_human_timeout_seconds: int = 900
 
 
     # Supabase / AI 记忆库

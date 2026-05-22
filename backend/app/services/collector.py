@@ -98,6 +98,50 @@ def _check_size_limit(path: Path, max_mb: int) -> None:
         raise RuntimeError(f'采集到的视频 {size_mb:.1f}MB，超过限制 {max_mb}MB。请换短视频或上传精简 MP4。')
 
 
+def collector_cookie_path(settings: Settings) -> Path:
+    """Return the preferred cookie file path.
+
+    优先使用 Render Secret File / 环境变量指定路径；没有时使用 /app/data/secrets/douyin_cookies.txt。
+    文件格式要求 Netscape cookies.txt。
+    """
+    configured = (settings.collector_cookie_file or '').strip()
+    if configured:
+        return Path(configured)
+    path = settings.data_dir / 'secrets' / 'douyin_cookies.txt'
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def get_collector_cookie_status(settings: Settings) -> dict:
+    path = collector_cookie_path(settings)
+    exists = path.exists() and path.is_file() and path.stat().st_size > 20
+    return {
+        'enabled': bool(settings.enable_ytdlp_collector),
+        'cookie_upload_enabled': bool(settings.enable_collector_cookie_upload),
+        'cookie_file': str(path),
+        'cookie_exists': exists,
+        'cookie_size_bytes': path.stat().st_size if exists else 0,
+        'hint': '已配置抖音 cookies，备用采集器会携带登录态。' if exists else '未配置 cookies。遇到 Fresh cookies needed 时，需要上传/配置 douyin_cookies.txt。'
+    }
+
+
+def save_collector_cookie_text(settings: Settings, cookie_text: str) -> dict:
+    if not settings.enable_collector_cookie_upload:
+        raise RuntimeError('当前后端未启用 cookie 上传，请用 Render Secret Files 配置。')
+    text = (cookie_text or '').strip()
+    if not text:
+        raise RuntimeError('cookies 内容为空。')
+    if len(text) > settings.collector_cookies_max_chars:
+        raise RuntimeError(f'cookies 内容过大，超过 {settings.collector_cookies_max_chars} 字符。')
+    # Netscape cookies.txt 通常包含 # Netscape 或若干 tab 分隔字段。这里允许宽松保存，交给 yt-dlp 校验。
+    if 'douyin.com' not in text and 'iesdouyin.com' not in text and 'tiktok.com' not in text:
+        raise RuntimeError('没有检测到 douyin.com / iesdouyin.com cookie，请确认导出的是抖音网页 cookies.txt。')
+    path = collector_cookie_path(settings)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text + '\n', encoding='utf-8')
+    return get_collector_cookie_status(settings)
+
+
 async def _download_direct(settings: Settings, url: str, method: str, warnings: list[str]) -> Optional[CollectedVideo]:
     headers = {
         'User-Agent': settings.collector_user_agent,
@@ -219,14 +263,33 @@ def _collect_with_ytdlp(settings: Settings, source_url: str, warnings: list[str]
         'retries': 1,
         'fragment_retries': 1,
         'progress_hooks': [progress_hook],
-        'http_headers': {'User-Agent': settings.collector_user_agent, 'Referer': 'https://www.douyin.com/'},
+        'http_headers': {
+            'User-Agent': settings.collector_user_agent,
+            'Referer': 'https://www.douyin.com/',
+            'Origin': 'https://www.douyin.com',
+            'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+        },
+        # 不强制校验证书，避免部分云环境证书链异常导致采集中断。
+        'nocheckcertificate': True,
     }
+
+    cookie_path = collector_cookie_path(settings)
+    if cookie_path.exists() and cookie_path.stat().st_size > 20:
+        opts['cookiefile'] = str(cookie_path)
+        warnings.append('备用视频采集器已携带 douyin_cookies.txt 登录态。')
+    else:
+        warnings.append('未配置 douyin_cookies.txt；如果平台要求 Fresh cookies，会自动降级为文案采集。')
 
     try:
         with yt_dlp.YoutubeDL(opts) as ydl:
             info = ydl.extract_info(source_url, download=True)
     except Exception as exc:
-        warnings.append(f'备用视频采集失败：{str(exc)[:300]}')
+        
+        msg = str(exc)[:500]
+        if 'Fresh cookies' in msg or 'cookies' in msg.lower():
+            warnings.append('备用视频采集失败：抖音要求新鲜 cookies。请在采集设置上传 douyin_cookies.txt，或在 Render Secret Files 配置 COLLECTOR_COOKIE_FILE。原始错误：' + msg)
+        else:
+            warnings.append(f'备用视频采集失败：{msg}')
         return None
 
     path = None

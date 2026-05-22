@@ -16,18 +16,20 @@ import {
   GrowthDecisionResponse,
   GrowthMetricInput,
   MemoryContextResponse,
+  CollectorCookieStatus,
   TTSResponse,
   TTSVoice,
   VideoEditChatResponse,
   VoiceDirectorResponse,
   VoiceSegment,
-  DigitalHumanCreateResponse,
   apiGet,
   apiPost,
+  getCollectorStatus,
+  uploadCollectorCookies,
   uploadAssets
 } from './api'
 
-type ModuleKey = 'dashboard' | 'monitor' | 'collector' | 'copy' | 'voice' | 'digitalHuman' | 'assets' | 'video' | 'subtitleCover' | 'publish' | 'strategy' | 'competitor' | 'trend' | 'shooting' | 'growth'
+type ModuleKey = 'dashboard' | 'monitor' | 'collector' | 'copy' | 'voice' | 'assets' | 'video' | 'subtitleCover' | 'publish' | 'strategy' | 'competitor' | 'trend' | 'shooting' | 'growth'
 
 function Field({ label, children, hint }: { label: string; children: ReactNode; hint?: string }) {
   return <label className="field"><span>{label}</span>{children}{hint && <em>{hint}</em>}</label>
@@ -60,7 +62,6 @@ const modules: { key: ModuleKey; icon: string; title: string; desc: string; tag:
   { key: 'collector', icon: '🔎', title: '1. 同行采集', desc: '采集同行视频、口令和钩子结构', tag: '采集' },
   { key: 'copy', icon: '✍️', title: '2. 文案生产', desc: '仿写改写、细改、入知识库', tag: '文案' },
   { key: 'voice', icon: '🎙️', title: '3. 配音导演', desc: '克隆音色、分段情绪、语速停顿', tag: '配音' },
-  { key: 'digitalHuman', icon: '🧑‍💼', title: '数字人', desc: '上传本人形象，生成口播数字人片段', tag: '数字人' },
   { key: 'assets', icon: '🗂️', title: '4. 素材选择', desc: '自有素材和采集视频分开管理', tag: '素材' },
   { key: 'video', icon: '🎬', title: '5. 剪辑合成', desc: '分段衔接、转场、贴片、字幕', tag: '剪辑' },
   { key: 'subtitleCover', icon: '🅰️', title: '6. 字幕封面', desc: '重点词高亮、封面样式、下载', tag: '视觉' },
@@ -77,7 +78,6 @@ const workflowSteps: { key: ModuleKey; step: string; title: string; desc: string
   { key: 'copy', step: '02', title: '仿写改写', desc: '基于同行结构做原创改写，保留打法，不照抄原文。', action: '去仿写' },
   { key: 'copy', step: '03', title: '文案细改', desc: '细调黄金三秒、标题、口播稿、违禁词和发布简介。', action: '改文案' },
   { key: 'voice', step: '04', title: '配音分段', desc: '选择叔叔音色，分段控制情绪、语速、停顿和语气。', action: '去配音' },
-  { key: 'digitalHuman', step: '04B', title: '数字人片段', desc: '上传授权照片或视频，把配音变成老板数字人口播素材。', action: '做数字人' },
   { key: 'assets', step: '05', title: '选择视频素材', desc: '选择老板、办公室、产品、案例素材；采集视频只作为学习参考。', action: '选素材' },
   { key: 'video', step: '06', title: '剪辑与合成', desc: '每段匹配素材，设置叠化/虚化/快切/贴片/字幕，生成 MP4。', action: '去剪辑' },
   { key: 'publish', step: '07', title: '平台发布', desc: '生成平台发布草稿，后续接抖音、视频号、快手、小红书开放平台。', action: '去发布' }
@@ -95,7 +95,7 @@ const pluginMatrix = [
 ]
 
 function nextStepOf(active: ModuleKey): ModuleKey {
-  const order: ModuleKey[] = ['collector','copy','voice','digitalHuman','assets','video','subtitleCover','publish']
+  const order: ModuleKey[] = ['collector','copy','voice','assets','video','subtitleCover','publish']
   const idx = order.indexOf(active)
   return idx >= 0 && idx < order.length - 1 ? order[idx + 1] : active
 }
@@ -146,6 +146,9 @@ export default function App() {
   const [sourceUrl, setSourceUrl] = useState('')
   const [manualText, setManualText] = useState('')
   const [extract, setExtract] = useState<InspirationExtractResponse | null>(null)
+  const [collectorStatus, setCollectorStatus] = useState<CollectorCookieStatus | null>(null)
+  const [collectorCookieText, setCollectorCookieText] = useState('')
+  const [showCookiePanel, setShowCookiePanel] = useState(false)
 
   const [copy, setCopy] = useState<GeneratedCopy>(emptyCopy)
   const [refineInstruction, setRefineInstruction] = useState('把开头改得更有压迫感，语气更像老板提醒客户；减少书面词，保留短视频口语感。')
@@ -158,11 +161,6 @@ export default function App() {
   const [voiceSegments, setVoiceSegments] = useState<VoiceSegment[]>([])
   const [voiceNotes, setVoiceNotes] = useState<string[]>([])
   const [audio, setAudio] = useState<TTSResponse | null>(null)
-  const [digitalHumanEngine, setDigitalHumanEngine] = useState('auto')
-  const [digitalHumanAvatarId, setDigitalHumanAvatarId] = useState('')
-  const [digitalHumanDriverId, setDigitalHumanDriverId] = useState('')
-  const [digitalHumanConsent, setDigitalHumanConsent] = useState(false)
-  const [digitalHuman, setDigitalHuman] = useState<DigitalHumanCreateResponse | null>(null)
 
   const [segmentSeconds, setSegmentSeconds] = useState<Record<number, number>>({})
   const [segmentTransitions, setSegmentTransitions] = useState<Record<number, string>>({})
@@ -302,10 +300,25 @@ export default function App() {
     setAssets(Array.isArray(list) ? list : [])
   }
 
+  async function reloadCollectorStatus() {
+    const status = await getCollectorStatus()
+    setCollectorStatus(status)
+    return status
+  }
+
+  async function saveCollectorCookies() {
+    const status = await run('上传抖音 Cookies', () => uploadCollectorCookies(collectorCookieText))
+    setCollectorStatus(status!)
+    setCollectorCookieText('')
+    setShowCookiePanel(false)
+    setLastHandoff('抖音采集 Cookies 已更新。之后采集器会携带登录态，公开视频采集成功率会更高。')
+  }
+
   useEffect(() => {
     apiGet('/api/health').then(setHealth).catch((e) => setError(e.message || 'API 未连接'))
     apiGet<TTSVoice[]>('/api/tts/voices').then(v => { const list = Array.isArray(v) ? v : []; setVoices(list); setVoice(list[0]?.id || '') }).catch(() => null)
     reloadAssets().catch(() => null)
+    reloadCollectorStatus().catch(() => null)
     reloadMemoryContext(true).catch(() => null)
   }, [])
 
@@ -512,22 +525,6 @@ ${manualText || ''}`.trim()
     if (autoAdvance) setActive('assets')
   }
 
-  async function makeDigitalHuman() {
-    if (!audio?.file_name) { setError('请先生成配音音频，再生成数字人。'); setActive('voice'); return }
-    if (!digitalHumanAvatarId) { setError('请先选择数字人形象素材：正脸照片、半身照片或本人视频。'); setActive('digitalHuman'); return }
-    const res = await run('生成数字人片段', () => apiPost<DigitalHumanCreateResponse>('/api/digital-human/create', {
-      avatar_asset_id: digitalHumanAvatarId,
-      driver_video_asset_id: digitalHumanDriverId,
-      audio_file_name: audio.file_name,
-      title: copy.title || '老板数字人口播',
-      script: currentScript,
-      engine: digitalHumanEngine,
-      consent_confirmed: digitalHumanConsent
-    }))
-    setDigitalHuman(res)
-    setActive('assets')
-  }
-
   async function composeVideo() {
     const ids = selectedMaterialIds.length ? selectedMaterialIds : materialAssets.slice(0, 8).map(a => a.id)
     const res = await run('合成视频并烧字幕', () => apiPost<ComposeResponse>('/api/compose-video', {
@@ -724,6 +721,26 @@ ${manualText || ''}`.trim()
           <Field label="抖音分享口令 / 视频链接"><textarea value={sourceUrl} onChange={e => setSourceUrl(e.target.value)} placeholder="直接粘贴：1.58 ... https://v.douyin.com/... 复制此链接..." /></Field>
           <Field label="手动粘贴竞品文案 / 豆包 App 识别稿"><textarea value={manualText} onChange={e => setManualText(e.target.value)} placeholder="如果已经有真实口播稿，粘这里。" /></Field>
         </div>
+        <div className="collectorAssist">
+          <div>
+            <strong>视频采集增强</strong>
+            <p>{collectorStatus?.hint || '正在读取采集器状态...'}</p>
+            <small>状态：{collectorStatus?.cookie_exists ? '已配置登录态 Cookies' : '未配置 Cookies'} · 采集器：{collectorStatus?.enabled ? '已启用' : '未启用'}</small>
+          </div>
+          <div className="buttonRow mini">
+            <Button label="刷新采集状态" onClick={() => reloadCollectorStatus()} kind="ghost" />
+            <Button label={showCookiePanel ? '收起 Cookies' : '上传 Cookies'} onClick={() => setShowCookiePanel(v => !v)} kind="soft" />
+          </div>
+        </div>
+        {showCookiePanel && <div className="cookiePanel">
+          <h4>上传 douyin_cookies.txt</h4>
+          <p>遇到 “Fresh cookies needed” 时，需要导出你自己浏览器里的抖音 cookies。只用于你的后端采集公开可访问内容，不会提交到前端展示。</p>
+          <textarea value={collectorCookieText} onChange={e => setCollectorCookieText(e.target.value)} placeholder="# Netscape HTTP Cookie File\n.douyin.com\tTRUE\t/\tTRUE\t..." />
+          <div className="buttonRow">
+            <Button busy={busy === '上传抖音 Cookies' ? busy : ''} label="保存 Cookies 到后端" onClick={saveCollectorCookies} disabled={!collectorCookieText.trim()} />
+            <Button label="取消" onClick={() => setShowCookiePanel(false)} kind="ghost" />
+          </div>
+        </div>}
         {extract && <div className="resultBox">
           <div className="resultTop"><Pill>{extract.status}</Pill><Pill tone="purple">{extract.collector_status || 'text'}</Pill>{extract.collected_video_url && <a href={extract.collected_video_url} target="_blank">打开采集视频</a>}</div>
           <h3>同行拆解结果</h3><p>{extract.summary}</p>
@@ -749,22 +766,6 @@ ${manualText || ''}`.trim()
         <div className="buttonRow"><button className="addSegment" onClick={addVoiceSegment}>+ 手动添加空白分段</button><button className="addSegment" onClick={addSelectedScriptAsSegment}>+ 把选中文案加入分段</button></div>
         <div className="segments">{voiceSegments.map((seg, i) => <div className="segmentCard" key={i}><div className="segmentHead"><strong>第 {i + 1} 段 · {segmentSeconds[i] || estimateSeconds(seg.text, seg.speed_ratio)} 秒</strong><div><button onClick={() => moveVoiceSegment(i, -1)}>↑</button><button onClick={() => moveVoiceSegment(i, 1)}>↓</button><button onClick={() => removeVoiceSegment(i)}>删除</button></div></div><textarea value={seg.text} onChange={e => updateVoiceSegment(i, { text: e.target.value })} /><div className="segmentGrid"><Field label="情绪"><input value={seg.emotion} onChange={e => updateVoiceSegment(i, { emotion: e.target.value })} /></Field><Field label={`语速 ${seg.speed_ratio}`}><input type="range" min="0.75" max="1.35" step="0.01" value={seg.speed_ratio} onChange={e => updateVoiceSegment(i, { speed_ratio: Number(e.target.value) })} /></Field><Field label={`音量 ${seg.volume_ratio}`}><input type="range" min="0.7" max="1.4" step="0.01" value={seg.volume_ratio} onChange={e => updateVoiceSegment(i, { volume_ratio: Number(e.target.value) })} /></Field><Field label={`停顿 ${seg.pause_after_ms}ms`}><input type="range" min="0" max="1500" step="50" value={seg.pause_after_ms} onChange={e => updateVoiceSegment(i, { pause_after_ms: Number(e.target.value) })} /></Field></div></div>)}</div>
         {audio && <div className="mediaBox"><audio controls src={audio.file_url} /><a href={audio.file_url} target="_blank">下载配音</a>{audio.warning && <div className="warn">{audio.warning}</div>}</div>}
-      </section>}
-
-
-      {active === 'digitalHuman' && <section className="card modulePanel">
-        <div className="sectionHeader"><div><h2>数字人工作台</h2><p>上传授权的本人照片或视频，用已经生成的豆包配音驱动口播片段。Render 负责提交任务；真实口型同步建议接 GPU worker。</p></div><Button busy={busy === '生成数字人片段' ? busy : ''} label="生成数字人片段" onClick={makeDigitalHuman} disabled={!audio?.file_name || !digitalHumanAvatarId || !digitalHumanConsent} /></div>
-        <div className="grid3">
-          <Field label="数字人形象素材"><select value={digitalHumanAvatarId} onChange={e => setDigitalHumanAvatarId(e.target.value)}><option value="">选择已上传照片/视频</option>{assets.map(a => <option key={a.id} value={a.id}>{a.kind} · {a.original_name || a.filename}</option>)}</select><em>建议上传本人授权的正脸/半身照片，或 5-15 秒自然说话视频。</em></Field>
-          <Field label="动作参考视频（可选）"><select value={digitalHumanDriverId} onChange={e => setDigitalHumanDriverId(e.target.value)}><option value="">不用动作参考</option>{assets.filter(a => a.kind === 'video').map(a => <option key={a.id} value={a.id}>{a.original_name || a.filename}</option>)}</select><em>后续接 LivePortrait/MuseTalk 时可用来参考表情和头部动作。</em></Field>
-          <Field label="引擎"><select value={digitalHumanEngine} onChange={e => setDigitalHumanEngine(e.target.value)}><option value="auto">自动</option><option value="preview">静态预览</option><option value="sadtalker">SadTalker</option><option value="musetalk">MuseTalk</option><option value="wav2lip">Wav2Lip</option><option value="liveportrait">LivePortrait</option><option value="webhook">外部 Webhook</option></select><em>未配置 GPU worker 时会生成静态头像预览。</em></Field>
-        </div>
-        <label className="checkline"><input type="checkbox" checked={digitalHumanConsent} onChange={e => setDigitalHumanConsent(e.target.checked)} /> 我确认已获得本人形象和声音授权，仅用于合法商业内容。</label>
-        <div className="infoGrid">
-          <div><strong>输入</strong><p>形象素材：{digitalHumanAvatarId || '未选择'}<br />配音音频：{audio?.file_name || '未生成'}<br />脚本：{shortText(currentScript || '', 80) || '未生成'}</p></div>
-          <div><strong>推荐开源引擎</strong><p>SadTalker：单图口播；MuseTalk：高质量口型；Wav2Lip：现有视频换口型；LivePortrait：表情动作更自然。</p></div>
-        </div>
-        {digitalHuman && <div className="resultBox"><h3>数字人结果</h3><p>{digitalHuman.message}</p>{digitalHuman.warnings?.map(w => <div className="warn" key={w}>{w}</div>)}{digitalHuman.video_url && <video controls src={digitalHuman.video_url} className="previewVideo" />}{digitalHuman.video_url && <a className="btn ghost" href={digitalHuman.video_url} target="_blank">下载/打开数字人片段</a>}</div>}
       </section>}
 
       {active === 'assets' && <section className="card modulePanel">
