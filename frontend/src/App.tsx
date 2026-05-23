@@ -61,22 +61,22 @@ const defaultSegment: VoiceSegment = {
 }
 
 const modules: { key: ModuleKey; icon: string; title: string; desc: string; tag: string }[] = [
-  { key: 'dashboard', icon: '🏠', title: '流程总览', desc: '一条视频从采集到发布的主流程', tag: '总览' },
-  { key: 'monitor', icon: '🧭', title: '运营中控台', desc: '总览进度、数据库、插件和待办', tag: '监控' },
-  { key: 'lead', icon: '📲', title: '获客自动化', desc: '截留、联动、监听、回复、私域承接', tag: '获客' },
-  { key: 'collector', icon: '🔎', title: '1. 同行采集', desc: '采集同行视频、口令和钩子结构', tag: '采集' },
-  { key: 'copy', icon: '✍️', title: '2. 文案生产', desc: '仿写改写、细改、入知识库', tag: '文案' },
-  { key: 'voice', icon: '🎙️', title: '3. 配音导演', desc: '克隆音色、分段情绪、语速停顿', tag: '配音' },
-  { key: 'digitalHuman', icon: '🧑‍💼', title: '数字人', desc: '上传本人形象，生成老板口播片段', tag: '数字人' },
-  { key: 'assets', icon: '🗂️', title: '4. 素材选择', desc: '自有素材和采集视频分开管理', tag: '素材' },
-  { key: 'video', icon: '🎬', title: '5. 剪辑合成', desc: '分段衔接、转场、贴片、字幕', tag: '剪辑' },
-  { key: 'subtitleCover', icon: '🅰️', title: '6. 字幕封面', desc: '重点词高亮、封面样式、下载', tag: '视觉' },
-  { key: 'publish', icon: '🚀', title: '7. 平台发布', desc: '发布草稿、平台适配、开放接口预留', tag: '发布' },
-  { key: 'strategy', icon: '🎯', title: '客户定位', desc: '行业、目标客户、成交路径、老板人设', tag: '定位' },
-  { key: 'competitor', icon: '👀', title: '竞品账号库', desc: '长期沉淀同行账号和爆款特征', tag: '账号' },
-  { key: 'trend', icon: '📡', title: '行业爆点', desc: '选题雷达、热点关键词、拍摄方向', tag: '雷达' },
-  { key: 'shooting', icon: '🎥', title: '运营拍摄', desc: '拍摄任务单、提词器、B-roll 清单', tag: '拍摄' },
-  { key: 'growth', icon: '📈', title: '增长投流细节', desc: '流量数据、机器学习投流、优化动作', tag: '增长' }
+  { key: 'dashboard', icon: '总', title: '流程总览', desc: '一条视频从采集到发布的主流程', tag: '总览' },
+  { key: 'monitor', icon: '控', title: '运营中控台', desc: '总览进度、数据库、插件和待办', tag: '监控' },
+  { key: 'lead', icon: '获', title: '获客自动化', desc: '截留、联动、监听、回复、私域承接', tag: '获客' },
+  { key: 'collector', icon: '采', title: '1. 同行采集', desc: '采集同行视频、口令和钩子结构', tag: '采集' },
+  { key: 'copy', icon: '文', title: '2. 文案生产', desc: '仿写改写、细改、入知识库', tag: '文案' },
+  { key: 'voice', icon: '声', title: '3. 配音导演', desc: '克隆音色、分段情绪、语速停顿', tag: '配音' },
+  { key: 'digitalHuman', icon: '人', title: '数字人', desc: '上传本人形象，生成老板口播片段', tag: '数字人' },
+  { key: 'assets', icon: '素', title: '4. 素材选择', desc: '自有素材和采集视频分开管理', tag: '素材' },
+  { key: 'video', icon: '剪', title: '5. 剪辑合成', desc: '分段衔接、转场、贴片、字幕', tag: '剪辑' },
+  { key: 'subtitleCover', icon: '字', title: '6. 字幕封面', desc: '重点词高亮、封面样式、下载', tag: '视觉' },
+  { key: 'publish', icon: '发', title: '7. 平台发布', desc: '发布草稿、平台适配、开放接口预留', tag: '发布' },
+  { key: 'strategy', icon: '客', title: '客户定位', desc: '行业、目标客户、成交路径、老板人设', tag: '定位' },
+  { key: 'competitor', icon: '竞', title: '竞品账号库', desc: '长期沉淀同行账号和爆款特征', tag: '账号' },
+  { key: 'trend', icon: '雷', title: '行业爆点', desc: '选题雷达、热点关键词、拍摄方向', tag: '雷达' },
+  { key: 'shooting', icon: '拍', title: '运营拍摄', desc: '拍摄任务单、提词器、B-roll 清单', tag: '拍摄' },
+  { key: 'growth', icon: '投', title: '增长投流细节', desc: '流量数据、机器学习投流、优化动作', tag: '增长' }
 ]
 
 const workflowSteps: { key: ModuleKey; step: string; title: string; desc: string; action: string }[] = [
@@ -697,8 +697,8 @@ ${manualText || ''}`.trim()
   return <div className="appShell">
     <aside className="studioNav">
       <div className="brandMark">
-        <div className="logo">抖</div>
-        <div><strong>AI视频获客系统</strong><span>采集 · 仿写 · 配音 · 剪辑 · 发布</span></div>
+        <div className="logo">AI</div>
+        <div><strong>AI 视频增长中枢</strong><span>采集 · 创作 · 合成 · 转化</span></div>
       </div>
       <button className="startButton" onClick={() => setActive('dashboard')}>开始使用</button>
       <nav>
@@ -712,9 +712,9 @@ ${manualText || ''}`.trim()
     <main className="studioMain">
       <header className="heroHeader">
         <div>
-          <span className="eyebrow">短视频获客工作台</span>
-          <h1>采集同行视频 → 仿写改写 → 文案细改 → 配音分段 → 选素材 → 剪辑合成 → 平台发布</h1>
-          <p>按真实运营流程走：先学同行，再做原创，再配音剪辑。每个模块独立，但结果会自动流转到下一步。</p>
+          <span className="eyebrow">AI Growth Studio</span>
+          <h1>从同行洞察到成片发布，一套闭环获客生产线</h1>
+          <p>系统沉淀客户画像、竞品打法、文案资产和素材资产；每一步结果自动流转，减少重复操作，提升内容获客效率。</p>
         </div>
         <div className="scoreCard"><span>当前进度</span><strong>{leadScore}%</strong><small>{leadScore >= 80 ? '可以进入发布前检查' : '继续补齐内容和素材'}</small></div>
       </header>
