@@ -10,6 +10,7 @@ from typing import Any, Dict, List, Optional
 from app.config import Settings
 from app.services.deepseek import DeepSeekError, _chat_json
 from app.services.doubao import extract_with_doubao, parse_competitor_input
+from app.services.collector import collector_cookie_path
 from app.services.memory import MemoryStore
 
 URL_RE = re.compile(r'https?://[^\s，。！？!！；;]+', re.I)
@@ -71,7 +72,8 @@ def discover_recent_video_urls(settings: Settings, source_url: str, limit: int =
     except Exception as exc:
         return [], [f'yt-dlp 未安装或不可用：{exc}']
 
-    cookiefile = (settings.collector_cookie_file or '').strip()
+    cookie_path = collector_cookie_path(settings)
+    cookiefile = str(cookie_path) if cookie_path.exists() and cookie_path.stat().st_size > 20 else ''
     opts: dict[str, Any] = {
         'extract_flat': True,
         'skip_download': True,

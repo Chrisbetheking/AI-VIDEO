@@ -98,6 +98,65 @@ def _check_size_limit(path: Path, max_mb: int) -> None:
         raise RuntimeError(f'采集到的视频 {size_mb:.1f}MB，超过限制 {max_mb}MB。请换短视频或上传精简 MP4。')
 
 
+
+
+def _looks_like_netscape_cookie(text: str) -> bool:
+    lines = [x for x in (text or '').splitlines() if x.strip() and not x.strip().startswith('#')]
+    if not lines:
+        return False
+    # Netscape cookies: domain \t include_subdomains \t path \t secure \t expiry \t name \t value
+    return any(len(line.split('\t')) >= 7 for line in lines[:30])
+
+
+def _cookie_json_to_netscape(text: str) -> str:
+    """Accept common browser extension JSON exports and convert to Netscape cookies.txt.
+
+    This does not bypass any platform restriction; it only lets the user provide cookies
+    from their own browser session in a format yt-dlp understands.
+    """
+    try:
+        data = json.loads(text)
+    except Exception:
+        return text
+    if isinstance(data, dict):
+        # Some extensions export {"cookies": [...]}.
+        data = data.get('cookies') or data.get('data') or []
+    if not isinstance(data, list):
+        return text
+    rows = ['# Netscape HTTP Cookie File']
+    found = False
+    for item in data:
+        if not isinstance(item, dict):
+            continue
+        domain = str(item.get('domain') or item.get('host') or '').strip()
+        name = str(item.get('name') or '').strip()
+        value = str(item.get('value') or '')
+        if not domain or not name:
+            continue
+        if 'douyin.com' not in domain and 'iesdouyin.com' not in domain and 'bytedance.com' not in domain:
+            continue
+        include_subdomains = 'TRUE' if domain.startswith('.') or bool(item.get('hostOnly') is False) else 'FALSE'
+        path = str(item.get('path') or '/')
+        secure = 'TRUE' if bool(item.get('secure')) else 'FALSE'
+        expiry = item.get('expirationDate') or item.get('expires') or item.get('expiry') or 0
+        try:
+            expiry_int = int(float(expiry))
+        except Exception:
+            expiry_int = 0
+        rows.append('\t'.join([domain, include_subdomains, path, secure, str(expiry_int), name, value]))
+        found = True
+    return '\n'.join(rows) + '\n' if found else text
+
+
+def _normalize_cookie_text(text: str) -> str:
+    text = (text or '').replace('\r\n', '\n').replace('\r', '\n').strip()
+    if not text:
+        return ''
+    text = _cookie_json_to_netscape(text).strip()
+    if not text.startswith('# Netscape') and _looks_like_netscape_cookie(text):
+        text = '# Netscape HTTP Cookie File\n' + text
+    return text + '\n'
+
 def collector_cookie_path(settings: Settings) -> Path:
     """Return the preferred cookie file path.
 
@@ -128,17 +187,16 @@ def get_collector_cookie_status(settings: Settings) -> dict:
 def save_collector_cookie_text(settings: Settings, cookie_text: str) -> dict:
     if not settings.enable_collector_cookie_upload:
         raise RuntimeError('当前后端未启用 cookie 上传，请用 Render Secret Files 配置。')
-    text = (cookie_text or '').strip()
-    if not text:
+    text = _normalize_cookie_text(cookie_text)
+    if not text.strip():
         raise RuntimeError('cookies 内容为空。')
     if len(text) > settings.collector_cookies_max_chars:
         raise RuntimeError(f'cookies 内容过大，超过 {settings.collector_cookies_max_chars} 字符。')
-    # Netscape cookies.txt 通常包含 # Netscape 或若干 tab 分隔字段。这里允许宽松保存，交给 yt-dlp 校验。
-    if 'douyin.com' not in text and 'iesdouyin.com' not in text and 'tiktok.com' not in text:
-        raise RuntimeError('没有检测到 douyin.com / iesdouyin.com cookie，请确认导出的是抖音网页 cookies.txt。')
+    if 'douyin.com' not in text and 'iesdouyin.com' not in text and 'bytedance.com' not in text:
+        raise RuntimeError('没有检测到 douyin.com / iesdouyin.com cookie，请确认导出的是抖音网页 cookies.txt 或浏览器 Cookie JSON。')
     path = collector_cookie_path(settings)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text + '\n', encoding='utf-8')
+    path.write_text(text, encoding='utf-8')
     return get_collector_cookie_status(settings)
 
 

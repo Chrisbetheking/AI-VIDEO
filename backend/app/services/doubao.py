@@ -13,6 +13,7 @@ import httpx
 from app.config import Settings
 from app.schemas import InspirationExtractResponse
 from app.services.collector import collect_public_video_best_effort
+from app.services.storage import maybe_upload_to_r2
 
 
 VIDEO_EXTS = {'.mp4', '.mov', '.m4v', '.webm'}
@@ -139,6 +140,7 @@ def _manual_response(reference_text: str, source_name: str, warnings: list[str])
 async def extract_with_doubao(settings: Settings, video_path: Optional[Path], source_url: str = '', manual_text: str = '') -> InspirationExtractResponse:
     parsed_url, reference_text, warnings = parse_competitor_input(source_url, manual_text)
     collected = None
+    collected_public_url = None
 
     # App 式采集：用户粘贴抖音分享口令/短链时，先尽力把公开视频采集成 MP4。
     # 采集失败不报错，自动降级为分享文案/钩子采集。
@@ -147,6 +149,10 @@ async def extract_with_doubao(settings: Settings, video_path: Optional[Path], so
         warnings.extend(collector_warnings)
         if collected and collected.path.exists():
             video_path = collected.path
+            try:
+                collected_public_url = maybe_upload_to_r2(settings, collected.path, prefix='collected-videos')
+            except Exception as exc:
+                warnings.append(f'采集视频已保存到后端本地，R2 上传失败：{str(exc)[:160]}')
             warnings.append(f'已采集到视频文件：{collected.path.name}，将尝试用豆包视频理解提取口播/画面。')
             extra_text = ' '.join(x for x in [collected.title, collected.description] if x).strip()
             if extra_text and extra_text not in reference_text:
@@ -228,6 +234,6 @@ async def extract_with_doubao(settings: Settings, video_path: Optional[Path], so
         warnings=warnings,
         collected_asset_id=collected.asset_id if collected else None,
         collected_video_name=collected.path.name if collected else None,
-        collected_video_url=(f'/files/uploads/{collected.path.name}' if collected else None),
+        collected_video_url=(collected_public_url or f'/files/uploads/{collected.path.name}' if collected else None),
         collector_status=collected.method if collected else ('share_text_only' if reference_text else ''),
     )
