@@ -204,7 +204,7 @@ def _volc_auth_headers(settings: Settings, action: str, body: dict[str, Any]) ->
     return url, headers, body_bytes
 
 
-async def _volc_call(settings: Settings, action: str, body: dict[str, Any]) -> dict[str, Any]:
+async def _volc_call(settings: Settings, action: str, body: dict[str, Any], *, raise_response_error: bool = True) -> dict[str, Any]:
     url, headers, body_bytes = _volc_auth_headers(settings, action, body)
     async with httpx.AsyncClient(timeout=settings.digital_human_timeout_seconds) as client:
         res = await client.post(url, headers=headers, content=body_bytes)
@@ -221,6 +221,8 @@ async def _volc_call(settings: Settings, action: str, body: dict[str, Any]) -> d
         err = data['ResponseMetadata']['Error']
         code = str(err.get('Code') or '')
         msg = str(err.get('Message') or '')
+        if not raise_response_error:
+            return data
         if code == '50430' or 'Concurrent Limit' in msg:
             raise RuntimeError('火山即梦并发限流：当前账号/模型正在生成中的任务还没结束，不能重复提交。请等待当前任务完成后再新建，或用已有 task_id 查询结果。')
         raise RuntimeError(f"火山即梦接口错误：{err.get('Code')} {err.get('Message')}")
@@ -484,7 +486,46 @@ async def query_jimeng_digital_human(settings: Settings, *, task_id: str, model:
         raise RuntimeError('缺少 task_id，无法查询数字人任务。')
     _submit_action, get_action, req_key = _jimeng_actions(settings, model)
     query_body = {'req_key': req_key, 'task_id': task_id}
-    data = await _volc_call(settings, get_action, query_body)
+    data = await _volc_call(settings, get_action, query_body, raise_response_error=False)
+
+    # 火山有时会对错误 task_id / 错误模型返回 200 + ResponseMetadata.Error，
+    # 旧代码会把它作为 500 抛给前端，导致用户不知道是任务 ID 不匹配还是仍在生成。
+    # 这里改成结构化结果，并保留 raw，方便在页面上直接看到火山原始返回。
+    err = data.get('ResponseMetadata', {}).get('Error') if isinstance(data, dict) else None
+    if isinstance(err, dict):
+        err_code = str(err.get('Code') or '')
+        err_msg = str(err.get('Message') or '')
+        raw_hint = _compact_raw(data, 900)
+        if err_code == '50215' or 'Input invalid for this service' in err_msg:
+            return DigitalHumanResult(
+                status='failed',
+                engine=f'jimeng:{model}',
+                message='这个 task_id 不是当前 OmniHuman1.5 服务的有效任务，通常是浏览器缓存了旧任务、任务模型不匹配，或上次提交没有真正生成有效 task_id。请清除当前任务后重新提交。',
+                job_id=task_id,
+                raw=data,
+                warnings=[
+                    '火山返回 50215：Input invalid for this service。',
+                    '处理办法：点击“清除当前任务”，确认模型选择 OmniHuman1.5，再重新生成数字人片段。',
+                    f'原始响应片段：{raw_hint}',
+                ],
+            )
+        if err_code == '50430' or 'Concurrent Limit' in err_msg:
+            return DigitalHumanResult(
+                status='running',
+                engine=f'jimeng:{model}',
+                message='火山即梦当前并发已满，说明已有任务正在生成或排队。不要重复提交，稍后继续查询。',
+                job_id=task_id,
+                raw=data,
+                warnings=['火山返回 50430：并发限制。一般等当前任务结束后会恢复。'],
+            )
+        return DigitalHumanResult(
+            status='failed',
+            engine=f'jimeng:{model}',
+            message=f'火山即梦查询失败：{err_code} {err_msg}',
+            job_id=task_id,
+            raw=data,
+            warnings=[f'原始响应片段：{raw_hint}'],
+        )
 
     video_url = _extract_video_url(data)
     status = _extract_status(data)

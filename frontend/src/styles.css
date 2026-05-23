@@ -311,3 +311,13 @@ input:focus,textarea:focus,select:focus{
 
 /* Digital human concurrency guard */
 .strongWarn{font-weight:850;border-color:#f59e0b;background:linear-gradient(180deg,#fff7ed,#fff);box-shadow:0 10px 24px rgba(245,158,11,.08)}
+
+.btn.danger,
+.btn.ghost.danger {
+  color: #b42318;
+  border-color: #fecaca;
+  background: #fff7f7;
+}
+.btn.ghost.danger:hover {
+  background: #fee2e2;
+}

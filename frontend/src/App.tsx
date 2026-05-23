@@ -53,6 +53,13 @@ function Empty({ children }: { children: ReactNode }) { return <div className="e
 const emptyCopy: GeneratedCopy = { title: '', hook: '', script: '', description: '', tags: [], shots: [], kb_refs: [] }
 const DIGITAL_HUMAN_TASK_KEY = 'ai_video_current_digital_human_task_v1'
 
+function getDigitalHumanTaskModel(task: DigitalHumanCreateResponse | null, fallback: string) {
+  const engine = String(task?.engine || '')
+  const match = engine.match(/^jimeng:([a-zA-Z0-9_-]+)/)
+  return match?.[1] || fallback || 'omnihuman15'
+}
+
+
 const defaultSegment: VoiceSegment = {
   text: '这里输入新增口播分段。',
   emotion: '自然可信',
@@ -442,6 +449,8 @@ export default function App() {
     try {
       if (digitalHuman?.job_id) {
         window.localStorage.setItem(DIGITAL_HUMAN_TASK_KEY, JSON.stringify(digitalHuman))
+      } else if (!digitalHuman) {
+        window.localStorage.removeItem(DIGITAL_HUMAN_TASK_KEY)
       }
     } catch {
       // Ignore localStorage quota / privacy-mode errors.
@@ -469,7 +478,7 @@ export default function App() {
       checkDigitalHumanStatus(true).catch(() => null)
     }, 20000)
     return () => window.clearInterval(timer)
-  }, [active, digitalHuman?.job_id, digitalHuman?.video_url, digitalHuman?.status, digitalHumanJimengModel])
+  }, [active, digitalHuman?.job_id, digitalHuman?.video_url, digitalHuman?.status, digitalHuman?.engine, digitalHumanJimengModel])
 
   async function handleUpload(files: FileList | null) {
     if (!files?.length) return
@@ -723,9 +732,18 @@ ${manualText || ''}`.trim()
     }
   }
 
+  function clearDigitalHumanTask() {
+    setDigitalHuman(null)
+    setDigitalHumanPollCount(0)
+    setDigitalHumanLastChecked('')
+    try { window.localStorage.removeItem(DIGITAL_HUMAN_TASK_KEY) } catch {}
+    setLastHandoff('已清除当前数字人任务。可以重新提交一个新的 OmniHuman1.5 任务。')
+  }
+
   async function checkDigitalHumanStatus(silent = false) {
     if (!digitalHuman?.job_id) { if (!silent) setError('当前没有可查询的数字人 task_id。'); return }
-    const url = `/api/digital-human/status/${encodeURIComponent(digitalHuman.job_id || '')}?model=${encodeURIComponent(digitalHumanJimengModel)}`
+    const taskModel = getDigitalHumanTaskModel(digitalHuman, digitalHumanJimengModel)
+    const url = `/api/digital-human/status/${encodeURIComponent(digitalHuman.job_id || '')}?model=${encodeURIComponent(taskModel)}`
     const fetchStatus = () => apiGet<DigitalHumanCreateResponse>(url)
     let res: DigitalHumanCreateResponse | undefined
     if (silent) {
@@ -739,6 +757,8 @@ ${manualText || ''}`.trim()
     setDigitalHumanPollCount(prev => prev + 1)
     if (res.video_url) {
       setLastHandoff('数字人片段已生成。可以把它作为素材进入素材选择和剪辑合成。')
+    } else if (String(res.status || '').toLowerCase() === 'failed') {
+      setLastHandoff('当前数字人任务不可继续查询。请查看火山原始返回，必要时清除当前任务后重新提交。')
     } else {
       setLastHandoff('火山即梦仍在生成或排队中。系统会每 20 秒自动查询一次，也可以手动点击查询。')
     }
@@ -1046,7 +1066,7 @@ https://www.douyin.com/user/..." /></Field>
         <label className="checkline"><input type="checkbox" checked={digitalHumanConsent} onChange={e => setDigitalHumanConsent(e.target.checked)} /> 我确认已获得本人形象和声音授权，仅用于合法商业内容。</label>
         <div className="infoGrid"><div><strong>当前输入</strong><p>形象素材：{digitalHumanAvatarId || '未选择'}<br />配音音频：{audio?.file_name || '未生成'}<br />脚本：{shortText(currentScript || '', 90) || '未生成'}</p></div><div><strong>接入建议</strong><p>需要真人口型同步时选择“火山即梦/OmniHuman”；不调用数字人时用“静态预览/素材合成”继续走上传素材合成流程。</p></div></div>
         {hasRunningDigitalHumanTask && <div className="warn strongWarn">已有任务正在火山侧排队/生成中。请不要再次点击提交，否则会触发 429 并发限制；等待当前任务完成或点击“查询当前数字人任务”。</div>}
-        {digitalHuman && <div className="resultBox"><h3>数字人结果</h3><p>{digitalHuman.message}</p><div className="resultMeta"><Pill tone={digitalHuman.video_url ? 'green' : digitalHuman.status === 'failed' ? 'red' : 'orange'}>状态：{digitalHuman.status || 'running'}</Pill>{digitalHumanLastChecked && <Pill tone="blue">最近查询：{digitalHumanLastChecked}</Pill>}{digitalHumanPollCount > 0 && <Pill tone="purple">已查询 {digitalHumanPollCount} 次</Pill>}</div>{digitalHuman.job_id && <p className="muted">任务 ID：{digitalHuman.job_id}</p>}{digitalHuman.job_id && !digitalHuman.video_url && <div className="warn">OmniHuman1.5 是排队生成任务，不是实时接口。系统会每 20 秒自动查一次；如果超过 20-30 分钟仍无结果，请去火山控制台 / API Explorer 用这个 task_id 查询任务详情。</div>}{digitalHuman.warnings?.map(w => <div className="warn" key={w}>{w}</div>)}{digitalHuman.job_id && !digitalHuman.video_url && <button className="btn soft" onClick={() => checkDigitalHumanStatus(false)} disabled={busy === '查询数字人结果'}>{busy === '查询数字人结果' ? '查询中…' : '立即查询数字人结果'}</button>}{digitalHuman.raw && <details className="rawBox"><summary>查看火山原始返回</summary><pre>{JSON.stringify(digitalHuman.raw, null, 2).slice(0, 2600)}</pre></details>}{digitalHuman.video_url && <video controls src={digitalHuman.video_url} className="previewVideo" />}{digitalHuman.video_url && <a className="download" href={digitalHuman.video_url} target="_blank">下载/打开数字人片段</a>}</div>}
+        {digitalHuman && <div className="resultBox"><h3>数字人结果</h3><p>{digitalHuman.message}</p><div className="resultMeta"><Pill tone={digitalHuman.video_url ? 'green' : digitalHuman.status === 'failed' ? 'red' : 'orange'}>状态：{digitalHuman.status || 'running'}</Pill>{digitalHumanLastChecked && <Pill tone="blue">最近查询：{digitalHumanLastChecked}</Pill>}{digitalHumanPollCount > 0 && <Pill tone="purple">已查询 {digitalHumanPollCount} 次</Pill>}</div>{digitalHuman.job_id && <p className="muted">任务 ID：{digitalHuman.job_id}<br />查询模型：{getDigitalHumanTaskModel(digitalHuman, digitalHumanJimengModel)}</p>}{digitalHuman.job_id && !digitalHuman.video_url && <div className="warn">OmniHuman1.5 是排队生成任务，不是实时接口。系统会每 20 秒自动查一次；如果超过 20-30 分钟仍无结果，请去火山控制台 / API Explorer 用这个 task_id 查询任务详情。</div>}{digitalHuman.warnings?.map(w => <div className="warn" key={w}>{w}</div>)}{digitalHuman.job_id && !digitalHuman.video_url && <div className="buttonRow"><button className="btn soft" onClick={() => checkDigitalHumanStatus(false)} disabled={busy === '查询数字人结果'}>{busy === '查询数字人结果' ? '查询中…' : '立即查询数字人结果'}</button><button className="btn ghost danger" onClick={clearDigitalHumanTask}>清除当前任务</button></div>}{digitalHuman.raw && <details className="rawBox"><summary>查看火山原始返回</summary><pre>{JSON.stringify(digitalHuman.raw, null, 2).slice(0, 2600)}</pre></details>}{digitalHuman.video_url && <video controls src={digitalHuman.video_url} className="previewVideo" />}{digitalHuman.video_url && <a className="download" href={digitalHuman.video_url} target="_blank">下载/打开数字人片段</a>}</div>}
       </section>}
 
       {active === 'assets' && <section className="card modulePanel">
