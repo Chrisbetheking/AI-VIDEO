@@ -508,6 +508,20 @@ async def api_tts_segments(req: TTSSegmentsRequest, request: Request, settings: 
     return TTSResponse(file_url=file_url(request, path.name, public_url), file_name=path.name, duration_seconds=duration, warning=warning)
 
 
+
+
+@app.get('/api/storage/status')
+def storage_status(settings: Settings = Depends(get_settings)) -> dict:
+    return {
+        'ok': True,
+        'uploads_dir': str(settings.uploads_dir),
+        'outputs_dir': str(settings.outputs_dir),
+        'r2_enabled': settings.r2_enabled,
+        'r2_bucket_name': settings.r2_bucket_name,
+        'r2_public_base_url': settings.r2_public_base_url,
+    }
+
+
 @app.get('/api/knowledge', response_model=List[KnowledgeItem])
 def api_list_knowledge(kb: KnowledgeBase = Depends(get_kb)) -> List[KnowledgeItem]:
     return kb.list(limit=50)
@@ -650,7 +664,7 @@ def api_delete_asset(asset_id: str, settings: Settings = Depends(get_settings)) 
 
 @app.get('/api/collected-videos', response_model=List[AssetItem])
 def api_list_collected_videos(request: Request, settings: Settings = Depends(get_settings)) -> List[AssetItem]:
-    items = api_list_assets(request, settings)
+    items = api_list_assets(request=request, settings=settings)
     return [item for item in items if item.kind == 'video' and item.filename.startswith('collected_')][:100]
 
 
