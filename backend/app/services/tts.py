@@ -226,7 +226,7 @@ def _concat_wavs(parts: Iterable[Path], output: Path) -> None:
         raise RuntimeError('没有可合并的分段音频。')
     list_path = output.parent / f'concat_{uuid.uuid4().hex}.txt'
     list_path.write_text('\n'.join("file '" + str(p).replace("'", "'\\''") + "'" for p in part_list), encoding='utf-8')
-    cmd = ['ffmpeg', '-y', '-f', 'concat', '-safe', '0', '-i', str(list_path), '-c:a', 'pcm_s16le', str(output)]
+    cmd = ['ffmpeg', '-y', '-f', 'concat', '-safe', '0', '-i', str(list_path), '-c:a', 'libmp3lame', '-q:a', '3', str(output)]
     proc = run_cmd(cmd, timeout=240)
     list_path.unlink(missing_ok=True)
     if proc.returncode != 0:
@@ -261,6 +261,10 @@ async def synthesize_tts_segments(settings: Settings, segments: list[VoiceSegmen
                     )
                     wav = tmp_dir / f'{index:02d}_voice.wav'
                     await asyncio.to_thread(_convert_to_standard_wav, raw, wav)
+                    try:
+                        raw.unlink(missing_ok=True)
+                    except Exception:
+                        pass
                 elif provider in {'sapi', 'windows', 'local'}:
                     wav = tmp_dir / f'{index:02d}_voice.wav'
                     await asyncio.to_thread(synthesize_sapi_to_wav, wav, text, voice or 'default', str(segment.speed_ratio))
@@ -279,7 +283,7 @@ async def synthesize_tts_segments(settings: Settings, segments: list[VoiceSegmen
                 await asyncio.to_thread(_make_silence_wav, silent, int(estimate_speech_duration(text) * 1000))
                 wav_parts.append(silent)
 
-        output = settings.outputs_dir / f'tts_segments_{uuid.uuid4().hex}.wav'
+        output = settings.outputs_dir / f'tts_segments_{uuid.uuid4().hex}.mp3'
         await asyncio.to_thread(_concat_wavs, wav_parts, output)
         duration = probe_duration(output) or sum(estimate_speech_duration(seg.text) + seg.pause_after_ms / 1000 for seg in segments)
         warning = '；'.join(warnings) if warnings else None

@@ -9,7 +9,7 @@ from typing import List, Optional
 
 from fastapi import BackgroundTasks, Depends, FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.config import Settings, get_settings
@@ -821,18 +821,67 @@ async def api_growth_decision(req: GrowthDecisionRequest, settings: Settings = D
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
+def _safe_public_r2_url(settings: Settings, prefix: str, name: str) -> str:
+    base = settings.r2_public_base_url.strip().rstrip('/')
+    if not base:
+        return ''
+    return f'{base}/{prefix.strip('/')}/{Path(name).name}'
+
+
+def _output_r2_prefix_candidates(name: str) -> list[str]:
+    safe_name = Path(name).name
+    lower = safe_name.lower()
+    if lower.startswith('tts') or lower.endswith(('.mp3', '.wav', '.m4a', '.aac')):
+        return ['audio', 'digital-human/audio', 'outputs']
+    if lower.endswith('.mp4'):
+        return ['videos', 'digital-human/preview', 'digital-human/result', 'outputs']
+    if lower.endswith(('.srt', '.ass', '.vtt')):
+        return ['subtitles', 'outputs']
+    if lower.endswith(('.jpg', '.jpeg', '.png', '.webp')):
+        return ['covers', 'outputs']
+    if lower.endswith('.zip'):
+        return ['packages', 'outputs']
+    return ['outputs']
+
+
+def _upload_r2_prefix_candidates(name: str) -> list[str]:
+    safe_name = Path(name).name
+    lower = safe_name.lower()
+    if lower.endswith(('.jpg', '.jpeg', '.png', '.webp')):
+        return ['uploads', 'digital-human/avatar']
+    if lower.endswith(('.mp4', '.mov', '.webm', '.mkv')):
+        return ['uploads', 'digital-human/driver']
+    return ['uploads']
+
+
 @app.get('/files/outputs/{name}')
-def get_output_file(name: str, settings: Settings = Depends(get_settings)) -> FileResponse:
-    path = safe_output_path(settings, name)
-    media_type = mimetypes.guess_type(path.name)[0] or 'application/octet-stream'
-    return FileResponse(path, media_type=media_type, filename=path.name)
+def get_output_file(name: str, settings: Settings = Depends(get_settings)):
+    safe_name = Path(name).name
+    path = (settings.outputs_dir / safe_name).resolve()
+    if settings.outputs_dir.resolve() in path.parents and path.exists() and path.is_file():
+        media_type = mimetypes.guess_type(path.name)[0] or 'application/octet-stream'
+        return FileResponse(path, media_type=media_type, filename=path.name)
+    # Render 免费实例重启/OOM 后，本地临时文件可能丢失；如果 R2 已开启，直接跳到可能的长期存储地址。
+    # 这样旧的 audio/video URL 不会立刻变成 404，本地文件丢失时仍优先尝试 R2。
+    if settings.r2_public_base_url.strip():
+        url = _safe_public_r2_url(settings, _output_r2_prefix_candidates(safe_name)[0], safe_name)
+        if url:
+            return RedirectResponse(url=url, status_code=302)
+    raise HTTPException(status_code=404, detail='文件不存在：本地临时文件可能因 Render 重启/OOM 被清理。请确认 R2 已成功上传，或重新生成该音频/视频。')
 
 
 @app.get('/files/uploads/{name}')
-def get_upload_file(name: str, settings: Settings = Depends(get_settings)) -> FileResponse:
-    path = safe_upload_path(settings, name)
-    media_type = mimetypes.guess_type(path.name)[0] or 'application/octet-stream'
-    return FileResponse(path, media_type=media_type, filename=path.name)
+def get_upload_file(name: str, settings: Settings = Depends(get_settings)):
+    safe_name = Path(name).name
+    path = (settings.uploads_dir / safe_name).resolve()
+    if settings.uploads_dir.resolve() in path.parents and path.exists() and path.is_file():
+        media_type = mimetypes.guess_type(path.name)[0] or 'application/octet-stream'
+        return FileResponse(path, media_type=media_type, filename=path.name)
+    if settings.r2_public_base_url.strip():
+        url = _safe_public_r2_url(settings, _upload_r2_prefix_candidates(safe_name)[0], safe_name)
+        if url:
+            return RedirectResponse(url=url, status_code=302)
+    raise HTTPException(status_code=404, detail='上传素材文件不存在：本地临时文件可能因 Render 重启/OOM 被清理。请确认 R2 已成功上传，或重新上传素材。')
 
 
 # 可选单体部署支持：只有当前端 dist 真的存在时，才托管静态文件。
