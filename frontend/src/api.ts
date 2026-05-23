@@ -1,6 +1,18 @@
-export const API_BASE = (import.meta.env.VITE_API_BASE || '').replace(/\/$/, '')
+const envApiBase = (import.meta.env.VITE_API_BASE || '').replace(/\/$/, '')
+const defaultRenderApi = 'https://ai-video-u8jd.onrender.com'
+const isLocal = typeof window !== 'undefined' && /^(localhost|127\.0\.0\.1)$/i.test(window.location.hostname)
 
-async function parseResponse<T>(res: Response): Promise<T> {
+// Cloudflare Pages 如果忘记配置 VITE_API_BASE，默认会请求当前 pages.dev 的 /api，
+// 这就是素材库/配音常见 Failed to fetch 的来源。这里加一个生产兜底。
+export const API_BASE = envApiBase || (isLocal ? 'http://localhost:8000' : defaultRenderApi)
+
+function withTimeout(ms = 90000) {
+  const controller = new AbortController()
+  const timer = window.setTimeout(() => controller.abort(), ms)
+  return { controller, timer }
+}
+
+async function parseResponse<T>(res: Response, url: string): Promise<T> {
   const contentType = res.headers.get('content-type') || ''
   if (!res.ok) {
     let detail = `${res.status} ${res.statusText}`
@@ -12,37 +24,56 @@ async function parseResponse<T>(res: Response): Promise<T> {
         detail = await res.text()
       }
     } catch {}
-    throw new Error(detail)
+    throw new Error(`${detail}\n请求地址：${url}`)
   }
   if (contentType.includes('application/json')) return res.json() as Promise<T>
   const text = await res.text()
-  throw new Error(`后端没有返回 JSON，请检查 VITE_API_BASE 是否指向 Render 后端。返回：${text.slice(0, 180)}`)
+  throw new Error(`后端没有返回 JSON，请检查 Cloudflare 的 VITE_API_BASE 是否指向 Render 后端。\n请求地址：${url}\n返回：${text.slice(0, 220)}`)
+}
+
+async function safeFetch<T>(url: string, init?: RequestInit, timeoutMs = 90000): Promise<T> {
+  const { controller, timer } = withTimeout(timeoutMs)
+  try {
+    const res = await fetch(url, { ...init, signal: controller.signal })
+    return parseResponse<T>(res, url)
+  } catch (err: any) {
+    if (err?.name === 'AbortError') {
+      throw new Error(`请求超时：${url}\nRender 免费实例可能冷启动、内存爆掉或接口耗时过长。`)
+    }
+    const msg = err?.message || String(err)
+    if (msg === 'Failed to fetch') {
+      throw new Error(`无法连接后端：${url}\n请检查 Render 服务是否正常、Cloudflare VITE_API_BASE 是否为 ${defaultRenderApi}、CORS_ORIGINS 是否允许当前前端域名。`)
+    }
+    throw err
+  } finally {
+    window.clearTimeout(timer)
+  }
 }
 
 export async function apiGet<T>(path: string): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`)
-  return parseResponse<T>(res)
+  const url = `${API_BASE}${path}`
+  return safeFetch<T>(url)
 }
 
 export async function apiPost<T>(path: string, body: unknown): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, {
+  const url = `${API_BASE}${path}`
+  return safeFetch<T>(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body)
   })
-  return parseResponse<T>(res)
 }
 
 export async function uploadAssets(files: FileList): Promise<AssetItem[]> {
   const form = new FormData()
   Array.from(files).forEach(file => form.append('files', file))
-  const res = await fetch(`${API_BASE}/api/assets`, { method: 'POST', body: form })
-  return parseResponse<AssetItem[]>(res)
+  const url = `${API_BASE}/api/assets`
+  return safeFetch<AssetItem[]>(url, { method: 'POST', body: form }, 180000)
 }
 
 export async function deleteAsset(assetId: string): Promise<{ok: boolean; deleted: string[]; warnings: string[]}> {
-  const res = await fetch(`${API_BASE}/api/assets/${encodeURIComponent(assetId)}`, { method: 'DELETE' })
-  return parseResponse<{ok: boolean; deleted: string[]; warnings: string[]}>(res)
+  const url = `${API_BASE}/api/assets/${encodeURIComponent(assetId)}`
+  return safeFetch<{ok: boolean; deleted: string[]; warnings: string[]}>(url, { method: 'DELETE' })
 }
 
 export interface GeneratedCopy {

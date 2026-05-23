@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import mimetypes
 import uuid
 from datetime import datetime, timezone
@@ -73,8 +74,9 @@ from app.services.collector import get_collector_cookie_status, save_collector_c
 from app.services.kb import KnowledgeBase
 from app.services.memory import MemoryStore
 from app.services.publisher import create_publish_package
-from app.services.storage import maybe_upload_to_r2, maybe_delete_from_r2, maybe_list_r2_objects
+from app.services.storage import maybe_upload_to_r2, maybe_delete_from_r2, maybe_list_r2_objects, read_last_storage_error, test_r2_connection
 from app.services.tts import get_tts_voices, synthesize_tts, synthesize_tts_segments
+from app.services.assets_store import read_manifest, upsert_asset, remove_asset, now_iso
 from app.services.video import IMAGE_EXTS, VIDEO_EXTS, compose_video
 from app.services.video_edit import apply_video_edit
 from app.services.auto_collector import run_auto_collection
@@ -512,6 +514,8 @@ async def api_tts_segments(req: TTSSegmentsRequest, request: Request, settings: 
 
 @app.get('/api/storage/status')
 def storage_status(settings: Settings = Depends(get_settings)) -> dict:
+    r2_check = test_r2_connection(settings)
+    last_error = read_last_storage_error(settings)
     return {
         'ok': True,
         'uploads_dir': str(settings.uploads_dir),
@@ -519,6 +523,9 @@ def storage_status(settings: Settings = Depends(get_settings)) -> dict:
         'r2_enabled': settings.r2_enabled,
         'r2_bucket_name': settings.r2_bucket_name,
         'r2_public_base_url': settings.r2_public_base_url,
+        'r2_check': r2_check,
+        'last_r2_error': last_error,
+        'max_upload_mb': settings.max_upload_mb,
     }
 
 
@@ -534,9 +541,19 @@ def api_add_knowledge(item: KnowledgeCreate, kb: KnowledgeBase = Depends(get_kb)
 
 @app.post('/api/assets', response_model=List[AssetItem])
 async def api_upload_assets(request: Request, files: List[UploadFile] = File(...), settings: Settings = Depends(get_settings)) -> List[AssetItem]:
+    """Upload material assets.
+
+    Fixes two common production problems:
+    1) R2 upload failure no longer makes the whole upload fail.
+    2) A manifest is kept so the material library does not guess R2 URLs for files
+       that never reached R2.
+    """
     results: List[AssetItem] = []
     max_bytes = settings.max_upload_mb * 1024 * 1024
     allowed = IMAGE_EXTS | VIDEO_EXTS
+    if not files:
+        raise HTTPException(status_code=400, detail='没有收到上传文件。')
+
     for file in files:
         original = file.filename or 'asset'
         ext = Path(original).suffix.lower()
@@ -546,19 +563,48 @@ async def api_upload_assets(request: Request, files: List[UploadFile] = File(...
         dest_name = f'{asset_id}{ext}'
         dest = settings.uploads_dir / dest_name
         total = 0
-        with dest.open('wb') as buffer:
-            while True:
-                chunk = await file.read(1024 * 1024)
-                if not chunk:
-                    break
-                total += len(chunk)
-                if total > max_bytes:
-                    dest.unlink(missing_ok=True)
-                    raise HTTPException(status_code=413, detail=f'单次上传超过 {settings.max_upload_mb}MB')
-                buffer.write(chunk)
+        try:
+            with dest.open('wb') as buffer:
+                while True:
+                    chunk = await file.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    total += len(chunk)
+                    if total > max_bytes:
+                        dest.unlink(missing_ok=True)
+                        raise HTTPException(status_code=413, detail=f'单个素材超过 {settings.max_upload_mb}MB；请压缩后再上传，或升级后端实例。')
+                    buffer.write(chunk)
+        finally:
+            try:
+                await file.close()
+            except Exception:
+                pass
+
         kind = 'image' if ext in IMAGE_EXTS else 'video'
+        created_at = now_iso()
         public_url = maybe_upload_to_r2(settings, dest, prefix='uploads')
-        results.append(AssetItem(id=asset_id, filename=dest_name, original_name=original, kind=kind, url=upload_url(request, dest_name, public_url), size_bytes=total, created_at=datetime.now(timezone.utc).isoformat()))
+        url = upload_url(request, dest_name, public_url)
+        item = AssetItem(
+            id=asset_id,
+            filename=dest_name,
+            original_name=original,
+            kind=kind,
+            url=url,
+            size_bytes=total,
+            created_at=created_at,
+        )
+        upsert_asset(settings, {
+            'id': asset_id,
+            'filename': dest_name,
+            'original_name': original,
+            'kind': kind,
+            'url': url,
+            'size_bytes': total,
+            'created_at': created_at,
+            'r2_url': public_url or '',
+            'r2_key': f'uploads/{dest_name}' if public_url else '',
+        })
+        results.append(item)
     return results
 
 
@@ -568,8 +614,15 @@ def api_list_assets(
     kind: Optional[str] = None,
     q: str = '',
     limit: int = 200,
+    include_r2: bool = True,
     settings: Settings = Depends(get_settings),
 ) -> List[AssetItem]:
+    """List material assets.
+
+    The endpoint must always return JSON. R2 is best-effort; if R2 is broken,
+    the frontend still receives local/manifest assets and diagnostics are in
+    /api/storage/status.
+    """
     items: List[AssetItem] = []
     seen: set[str] = set()
     allowed_kinds = {'image', 'video'}
@@ -581,52 +634,81 @@ def api_list_assets(
             return
         if kind_filter and item.kind != kind_filter:
             return
-        if query and query not in f'{item.original_name} {item.filename} {item.kind}'.lower():
+        searchable = f'{item.original_name} {item.filename} {item.kind}'.lower()
+        if query and query not in searchable:
             return
         seen.add(item.filename)
         items.append(item)
 
+    # 1) Prefer manifest records because they preserve original filename and confirmed R2 URL.
+    for raw in read_manifest(settings):
+        try:
+            filename = Path(str(raw.get('filename') or '')).name
+            if not filename:
+                continue
+            ext = Path(filename).suffix.lower()
+            if ext not in (IMAGE_EXTS | VIDEO_EXTS):
+                continue
+            local_path = settings.uploads_dir / filename
+            url = str(raw.get('r2_url') or raw.get('url') or '')
+            # If manifest only has an old local URL and the file is gone, skip it unless R2 URL exists.
+            if (not url or '/files/uploads/' in url) and local_path.exists():
+                url = upload_url(request, filename)
+            elif (not url or '/files/uploads/' in url) and not local_path.exists():
+                continue
+            add_item(AssetItem(
+                id=str(raw.get('id') or Path(filename).stem),
+                filename=filename,
+                original_name=str(raw.get('original_name') or filename),
+                kind=str(raw.get('kind') or ('image' if ext in IMAGE_EXTS else 'video')),
+                url=url,
+                size_bytes=int(raw.get('size_bytes') or (local_path.stat().st_size if local_path.exists() else 0)),
+                created_at=str(raw.get('created_at') or now_iso()),
+            ))
+        except Exception:
+            continue
+
+    # 2) Local files not in manifest. Do not guess R2 URLs here; use local URL.
     if settings.uploads_dir.exists():
         for path in sorted(settings.uploads_dir.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True):
             if not path.is_file() or path.suffix.lower() not in (IMAGE_EXTS | VIDEO_EXTS):
                 continue
             item_kind = 'image' if path.suffix.lower() in IMAGE_EXTS else 'video'
             stat = path.stat()
-            public_url = None
-            if settings.r2_public_base_url.strip():
-                public_url = _safe_public_r2_url(settings, _upload_r2_prefix_candidates(path.name)[0], path.name)
             add_item(AssetItem(
                 id=path.stem,
                 filename=path.name,
                 original_name=path.name,
                 kind=item_kind,
-                url=upload_url(request, path.name, public_url),
+                url=upload_url(request, path.name),
                 size_bytes=stat.st_size,
                 created_at=datetime.fromtimestamp(stat.st_mtime, timezone.utc).isoformat(),
             ))
 
-    # R2 objects are listed as a fallback so the素材库 can still show files after Render restarts/OOM.
-    for prefix in ['uploads', 'digital-human/avatar', 'digital-human/driver']:
-        for obj in maybe_list_r2_objects(settings, prefix=prefix, limit=limit):
-            name = obj.get('name') or ''
-            ext = Path(name).suffix.lower()
-            if ext not in (IMAGE_EXTS | VIDEO_EXTS):
-                continue
-            item_kind = 'image' if ext in IMAGE_EXTS else 'video'
-            lm = obj.get('last_modified')
-            if hasattr(lm, 'isoformat'):
-                created_at = lm.astimezone(timezone.utc).isoformat()
-            else:
-                created_at = datetime.now(timezone.utc).isoformat()
-            add_item(AssetItem(
-                id=Path(name).stem,
-                filename=name,
-                original_name=name,
-                kind=item_kind,
-                url=obj.get('url') or upload_url(request, name),
-                size_bytes=int(obj.get('size') or 0),
-                created_at=created_at,
-            ))
+    # 3) R2 fallback after Render restart/OOM. Short timeouts in storage.py prevent hanging.
+    if include_r2:
+        per_prefix_limit = max(20, min(int(limit or 200), 200))
+        for prefix in ['uploads', 'digital-human/avatar', 'digital-human/driver']:
+            for obj in maybe_list_r2_objects(settings, prefix=prefix, limit=per_prefix_limit):
+                name = obj.get('name') or ''
+                ext = Path(name).suffix.lower()
+                if ext not in (IMAGE_EXTS | VIDEO_EXTS):
+                    continue
+                item_kind = 'image' if ext in IMAGE_EXTS else 'video'
+                lm = obj.get('last_modified')
+                if hasattr(lm, 'isoformat'):
+                    created_at = lm.astimezone(timezone.utc).isoformat()
+                else:
+                    created_at = now_iso()
+                add_item(AssetItem(
+                    id=Path(name).stem,
+                    filename=name,
+                    original_name=name,
+                    kind=item_kind,
+                    url=obj.get('url') or upload_url(request, name),
+                    size_bytes=int(obj.get('size') or 0),
+                    created_at=created_at,
+                ))
 
     items.sort(key=lambda it: it.created_at, reverse=True)
     return items[:max(1, min(limit, 500))]
@@ -640,24 +722,36 @@ def api_delete_asset(asset_id: str, settings: Settings = Depends(get_settings)) 
     deleted: list[str] = []
     warnings: list[str] = []
 
+    removed_manifest = remove_asset(settings, safe_id)
+    filenames: set[str] = set()
+    object_keys: set[str] = set()
+    for item in removed_manifest:
+        filename = Path(str(item.get('filename') or '')).name
+        if filename:
+            filenames.add(filename)
+        key = str(item.get('r2_key') or '').strip().strip('/')
+        if key:
+            object_keys.add(key)
+
+    # Fall back to all possible extensions if the user deletes a R2-discovered item.
     for ext in IMAGE_EXTS | VIDEO_EXTS:
-        path = settings.uploads_dir / f'{safe_id}{ext}'
+        filenames.add(f'{safe_id}{ext}')
+
+    for filename in filenames:
+        path = settings.uploads_dir / filename
         if path.exists() and path.is_file():
             try:
                 path.unlink()
-                deleted.append(str(path.name))
+                deleted.append(path.name)
             except Exception as exc:
                 warnings.append(f'本地文件删除失败：{path.name}：{exc}')
-
-    object_keys: list[str] = []
-    for ext in IMAGE_EXTS | VIDEO_EXTS:
-        filename = f'{safe_id}{ext}'
         for prefix in _upload_r2_prefix_candidates(filename):
-            object_keys.append(f'{prefix.strip("/")}/{filename}')
-    r2_deleted = maybe_delete_from_r2(settings, object_keys)
+            object_keys.add(f'{prefix.strip("/")}/{filename}')
+
+    r2_deleted = maybe_delete_from_r2(settings, sorted(object_keys))
     deleted.extend(r2_deleted)
 
-    if not deleted:
+    if not deleted and not removed_manifest:
         raise HTTPException(status_code=404, detail='素材不存在，可能已经删除或只存在于旧临时目录。')
     return {'ok': True, 'deleted': deleted, 'warnings': warnings}
 
