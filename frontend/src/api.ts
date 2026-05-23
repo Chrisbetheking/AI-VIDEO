@@ -263,3 +263,26 @@ export interface DigitalHumanCreateResponse {
   warnings: string[]
   raw?: Record<string, any>
 }
+
+export interface AutoCollectorStatusResponse {
+  enabled: boolean
+  interval_minutes: number
+  run_limit: number
+  seed_links_configured: boolean
+  cron_token_enabled: boolean
+  memory_enabled: boolean
+  competitors_count: number
+  recent_learning_events: any[]
+  recent_videos: any[]
+}
+
+export interface AutoCollectorRunResponse {
+  ok: boolean
+  mode: string
+  sources_count: number
+  discovered_count: number
+  collected_count: number
+  saved_event_id?: string
+  learning: any
+  warnings: string[]
+}

@@ -475,3 +475,34 @@ class DigitalHumanCreateResponse(BaseModel):
     job_id: Optional[str] = None
     warnings: List[str] = Field(default_factory=list)
     raw: dict = Field(default_factory=dict)
+
+
+class AutoCollectorRunRequest(BaseModel):
+    seed_links: str = Field(default='', max_length=12000)
+    include_account_urls: bool = True
+    limit: int = Field(default=3, ge=1, le=8)
+    learn_goal: str = Field(default='学习同行博主的钩子公式、情绪推进、剪辑节奏和转化逻辑；只迁移方法，不模仿原文、不搬运素材。', max_length=1000)
+    token: str = Field(default='', max_length=300)
+
+
+class AutoCollectorStatusResponse(BaseModel):
+    enabled: bool
+    interval_minutes: int
+    run_limit: int
+    seed_links_configured: bool
+    cron_token_enabled: bool
+    memory_enabled: bool
+    competitors_count: int
+    recent_learning_events: List[dict] = Field(default_factory=list)
+    recent_videos: List[dict] = Field(default_factory=list)
+
+
+class AutoCollectorRunResponse(BaseModel):
+    ok: bool
+    mode: str
+    sources_count: int
+    discovered_count: int
+    collected_count: int
+    saved_event_id: Optional[str] = None
+    learning: dict = Field(default_factory=dict)
+    warnings: List[str] = Field(default_factory=list)

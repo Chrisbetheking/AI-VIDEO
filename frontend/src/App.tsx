@@ -18,6 +18,8 @@ import {
   MemoryContextResponse,
   CollectorCookieStatus,
   DigitalHumanCreateResponse,
+  AutoCollectorStatusResponse,
+  AutoCollectorRunResponse,
   TTSResponse,
   TTSVoice,
   VideoEditChatResponse,
@@ -90,6 +92,7 @@ const badWords = ['最', '第一', '保证', '包赚', '稳赚', '绝对', '唯�
 
 const pluginMatrix = [
   { name: '采集插件', desc: '抖音口令、短链、MP4、页面元信息尽力采集', status: 'collector' },
+  { name: '自动学习智能体', desc: '后台读取竞品账号，学习钩子公式和视频打法，不照抄文案', status: 'agent' },
   { name: '文案智能体', desc: '读取行业档案、同行库、爆点雷达和知识库', status: 'deepseek' },
   { name: '声音导演', desc: '克隆音色、分段情绪、语速停顿、自动合并', status: 'tts' },
   { name: '剪辑插件', desc: 'FFmpeg 合成、转场、字幕、AI 指令重剪', status: 'ffmpeg' },
@@ -153,6 +156,10 @@ export default function App() {
   const [collectorStatus, setCollectorStatus] = useState<CollectorCookieStatus | null>(null)
   const [collectorCookieText, setCollectorCookieText] = useState('')
   const [showCookiePanel, setShowCookiePanel] = useState(false)
+  const [agentStatus, setAgentStatus] = useState<AutoCollectorStatusResponse | null>(null)
+  const [agentResult, setAgentResult] = useState<AutoCollectorRunResponse | null>(null)
+  const [agentSeedLinks, setAgentSeedLinks] = useState('')
+  const [agentLearnGoal, setAgentLearnGoal] = useState('学习这个博主的视频办法：钩子公式、情绪推进、镜头节奏、转化逻辑。只迁移方法，不模仿具体文案、不搬运素材。')
 
   const [copy, setCopy] = useState<GeneratedCopy>(emptyCopy)
   const [refineInstruction, setRefineInstruction] = useState('把开头改得更有压迫感，语气更像老板提醒客户；减少书面词，保留短视频口语感。')
@@ -211,7 +218,7 @@ export default function App() {
 
   const pipelineTodos = useMemo(() => [
     { ok: Boolean(industry && audience), text: '保存客户定位，让 AI 记住行业和客户画像', go: 'strategy' as ModuleKey },
-    { ok: Boolean(extract), text: '采集 1 条同行视频或口令，沉淀钩子结构', go: 'collector' as ModuleKey },
+    { ok: Boolean(extract || agentResult), text: '采集 1 条同行视频或口令，沉淀钩子结构', go: 'collector' as ModuleKey },
     { ok: Boolean(copy.script), text: '生成并细改口播文案，确认是否入知识库', go: 'copy' as ModuleKey },
     { ok: Boolean(audio), text: '生成分段情绪配音，确认语速和停顿', go: 'voice' as ModuleKey },
     { ok: selectedMaterialIds.length > 0, text: '选择自有素材，避免直接搬运采集视频', go: 'assets' as ModuleKey },
@@ -316,6 +323,26 @@ export default function App() {
     return status
   }
 
+  async function reloadAgentStatus() {
+    const status = await apiGet<AutoCollectorStatusResponse>('/api/agent/status')
+    setAgentStatus(status)
+    return status
+  }
+
+  async function runAutoAgent() {
+    const res = await run('自动采集/学习同行打法', () => apiPost<AutoCollectorRunResponse>('/api/agent/run-now', {
+      seed_links: agentSeedLinks,
+      include_account_urls: true,
+      limit: 3,
+      learn_goal: agentLearnGoal,
+      token: ''
+    }))
+    setAgentResult(res!)
+    await reloadMemoryContext()
+    await reloadAgentStatus().catch(() => null)
+    setLastHandoff('自动学习智能体已完成一轮：只沉淀钩子公式、情绪推进和视频打法，不照抄原文。')
+  }
+
   async function saveCollectorCookies() {
     const status = await run('上传抖音 Cookies', () => uploadCollectorCookies(collectorCookieText))
     setCollectorStatus(status!)
@@ -329,6 +356,7 @@ export default function App() {
     apiGet<TTSVoice[]>('/api/tts/voices').then(v => { const list = Array.isArray(v) ? v : []; setVoices(list); setVoice(list[0]?.id || '') }).catch(() => null)
     reloadAssets().catch(() => null)
     reloadCollectorStatus().catch(() => null)
+    reloadAgentStatus().catch(() => null)
     reloadMemoryContext(true).catch(() => null)
   }, [])
 
@@ -760,6 +788,21 @@ ${manualText || ''}`.trim()
             <Button label={showCookiePanel ? '收起 Cookies' : '上传 Cookies'} onClick={() => setShowCookiePanel(v => !v)} kind="soft" />
           </div>
         </div>
+        <div className="agentPanel">
+          <div className="sectionHeader compact"><div><h3>后台自动学习智能体</h3><p>它会读取竞品账号库和种子链接，尽力发现/采集新视频，然后只学习钩子公式、节奏和转化结构，不复制原文。</p></div><div className="buttonRow mini"><Button label="刷新智能体" onClick={() => reloadAgentStatus()} kind="ghost" /><Button busy={busy === '自动采集/学习同行打法' ? busy : ''} label="立即跑一轮" onClick={runAutoAgent} kind="soft" /></div></div>
+          <div className="grid2">
+            <Field label="种子链接（可选，一行一个）" hint="可以填某个博主的主页/爆款视频链接；空着时会自动读取竞品账号库 URL。"><textarea value={agentSeedLinks} onChange={e => setAgentSeedLinks(e.target.value)} placeholder="https://v.douyin.com/...
+https://www.douyin.com/user/..." /></Field>
+            <Field label="学习目标" hint="强调学习打法，不要复制文案。"><textarea value={agentLearnGoal} onChange={e => setAgentLearnGoal(e.target.value)} /></Field>
+          </div>
+          <div className="agentStats">
+            <Pill tone={agentStatus?.enabled ? 'green' : 'orange'}>{agentStatus?.enabled ? '后台定时已启用' : '后台定时未启用'}</Pill>
+            <Pill>竞品账号 {agentStatus?.competitors_count ?? competitors.length}</Pill>
+            <Pill tone={agentStatus?.memory_enabled ? 'green' : 'orange'}>{agentStatus?.memory_enabled ? 'Supabase 记忆库' : '本地记忆'}</Pill>
+            <Pill>每轮最多 {agentStatus?.run_limit ?? 3} 条</Pill>
+          </div>
+          {agentResult && <div className="resultBox"><h3>{agentResult.learning?.summary || '自动学习完成'}</h3><div className="splitGrid"><div><h4>学到的方法</h4>{(agentResult.learning?.creator_methods || []).map((x: string) => <p key={x}>· {x}</p>)}</div><div><h4>钩子公式</h4>{(agentResult.learning?.hook_formulas || []).map((x: any, i: number) => <p key={i}>· {x.name || '公式'}：{x.template || x.logic || JSON.stringify(x)}</p>)}</div><div><h4>迁移规则</h4>{(agentResult.learning?.transfer_rules || []).map((x: string) => <p key={x}>· {x}</p>)}</div></div>{agentResult.warnings?.slice(0, 6).map(w => <div className="warn" key={w}>{w}</div>)}</div>}
+        </div>
         {showCookiePanel && <div className="cookiePanel">
           <h4>上传 douyin_cookies.txt</h4>
           <p>遇到 “Fresh cookies needed” 时，需要导出你自己浏览器里的抖音 cookies。只用于你的后端采集公开可访问内容，不会提交到前端展示。</p>
@@ -776,6 +819,7 @@ ${manualText || ''}`.trim()
           {extract.warnings?.map(w => <div className="warn" key={w}>{w}</div>)}
         </div>}
         <div className="memoryList"><h3>数据库已采集同行内容</h3>{(memoryContext?.videos || []).slice(0, 6).map((v: any) => <div className="memoryItem" key={v.id || v.created_at}><strong>{v.source_name || v.summary || '同行采集记录'}</strong><p>{v.summary || v.transcript || v.manual_text}</p><small>{v.status} · {v.collector_status} · {v.created_at}</small></div>)}{!(memoryContext?.videos || []).length && <Empty>还没有入库采集记录。每次采集会自动保存，后续 AI 会读取。</Empty>}</div>
+        <div className="memoryList"><h3>自动学习到的博主打法</h3>{(memoryContext?.events || []).filter((e: any) => e.event_type === 'auto_creator_learning').slice(0, 5).map((e: any) => <div className="memoryItem" key={e.id || e.created_at}><strong>{e.payload?.learning?.summary || e.title || '自动学习记录'}</strong><p>{(e.payload?.learning?.creator_methods || []).slice(0, 3).join('；')}</p><small>只学习结构方法，不照抄文案 · {e.created_at}</small></div>)}{!(memoryContext?.events || []).filter((e: any) => e.event_type === 'auto_creator_learning').length && <Empty>自动智能体跑过后，会把钩子公式、情绪推进和迁移规则沉淀到这里。</Empty>}</div>
       </section>}
 
       {active === 'copy' && <section className="card modulePanel">

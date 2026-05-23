@@ -72,6 +72,15 @@ class Settings(BaseSettings):
     # 平台发布：先保留入口，等开放平台权限下来再接真实发布
     enable_platform_publish: bool = False
 
+
+    # 后台自动采集/学习智能体：定时从竞品账号和种子链接里学习钩子结构，不照抄原文
+    enable_auto_collector: bool = False
+    auto_collector_interval_minutes: int = 720
+    auto_collector_run_limit: int = 3
+    auto_collector_seed_links: str = ''
+    auto_collector_learn_goal: str = '学习同行博主的钩子公式、情绪推进、剪辑节奏和转化逻辑；只迁移方法，不模仿原文、不搬运素材。'
+    auto_collector_cron_token: str = ''
+
     # 数字人：Render 默认只做静态头像预览；真实口型同步建议接 GPU Worker / API
     enable_digital_human: bool = True
     digital_human_engine: str = 'preview'

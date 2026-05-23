@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import mimetypes
 import uuid
 from datetime import datetime, timezone
@@ -59,6 +60,9 @@ from app.schemas import (
     ScriptVersionSave,
     DigitalHumanCreateRequest,
     DigitalHumanCreateResponse,
+    AutoCollectorRunRequest,
+    AutoCollectorRunResponse,
+    AutoCollectorStatusResponse,
 )
 from app.services.ad_analysis import analyze_ad
 from app.services.cover import create_cover
@@ -73,9 +77,40 @@ from app.services.storage import maybe_upload_to_r2
 from app.services.tts import get_tts_voices, synthesize_tts, synthesize_tts_segments
 from app.services.video import IMAGE_EXTS, VIDEO_EXTS, compose_video
 from app.services.video_edit import apply_video_edit
+from app.services.auto_collector import run_auto_collection
 
 app = FastAPI(title='AI-VIDEO 正式版 API', version='1.0.0')
 settings = get_settings()
+_auto_collector_task: asyncio.Task | None = None
+
+
+async def _auto_collector_loop() -> None:
+    # Render 免费实例睡眠时不会运行；这个循环适合服务保持唤醒时自动采集。
+    await asyncio.sleep(60)
+    while True:
+        try:
+            current = get_settings()
+            if current.enable_auto_collector:
+                memory = MemoryStore(current)
+                req = AutoCollectorRunRequest(
+                    seed_links=current.auto_collector_seed_links,
+                    include_account_urls=True,
+                    limit=current.auto_collector_run_limit,
+                    learn_goal=current.auto_collector_learn_goal,
+                    token=current.auto_collector_cron_token,
+                )
+                await run_auto_collection(current, memory, req)
+            await asyncio.sleep(max(15, int(current.auto_collector_interval_minutes) * 60))
+        except Exception:
+            await asyncio.sleep(300)
+
+
+@app.on_event('startup')
+async def _start_auto_collector() -> None:
+    global _auto_collector_task
+    if settings.enable_auto_collector and _auto_collector_task is None:
+        _auto_collector_task = asyncio.create_task(_auto_collector_loop())
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_list,
@@ -183,6 +218,51 @@ async def api_ai_test(payload: dict | None = None, settings: Settings = Depends(
 @app.get('/api/memory/context', response_model=MemoryContextResponse)
 def api_memory_context(memory: MemoryStore = Depends(get_memory)) -> dict:
     return memory.context()
+
+
+
+@app.get('/api/agent/status', response_model=AutoCollectorStatusResponse)
+def api_agent_status(settings: Settings = Depends(get_settings), memory: MemoryStore = Depends(get_memory)) -> dict:
+    events = [e for e in memory.list('learning_events', limit=80) if e.get('event_type') == 'auto_creator_learning'][:8]
+    return {
+        'enabled': settings.enable_auto_collector,
+        'interval_minutes': settings.auto_collector_interval_minutes,
+        'run_limit': settings.auto_collector_run_limit,
+        'seed_links_configured': bool(settings.auto_collector_seed_links.strip()),
+        'cron_token_enabled': bool(settings.auto_collector_cron_token.strip()),
+        'memory_enabled': memory.supabase_enabled,
+        'competitors_count': len(memory.list('competitor_accounts', limit=100)),
+        'recent_learning_events': events,
+        'recent_videos': memory.list('competitor_videos', limit=8),
+    }
+
+
+@app.post('/api/agent/run-now', response_model=AutoCollectorRunResponse)
+async def api_agent_run_now(req: AutoCollectorRunRequest, settings: Settings = Depends(get_settings), memory: MemoryStore = Depends(get_memory)) -> dict:
+    if settings.auto_collector_cron_token and req.token != settings.auto_collector_cron_token:
+        raise HTTPException(status_code=403, detail='AUTO_COLLECTOR_CRON_TOKEN 不正确。')
+    return await run_auto_collection(settings, memory, req)
+
+
+@app.get('/api/agent/hook-patterns')
+def api_agent_hook_patterns(memory: MemoryStore = Depends(get_memory)) -> list[dict]:
+    events = [e for e in memory.list('learning_events', limit=120) if e.get('event_type') == 'auto_creator_learning']
+    out = []
+    for event in events[:30]:
+        payload = event.get('payload') or {}
+        learning = payload.get('learning') or {}
+        out.append({
+            'id': event.get('id'),
+            'created_at': event.get('created_at'),
+            'summary': learning.get('summary', ''),
+            'score': learning.get('score', 0),
+            'creator_methods': learning.get('creator_methods', []),
+            'hook_formulas': learning.get('hook_formulas', []),
+            'transfer_rules': learning.get('transfer_rules', []),
+            'next_collect_targets': learning.get('next_collect_targets', []),
+            'warnings': payload.get('warnings', []),
+        })
+    return out
 
 
 @app.post('/api/memory/customer-profile')
