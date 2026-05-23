@@ -210,6 +210,24 @@ async def _volc_call(settings: Settings, action: str, body: dict[str, Any], *, r
         res = await client.post(url, headers=headers, content=body_bytes)
         text = res.text
         if res.status_code >= 400:
+            # Query endpoints may return HTTP 400 with a valid JSON body such as
+            # {ResponseMetadata:{Error:{Code:'50215', Message:'Input invalid for this service'}}}.
+            # When raise_response_error=False, pass that JSON back to the caller so the UI can
+            # mark the cached task_id as invalid and show the clear/re-submit action instead of
+            # surfacing a generic HTTP 500.
+            if not raise_response_error:
+                try:
+                    return res.json()
+                except Exception:
+                    return {
+                        'ResponseMetadata': {
+                            'Error': {
+                                'Code': str(res.status_code),
+                                'Message': text[:1200] or 'HTTP error from Jimeng API',
+                            }
+                        },
+                        'http_status': res.status_code,
+                    }
             if res.status_code == 429 or '50430' in text or 'Concurrent Limit' in text:
                 raise RuntimeError('火山即梦并发限流：当前账号/模型正在生成中的任务还没结束，不能重复提交。请等待当前任务完成后再新建，或用已有 task_id 查询结果。原始返回：' + text[:900])
             raise RuntimeError(f'火山即梦接口失败 HTTP {res.status_code}: {text[:1200]}')
