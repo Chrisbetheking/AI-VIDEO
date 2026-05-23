@@ -498,6 +498,8 @@ class DigitalHumanCreateRequest(BaseModel):
     title: str = Field(default='', max_length=200)
     script: str = Field(default='', max_length=12000)
     engine: str = Field(default='auto', max_length=80)
+    # 使用火山即梦/OmniHuman 时可选；不填则使用环境变量里的默认 action。
+    jimeng_model: str = Field(default='omnihuman15', max_length=80)
     consent_confirmed: bool = False
 
 

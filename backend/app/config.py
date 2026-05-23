@@ -88,6 +88,25 @@ class Settings(BaseSettings):
     digital_human_webhook_token: str = ''
     digital_human_timeout_seconds: int = 900
 
+    # 火山即梦 / OmniHuman 数字人 API（可选，正式口型同步用）
+    # 一个火山账号 AK/SK 通常可调用已开通的多个即梦模型；调用时用 DIGITAL_HUMAN_ENGINE / 前端选择决定模型。
+    jimeng_enabled: bool = False
+    jimeng_access_key_id: str = ''
+    jimeng_secret_access_key: str = ''
+    jimeng_region: str = 'cn-north-1'
+    jimeng_service: str = 'cv'
+    jimeng_version: str = '2024-06-06'
+    jimeng_endpoint: str = 'https://visual.volcengineapi.com'
+    jimeng_poll_seconds: int = 8
+    jimeng_max_wait_seconds: int = 900
+    # 下面 action 名称以火山控制台 API Explorer 为准；我先按公开文档/接口名预置，可在环境变量覆盖。
+    jimeng_omni15_submit_action: str = 'JimengRealmanAvatarPictureOmniV15SubmitTask'
+    jimeng_omni15_get_action: str = 'JimengRealmanAvatarPictureOmniV15GetResult'
+    jimeng_quick_submit_action: str = 'JimengRealmanAvatarPictureSubmitTask'
+    jimeng_quick_get_action: str = 'JimengRealmanAvatarPictureGetResult'
+    jimeng_video30_submit_action: str = 'JimengI2VV301080PSubmitTask'
+    jimeng_video30_get_action: str = 'JimengI2VV301080PGetResult'
+
 
     # Supabase / AI 记忆库
     supabase_url: str = ''

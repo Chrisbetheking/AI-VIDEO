@@ -271,6 +271,7 @@ export interface DigitalHumanCreateRequest {
   title?: string
   script?: string
   engine?: string
+  jimeng_model?: string
   consent_confirmed: boolean
 }
 

@@ -1,11 +1,17 @@
 from __future__ import annotations
 
+import base64
+import hashlib
+import hmac
 import json
 import subprocess
+import time
 import uuid
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
+from urllib.parse import quote, urlencode, urlparse
 
 import httpx
 
@@ -47,11 +53,7 @@ def _probe_duration(path: Path) -> float:
 
 
 def create_static_avatar_preview(settings: Settings, avatar_path: Path, audio_path: Path, title: str = '') -> Path:
-    """Fallback: not true lip-sync. It creates a 9:16 talking-card preview from image/video + audio.
-
-    Real digital-human lip-sync should be performed by SadTalker / MuseTalk / Wav2Lip / LivePortrait worker.
-    This fallback keeps the product usable when no GPU worker is configured.
-    """
+    """Fallback: static image/video card + audio. Not true lip-sync."""
     out = settings.outputs_dir / f'digital_human_preview_{uuid.uuid4().hex}.mp4'
     avatar_ext = avatar_path.suffix.lower()
     duration = _probe_duration(audio_path) or 12.0
@@ -63,12 +65,8 @@ def create_static_avatar_preview(settings: Settings, avatar_path: Path, audio_pa
     ]
     if title:
         safe_title = title.replace("'", "\\'").replace(':', '：')[:40]
-        vf_parts.append(
-            "drawbox=x=0:y=1580:w=1080:h=220:color=black@0.45:t=fill"
-        )
-        vf_parts.append(
-            f"drawtext=text='{safe_title}':x=(w-text_w)/2:y=1640:fontcolor=white:fontsize=54:box=0"
-        )
+        vf_parts.append("drawbox=x=0:y=1580:w=1080:h=220:color=black@0.45:t=fill")
+        vf_parts.append(f"drawtext=text='{safe_title}':x=(w-text_w)/2:y=1640:fontcolor=white:fontsize=54:box=0")
     vf = ','.join(vf_parts)
 
     if avatar_ext in IMAGE_EXTS:
@@ -105,12 +103,7 @@ async def call_external_digital_human_worker(
     engine: str,
     driver_video_url: str = '',
 ) -> DigitalHumanResult:
-    """Call an external GPU worker.
-
-    Expected webhook JSON response examples:
-    {"status":"done","video_url":"https://.../out.mp4","job_id":"..."}
-    {"status":"queued","job_id":"...","message":"queued"}
-    """
+    """Call a custom external GPU/API worker."""
     if not settings.digital_human_webhook_url:
         raise RuntimeError('未配置 DIGITAL_HUMAN_WEBHOOK_URL，无法调用真实数字人引擎。')
 
@@ -140,13 +133,273 @@ async def call_external_digital_human_worker(
 
     video_url = data.get('video_url') or data.get('output_url') or data.get('result_url')
     status = data.get('status') or ('done' if video_url else 'queued')
-    message = data.get('message') or ('数字人任务已完成。' if video_url else '数字人任务已提交，等待外部 GPU 引擎处理。')
+    message = data.get('message') or ('数字人任务已完成。' if video_url else '数字人任务已提交，等待外部 GPU/API 引擎处理。')
     return DigitalHumanResult(
         status=status,
         engine=engine or settings.digital_human_engine,
         message=message,
         video_url=video_url,
-        job_id=str(data.get('job_id') or data.get('id') or ''),
+        job_id=str(data.get('job_id') or data.get('task_id') or data.get('id') or ''),
         warnings=list(data.get('warnings') or []),
         raw=data,
     )
+
+
+def _hash_sha256(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def _hmac_sha256(key: bytes, msg: str) -> bytes:
+    return hmac.new(key, msg.encode('utf-8'), hashlib.sha256).digest()
+
+
+def _volc_auth_headers(settings: Settings, action: str, body: dict[str, Any]) -> tuple[str, dict[str, str], bytes]:
+    """Volcengine OpenAPI V4 signing for service=cv.
+
+    Endpoint path is '/', query contains Action and Version.
+    """
+    if not settings.jimeng_access_key_id or not settings.jimeng_secret_access_key:
+        raise RuntimeError('未配置 JIMENG_ACCESS_KEY_ID / JIMENG_SECRET_ACCESS_KEY。')
+
+    endpoint = settings.jimeng_endpoint.rstrip('/')
+    parsed = urlparse(endpoint)
+    host = parsed.netloc
+    path = parsed.path or '/'
+    if path != '/':
+        path = path.rstrip('/') + '/'
+    query = urlencode({'Action': action, 'Version': settings.jimeng_version})
+    url = f'{endpoint}{path}?{query}'
+
+    body_bytes = json.dumps(body, ensure_ascii=False, separators=(',', ':')).encode('utf-8')
+    now = datetime.now(timezone.utc)
+    x_date = now.strftime('%Y%m%dT%H%M%SZ')
+    short_date = now.strftime('%Y%m%d')
+
+    method = 'POST'
+    canonical_uri = path
+    canonical_query = query
+    canonical_headers = f'content-type:application/json\nhost:{host}\nx-date:{x_date}\n'
+    signed_headers = 'content-type;host;x-date'
+    payload_hash = _hash_sha256(body_bytes)
+    canonical_request = '\n'.join([method, canonical_uri, canonical_query, canonical_headers, signed_headers, payload_hash])
+    credential_scope = f'{short_date}/{settings.jimeng_region}/{settings.jimeng_service}/request'
+    string_to_sign = '\n'.join(['HMAC-SHA256', x_date, credential_scope, _hash_sha256(canonical_request.encode('utf-8'))])
+
+    k_date = _hmac_sha256(settings.jimeng_secret_access_key.encode('utf-8'), short_date)
+    k_region = hmac.new(k_date, settings.jimeng_region.encode('utf-8'), hashlib.sha256).digest()
+    k_service = hmac.new(k_region, settings.jimeng_service.encode('utf-8'), hashlib.sha256).digest()
+    k_signing = hmac.new(k_service, b'request', hashlib.sha256).digest()
+    signature = hmac.new(k_signing, string_to_sign.encode('utf-8'), hashlib.sha256).hexdigest()
+
+    authorization = (
+        f'HMAC-SHA256 Credential={settings.jimeng_access_key_id}/{credential_scope}, '
+        f'SignedHeaders={signed_headers}, Signature={signature}'
+    )
+    headers = {
+        'Content-Type': 'application/json',
+        'Host': host,
+        'X-Date': x_date,
+        'Authorization': authorization,
+    }
+    return url, headers, body_bytes
+
+
+async def _volc_call(settings: Settings, action: str, body: dict[str, Any]) -> dict[str, Any]:
+    url, headers, body_bytes = _volc_auth_headers(settings, action, body)
+    async with httpx.AsyncClient(timeout=settings.digital_human_timeout_seconds) as client:
+        res = await client.post(url, headers=headers, content=body_bytes)
+        text = res.text
+        if res.status_code >= 400:
+            raise RuntimeError(f'火山即梦接口失败 HTTP {res.status_code}: {text[:1200]}')
+        try:
+            data = res.json()
+        except Exception:
+            raise RuntimeError(f'火山即梦接口未返回 JSON：{text[:1200]}')
+    if isinstance(data, dict) and data.get('ResponseMetadata', {}).get('Error'):
+        err = data['ResponseMetadata']['Error']
+        raise RuntimeError(f"火山即梦接口错误：{err.get('Code')} {err.get('Message')}")
+    return data
+
+
+def _extract_task_id(data: dict[str, Any]) -> str:
+    candidates = [
+        data.get('Result', {}).get('TaskId'), data.get('Result', {}).get('task_id'),
+        data.get('Result', {}).get('JobId'), data.get('Result', {}).get('id'),
+        data.get('task_id'), data.get('TaskId'), data.get('job_id'), data.get('id'),
+    ]
+    for x in candidates:
+        if x:
+            return str(x)
+    # Some APIs nest data under data/result.
+    for key in ('data', 'result'):
+        sub = data.get(key)
+        if isinstance(sub, dict):
+            for k in ('task_id', 'TaskId', 'job_id', 'id'):
+                if sub.get(k):
+                    return str(sub[k])
+    return ''
+
+
+def _extract_video_url(data: dict[str, Any]) -> str:
+    # Try common response shapes.
+    for path in [
+        ('Result', 'VideoUrl'), ('Result', 'video_url'), ('Result', 'OutputUrl'), ('Result', 'output_url'),
+        ('Result', 'Url'), ('Result', 'url'),
+        ('data', 'video_url'), ('data', 'output_url'), ('data', 'url'),
+        ('result', 'video_url'), ('result', 'output_url'), ('result', 'url'),
+    ]:
+        cur: Any = data
+        ok = True
+        for p in path:
+            if isinstance(cur, dict) and p in cur:
+                cur = cur[p]
+            else:
+                ok = False
+                break
+        if ok and isinstance(cur, str) and cur.startswith(('http://', 'https://')):
+            return cur
+    # Search recursively for first http mp4/url-like value.
+    def walk(obj: Any) -> str:
+        if isinstance(obj, str) and obj.startswith(('http://', 'https://')):
+            return obj
+        if isinstance(obj, dict):
+            for v in obj.values():
+                found = walk(v)
+                if found:
+                    return found
+        if isinstance(obj, list):
+            for v in obj:
+                found = walk(v)
+                if found:
+                    return found
+        return ''
+    return walk(data)
+
+
+def _extract_status(data: dict[str, Any]) -> str:
+    for path in [('Result', 'Status'), ('Result', 'status'), ('data', 'status'), ('result', 'status')]:
+        cur: Any = data
+        ok = True
+        for p in path:
+            if isinstance(cur, dict) and p in cur:
+                cur = cur[p]
+            else:
+                ok = False
+                break
+        if ok and cur:
+            return str(cur).lower()
+    return ''
+
+
+def _asset_to_url_or_base64(path: Path, url: str) -> dict[str, str]:
+    """Prefer public URL. If not public, send base64. Different Jimeng APIs may require one or the other.
+
+    The request includes both url/base64 to maximize compatibility; if your API docs require exact field names,
+    override by editing this payload section only.
+    """
+    if url.startswith(('http://', 'https://')):
+        return {'url': url}
+    raw = path.read_bytes()
+    return {'base64': base64.b64encode(raw).decode('utf-8')}
+
+
+def _jimeng_actions(settings: Settings, model: str) -> tuple[str, str]:
+    model = (model or '').lower()
+    if model in {'quick', 'quickmode', 'omnihuman10', 'omni10', 'jimeng_quick'}:
+        return settings.jimeng_quick_submit_action, settings.jimeng_quick_get_action
+    if model in {'video30', 'video3', 'jimeng_video30'}:
+        return settings.jimeng_video30_submit_action, settings.jimeng_video30_get_action
+    return settings.jimeng_omni15_submit_action, settings.jimeng_omni15_get_action
+
+
+async def call_jimeng_digital_human(
+    settings: Settings,
+    *,
+    avatar_path: Path,
+    audio_path: Path,
+    avatar_url: str,
+    audio_url: str,
+    script: str,
+    title: str,
+    model: str = 'omnihuman15',
+    driver_video_url: str = '',
+) -> DigitalHumanResult:
+    """Call Volcengine Jimeng / OmniHuman digital-human API.
+
+    This wrapper supports the common submit-task + poll-result pattern.
+    It intentionally keeps payload generous because Jimeng action payload fields vary by model/version.
+    If 火山 API Explorer shows exact field names for your enabled model, adjust the payload in one place below.
+    """
+    if not settings.jimeng_enabled:
+        raise RuntimeError('未启用 JIMENG_ENABLED=true。')
+
+    submit_action, get_action = _jimeng_actions(settings, model)
+    image_payload = _asset_to_url_or_base64(avatar_path, avatar_url)
+    audio_payload = _asset_to_url_or_base64(audio_path, audio_url)
+
+    submit_body: dict[str, Any] = {
+        # OmniHuman / 数字人常见输入
+        'image_url': image_payload.get('url', ''),
+        'image_base64': image_payload.get('base64', ''),
+        'audio_url': audio_payload.get('url', ''),
+        'audio_base64': audio_payload.get('base64', ''),
+        # Some actions use camel case.
+        'ImageUrl': image_payload.get('url', ''),
+        'ImageBase64': image_payload.get('base64', ''),
+        'AudioUrl': audio_payload.get('url', ''),
+        'AudioBase64': audio_payload.get('base64', ''),
+        # Metadata / output preference.
+        'prompt': script or title or '生成自然口播数字人视频',
+        'Prompt': script or title or '生成自然口播数字人视频',
+        'title': title,
+        'Title': title,
+        'ratio': '9:16',
+        'Ratio': '9:16',
+        'resolution': '720p',
+        'Resolution': '720p',
+    }
+    if driver_video_url:
+        submit_body.update({'driver_video_url': driver_video_url, 'DriverVideoUrl': driver_video_url})
+
+    submit_data = await _volc_call(settings, submit_action, submit_body)
+    task_id = _extract_task_id(submit_data)
+    video_url = _extract_video_url(submit_data)
+    if video_url:
+        return DigitalHumanResult(
+            status='done', engine=f'jimeng:{model}', message='火山即梦数字人视频已生成。',
+            video_url=video_url, job_id=task_id, raw=submit_data, warnings=[]
+        )
+    if not task_id:
+        return DigitalHumanResult(
+            status='submitted', engine=f'jimeng:{model}', message='火山即梦任务已提交，但响应里没有识别到 task_id。请到火山控制台/API Explorer 对照字段名。',
+            job_id='', raw=submit_data, warnings=['未识别到 task_id，可能需要按你开通模型的接口文档调整 payload 字段。']
+        )
+
+    deadline = time.time() + max(30, settings.jimeng_max_wait_seconds)
+    last_data: dict[str, Any] = submit_data
+    while time.time() < deadline:
+        await _sleep_async(max(2, settings.jimeng_poll_seconds))
+        query_body = {'TaskId': task_id, 'task_id': task_id, 'JobId': task_id, 'id': task_id}
+        last_data = await _volc_call(settings, get_action, query_body)
+        video_url = _extract_video_url(last_data)
+        status = _extract_status(last_data)
+        if video_url:
+            return DigitalHumanResult(
+                status='done', engine=f'jimeng:{model}', message='火山即梦数字人视频已生成。',
+                video_url=video_url, job_id=task_id, raw=last_data, warnings=[]
+            )
+        if status in {'failed', 'fail', 'error', 'canceled', 'cancelled'}:
+            return DigitalHumanResult(
+                status='failed', engine=f'jimeng:{model}', message=f'火山即梦任务失败：{status}',
+                job_id=task_id, raw=last_data, warnings=['请在火山控制台查看该任务失败原因。']
+            )
+
+    return DigitalHumanResult(
+        status='running', engine=f'jimeng:{model}', message='火山即梦任务已提交，仍在生成中。稍后在火山控制台或后续查询接口查看结果。',
+        job_id=task_id, raw=last_data, warnings=['生成时间超过本次等待上限，任务可能仍在火山侧排队处理。']
+    )
+
+
+async def _sleep_async(seconds: int) -> None:
+    import asyncio
+    await asyncio.sleep(seconds)

@@ -63,14 +63,12 @@ from app.schemas import (
     AutoCollectorRunRequest,
     AutoCollectorRunResponse,
     AutoCollectorStatusResponse,
-    LeadAcquisitionRequest,
-    LeadAcquisitionPlanResponse,
 )
 from app.services.ad_analysis import analyze_ad
 from app.services.cover import create_cover
-from app.services.deepseek import DeepSeekError, generate_copy, generate_edit_plan, generate_growth_decision, generate_shooting_plan, generate_subtitle_emphasis, generate_trend_radar, generate_voice_director, generate_lead_acquisition_plan, refine_copy_with_instruction, rewrite_from_inspiration, test_deepseek, video_edit_chat_advice
+from app.services.deepseek import DeepSeekError, generate_copy, generate_edit_plan, generate_growth_decision, generate_shooting_plan, generate_subtitle_emphasis, generate_trend_radar, generate_voice_director, refine_copy_with_instruction, rewrite_from_inspiration, test_deepseek, video_edit_chat_advice
 from app.services.doubao import extract_with_doubao
-from app.services.digital_human import call_external_digital_human_worker, create_static_avatar_preview
+from app.services.digital_human import call_external_digital_human_worker, call_jimeng_digital_human, create_static_avatar_preview
 from app.services.collector import get_collector_cookie_status, save_collector_cookie_text
 from app.services.kb import KnowledgeBase
 from app.services.memory import MemoryStore
@@ -379,22 +377,6 @@ def api_memory_event(req: MemoryEventInput, memory: MemoryStore = Depends(get_me
     return memory.save_learning_event(req.model_dump())
 
 
-@app.post('/api/lead-acquisition/plan', response_model=LeadAcquisitionPlanResponse)
-async def api_lead_acquisition_plan(req: LeadAcquisitionRequest, settings: Settings = Depends(get_settings), memory: MemoryStore = Depends(get_memory)) -> LeadAcquisitionPlanResponse:
-    try:
-        ctx = memory.context()
-        if ctx.get('learning_summary') and not req.existing_context:
-            req.existing_context = ctx['learning_summary'][:7000]
-        result = await generate_lead_acquisition_plan(settings, req)
-        memory.save_learning_event({
-            'event_type': 'lead_acquisition_plan',
-            'payload': {'request': req.model_dump(), 'result': result.model_dump()},
-        })
-        return result
-    except DeepSeekError as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
-
-
 @app.post('/api/generate-copy', response_model=GeneratedCopy)
 async def api_generate_copy(req: CopyRequest, settings: Settings = Depends(get_settings), kb: KnowledgeBase = Depends(get_kb), memory: MemoryStore = Depends(get_memory)) -> GeneratedCopy:
     knowledge = kb.search_texts(' '.join([req.topic, req.industry, req.selling_points]), limit=8)
@@ -667,6 +649,33 @@ async def api_digital_human_create(
 
     warnings: List[str] = []
     try:
+        if engine in {'jimeng', 'jimeng_omni15', 'omnihuman15', 'omnihuman', 'volcengine_avatar', 'volcengine_jimeng'}:
+            result = await call_jimeng_digital_human(
+                settings,
+                avatar_path=avatar_path,
+                audio_path=audio_path,
+                avatar_url=avatar_url_value,
+                audio_url=audio_url_value,
+                driver_video_url=driver_url_value,
+                script=req.script,
+                title=req.title,
+                model=req.jimeng_model or 'omnihuman15',
+            )
+            memory.save_learning_event({
+                'event_type': 'digital_human_jimeng',
+                'title': req.title or '火山即梦数字人任务',
+                'payload': {'engine': result.engine, 'status': result.status, 'video_url': result.video_url, 'job_id': result.job_id},
+            })
+            return DigitalHumanCreateResponse(
+                status=result.status,
+                engine=result.engine,
+                message=result.message,
+                video_url=result.video_url,
+                job_id=result.job_id,
+                warnings=result.warnings or [],
+                raw=result.raw or {},
+            )
+
         if engine in {'webhook', 'sadtalker', 'wav2lip', 'musetalk', 'liveportrait'} and settings.digital_human_webhook_url:
             result = await call_external_digital_human_worker(
                 settings,
