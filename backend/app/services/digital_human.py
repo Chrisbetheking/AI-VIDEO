@@ -303,13 +303,18 @@ def _asset_to_url_or_base64(path: Path, url: str) -> dict[str, str]:
     return {'base64': base64.b64encode(raw).decode('utf-8')}
 
 
-def _jimeng_actions(settings: Settings, model: str) -> tuple[str, str]:
+def _jimeng_actions(settings: Settings, model: str) -> tuple[str, str, str]:
+    """Return submit action, get action and req_key for the selected Jimeng model.
+
+    Volcengine Jimeng APIs require req_key in both submit and query payloads.
+    Missing req_key returns: Invalid Input Parameters: missing req_key.
+    """
     model = (model or '').lower()
     if model in {'quick', 'quickmode', 'omnihuman10', 'omni10', 'jimeng_quick'}:
-        return settings.jimeng_quick_submit_action, settings.jimeng_quick_get_action
+        return settings.jimeng_quick_submit_action, settings.jimeng_quick_get_action, settings.jimeng_quick_req_key
     if model in {'video30', 'video3', 'jimeng_video30'}:
-        return settings.jimeng_video30_submit_action, settings.jimeng_video30_get_action
-    return settings.jimeng_omni15_submit_action, settings.jimeng_omni15_get_action
+        return settings.jimeng_video30_submit_action, settings.jimeng_video30_get_action, settings.jimeng_video30_req_key
+    return settings.jimeng_omni15_submit_action, settings.jimeng_omni15_get_action, settings.jimeng_omni15_req_key
 
 
 async def call_jimeng_digital_human(
@@ -333,11 +338,14 @@ async def call_jimeng_digital_human(
     if not settings.jimeng_enabled:
         raise RuntimeError('未启用 JIMENG_ENABLED=true。')
 
-    submit_action, get_action = _jimeng_actions(settings, model)
+    submit_action, get_action, req_key = _jimeng_actions(settings, model)
     image_payload = _asset_to_url_or_base64(avatar_path, avatar_url)
     audio_payload = _asset_to_url_or_base64(audio_path, audio_url)
 
     submit_body: dict[str, Any] = {
+        # 火山即梦必填服务标识。OmniHuman1.5 固定为 jimeng_realman_avatar_picture_omni_v15。
+        'req_key': req_key,
+        'ReqKey': req_key,
         # OmniHuman / 数字人常见输入
         'image_url': image_payload.get('url', ''),
         'image_base64': image_payload.get('base64', ''),
@@ -379,7 +387,7 @@ async def call_jimeng_digital_human(
     last_data: dict[str, Any] = submit_data
     while time.time() < deadline:
         await _sleep_async(max(2, settings.jimeng_poll_seconds))
-        query_body = {'TaskId': task_id, 'task_id': task_id, 'JobId': task_id, 'id': task_id}
+        query_body = {'req_key': req_key, 'ReqKey': req_key, 'TaskId': task_id, 'task_id': task_id, 'JobId': task_id, 'id': task_id}
         last_data = await _volc_call(settings, get_action, query_body)
         video_url = _extract_video_url(last_data)
         status = _extract_status(last_data)

@@ -104,8 +104,12 @@ class Settings(BaseSettings):
     jimeng_omni15_get_action: str = 'JimengRealmanAvatarPictureOmniV15GetResult'
     jimeng_quick_submit_action: str = 'JimengRealmanAvatarPictureSubmitTask'
     jimeng_quick_get_action: str = 'JimengRealmanAvatarPictureGetResult'
-    jimeng_video30_submit_action: str = 'JimengI2VV301080PSubmitTask'
-    jimeng_video30_get_action: str = 'JimengI2VV301080PGetResult'
+    jimeng_video30_submit_action: str = 'JimengI2VFirstV30SubmitTask'
+    jimeng_video30_get_action: str = 'JimengI2VFirstV30GetResult'
+    # 火山即梦 API 必填服务标识 req_key。不同 action 必须传对应 req_key。
+    jimeng_omni15_req_key: str = 'jimeng_realman_avatar_picture_omni_v15'
+    jimeng_quick_req_key: str = 'realman_avatar_picture_v2'
+    jimeng_video30_req_key: str = 'jimeng_i2v_first_v30'
 
 
     # Supabase / AI 记忆库
