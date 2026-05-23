@@ -73,7 +73,7 @@ from app.services.collector import get_collector_cookie_status, save_collector_c
 from app.services.kb import KnowledgeBase
 from app.services.memory import MemoryStore
 from app.services.publisher import create_publish_package
-from app.services.storage import maybe_upload_to_r2
+from app.services.storage import maybe_upload_to_r2, maybe_delete_from_r2, maybe_list_r2_objects
 from app.services.tts import get_tts_voices, synthesize_tts, synthesize_tts_segments
 from app.services.video import IMAGE_EXTS, VIDEO_EXTS, compose_video
 from app.services.video_edit import apply_video_edit
@@ -549,15 +549,103 @@ async def api_upload_assets(request: Request, files: List[UploadFile] = File(...
 
 
 @app.get('/api/assets', response_model=List[AssetItem])
-def api_list_assets(request: Request, settings: Settings = Depends(get_settings)) -> List[AssetItem]:
+def api_list_assets(
+    request: Request,
+    kind: Optional[str] = None,
+    q: str = '',
+    limit: int = 200,
+    settings: Settings = Depends(get_settings),
+) -> List[AssetItem]:
     items: List[AssetItem] = []
-    for path in sorted(settings.uploads_dir.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True):
-        if not path.is_file() or path.suffix.lower() not in (IMAGE_EXTS | VIDEO_EXTS):
-            continue
-        kind = 'image' if path.suffix.lower() in IMAGE_EXTS else 'video'
-        stat = path.stat()
-        items.append(AssetItem(id=path.stem, filename=path.name, original_name=path.name, kind=kind, url=upload_url(request, path.name), size_bytes=stat.st_size, created_at=datetime.fromtimestamp(stat.st_mtime, timezone.utc).isoformat()))
-    return items[:100]
+    seen: set[str] = set()
+    allowed_kinds = {'image', 'video'}
+    kind_filter = kind if kind in allowed_kinds else None
+    query = (q or '').strip().lower()
+
+    def add_item(item: AssetItem) -> None:
+        if item.filename in seen:
+            return
+        if kind_filter and item.kind != kind_filter:
+            return
+        if query and query not in f'{item.original_name} {item.filename} {item.kind}'.lower():
+            return
+        seen.add(item.filename)
+        items.append(item)
+
+    if settings.uploads_dir.exists():
+        for path in sorted(settings.uploads_dir.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True):
+            if not path.is_file() or path.suffix.lower() not in (IMAGE_EXTS | VIDEO_EXTS):
+                continue
+            item_kind = 'image' if path.suffix.lower() in IMAGE_EXTS else 'video'
+            stat = path.stat()
+            public_url = None
+            if settings.r2_public_base_url.strip():
+                public_url = _safe_public_r2_url(settings, _upload_r2_prefix_candidates(path.name)[0], path.name)
+            add_item(AssetItem(
+                id=path.stem,
+                filename=path.name,
+                original_name=path.name,
+                kind=item_kind,
+                url=upload_url(request, path.name, public_url),
+                size_bytes=stat.st_size,
+                created_at=datetime.fromtimestamp(stat.st_mtime, timezone.utc).isoformat(),
+            ))
+
+    # R2 objects are listed as a fallback so the素材库 can still show files after Render restarts/OOM.
+    for prefix in ['uploads', 'digital-human/avatar', 'digital-human/driver']:
+        for obj in maybe_list_r2_objects(settings, prefix=prefix, limit=limit):
+            name = obj.get('name') or ''
+            ext = Path(name).suffix.lower()
+            if ext not in (IMAGE_EXTS | VIDEO_EXTS):
+                continue
+            item_kind = 'image' if ext in IMAGE_EXTS else 'video'
+            lm = obj.get('last_modified')
+            if hasattr(lm, 'isoformat'):
+                created_at = lm.astimezone(timezone.utc).isoformat()
+            else:
+                created_at = datetime.now(timezone.utc).isoformat()
+            add_item(AssetItem(
+                id=Path(name).stem,
+                filename=name,
+                original_name=name,
+                kind=item_kind,
+                url=obj.get('url') or upload_url(request, name),
+                size_bytes=int(obj.get('size') or 0),
+                created_at=created_at,
+            ))
+
+    items.sort(key=lambda it: it.created_at, reverse=True)
+    return items[:max(1, min(limit, 500))]
+
+
+@app.delete('/api/assets/{asset_id}')
+def api_delete_asset(asset_id: str, settings: Settings = Depends(get_settings)) -> dict:
+    safe_id = ''.join(ch for ch in asset_id if ch.isalnum() or ch in {'_', '-'})[:128]
+    if not safe_id:
+        raise HTTPException(status_code=400, detail='素材 ID 无效')
+    deleted: list[str] = []
+    warnings: list[str] = []
+
+    for ext in IMAGE_EXTS | VIDEO_EXTS:
+        path = settings.uploads_dir / f'{safe_id}{ext}'
+        if path.exists() and path.is_file():
+            try:
+                path.unlink()
+                deleted.append(str(path.name))
+            except Exception as exc:
+                warnings.append(f'本地文件删除失败：{path.name}：{exc}')
+
+    object_keys: list[str] = []
+    for ext in IMAGE_EXTS | VIDEO_EXTS:
+        filename = f'{safe_id}{ext}'
+        for prefix in _upload_r2_prefix_candidates(filename):
+            object_keys.append(f'{prefix.strip("/")}/{filename}')
+    r2_deleted = maybe_delete_from_r2(settings, object_keys)
+    deleted.extend(r2_deleted)
+
+    if not deleted:
+        raise HTTPException(status_code=404, detail='素材不存在，可能已经删除或只存在于旧临时目录。')
+    return {'ok': True, 'deleted': deleted, 'warnings': warnings}
 
 
 @app.get('/api/collected-videos', response_model=List[AssetItem])

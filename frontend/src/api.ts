@@ -40,6 +40,11 @@ export async function uploadAssets(files: FileList): Promise<AssetItem[]> {
   return parseResponse<AssetItem[]>(res)
 }
 
+export async function deleteAsset(assetId: string): Promise<{ok: boolean; deleted: string[]; warnings: string[]}> {
+  const res = await fetch(`${API_BASE}/api/assets/${encodeURIComponent(assetId)}`, { method: 'DELETE' })
+  return parseResponse<{ok: boolean; deleted: string[]; warnings: string[]}>(res)
+}
+
 export interface GeneratedCopy {
   title: string
   hook: string

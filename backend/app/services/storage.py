@@ -70,3 +70,82 @@ def _write_storage_error(settings: Settings, message: str) -> None:
         print(f'[storage] {message}', flush=True)
     except Exception:
         pass
+
+
+def maybe_delete_from_r2(settings: Settings, object_keys: list[str]) -> list[str]:
+    """Best-effort R2 delete for online asset management."""
+    deleted: list[str] = []
+    if not settings.r2_enabled or not object_keys:
+        return deleted
+    try:
+        import boto3  # type: ignore
+    except Exception as exc:
+        _write_storage_error(settings, f'boto3 import failed while deleting: {exc}')
+        return deleted
+    try:
+        endpoint = f'https://{settings.r2_account_id}.r2.cloudflarestorage.com'
+        client = boto3.client(
+            's3',
+            endpoint_url=endpoint,
+            aws_access_key_id=settings.r2_access_key_id,
+            aws_secret_access_key=settings.r2_secret_access_key,
+            region_name='auto',
+        )
+        for key in object_keys:
+            try:
+                client.delete_object(Bucket=settings.r2_bucket_name, Key=key)
+                deleted.append(key)
+            except Exception as exc:
+                _write_storage_error(settings, f'R2 delete failed for {key}: {type(exc).__name__}: {exc}')
+        return deleted
+    except Exception as exc:
+        _write_storage_error(settings, f'R2 delete setup failed: {type(exc).__name__}: {exc}')
+        return deleted
+
+
+def maybe_list_r2_objects(settings: Settings, prefix: str = 'uploads', limit: int = 500) -> list[dict]:
+    """Best-effort list R2 objects so material library still works after Render restarts."""
+    if not settings.r2_enabled:
+        return []
+    try:
+        import boto3  # type: ignore
+    except Exception as exc:
+        _write_storage_error(settings, f'boto3 import failed while listing: {exc}')
+        return []
+    try:
+        endpoint = f'https://{settings.r2_account_id}.r2.cloudflarestorage.com'
+        client = boto3.client(
+            's3',
+            endpoint_url=endpoint,
+            aws_access_key_id=settings.r2_access_key_id,
+            aws_secret_access_key=settings.r2_secret_access_key,
+            region_name='auto',
+        )
+        items: list[dict] = []
+        token = None
+        while len(items) < limit:
+            kwargs = {'Bucket': settings.r2_bucket_name, 'Prefix': prefix.strip('/') + '/', 'MaxKeys': min(1000, limit - len(items))}
+            if token:
+                kwargs['ContinuationToken'] = token
+            resp = client.list_objects_v2(**kwargs)
+            for obj in resp.get('Contents', []) or []:
+                key = obj.get('Key')
+                if not key or key.endswith('/'):
+                    continue
+                url = public_r2_url(settings, key)
+                items.append({
+                    'key': key,
+                    'name': Path(key).name,
+                    'url': url,
+                    'size': int(obj.get('Size') or 0),
+                    'last_modified': obj.get('LastModified'),
+                })
+                if len(items) >= limit:
+                    break
+            if not resp.get('IsTruncated') or len(items) >= limit:
+                break
+            token = resp.get('NextContinuationToken')
+        return items
+    except Exception as exc:
+        _write_storage_error(settings, f'R2 list failed: {type(exc).__name__}: {exc}')
+        return []

@@ -195,3 +195,110 @@ input:focus,textarea:focus,select:focus{
   .appShell{padding:10px}.collectorAssist,.agentPanel,.cookiePanel,.resultBox,.memoryList,.leadPanel .grid2,.copyEditor,.editChatBox,.downloadPanel{border-radius:20px;padding:14px}
   input,textarea,select{border-radius:16px}.studioNav nav button{min-width:142px}.heroHeader h1{font-size:28px}.sectionHeader h2,.card h2{font-size:24px}.resultTop a{margin-left:0;width:100%;text-align:center}.splitGrid>div{padding:12px}.buttonRow .btn,.headerActions .btn{width:100%}
 }
+
+/* Material library upgrade */
+.fileButton { display: inline-flex; align-items: center; justify-content: center; cursor: pointer; }
+.fileButton input { display: none; }
+.dropZone {
+  margin: 16px 0;
+  border: 1.5px dashed rgba(37, 99, 235, .28);
+  background: linear-gradient(135deg, rgba(239, 246, 255, .92), rgba(255, 255, 255, .92));
+  border-radius: 24px;
+  min-height: 118px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: #475569;
+  transition: .18s ease;
+}
+.dropZone strong { color: #0f172a; font-size: 18px; }
+.dropZone span { max-width: 760px; text-align: center; line-height: 1.7; }
+.dropZone.dragging {
+  border-color: #2563eb;
+  background: linear-gradient(135deg, rgba(219, 234, 254, .95), rgba(237, 233, 254, .95));
+  box-shadow: inset 0 0 0 2px rgba(37, 99, 235, .15), 0 16px 45px rgba(37, 99, 235, .16);
+  transform: translateY(-1px);
+}
+.assetToolbar {
+  display: grid;
+  grid-template-columns: minmax(220px, 1.5fr) repeat(3, minmax(130px, .7fr)) auto;
+  gap: 10px;
+  align-items: center;
+  margin: 14px 0;
+}
+.assetToolbar input,
+.assetToolbar select {
+  min-height: 44px;
+}
+.assetStats {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin: 8px 0 18px;
+  color: #64748b;
+}
+.assetGridWrap {
+  align-items: start;
+}
+.assetCards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 14px;
+}
+.assetCard {
+  border: 1px solid rgba(148, 163, 184, .28);
+  background: rgba(255, 255, 255, .86);
+  border-radius: 22px;
+  overflow: hidden;
+  box-shadow: 0 10px 26px rgba(15, 23, 42, .05);
+  transition: .18s ease;
+}
+.assetCard:hover { transform: translateY(-1px); border-color: rgba(37, 99, 235, .28); box-shadow: 0 18px 38px rgba(15, 23, 42, .08); }
+.assetCard.selected { border-color: #2563eb; box-shadow: 0 0 0 3px rgba(37, 99, 235, .12), 0 18px 38px rgba(37, 99, 235, .12); }
+.assetPreview {
+  width: 100%;
+  height: 142px;
+  border: 0;
+  padding: 0;
+  background: linear-gradient(135deg, #f8fafc, #eef2ff);
+  overflow: hidden;
+  cursor: pointer;
+}
+.assetPreview img,
+.assetPreview video { width: 100%; height: 100%; object-fit: cover; display: block; }
+.assetMeta { padding: 12px 13px 8px; display: grid; gap: 4px; }
+.assetMeta strong { color: #0f172a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.assetMeta span { color: #64748b; font-size: 12px; }
+.assetActions { display: flex; gap: 8px; padding: 0 13px 13px; }
+.mini {
+  border: 1px solid rgba(148, 163, 184, .35);
+  background: #fff;
+  color: #1e3a8a;
+  min-height: 32px;
+  padding: 0 10px;
+  border-radius: 999px;
+  font-weight: 700;
+  font-size: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+  cursor: pointer;
+}
+.mini.active { color: #fff; background: linear-gradient(135deg, #2563eb, #7c3aed); border-color: transparent; }
+.mini.danger { color: #b91c1c; border-color: rgba(239, 68, 68, .25); background: #fff7f7; }
+.assetRow.collected { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; gap: 10px; align-items: center; }
+.assetRow.collected span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.assetRow.collected button:first-child { border: 0; border-radius: 999px; min-height: 32px; padding: 0 12px; color: #1e40af; background: #eff6ff; font-weight: 800; cursor: pointer; }
+.assetRow.collected.selected { border-color: #2563eb; background: #eff6ff; }
+
+@media (max-width: 920px) {
+  .assetToolbar { grid-template-columns: 1fr 1fr; }
+  .assetToolbar input { grid-column: 1 / -1; }
+  .assetToolbar .btn { grid-column: 1 / -1; }
+  .dropZone { min-height: 104px; padding: 16px; }
+  .assetCards { grid-template-columns: 1fr; }
+}

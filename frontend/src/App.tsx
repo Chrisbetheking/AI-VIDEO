@@ -30,7 +30,8 @@ import {
   apiPost,
   getCollectorStatus,
   uploadCollectorCookies,
-  uploadAssets
+  uploadAssets,
+  deleteAsset
 } from './api'
 
 type ModuleKey = 'dashboard' | 'monitor' | 'lead' | 'collector' | 'copy' | 'voice' | 'digitalHuman' | 'assets' | 'video' | 'subtitleCover' | 'publish' | 'strategy' | 'competitor' | 'trend' | 'shooting' | 'growth'
@@ -152,6 +153,11 @@ export default function App() {
   const [assets, setAssets] = useState<AssetItem[]>([])
   const [selectedMaterialIds, setSelectedMaterialIds] = useState<string[]>([])
   const [selectedReferenceAssetId, setSelectedReferenceAssetId] = useState('')
+  const [assetSearch, setAssetSearch] = useState('')
+  const [assetKindFilter, setAssetKindFilter] = useState<'all' | 'image' | 'video'>('all')
+  const [assetTimeFilter, setAssetTimeFilter] = useState<'all' | 'today' | '7d' | '30d'>('all')
+  const [assetSort, setAssetSort] = useState<'new' | 'old' | 'size_desc' | 'size_asc' | 'name'>('new')
+  const [isDraggingAssets, setIsDraggingAssets] = useState(false)
   const [sourceUrl, setSourceUrl] = useState('')
   const [manualText, setManualText] = useState('')
   const [extract, setExtract] = useState<InspirationExtractResponse | null>(null)
@@ -206,6 +212,28 @@ export default function App() {
 
   const materialAssets = useMemo(() => assets.filter(a => !a.filename.startsWith('collected_')), [assets])
   const collectedVideos = useMemo(() => assets.filter(a => a.kind === 'video' && a.filename.startsWith('collected_')), [assets])
+  const filteredMaterialAssets = useMemo(() => {
+    const now = Date.now()
+    const maxAge = assetTimeFilter === 'today' ? 24 * 3600 * 1000 : assetTimeFilter === '7d' ? 7 * 24 * 3600 * 1000 : assetTimeFilter === '30d' ? 30 * 24 * 3600 * 1000 : 0
+    const q = assetSearch.trim().toLowerCase()
+    const list = materialAssets.filter(a => {
+      if (assetKindFilter !== 'all' && a.kind !== assetKindFilter) return false
+      if (q && !`${a.original_name} ${a.filename} ${a.kind}`.toLowerCase().includes(q)) return false
+      if (maxAge) {
+        const t = new Date(a.created_at).getTime()
+        if (!Number.isFinite(t) || now - t > maxAge) return false
+      }
+      return true
+    })
+    return [...list].sort((a, b) => {
+      if (assetSort === 'old') return new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+      if (assetSort === 'size_desc') return b.size_bytes - a.size_bytes
+      if (assetSort === 'size_asc') return a.size_bytes - b.size_bytes
+      if (assetSort === 'name') return (a.original_name || a.filename).localeCompare(b.original_name || b.filename, 'zh-Hans-CN')
+      return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+    })
+  }, [materialAssets, assetKindFilter, assetSearch, assetSort, assetTimeFilter])
+  const selectedMaterialAssets = useMemo(() => materialAssets.filter(a => selectedMaterialIds.includes(a.id)), [materialAssets, selectedMaterialIds])
   const referenceText = useMemo(() => extract?.transcript || manualText || sourceUrl, [extract, manualText, sourceUrl])
   const competitorNotes = useMemo(() => competitors.map(c => `${c.platform}｜${c.name}｜${c.positioning}｜${c.notes}`).join('\n'), [competitors])
   const learningSummary = memoryContext?.learning_summary || '保存客户定位、竞品账号和采集结果后，AI 会在文案、雷达、投流建议里自动读取。'
@@ -413,6 +441,33 @@ export default function App() {
 
   function toggleMaterial(id: string) {
     setSelectedMaterialIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])
+  }
+
+  async function removeAsset(asset: AssetItem) {
+    const name = asset.original_name || asset.filename
+    if (!confirm(`确认删除素材「${name}」？这会从素材库移除，已选剪辑也会同步取消。`)) return
+    await run('删除素材', () => deleteAsset(asset.id))
+    setAssets(prev => prev.filter(a => a.id !== asset.id))
+    setSelectedMaterialIds(prev => prev.filter(id => id !== asset.id))
+    if (selectedReferenceAssetId === asset.id) setSelectedReferenceAssetId('')
+    if (digitalHumanAvatarId === asset.id) setDigitalHumanAvatarId('')
+    if (digitalHumanDriverId === asset.id) setDigitalHumanDriverId('')
+  }
+
+  function onAssetDragOver(e: React.DragEvent<HTMLDivElement>) {
+    e.preventDefault()
+    setIsDraggingAssets(true)
+  }
+
+  function onAssetDragLeave(e: React.DragEvent<HTMLDivElement>) {
+    e.preventDefault()
+    setIsDraggingAssets(false)
+  }
+
+  async function onAssetDrop(e: React.DragEvent<HTMLDivElement>) {
+    e.preventDefault()
+    setIsDraggingAssets(false)
+    await handleUpload(e.dataTransfer.files)
   }
 
   async function collectCompetitor() {
@@ -916,9 +971,20 @@ https://www.douyin.com/user/..." /></Field>
       </section>}
 
       {active === 'assets' && <section className="card modulePanel">
-        <div className="sectionHeader"><div><h2>第五步：选择视频素材</h2><p>素材库是你自己的可用视频/图片，采集视频库只用于学习同行结构；合成时优先选自有素材。</p></div><input type="file" multiple accept="image/*,video/*" onChange={e => handleUpload(e.target.files)} /></div>
-        <div className="grid2"><div><h3>素材库</h3><div className="assetList">{materialAssets.length === 0 && <Empty>还没有素材。</Empty>}{materialAssets.map(a => <label key={a.id} className="assetRow"><input type="checkbox" checked={selectedMaterialIds.includes(a.id)} onChange={() => toggleMaterial(a.id)} /><span>{a.kind === 'video' ? '🎬' : '🖼️'} {a.original_name}</span><em>{formatBytes(a.size_bytes)}</em></label>)}</div></div><div><h3>采集视频库</h3><div className="assetList">{collectedVideos.length === 0 && <Empty>暂时没有采集到视频。</Empty>}{collectedVideos.map(a => <button key={a.id} className={`assetButton ${selectedReferenceAssetId === a.id ? 'selected' : ''}`} onClick={() => setSelectedReferenceAssetId(a.id)}>🎯 {a.original_name}<em>{formatBytes(a.size_bytes)}</em></button>)}</div></div></div>
-        <div className="resultBox"><h3>素材匹配建议</h3><p>优先把老板出镜、办公室、客户交流、产品细节、服务流程素材分别对应到口播分段。没有匹配素材时，先用采集视频的结构做 B-roll 参考，不直接照搬原画面。</p></div>
+        <div className="sectionHeader"><div><h2>第五步：选择视频素材</h2><p>素材库用于长期管理自有图片/视频；支持拖动上传、筛选、选择和在线删除。采集视频只用于学习同行结构，不直接搬运画面。</p></div><label className="btn soft fileButton"><input type="file" multiple accept="image/*,video/*" onChange={e => handleUpload(e.target.files)} />上传素材</label></div>
+        <div className={`dropZone ${isDraggingAssets ? 'dragging' : ''}`} onDragOver={onAssetDragOver} onDragLeave={onAssetDragLeave} onDrop={onAssetDrop}>
+          <strong>拖动图片/视频到这里上传</strong><span>支持 JPG、PNG、WEBP、MP4、MOV、WEBM；建议老板出镜、项目环境、客户交流、流程讲解分别归档。</span>
+        </div>
+        <div className="assetToolbar">
+          <input value={assetSearch} onChange={e => setAssetSearch(e.target.value)} placeholder="搜索素材名称 / 文件名" />
+          <select value={assetKindFilter} onChange={e => setAssetKindFilter(e.target.value as any)}><option value="all">全部类型</option><option value="video">只看视频</option><option value="image">只看图片</option></select>
+          <select value={assetTimeFilter} onChange={e => setAssetTimeFilter(e.target.value as any)}><option value="all">全部时间</option><option value="today">今天上传</option><option value="7d">近 7 天</option><option value="30d">近 30 天</option></select>
+          <select value={assetSort} onChange={e => setAssetSort(e.target.value as any)}><option value="new">最新优先</option><option value="old">最早优先</option><option value="size_desc">文件从大到小</option><option value="size_asc">文件从小到大</option><option value="name">名称排序</option></select>
+          <button className="btn ghost" onClick={() => { setAssetSearch(''); setAssetKindFilter('all'); setAssetTimeFilter('all'); setAssetSort('new') }}>重置</button>
+        </div>
+        <div className="assetStats"><Pill tone="blue">自有素材 {materialAssets.length}</Pill><Pill tone="green">已选 {selectedMaterialIds.length}</Pill><Pill tone="purple">采集视频 {collectedVideos.length}</Pill>{selectedMaterialAssets.length > 0 && <span>已选：{selectedMaterialAssets.map(a => a.original_name || a.filename).slice(0, 4).join(' / ')}{selectedMaterialAssets.length > 4 ? ` 等 ${selectedMaterialAssets.length} 个` : ''}</span>}</div>
+        <div className="grid2 assetGridWrap"><div><h3>自有素材库</h3><div className="assetCards">{filteredMaterialAssets.length === 0 && <Empty>没有匹配的素材。可以拖动上传或调整筛选条件。</Empty>}{filteredMaterialAssets.map(a => <div key={a.id} className={`assetCard ${selectedMaterialIds.includes(a.id) ? 'selected' : ''}`}><button className="assetPreview" onClick={() => window.open(a.url, '_blank')}>{a.kind === 'video' ? <video src={a.url} muted /> : <img src={a.url} alt={a.original_name || a.filename} />}</button><div className="assetMeta"><strong title={a.original_name || a.filename}>{a.original_name || a.filename}</strong><span>{a.kind === 'video' ? '视频' : '图片'} · {formatBytes(a.size_bytes)} · {new Date(a.created_at).toLocaleDateString()}</span></div><div className="assetActions"><button className={selectedMaterialIds.includes(a.id) ? 'mini active' : 'mini'} onClick={() => toggleMaterial(a.id)}>{selectedMaterialIds.includes(a.id) ? '已选' : '选择'}</button><a className="mini" href={a.url} target="_blank">预览</a><button className="mini danger" onClick={() => removeAsset(a)}>删除</button></div></div>)}</div></div><div><h3>采集视频库</h3><div className="assetList">{collectedVideos.length === 0 && <Empty>暂时没有采集到视频。</Empty>}{collectedVideos.map(a => <div key={a.id} className={`assetRow collected ${selectedReferenceAssetId === a.id ? 'selected' : ''}`}><button onClick={() => setSelectedReferenceAssetId(a.id)}>作为参考</button><span>{a.original_name || a.filename}</span><em>{formatBytes(a.size_bytes)}</em><button className="mini danger" onClick={() => removeAsset(a)}>删除</button></div>)}</div></div></div>
+        <div className="resultBox"><h3>素材匹配建议</h3><p>把老板出镜、项目环境、客户交流、流程讲解、客户疑问分别对应到口播分段。素材选中后会自动进入剪辑合成；不够时先生成拍摄任务单补拍。</p></div>
       </section>}
 
       {active === 'shooting' && <section className="card modulePanel">
