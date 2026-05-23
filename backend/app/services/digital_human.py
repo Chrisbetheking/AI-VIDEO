@@ -221,73 +221,95 @@ async def _volc_call(settings: Settings, action: str, body: dict[str, Any]) -> d
     return data
 
 
+def _get_path(data: dict[str, Any], path: tuple[str, ...]) -> Any:
+    cur: Any = data
+    for p in path:
+        if isinstance(cur, dict) and p in cur:
+            cur = cur[p]
+        else:
+            return None
+    return cur
+
+
+def _walk_values(obj: Any):
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            yield k, v
+            yield from _walk_values(v)
+    elif isinstance(obj, list):
+        for v in obj:
+            yield from _walk_values(v)
+
+
 def _extract_task_id(data: dict[str, Any]) -> str:
-    candidates = [
-        data.get('Result', {}).get('TaskId'), data.get('Result', {}).get('task_id'),
-        data.get('Result', {}).get('JobId'), data.get('Result', {}).get('id'),
-        data.get('task_id'), data.get('TaskId'), data.get('job_id'), data.get('id'),
+    """Extract Jimeng task id from several real Volcengine response shapes.
+
+    OmniHuman submit commonly returns:
+    {"Result":{"code":10000,"data":{"task_id":"..."}}}
+    """
+    preferred_paths = [
+        ('Result', 'data', 'task_id'), ('Result', 'data', 'TaskId'), ('Result', 'data', 'taskId'),
+        ('Result', 'data', 'job_id'), ('Result', 'data', 'JobId'), ('Result', 'data', 'jobId'),
+        ('Result', 'task_id'), ('Result', 'TaskId'), ('Result', 'taskId'),
+        ('Result', 'JobId'), ('Result', 'job_id'), ('Result', 'jobId'),
+        ('data', 'task_id'), ('data', 'TaskId'), ('data', 'taskId'),
+        ('result', 'task_id'), ('result', 'TaskId'), ('result', 'taskId'),
+        ('task_id',), ('TaskId',), ('taskId',), ('job_id',), ('JobId',), ('jobId',),
     ]
-    for x in candidates:
-        if x:
-            return str(x)
-    # Some APIs nest data under data/result.
-    for key in ('data', 'result'):
-        sub = data.get(key)
-        if isinstance(sub, dict):
-            for k in ('task_id', 'TaskId', 'job_id', 'id'):
-                if sub.get(k):
-                    return str(sub[k])
+    for path in preferred_paths:
+        val = _get_path(data, path)
+        if val:
+            return str(val)
+
+    # Recursive fallback: avoid request_id/requestId, which is not a task id.
+    task_keys = {'task_id', 'TaskId', 'taskId', 'job_id', 'JobId', 'jobId'}
+    for k, v in _walk_values(data):
+        if k in task_keys and v:
+            return str(v)
     return ''
 
 
 def _extract_video_url(data: dict[str, Any]) -> str:
-    # Try common response shapes.
     for path in [
+        ('Result', 'data', 'video_url'), ('Result', 'data', 'VideoUrl'), ('Result', 'data', 'videoUrl'),
+        ('Result', 'data', 'output_url'), ('Result', 'data', 'OutputUrl'), ('Result', 'data', 'result_url'),
+        ('Result', 'data', 'url'), ('Result', 'data', 'Url'),
         ('Result', 'VideoUrl'), ('Result', 'video_url'), ('Result', 'OutputUrl'), ('Result', 'output_url'),
         ('Result', 'Url'), ('Result', 'url'),
         ('data', 'video_url'), ('data', 'output_url'), ('data', 'url'),
         ('result', 'video_url'), ('result', 'output_url'), ('result', 'url'),
     ]:
-        cur: Any = data
-        ok = True
-        for p in path:
-            if isinstance(cur, dict) and p in cur:
-                cur = cur[p]
-            else:
-                ok = False
-                break
-        if ok and isinstance(cur, str) and cur.startswith(('http://', 'https://')):
+        cur = _get_path(data, path)
+        if isinstance(cur, str) and cur.startswith(('http://', 'https://')):
             return cur
-    # Search recursively for first http mp4/url-like value.
-    def walk(obj: Any) -> str:
-        if isinstance(obj, str) and obj.startswith(('http://', 'https://')):
-            return obj
-        if isinstance(obj, dict):
-            for v in obj.values():
-                found = walk(v)
-                if found:
-                    return found
-        if isinstance(obj, list):
-            for v in obj:
-                found = walk(v)
-                if found:
-                    return found
-        return ''
-    return walk(data)
+        if isinstance(cur, list):
+            for item in cur:
+                if isinstance(item, str) and item.startswith(('http://', 'https://')):
+                    return item
+
+    urls: list[str] = []
+    for _k, v in _walk_values(data):
+        if isinstance(v, str) and v.startswith(('http://', 'https://')):
+            urls.append(v)
+    for u in urls:
+        low = u.lower()
+        if any(x in low for x in ('.mp4', '.mov', '.m3u8', 'video', 'tos-', 'volc')):
+            return u
+    return urls[0] if urls else ''
 
 
 def _extract_status(data: dict[str, Any]) -> str:
-    for path in [('Result', 'Status'), ('Result', 'status'), ('data', 'status'), ('result', 'status')]:
-        cur: Any = data
-        ok = True
-        for p in path:
-            if isinstance(cur, dict) and p in cur:
-                cur = cur[p]
-            else:
-                ok = False
-                break
-        if ok and cur:
+    for path in [
+        ('Result', 'data', 'status'), ('Result', 'data', 'Status'), ('Result', 'data', 'state'), ('Result', 'data', 'State'),
+        ('Result', 'status'), ('Result', 'Status'), ('Result', 'state'), ('Result', 'State'),
+        ('data', 'status'), ('data', 'state'), ('result', 'status'), ('result', 'state'),
+    ]:
+        cur = _get_path(data, path)
+        if cur:
             return str(cur).lower()
+    for k, v in _walk_values(data):
+        if k in {'status', 'Status', 'state', 'State'} and v:
+            return str(v).lower()
     return ''
 
 
