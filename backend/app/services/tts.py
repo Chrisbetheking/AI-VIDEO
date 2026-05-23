@@ -92,9 +92,14 @@ def get_tts_voices(settings: Settings) -> list[TTSVoice]:
 async def synthesize_volcengine_v1(settings: Settings, text: str, voice: Optional[str], rate: Optional[str], speed_ratio: Optional[float] = None, volume_ratio: float = 1.0, pitch_ratio: float = 1.0) -> Path:
     if not settings.volcengine_app_id.strip() or not settings.volcengine_access_token.strip():
         raise RuntimeError('缺少豆包语音配置：VOLCENGINE_APP_ID / VOLCENGINE_ACCESS_TOKEN。')
-    voice_type = (voice or settings.volcengine_voice_type or '').strip()
-    if voice_type in {'', 'default'}:
-        raise RuntimeError('缺少 VOLCENGINE_VOICE_TYPE；如果是声音复刻，请填复刻成功后的音色 ID。')
+    # 前端/测试请求经常会传 voice='default'，不能让它覆盖环境变量里的复刻音色。
+    requested_voice = (voice or '').strip()
+    if requested_voice.lower() in {'', 'default', 'auto', 'cloned'}:
+        voice_type = (settings.volcengine_voice_type or settings.tts_voice or '').strip()
+    else:
+        voice_type = requested_voice
+    if voice_type.lower() in {'', 'default', 'auto', 'cloned'}:
+        raise RuntimeError('缺少 VOLCENGINE_VOICE_TYPE；请填火山控制台“声音ID/voice_type”，不要填 default。')
 
     reqid = uuid.uuid4().hex
     body = {
