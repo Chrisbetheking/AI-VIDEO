@@ -769,19 +769,53 @@ def api_list_collected_videos(request: Request, settings: Settings = Depends(get
 
 @app.post('/api/compose-video', response_model=ComposeResponse)
 async def api_compose_video(req: ComposeRequest, request: Request, settings: Settings = Depends(get_settings)) -> ComposeResponse:
+    """Compose the final video.
+
+    Render free instances can restart/OOM and delete local /app/data files.
+    The old implementation used safe_output_path() for audio and returned 404
+    when an old TTS filename was no longer on disk, which showed as
+    "文件不存在 /api/compose-video" in the frontend.  For production flow we
+    should not fail the whole compose step just because the previous audio file
+    was lost; instead regenerate TTS from the current script and continue.
+    """
+    pre_warnings: list[str] = []
     asset_paths: List[Path] = []
+    missing_asset_ids: list[str] = []
+
     if req.asset_ids:
         for asset_id in req.asset_ids:
             path = find_asset_path(settings, asset_id)
             if path:
                 asset_paths.append(path)
+            else:
+                missing_asset_ids.append(str(asset_id))
+        if missing_asset_ids:
+            pre_warnings.append('部分素材只存在于旧临时目录或 R2 远端，Render 当前本地找不到，已自动跳过并使用可用素材/默认背景。')
     else:
-        asset_paths = list(settings.uploads_dir.glob('*'))[:6]
-    audio_path: Optional[Path] = safe_output_path(settings, req.audio_file_name) if req.audio_file_name else None
+        asset_paths = [p for p in settings.uploads_dir.glob('*') if p.is_file()][:6]
+
+    audio_path: Optional[Path] = None
+    if req.audio_file_name:
+        # Do NOT call safe_output_path here. If Render restarted, the old local
+        # mp3/wav is gone. Let compose_video() regenerate audio instead.
+        audio_path = find_media_file(settings, req.audio_file_name)
+        if audio_path is None:
+            pre_warnings.append(f'配音文件 {Path(req.audio_file_name).name} 不在当前 Render 本地磁盘，已根据当前文案自动重新生成配音。')
+
     try:
-        result = await compose_video(settings=settings, script=req.script, asset_paths=asset_paths, duration_seconds=req.duration_seconds, audio_path=audio_path, voice=req.voice, rate=req.rate)
+        result = await compose_video(
+            settings=settings,
+            script=req.script,
+            asset_paths=asset_paths,
+            duration_seconds=req.duration_seconds,
+            audio_path=audio_path,
+            voice=req.voice,
+            rate=req.rate,
+        )
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        # Return a clear API error instead of leaving the browser with a vague Failed to fetch.
+        raise HTTPException(status_code=500, detail=f'视频合成失败：{str(exc)[:1800]}') from exc
+
     video_public = maybe_upload_to_r2(settings, result.video_path, prefix='videos')
     subtitle_public = maybe_upload_to_r2(settings, result.subtitle_path, prefix='subtitles') if result.subtitle_path else None
     audio_public = maybe_upload_to_r2(settings, result.audio_path, prefix='audio') if result.audio_path else None
@@ -791,7 +825,7 @@ async def api_compose_video(req: ComposeRequest, request: Request, settings: Set
         subtitle_url=file_url(request, result.subtitle_path.name, subtitle_public) if result.subtitle_path else None,
         audio_url=file_url(request, result.audio_path.name, audio_public) if result.audio_path else None,
         duration_seconds=result.duration_seconds,
-        warnings=result.warnings,
+        warnings=[*pre_warnings, *result.warnings],
     )
 
 
