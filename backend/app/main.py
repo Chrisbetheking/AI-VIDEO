@@ -149,12 +149,17 @@ async def _start_auto_collector() -> None:
     if settings.enable_auto_collector and _auto_collector_task is None:
         _auto_collector_task = asyncio.create_task(_auto_collector_loop())
 
+# CORS：Cloudflare Pages 与 Render 分离部署时必须允许跨域。
+# 如果 CORS_ORIGINS=*，用 allow_origin_regex='.*' 回显 Origin，避免浏览器在某些请求上拦截。
+_cors_all = (not settings.cors_origins) or settings.cors_origins.strip() == '*'
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.cors_list,
-    allow_credentials=True,
+    allow_origins=[] if _cors_all else settings.cors_list,
+    allow_origin_regex='.*' if _cors_all else None,
+    allow_credentials=False,
     allow_methods=['*'],
     allow_headers=['*'],
+    expose_headers=['*'],
 )
 
 

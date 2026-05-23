@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import os
 import re
 import shlex
 import subprocess
@@ -25,8 +26,30 @@ class VideoResult:
     warnings: List[str]
 
 
-def run_cmd(cmd: list[str], timeout: int = 600) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, check=False)
+def _env_int(name: str, default: int, low: int, high: int) -> int:
+    try:
+        value = int(os.getenv(name, str(default)))
+    except Exception:
+        value = default
+    return max(low, min(high, value))
+
+
+def target_size() -> tuple[int, int]:
+    # Render free instance只有 512MB。默认改成 720x1280，避免 1080x1920 合成时 OOM 导致前端 Failed to fetch。
+    width = _env_int("COMPOSE_VIDEO_WIDTH", 720, 360, 1080)
+    height = _env_int("COMPOSE_VIDEO_HEIGHT", 1280, 640, 1920)
+    # x264/yuv420p 要求偶数尺寸。
+    width = width if width % 2 == 0 else width - 1
+    height = height if height % 2 == 0 else height - 1
+    return width, height
+
+
+def run_cmd(cmd: list[str], timeout: int = 480) -> subprocess.CompletedProcess[str]:
+    # 限制线程数，防止免费实例内存/CPU 被 ffmpeg 打满。
+    env = os.environ.copy()
+    env.setdefault("OMP_NUM_THREADS", "1")
+    env.setdefault("OPENBLAS_NUM_THREADS", "1")
+    return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, check=False, env=env)
 
 
 def is_image(path: Path) -> bool:
@@ -90,83 +113,84 @@ def create_srt(script: str, duration: float, output_path: Path) -> None:
 
 
 def ffmpeg_subtitle_path(path: Path) -> str:
-    # subtitles filter path escaping for ffmpeg/libass on Linux/macOS.
-    value = str(path.resolve())
-    value = value.replace("\\", "/")
-    value = value.replace(":", "\\:").replace("'", "\\'")
-    return value
+    value = str(path.resolve()).replace("\\", "/")
+    return value.replace(":", "\\:").replace("'", "\\'")
+
+
+def _video_codec_args() -> list[str]:
+    # ultrafast + CRF 30：牺牲一点体积换稳定，防止 Render 免费实例爆内存。
+    return ["-c:v", "libx264", "-preset", "ultrafast", "-crf", os.getenv("COMPOSE_VIDEO_CRF", "30"), "-threads", "1", "-pix_fmt", "yuv420p"]
+
+
+def _color_base_cmd(duration: float, output_path: Path) -> list[str]:
+    w, h = target_size()
+    return [
+        "ffmpeg", "-hide_banner", "-loglevel", "warning", "-y",
+        "-f", "lavfi", "-i", f"color=c=0x111827:s={w}x{h}:r=24:d={duration:.2f}",
+        "-t", f"{duration:.2f}",
+        *_video_codec_args(),
+        str(output_path),
+    ]
+
+
+def build_default_base(duration: float, output_path: Path) -> Tuple[Path, List[str]]:
+    proc = run_cmd(_color_base_cmd(duration, output_path), timeout=240)
+    if proc.returncode != 0:
+        raise RuntimeError(f"生成默认背景视频失败：{proc.stderr[-1200:]}")
+    return output_path, ["素材不可用或合成压力过高，已使用轻量默认背景，避免 Render 免费实例崩溃。"]
 
 
 def build_video_base(asset_paths: List[Path], duration: float, output_path: Path) -> Tuple[Path, List[str]]:
     warnings: List[str] = []
-    duration = max(3.0, duration)
-
-    if not asset_paths:
-        cmd = [
-            "ffmpeg",
-            "-y",
-            "-f",
-            "lavfi",
-            "-i",
-            f"color=c=0x111827:s=1080x1920:r=30:d={duration:.2f}",
-            "-vf",
-            "format=yuv420p",
-            "-c:v",
-            "libx264",
-            "-preset",
-            "veryfast",
-            "-t",
-            f"{duration:.2f}",
-            str(output_path),
-        ]
-        proc = run_cmd(cmd)
-        if proc.returncode != 0:
-            raise RuntimeError(f"生成默认背景视频失败：{proc.stderr[-1000:]}")
-        warnings.append("未上传素材，已使用默认背景生成视频。")
-        return output_path, warnings
-
-    valid_paths = [p for p in asset_paths if p.exists() and (is_image(p) or is_video(p))]
+    duration = max(3.0, min(float(duration), float(_env_int("COMPOSE_MAX_SECONDS", 75, 5, 180))))
+    max_assets = _env_int("COMPOSE_MAX_ASSETS", 4, 1, 8)
+    valid_paths = [p for p in asset_paths if p.exists() and (is_image(p) or is_video(p))][:max_assets]
     if not valid_paths:
-        return build_video_base([], duration, output_path)
+        return build_default_base(duration, output_path)
 
+    w, h = target_size()
+    fps = _env_int("COMPOSE_FPS", 24, 12, 30)
     per_duration = max(2.0, duration / len(valid_paths))
-    cmd: List[str] = ["ffmpeg", "-y"]
+    cmd: List[str] = ["ffmpeg", "-hide_banner", "-loglevel", "warning", "-y"]
     for path in valid_paths:
         if is_image(path):
             cmd += ["-loop", "1", "-t", f"{per_duration:.2f}", "-i", str(path)]
         else:
-            cmd += ["-stream_loop", "-1", "-t", f"{per_duration:.2f}", "-i", str(path)]
+            # 视频素材只拿前几秒，循环会显著增加内存/CPU，免费实例先稳。
+            cmd += ["-t", f"{per_duration:.2f}", "-i", str(path)]
 
     filter_parts: List[str] = []
     video_labels: List[str] = []
     for i, _path in enumerate(valid_paths):
         label = f"v{i}"
         filter_parts.append(
-            f"[{i}:v]scale=1080:1920:force_original_aspect_ratio=increase,"
-            f"crop=1080:1920,setsar=1,fps=30,format=yuv420p[{label}]"
+            f"[{i}:v]scale={w}:{h}:force_original_aspect_ratio=increase,"
+            f"crop={w}:{h},setsar=1,fps={fps},format=yuv420p[{label}]"
         )
         video_labels.append(f"[{label}]")
     filter_parts.append("".join(video_labels) + f"concat=n={len(valid_paths)}:v=1:a=0[outv]")
 
     cmd += [
-        "-filter_complex",
-        ";".join(filter_parts),
-        "-map",
-        "[outv]",
-        "-t",
-        f"{duration:.2f}",
-        "-c:v",
-        "libx264",
-        "-preset",
-        "veryfast",
-        "-pix_fmt",
-        "yuv420p",
+        "-filter_complex", ";".join(filter_parts),
+        "-map", "[outv]",
+        "-t", f"{duration:.2f}",
+        *_video_codec_args(),
         str(output_path),
     ]
-    proc = run_cmd(cmd)
-    if proc.returncode != 0:
-        raise RuntimeError(f"素材合成失败：{proc.stderr[-1500:]}\nCMD: {' '.join(shlex.quote(c) for c in cmd)}")
-    return output_path, warnings
+    proc = run_cmd(cmd, timeout=max(240, int(duration * 12)))
+    if proc.returncode == 0:
+        if len(asset_paths) > len(valid_paths):
+            warnings.append(f"为保证 Render 稳定，本次只使用前 {len(valid_paths)} 个可用素材。")
+        return output_path, warnings
+
+    warnings.append(f"素材合成失败，已降级默认背景：{proc.stderr[-900:]}")
+    try:
+        output_path.unlink(missing_ok=True)
+    except Exception:
+        pass
+    default_path, default_warnings = build_default_base(duration, output_path)
+    warnings.extend(default_warnings)
+    return default_path, warnings
 
 
 def burn_subtitles_and_audio(
@@ -177,66 +201,48 @@ def burn_subtitles_and_audio(
     duration: float,
 ) -> List[str]:
     warnings: List[str] = []
-    vf = "scale=1080:1920,format=yuv420p"
+    w, h = target_size()
+    vf = f"scale={w}:{h},format=yuv420p"
     if subtitle_path and subtitle_path.exists():
         sub_path = ffmpeg_subtitle_path(subtitle_path)
-        # Alignment=2 底部居中；MarginV 控制离底部距离。
-        style = "FontName=Noto Sans CJK SC,FontSize=17,PrimaryColour=&H00FFFFFF,OutlineColour=&H80000000,BorderStyle=1,Outline=2,Shadow=1,Alignment=2,MarginV=180"
+        font_size = _env_int("COMPOSE_SUBTITLE_SIZE", 16, 12, 28)
+        margin_v = _env_int("COMPOSE_SUBTITLE_MARGIN", 120, 40, 260)
+        style = f"FontName=Noto Sans CJK SC,FontSize={font_size},PrimaryColour=&H00FFFFFF,OutlineColour=&H80000000,BorderStyle=1,Outline=2,Shadow=1,Alignment=2,MarginV={margin_v}"
         vf += f",subtitles='{sub_path}':force_style='{style}'"
 
-    cmd = ["ffmpeg", "-y", "-i", str(base_video)]
+    cmd = ["ffmpeg", "-hide_banner", "-loglevel", "warning", "-y", "-i", str(base_video)]
     if audio_path and audio_path.exists():
         cmd += ["-i", str(audio_path)]
     cmd += ["-vf", vf]
     if audio_path and audio_path.exists():
         cmd += ["-map", "0:v:0", "-map", "1:a:0", "-shortest"]
-    cmd += [
-        "-t",
-        f"{duration:.2f}",
-        "-c:v",
-        "libx264",
-        "-preset",
-        "veryfast",
-        "-c:a",
-        "aac",
-        "-b:a",
-        "128k",
-        "-pix_fmt",
-        "yuv420p",
-        "-movflags",
-        "+faststart",
-        str(output_path),
-    ]
-    proc = run_cmd(cmd)
+    cmd += ["-t", f"{duration:.2f}", *_video_codec_args()]
+    if audio_path and audio_path.exists():
+        cmd += ["-c:a", "aac", "-b:a", "96k"]
+    cmd += ["-movflags", "+faststart", str(output_path)]
+
+    proc = run_cmd(cmd, timeout=max(240, int(duration * 12)))
     if proc.returncode == 0:
         return warnings
 
-    # 字幕滤镜在某些系统可能因字体/路径失败，降级为无字幕版本。
-    warnings.append(f"字幕烧录失败，已降级为无字幕视频：{proc.stderr[-800:]}")
-    cmd = ["ffmpeg", "-y", "-i", str(base_video)]
+    # 字幕滤镜最容易因为字体/路径失败；自动降级无字幕，但不能让前端直接 Failed to fetch。
+    warnings.append(f"字幕烧录失败，已降级为无字幕视频：{proc.stderr[-900:]}")
+    try:
+        output_path.unlink(missing_ok=True)
+    except Exception:
+        pass
+
+    cmd = ["ffmpeg", "-hide_banner", "-loglevel", "warning", "-y", "-i", str(base_video)]
     if audio_path and audio_path.exists():
         cmd += ["-i", str(audio_path)]
-    cmd += ["-vf", "scale=1080:1920,format=yuv420p"]
+    cmd += ["-vf", f"scale={w}:{h},format=yuv420p"]
     if audio_path and audio_path.exists():
         cmd += ["-map", "0:v:0", "-map", "1:a:0", "-shortest"]
-    cmd += [
-        "-t",
-        f"{duration:.2f}",
-        "-c:v",
-        "libx264",
-        "-preset",
-        "veryfast",
-        "-c:a",
-        "aac",
-        "-b:a",
-        "128k",
-        "-pix_fmt",
-        "yuv420p",
-        "-movflags",
-        "+faststart",
-        str(output_path),
-    ]
-    proc2 = run_cmd(cmd)
+    cmd += ["-t", f"{duration:.2f}", *_video_codec_args()]
+    if audio_path and audio_path.exists():
+        cmd += ["-c:a", "aac", "-b:a", "96k"]
+    cmd += ["-movflags", "+faststart", str(output_path)]
+    proc2 = run_cmd(cmd, timeout=max(240, int(duration * 10)))
     if proc2.returncode != 0:
         raise RuntimeError(f"最终视频合成失败：{proc2.stderr[-1500:]}")
     return warnings
@@ -260,7 +266,12 @@ async def compose_video(
     else:
         audio_duration = probe_duration(audio_path)
 
+    duration_cap = float(_env_int("COMPOSE_MAX_SECONDS", 75, 5, 180))
     duration = max(float(duration_seconds), audio_duration or 0, 5.0)
+    if duration > duration_cap:
+        warnings.append(f"为避免 Render 免费实例合成超时/爆内存，本次视频时长从 {duration:.1f}s 限制为 {duration_cap:.1f}s。")
+        duration = duration_cap
+
     task_id = uuid.uuid4().hex
     base_video = settings.tmp_dir / f"base_{task_id}.mp4"
     subtitle_path = settings.outputs_dir / f"sub_{task_id}.srt"
@@ -273,7 +284,7 @@ async def compose_video(
 
     try:
         base_video.unlink(missing_ok=True)
-    except Exception:  # noqa: BLE001
+    except Exception:
         pass
 
     return VideoResult(
