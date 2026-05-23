@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional
 
-from fastapi import Depends, FastAPI, File, HTTPException, Request, UploadFile
+from fastapi import BackgroundTasks, Depends, FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -63,10 +63,12 @@ from app.schemas import (
     AutoCollectorRunRequest,
     AutoCollectorRunResponse,
     AutoCollectorStatusResponse,
+    LeadAcquisitionRequest,
+    LeadAcquisitionPlanResponse,
 )
 from app.services.ad_analysis import analyze_ad
 from app.services.cover import create_cover
-from app.services.deepseek import DeepSeekError, generate_copy, generate_edit_plan, generate_growth_decision, generate_shooting_plan, generate_subtitle_emphasis, generate_trend_radar, generate_voice_director, refine_copy_with_instruction, rewrite_from_inspiration, test_deepseek, video_edit_chat_advice
+from app.services.deepseek import DeepSeekError, generate_copy, generate_edit_plan, generate_growth_decision, generate_shooting_plan, generate_subtitle_emphasis, generate_trend_radar, generate_voice_director, generate_lead_acquisition_plan, refine_copy_with_instruction, rewrite_from_inspiration, test_deepseek, video_edit_chat_advice
 from app.services.doubao import extract_with_doubao
 from app.services.digital_human import call_external_digital_human_worker, create_static_avatar_preview
 from app.services.collector import get_collector_cookie_status, save_collector_cookie_text
@@ -82,6 +84,7 @@ from app.services.auto_collector import run_auto_collection
 app = FastAPI(title='AI-VIDEO 正式版 API', version='1.0.0')
 settings = get_settings()
 _auto_collector_task: asyncio.Task | None = None
+_auto_agent_jobs: dict[str, dict] = {}
 
 
 async def _auto_collector_loop() -> None:
@@ -103,6 +106,41 @@ async def _auto_collector_loop() -> None:
             await asyncio.sleep(max(15, int(current.auto_collector_interval_minutes) * 60))
         except Exception:
             await asyncio.sleep(300)
+
+
+def _utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _trim_jobs(max_jobs: int = 80) -> None:
+    if len(_auto_agent_jobs) <= max_jobs:
+        return
+    for job_id, _ in sorted(_auto_agent_jobs.items(), key=lambda kv: kv[1].get('created_at', ''))[: max(0, len(_auto_agent_jobs) - max_jobs)]:
+        _auto_agent_jobs.pop(job_id, None)
+
+
+async def _run_auto_collection_job(job_id: str, req_data: dict) -> None:
+    """Run collection outside the HTTP request so cron-job.org's 30s limit is safe."""
+    _auto_agent_jobs[job_id].update({'status': 'running', 'started_at': _utc_now(), 'message': '后台采集学习正在运行。'})
+    current = get_settings()
+    memory = MemoryStore(current)
+    try:
+        req = AutoCollectorRunRequest(**req_data)
+        result = await run_auto_collection(current, memory, req)
+        _auto_agent_jobs[job_id].update({
+            'status': 'done',
+            'finished_at': _utc_now(),
+            'message': '后台采集学习已完成，结果已写入记忆库。',
+            'result': result,
+            'error': '',
+        })
+    except Exception as exc:
+        _auto_agent_jobs[job_id].update({
+            'status': 'failed',
+            'finished_at': _utc_now(),
+            'message': '后台采集学习失败。',
+            'error': str(exc)[:1000],
+        })
 
 
 @app.on_event('startup')
@@ -237,8 +275,42 @@ def api_agent_status(settings: Settings = Depends(get_settings), memory: MemoryS
     }
 
 
+@app.post('/api/agent/start')
+async def api_agent_start(req: AutoCollectorRunRequest, background_tasks: BackgroundTasks, settings: Settings = Depends(get_settings)) -> dict:
+    if settings.auto_collector_cron_token and req.token != settings.auto_collector_cron_token:
+        raise HTTPException(status_code=403, detail='AUTO_COLLECTOR_CRON_TOKEN 不正确。')
+    _trim_jobs()
+    job_id = uuid.uuid4().hex
+    _auto_agent_jobs[job_id] = {
+        'job_id': job_id,
+        'status': 'queued',
+        'created_at': _utc_now(),
+        'started_at': '',
+        'finished_at': '',
+        'message': '任务已进入后台队列，cron 可以立即结束请求。',
+        'result': None,
+        'error': '',
+    }
+    background_tasks.add_task(_run_auto_collection_job, job_id, req.model_dump())
+    return _auto_agent_jobs[job_id]
+
+
+@app.get('/api/agent/job/{job_id}')
+def api_agent_job(job_id: str) -> dict:
+    item = _auto_agent_jobs.get(job_id)
+    if not item:
+        raise HTTPException(status_code=404, detail='任务不存在，可能服务重启后内存状态已清空；请查看 Supabase learning_events 中的结果。')
+    return item
+
+
+@app.get('/api/agent/jobs')
+def api_agent_jobs() -> list[dict]:
+    return sorted(_auto_agent_jobs.values(), key=lambda x: x.get('created_at', ''), reverse=True)[:30]
+
+
 @app.post('/api/agent/run-now', response_model=AutoCollectorRunResponse)
 async def api_agent_run_now(req: AutoCollectorRunRequest, settings: Settings = Depends(get_settings), memory: MemoryStore = Depends(get_memory)) -> dict:
+    # 手动调试用：同步执行，适合在前端点按钮等待结果；cron-job.org 请用 /api/agent/start。
     if settings.auto_collector_cron_token and req.token != settings.auto_collector_cron_token:
         raise HTTPException(status_code=403, detail='AUTO_COLLECTOR_CRON_TOKEN 不正确。')
     return await run_auto_collection(settings, memory, req)
@@ -305,6 +377,22 @@ def api_memory_script_version(req: ScriptVersionSave, memory: MemoryStore = Depe
 @app.post('/api/memory/events')
 def api_memory_event(req: MemoryEventInput, memory: MemoryStore = Depends(get_memory)) -> dict:
     return memory.save_learning_event(req.model_dump())
+
+
+@app.post('/api/lead-acquisition/plan', response_model=LeadAcquisitionPlanResponse)
+async def api_lead_acquisition_plan(req: LeadAcquisitionRequest, settings: Settings = Depends(get_settings), memory: MemoryStore = Depends(get_memory)) -> LeadAcquisitionPlanResponse:
+    try:
+        ctx = memory.context()
+        if ctx.get('learning_summary') and not req.existing_context:
+            req.existing_context = ctx['learning_summary'][:7000]
+        result = await generate_lead_acquisition_plan(settings, req)
+        memory.save_learning_event({
+            'event_type': 'lead_acquisition_plan',
+            'payload': {'request': req.model_dump(), 'result': result.model_dump()},
+        })
+        return result
+    except DeepSeekError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
 @app.post('/api/generate-copy', response_model=GeneratedCopy)

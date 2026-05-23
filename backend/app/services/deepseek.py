@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Optional
 import httpx
 
 from app.config import Settings
-from app.schemas import CopyRequest, EditPlanRequest, EditPlanResponse, GeneratedCopy, RewriteFromInspirationRequest, VoiceDirectorRequest, VoiceDirectorResponse
+from app.schemas import CopyRequest, EditPlanRequest, EditPlanResponse, GeneratedCopy, RewriteFromInspirationRequest, VoiceDirectorRequest, VoiceDirectorResponse, LeadAcquisitionRequest, LeadAcquisitionPlanResponse, LeadChannelPlaybook
 
 
 class DeepSeekError(RuntimeError):
@@ -173,6 +173,90 @@ async def rewrite_from_inspiration(settings: Settings, req: RewriteFromInspirati
 '''.strip()
     payload = await _chat_json(settings, system, user, temperature=0.78)
     return normalize_copy(payload, req.industry or '原创短视频文案')
+
+
+async def generate_lead_acquisition_plan(settings: Settings, req: LeadAcquisitionRequest) -> LeadAcquisitionPlanResponse:
+    channels = req.channels or ['抖音截留获客', '抖音养号', '采集目标客户', '自动监听', '自动回复', '目标用户导流私域']
+    system = '你是海外房产置业与第二家园行业的短视频增长负责人，擅长把同行视频打法迁移成获客流程。必须输出严格 JSON，不能生成抄袭文案，重点是获客路径和自动化动作。'
+    user = f"""
+请为以下业务生成一套可执行的短视频获客自动化作战图。
+行业：{req.industry or '海外房产置业 / 第二家园'}
+目标客户：{req.audience or '有海外置业、第二家园、子女教育、养老度假和资产配置需求的人群'}
+核心卖点：{req.selling_points or '海外第二家园规划、项目筛选、置业流程、生活配套与长期服务'}
+内容风格：{req.style or '专业可信、真实案例、顾问式成交'}
+获客地域/人群：{req.lead_region or '华人家庭、企业主、高净值人群、海外生活规划人群'}
+转化目标：{req.conversion_goal or '私信咨询 / 表单留资 / 进入微信私域'}
+可选固定人群/场景：{req.fixed_options or '无'}
+重点渠道：{', '.join(channels)}
+同行/内容沉淀：
+{req.competitor_notes or '暂无'}
+监控关键词：{req.trend_keywords or '海外房产,第二家园,海外置业,移居,资产配置'}
+历史记忆：
+{req.existing_context or '暂无'}
+
+输出 JSON 字段：
+{{
+  "overview": "一句话总策略",
+  "audience_segments": ["目标客户分层"],
+  "channel_playbook": [{{"channel":"渠道名", "goal":"目标", "actions":["动作"], "automation":["自动化动作"], "required_inputs":["需要录入的数据"], "success_metric":"判断指标"}}],
+  "listening_keywords": ["监听关键词"],
+  "content_triggers": ["触发拍摄/发视频的条件"],
+  "reply_templates": ["评论/私信自动回复模板"],
+  "private_domain_sop": ["私域承接步骤"],
+  "daily_automation_tasks": ["每天后台自动执行任务"],
+  "next_actions": ["下一步人工确认事项"]
+}}
+
+要求：
+1. 学习同行博主的钩子公式、选题切入、评论区互动、流量承接方法，不照抄原文。
+2. 针对海外房产/第二家园行业，强调信任、咨询、资产与生活规划，不做夸大承诺。
+3. 自动化要落到系统能执行的动作：账号库、关键词监听、采集库、文案生成、评论/私信模板、私域承接。
+4. 语气专业，不要出现“我认为”“可能可以”这种犹豫表达。
+""".strip()
+    try:
+        payload = await _chat_json(settings, system, user, temperature=0.62, timeout=90)
+        playbook = []
+        for item in payload.get('channel_playbook') or []:
+            if isinstance(item, dict):
+                playbook.append(LeadChannelPlaybook(
+                    channel=str(item.get('channel') or '获客渠道'),
+                    goal=str(item.get('goal') or ''),
+                    actions=_as_list(item, 'actions'),
+                    automation=_as_list(item, 'automation'),
+                    required_inputs=_as_list(item, 'required_inputs'),
+                    success_metric=str(item.get('success_metric') or ''),
+                ))
+        if not playbook:
+            raise ValueError('empty playbook')
+        return LeadAcquisitionPlanResponse(
+            overview=_as_str(payload, 'overview', '以同行打法为输入，围绕海外第二家园客户建立内容、互动、私域三段式获客闭环。'),
+            audience_segments=_as_list(payload, 'audience_segments') or ['子女教育家庭', '资产配置型企业主', '养老度假型家庭', '海外生活规划人群'],
+            channel_playbook=playbook,
+            listening_keywords=_as_list(payload, 'listening_keywords') or ['海外置业', '第二家园', '海外房产', '子女教育', '退休养老'],
+            content_triggers=_as_list(payload, 'content_triggers') or ['同行爆款出现高频痛点', '评论区集中询问国家/预算/身份', '政策/汇率/项目节点变化'],
+            reply_templates=_as_list(payload, 'reply_templates') or ['可以先看你的预算、家庭规划和目标国家，再判断适不适合。', '这个问题不能只看房价，要一起看生活半径、持有成本和退出路径。'],
+            private_domain_sop=_as_list(payload, 'private_domain_sop') or ['评论区识别意向', '私信发送筛选问题', '进入微信后做需求表', '按预算和国家生成方案'],
+            daily_automation_tasks=_as_list(payload, 'daily_automation_tasks') or ['采集同行新视频', '汇总评论区高频问题', '生成今日选题', '更新自动回复模板'],
+            next_actions=_as_list(payload, 'next_actions') or ['补充竞品账号', '确认目标国家和项目类型', '录入客户常见问题'],
+        )
+    except Exception:
+        return LeadAcquisitionPlanResponse(
+            overview='围绕海外第二家园客户建立“同行打法学习—内容触发—评论私信承接—微信私域跟进”的获客闭环。',
+            audience_segments=['子女教育规划家庭', '企业主资产配置人群', '养老度假第二居所人群', '海外生活方式升级人群'],
+            channel_playbook=[
+                LeadChannelPlaybook(channel='抖音截留获客', goal='承接同行内容下的同类需求', actions=['监控同行爆款选题和评论高频问题', '用同结构不同表达发布观点型视频', '在评论和私信中引导做需求筛选'], automation=['自动采集同行口令/视频', '提炼钩子公式', '生成对应海外置业选题'], required_inputs=['竞品账号', '目标国家', '客户预算段'], success_metric='私信率、留资率、微信添加率'),
+                LeadChannelPlaybook(channel='博主联动流量', goal='通过同领域内容形成关联曝光', actions=['建立相关博主库', '围绕相同热点做不同角度视频', '用评论区问题反推下一条内容'], automation=['自动学习博主钩子和选题节奏', '生成联动选题清单'], required_inputs=['博主主页链接', '账号定位备注'], success_metric='关联话题播放量、评论转私信数量'),
+                LeadChannelPlaybook(channel='自动监听', goal='持续发现潜在线索和选题机会', actions=['监听海外房产、第二家园、子女教育、养老度假等关键词', '记录高频疑问', '触发内容生产'], automation=['每日后台采集学习', '生成行业雷达', '更新回复模板'], required_inputs=['关键词', '目标客群', '服务国家/城市'], success_metric='每日有效选题数、线索问题命中率'),
+                LeadChannelPlaybook(channel='自动回复', goal='把评论和私信导向需求诊断', actions=['准备不同客户分层回复', '优先问预算、国家、用途、时间', '把泛流量筛成有效咨询'], automation=['生成评论回复模板', '生成私信筛选问题', '沉淀高意向话术'], required_inputs=['FAQ', '服务边界', '顾问联系方式'], success_metric='回复率、有效需求表完成率'),
+                LeadChannelPlaybook(channel='私域承接', goal='把短视频流量转成可跟进客户', actions=['微信承接后发需求表', '根据预算和用途分层', '安排资料包或顾问咨询'], automation=['生成私域欢迎语', '生成客户分层标签', '生成下一步跟进提醒'], required_inputs=['微信话术', '客户标签', '项目资料'], success_metric='微信添加率、有效咨询率、预约率'),
+            ],
+            listening_keywords=['海外房产', '第二家园', '海外置业', '子女教育', '养老度假', '资产配置', '移居规划', '海外生活'],
+            content_triggers=['同行出现高互动钩子', '评论区集中问预算/国家/流程', '项目政策或汇率变化', '客户案例可讲述'],
+            reply_templates=['你这个情况要先看用途：自住、教育、养老还是资产配置，不同目的选法完全不同。', '可以先发我预算区间和目标国家，我帮你判断适合看哪类第二家园方案。', '海外置业不能只看价格，生活半径、持有成本和后期退出都要一起看。'],
+            private_domain_sop=['评论区用问题筛选意向', '私信发送 4 个需求问题', '加微信后打标签：教育/养老/投资/自住', '发送匹配资料包', '安排顾问沟通或项目说明'],
+            daily_automation_tasks=['采集同行账号新视频', '提炼今日钩子公式', '整理评论区高频问题', '生成 3 个海外第二家园选题', '更新自动回复模板'],
+            next_actions=['录入 5 个同领域博主账号', '确认主推国家/城市', '整理常见客户问题', '准备 3 个真实案例素材'],
+        )
 
 
 async def generate_edit_plan(settings: Settings, req: EditPlanRequest) -> EditPlanResponse:

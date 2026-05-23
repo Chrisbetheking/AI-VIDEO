@@ -242,6 +242,27 @@ export interface CustomerProfileSave {
 }
 
 
+export interface LeadChannelPlaybook {
+  channel: string
+  goal: string
+  actions: string[]
+  automation: string[]
+  required_inputs: string[]
+  success_metric: string
+}
+
+export interface LeadAcquisitionPlanResponse {
+  overview: string
+  audience_segments: string[]
+  channel_playbook: LeadChannelPlaybook[]
+  listening_keywords: string[]
+  content_triggers: string[]
+  reply_templates: string[]
+  private_domain_sop: string[]
+  daily_automation_tasks: string[]
+  next_actions: string[]
+}
+
 export interface DigitalHumanCreateRequest {
   avatar_asset_id?: string
   avatar_file_name?: string

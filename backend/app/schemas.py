@@ -455,6 +455,41 @@ class ScriptVersionSave(BaseModel):
 
 
 
+class LeadAcquisitionRequest(BaseModel):
+    industry: str = Field(default='', max_length=160)
+    audience: str = Field(default='', max_length=300)
+    selling_points: str = Field(default='', max_length=1500)
+    style: str = Field(default='', max_length=300)
+    lead_region: str = Field(default='', max_length=300)
+    conversion_goal: str = Field(default='', max_length=300)
+    channels: List[str] = Field(default_factory=list, max_length=20)
+    fixed_options: str = Field(default='', max_length=3000)
+    competitor_notes: str = Field(default='', max_length=6000)
+    trend_keywords: str = Field(default='', max_length=2000)
+    existing_context: str = Field(default='', max_length=8000)
+
+
+class LeadChannelPlaybook(BaseModel):
+    channel: str
+    goal: str
+    actions: List[str] = Field(default_factory=list)
+    automation: List[str] = Field(default_factory=list)
+    required_inputs: List[str] = Field(default_factory=list)
+    success_metric: str = ''
+
+
+class LeadAcquisitionPlanResponse(BaseModel):
+    overview: str
+    audience_segments: List[str] = Field(default_factory=list)
+    channel_playbook: List[LeadChannelPlaybook] = Field(default_factory=list)
+    listening_keywords: List[str] = Field(default_factory=list)
+    content_triggers: List[str] = Field(default_factory=list)
+    reply_templates: List[str] = Field(default_factory=list)
+    private_domain_sop: List[str] = Field(default_factory=list)
+    daily_automation_tasks: List[str] = Field(default_factory=list)
+    next_actions: List[str] = Field(default_factory=list)
+
+
 class DigitalHumanCreateRequest(BaseModel):
     avatar_asset_id: Optional[str] = None
     avatar_file_name: Optional[str] = None

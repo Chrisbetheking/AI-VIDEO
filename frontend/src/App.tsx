@@ -15,6 +15,7 @@ import {
   SubtitleEmphasisResponse,
   GrowthDecisionResponse,
   GrowthMetricInput,
+  LeadAcquisitionPlanResponse,
   MemoryContextResponse,
   CollectorCookieStatus,
   DigitalHumanCreateResponse,
@@ -32,7 +33,7 @@ import {
   uploadAssets
 } from './api'
 
-type ModuleKey = 'dashboard' | 'monitor' | 'collector' | 'copy' | 'voice' | 'digitalHuman' | 'assets' | 'video' | 'subtitleCover' | 'publish' | 'strategy' | 'competitor' | 'trend' | 'shooting' | 'growth'
+type ModuleKey = 'dashboard' | 'monitor' | 'lead' | 'collector' | 'copy' | 'voice' | 'digitalHuman' | 'assets' | 'video' | 'subtitleCover' | 'publish' | 'strategy' | 'competitor' | 'trend' | 'shooting' | 'growth'
 
 function Field({ label, children, hint }: { label: string; children: ReactNode; hint?: string }) {
   return <label className="field"><span>{label}</span>{children}{hint && <em>{hint}</em>}</label>
@@ -62,6 +63,7 @@ const defaultSegment: VoiceSegment = {
 const modules: { key: ModuleKey; icon: string; title: string; desc: string; tag: string }[] = [
   { key: 'dashboard', icon: '🏠', title: '流程总览', desc: '一条视频从采集到发布的主流程', tag: '总览' },
   { key: 'monitor', icon: '🧭', title: '运营中控台', desc: '总览进度、数据库、插件和待办', tag: '监控' },
+  { key: 'lead', icon: '📲', title: '获客自动化', desc: '截留、联动、监听、回复、私域承接', tag: '获客' },
   { key: 'collector', icon: '🔎', title: '1. 同行采集', desc: '采集同行视频、口令和钩子结构', tag: '采集' },
   { key: 'copy', icon: '✍️', title: '2. 文案生产', desc: '仿写改写、细改、入知识库', tag: '文案' },
   { key: 'voice', icon: '🎙️', title: '3. 配音导演', desc: '克隆音色、分段情绪、语速停顿', tag: '配音' },
@@ -129,14 +131,14 @@ export default function App() {
   const [error, setError] = useState('')
   const [health, setHealth] = useState<any>(null)
 
-  const [industry, setIndustry] = useState('企业服务')
-  const [audience, setAudience] = useState('老板、企业负责人、需要获客的本地商家')
-  const [sellingPoints, setSellingPoints] = useState('AI 自动生成文案、配音、剪辑、封面和平台发布草稿')
-  const [style, setStyle] = useState('老板口播、真实可信、强转化、短平快')
+  const [industry, setIndustry] = useState('海外房产置业 · 第二家园')
+  const [audience, setAudience] = useState('有海外置业、第二家园、子女教育、养老度假和资产配置需求的华人家庭与企业主')
+  const [sellingPoints, setSellingPoints] = useState('海外第二家园规划、国家/城市筛选、项目匹配、置业流程、生活配套、长期服务和顾问式咨询')
+  const [style, setStyle] = useState('专业可信、顾问式成交、真实案例、短视频强钩子')
   const [duration, setDuration] = useState(35)
-  const [leadRegion, setLeadRegion] = useState('本地同城老板 / 企业客户')
-  const [conversionGoal, setConversionGoal] = useState('私信咨询 / 留资 / 加微信')
-  const [trendKeywords, setTrendKeywords] = useState('获客,投流,同城,客户转化,短视频获客')
+  const [leadRegion, setLeadRegion] = useState('华人高净值家庭、企业主、留学家庭、养老度假人群、海外生活规划人群')
+  const [conversionGoal, setConversionGoal] = useState('私信咨询 / 需求筛选 / 加微信进入私域 / 预约顾问沟通')
+  const [trendKeywords, setTrendKeywords] = useState('海外房产,第二家园,海外置业,子女教育,养老度假,资产配置,海外生活')
   const [trendRadar, setTrendRadar] = useState<TrendRadarResponse | null>(null)
   const [competitors, setCompetitors] = useState<CompetitorAccount[]>([])
   const [competitorDraft, setCompetitorDraft] = useState<CompetitorAccount>({ name: '', platform: 'douyin', url: '', positioning: '', notes: '' })
@@ -183,8 +185,8 @@ export default function App() {
   const [segmentTransitions, setSegmentTransitions] = useState<Record<number, string>>({})
   const [subtitleSize, setSubtitleSize] = useState(58)
   const [subtitleColor, setSubtitleColor] = useState('#ffffff')
-  const [subtitleHighlight, setSubtitleHighlight] = useState('客户,同行,投流,获客,成本')
-  const [coverStyle, setCoverStyle] = useState('老板口播强钩子封面')
+  const [subtitleHighlight, setSubtitleHighlight] = useState('第二家园,海外置业,子女教育,养老度假,资产配置,私信咨询')
+  const [coverStyle, setCoverStyle] = useState('海外第二家园强钩子封面')
 
   const [video, setVideo] = useState<ComposeResponse | null>(null)
   const [cover, setCover] = useState<CoverResponse | null>(null)
@@ -196,6 +198,10 @@ export default function App() {
   const [lastHandoff, setLastHandoff] = useState('系统会把上一模块结果自动带到下一模块。')
   const [autoAdvance, setAutoAdvance] = useState(true)
   const [knowledgeDialog, setKnowledgeDialog] = useState({ open: false, source: '', title: '', content: '', tags: '老板口播,获客,短视频' })
+
+  const [leadPlan, setLeadPlan] = useState<LeadAcquisitionPlanResponse | null>(null)
+  const [leadChannels, setLeadChannels] = useState<string[]>(['抖音截留获客', '博主联动流量', '采集目标客户', '自动监听', '自动回复', '目标用户导流私域'])
+  const [leadFixedOptions, setLeadFixedOptions] = useState('子女教育家庭、企业主资产配置、养老度假、海外第二居所、华人家庭、目标国家/城市、预算区间')
 
   const materialAssets = useMemo(() => assets.filter(a => !a.filename.startsWith('collected_')), [assets])
   const collectedVideos = useMemo(() => assets.filter(a => a.kind === 'video' && a.filename.startsWith('collected_')), [assets])
@@ -218,13 +224,14 @@ export default function App() {
 
   const pipelineTodos = useMemo(() => [
     { ok: Boolean(industry && audience), text: '保存客户定位，让 AI 记住行业和客户画像', go: 'strategy' as ModuleKey },
+    { ok: Boolean(leadPlan), text: '生成获客自动化作战图，明确截留、监听和私域承接', go: 'lead' as ModuleKey },
     { ok: Boolean(extract || agentResult), text: '采集 1 条同行视频或口令，沉淀钩子结构', go: 'collector' as ModuleKey },
     { ok: Boolean(copy.script), text: '生成并细改口播文案，确认是否入知识库', go: 'copy' as ModuleKey },
     { ok: Boolean(audio), text: '生成分段情绪配音，确认语速和停顿', go: 'voice' as ModuleKey },
     { ok: selectedMaterialIds.length > 0, text: '选择自有素材，避免直接搬运采集视频', go: 'assets' as ModuleKey },
     { ok: Boolean(video?.video_url), text: '合成视频并下载检查音画字幕', go: 'video' as ModuleKey },
     { ok: Boolean(publish), text: '生成平台发布草稿，后续接开放平台', go: 'publish' as ModuleKey },
-  ], [industry, audience, extract, copy.script, audio, selectedMaterialIds, video, publish])
+  ], [industry, audience, leadPlan, extract, copy.script, audio, selectedMaterialIds, video, publish])
   const nextTodo = pipelineTodos.find(x => !x.ok)
 
   function openKnowledgeSave(source: string, item: GeneratedCopy) {
@@ -310,6 +317,31 @@ export default function App() {
       trend_keywords: trendKeywords
     }))
     await reloadMemoryContext(true)
+  }
+
+
+  function toggleLeadChannel(name: string) {
+    setLeadChannels(prev => prev.includes(name) ? prev.filter(x => x !== name) : [...prev, name])
+  }
+
+  async function makeLeadPlan() {
+    const res = await run('生成获客自动化作战图', () => apiPost<LeadAcquisitionPlanResponse>('/api/lead-acquisition/plan', {
+      industry,
+      audience,
+      selling_points: sellingPoints,
+      style,
+      lead_region: leadRegion,
+      conversion_goal: conversionGoal,
+      channels: leadChannels,
+      fixed_options: leadFixedOptions,
+      competitor_notes: competitorNotes,
+      trend_keywords: trendKeywords,
+      existing_context: memoryContext?.learning_summary || ''
+    }))
+    setLeadPlan(res!)
+    setLastHandoff('获客自动化作战图已生成。同行采集、文案生产、自动监听和私域承接会读取这套策略。')
+    setActive('lead')
+    await reloadMemoryContext()
   }
 
   async function reloadAssets() {
@@ -720,7 +752,7 @@ ${manualText || ''}`.trim()
           </button>)}
         </div>
         <div className="opsGrid">
-          {modules.filter(x => ['monitor','strategy','competitor','trend','shooting','growth'].includes(x.key)).map(item => <button className="moduleCard compact" key={item.key} onClick={() => setActive(item.key)}>
+          {modules.filter(x => ['monitor','lead','strategy','competitor','trend','shooting','growth'].includes(x.key)).map(item => <button className="moduleCard compact" key={item.key} onClick={() => setActive(item.key)}>
             <span className="moduleIcon">{item.icon}</span>
             <strong>{item.title}</strong>
             <p>{item.desc}</p>
@@ -741,8 +773,36 @@ ${manualText || ''}`.trim()
         <div className="memoryBox"><strong>AI 学习摘要</strong><p>{learningSummary}</p></div>
       </section>}
 
+
+      {active === 'lead' && <section className="card modulePanel leadPanel">
+        <div className="sectionHeader"><div><h2>获客自动化</h2><p>围绕海外房产置业和第二家园，把同行流量打法转成可执行的截留、监听、回复和私域承接流程。</p></div><div className="headerActions"><Button busy={busy === '生成获客自动化作战图' ? busy : ''} label="生成获客作战图" onClick={makeLeadPlan} kind="soft" /><Button label="保存行业档案" onClick={saveCustomerProfile} kind="ghost" /></div></div>
+        <div className="leadHero">
+          <div><span>当前业务</span><strong>{industry}</strong><p>{audience}</p></div>
+          <div><span>转化目标</span><strong>{conversionGoal}</strong><p>{leadRegion}</p></div>
+        </div>
+        <div className="leadChannelSelect">
+          {['抖音截留获客','博主联动流量','采集目标客户','自动监听','自动回复','目标用户导流私域'].map(item => <button key={item} className={leadChannels.includes(item) ? 'selected' : ''} onClick={() => toggleLeadChannel(item)}>{item}</button>)}
+        </div>
+        <div className="grid2">
+          <Field label="目标客户与固定选项"><textarea value={leadFixedOptions} onChange={e => setLeadFixedOptions(e.target.value)} /></Field>
+          <Field label="监听关键词"><textarea value={trendKeywords} onChange={e => setTrendKeywords(e.target.value)} /></Field>
+        </div>
+        {!leadPlan && <div className="leadBlueprint">
+          <div><b>截留</b><span>同行爆款 → 钩子公式 → 同主题不同角度视频</span></div>
+          <div><b>监听</b><span>关键词、评论区问题、竞品更新自动沉淀</span></div>
+          <div><b>承接</b><span>自动回复模板 → 私信筛选 → 微信私域标签</span></div>
+          <div><b>复盘</b><span>播放、私信、留资、预约数据回流给下一条视频</span></div>
+        </div>}
+        {leadPlan && <div className="resultBox leadResult"><h3>{leadPlan.overview}</h3>
+          <div className="chips">{leadPlan.audience_segments?.map(x => <Pill key={x} tone="purple">{x}</Pill>)}</div>
+          <div className="leadPlaybookGrid">{leadPlan.channel_playbook?.map(item => <div className="leadPlaybook" key={item.channel}><strong>{item.channel}</strong><p>{item.goal}</p><h4>动作</h4>{item.actions?.map(x => <small key={x}>· {x}</small>)}<h4>自动化</h4>{item.automation?.map(x => <small key={x}>· {x}</small>)}<em>{item.success_metric}</em></div>)}</div>
+          <div className="splitGrid"><div><h4>监听词</h4>{leadPlan.listening_keywords?.map(x => <p key={x}>· {x}</p>)}</div><div><h4>触发内容</h4>{leadPlan.content_triggers?.map(x => <p key={x}>· {x}</p>)}</div><div><h4>每日自动任务</h4>{leadPlan.daily_automation_tasks?.map(x => <p key={x}>· {x}</p>)}</div></div>
+          <div className="splitGrid"><div><h4>自动回复</h4>{leadPlan.reply_templates?.map(x => <p key={x}>· {x}</p>)}</div><div><h4>私域承接</h4>{leadPlan.private_domain_sop?.map(x => <p key={x}>· {x}</p>)}</div><div><h4>下一步</h4>{leadPlan.next_actions?.map(x => <p key={x}>· {x}</p>)}</div></div>
+        </div>}
+      </section>}
+
       {active === 'strategy' && <section className="card modulePanel">
-        <div className="sectionHeader"><div><h2>获客定位</h2><p>先定客户，再学同行。保存后会写入数据库，后续每一步都会读取这里的行业和目标客户。</p></div><div className="headerActions"><Button busy={busy === '保存行业档案' ? busy : ''} label="保存行业档案" onClick={saveCustomerProfile} kind="soft" /><Button busy={busy === '投流分析' ? busy : ''} label="投流/获客方向分析" onClick={analyzeAd} kind="ghost" /></div></div>
+        <div className="sectionHeader"><div><h2>客户定位</h2><p>先把海外置业客户、第二家园需求和私域承接路径保存好，后续采集、文案、监听和投流都会自动读取。</p></div><div className="headerActions"><Button busy={busy === '保存行业档案' ? busy : ''} label="保存行业档案" onClick={saveCustomerProfile} kind="soft" /><Button busy={busy === '生成获客自动化作战图' ? busy : ''} label="生成获客作战图" onClick={makeLeadPlan} kind="ghost" /></div></div>
         <div className="grid2">
           <Field label="行业"><input value={industry} onChange={e => setIndustry(e.target.value)} /></Field>
           <Field label="目标客户"><input value={audience} onChange={e => setAudience(e.target.value)} /></Field>
@@ -758,7 +818,7 @@ ${manualText || ''}`.trim()
       {active === 'trend' && <section className="card modulePanel">
         <div className="sectionHeader"><div><h2>行业爆点与选题雷达</h2><p>根据行业、目标客户、同行账号和采集内容，生成可拍选题、监控关键词和下一步动作。</p></div><Button busy={busy === '生成行业爆点雷达' ? busy : ''} label="自动采集/生成行业雷达" onClick={makeTrendRadar} /></div>
         <div className="grid2">
-          <Field label="监控关键词"><input value={trendKeywords} onChange={e => setTrendKeywords(e.target.value)} placeholder="获客,投流,同城,客户转化" /></Field>
+          <Field label="监控关键词"><input value={trendKeywords} onChange={e => setTrendKeywords(e.target.value)} placeholder="海外房产,第二家园,海外置业,子女教育,养老度假" /></Field>
           <Field label="同行备注汇总"><textarea value={`${competitorNotes}${extract?.summary ? '\n' + extract.summary : ''}`} readOnly placeholder="竞品账号库和同行采集结果会自动汇总到这里" /></Field>
         </div>
         {trendRadar ? <div className="resultBox"><h3>{trendRadar.summary}</h3><div className="trendGrid">{trendRadar.hot_topics?.map(item => <div className="trendCard" key={item.title}><div className="heat"><span>{item.heat}</span><em>热度</em></div><strong>{item.title}</strong><p>{item.reason}</p><small>角度：{item.angle}</small><small>钩子：{item.suggested_hook}</small>{item.risk && <div className="warn">{item.risk}</div>}</div>)}</div><div className="splitGrid"><div><h4>内容角度</h4>{trendRadar.content_angles?.map(x => <p key={x}>· {x}</p>)}</div><div><h4>拍摄建议</h4>{trendRadar.shooting_suggestions?.map(x => <p key={x}>· {x}</p>)}</div><div><h4>监控词</h4><div className="chips">{trendRadar.monitor_keywords?.map(x => <Pill key={x}>{x}</Pill>)}</div></div></div></div> : <Empty>保存客户定位、账号库和采集结果后，系统会自动读取数据库生成行业雷达。</Empty>}

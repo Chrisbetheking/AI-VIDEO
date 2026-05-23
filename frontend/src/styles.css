@@ -318,3 +318,22 @@ button{cursor:pointer}
   gap: 10px;
   margin: 12px 0;
 }
+
+.leadPanel .leadHero{
+  display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:14px;
+  margin:12px 0 16px;
+}
+.leadHero>div{
+  border:1px solid rgba(47,107,255,.16);
+  background:linear-gradient(135deg,#ffffff,#f3f8ff);
+  border-radius:22px;
+  padding:18px;
+  box-shadow:0 14px 34px rgba(31,57,112,.06);
+}
+.leadHero span{display:block;color:#64748b;font-weight:900;font-size:13px;margin-bottom:6px}.leadHero strong{display:block;color:#0f2f75;font-size:22px;line-height:1.35}.leadHero p{margin:8px 0 0;color:#475569;line-height:1.65}
+.leadChannelSelect{display:flex;flex-wrap:wrap;gap:10px;margin:12px 0 18px}.leadChannelSelect button{border:1px solid #d6e4ff;background:#fff;color:#164b9b;font-weight:900;border-radius:999px;padding:10px 14px;cursor:pointer;box-shadow:0 8px 18px rgba(37,99,235,.08)}.leadChannelSelect button.selected{background:linear-gradient(135deg,#2563eb,#7c3aed);color:#fff;border-color:transparent}
+.leadBlueprint{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-top:18px}.leadBlueprint>div{border:1px solid #dbeafe;background:#fff;border-radius:18px;padding:16px}.leadBlueprint b{display:block;font-size:20px;color:#0f2f75;margin-bottom:8px}.leadBlueprint span{color:#475569;line-height:1.6}
+.leadResult h3{font-size:22px;margin-top:0}.leadPlaybookGrid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin:18px 0}.leadPlaybook{background:#fff;border:1px solid #dbeafe;border-radius:20px;padding:17px;display:grid;gap:8px}.leadPlaybook strong{font-size:19px;color:#0f2f75}.leadPlaybook p{margin:0;color:#475569;line-height:1.6}.leadPlaybook h4{margin:8px 0 0;color:#1d4ed8}.leadPlaybook small{display:block;color:#334155;line-height:1.55}.leadPlaybook em{font-style:normal;background:#eef5ff;color:#1d4ed8;border-radius:999px;padding:7px 10px;font-size:12px;font-weight:900;justify-self:start;margin-top:6px}
+@media(max-width:1100px){.leadBlueprint,.leadPlaybookGrid{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:720px){.leadPanel .leadHero,.leadBlueprint,.leadPlaybookGrid{grid-template-columns:1fr}.leadChannelSelect button{flex:1;min-width:46%}}
