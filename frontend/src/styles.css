@@ -308,3 +308,6 @@ input:focus,textarea:focus,select:focus{
 .rawBox { margin-top: 12px; border: 1px dashed rgba(37, 99, 235, .28); border-radius: 14px; background: rgba(248, 250, 252, .85); padding: 10px 12px; }
 .rawBox summary { cursor: pointer; font-weight: 800; color: #1e40af; }
 .rawBox pre { margin: 10px 0 0; max-height: 280px; overflow: auto; white-space: pre-wrap; word-break: break-word; font-size: 12px; line-height: 1.55; color: #334155; }
+
+/* Digital human concurrency guard */
+.strongWarn{font-weight:850;border-color:#f59e0b;background:linear-gradient(180deg,#fff7ed,#fff);box-shadow:0 10px 24px rgba(245,158,11,.08)}

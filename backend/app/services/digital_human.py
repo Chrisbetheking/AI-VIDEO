@@ -210,6 +210,8 @@ async def _volc_call(settings: Settings, action: str, body: dict[str, Any]) -> d
         res = await client.post(url, headers=headers, content=body_bytes)
         text = res.text
         if res.status_code >= 400:
+            if res.status_code == 429 or '50430' in text or 'Concurrent Limit' in text:
+                raise RuntimeError('火山即梦并发限流：当前账号/模型正在生成中的任务还没结束，不能重复提交。请等待当前任务完成后再新建，或用已有 task_id 查询结果。原始返回：' + text[:900])
             raise RuntimeError(f'火山即梦接口失败 HTTP {res.status_code}: {text[:1200]}')
         try:
             data = res.json()
@@ -217,6 +219,10 @@ async def _volc_call(settings: Settings, action: str, body: dict[str, Any]) -> d
             raise RuntimeError(f'火山即梦接口未返回 JSON：{text[:1200]}')
     if isinstance(data, dict) and data.get('ResponseMetadata', {}).get('Error'):
         err = data['ResponseMetadata']['Error']
+        code = str(err.get('Code') or '')
+        msg = str(err.get('Message') or '')
+        if code == '50430' or 'Concurrent Limit' in msg:
+            raise RuntimeError('火山即梦并发限流：当前账号/模型正在生成中的任务还没结束，不能重复提交。请等待当前任务完成后再新建，或用已有 task_id 查询结果。')
         raise RuntimeError(f"火山即梦接口错误：{err.get('Code')} {err.get('Message')}")
     return data
 

@@ -51,6 +51,7 @@ function Pill({ children, tone = 'blue' }: { children: ReactNode; tone?: 'blue' 
 function Empty({ children }: { children: ReactNode }) { return <div className="empty">{children}</div> }
 
 const emptyCopy: GeneratedCopy = { title: '', hook: '', script: '', description: '', tags: [], shots: [], kb_refs: [] }
+const DIGITAL_HUMAN_TASK_KEY = 'ai_video_current_digital_human_task_v1'
 
 const defaultSegment: VoiceSegment = {
   text: '这里输入新增口播分段。',
@@ -424,6 +425,30 @@ export default function App() {
   }, [])
 
   useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem(DIGITAL_HUMAN_TASK_KEY)
+      if (!saved) return
+      const parsed = JSON.parse(saved) as DigitalHumanCreateResponse
+      if (parsed?.job_id) {
+        setDigitalHuman(parsed)
+        setDigitalHumanLastChecked('已恢复上次任务')
+      }
+    } catch {
+      window.localStorage.removeItem(DIGITAL_HUMAN_TASK_KEY)
+    }
+  }, [])
+
+  useEffect(() => {
+    try {
+      if (digitalHuman?.job_id) {
+        window.localStorage.setItem(DIGITAL_HUMAN_TASK_KEY, JSON.stringify(digitalHuman))
+      }
+    } catch {
+      // Ignore localStorage quota / privacy-mode errors.
+    }
+  }, [digitalHuman])
+
+  useEffect(() => {
     setSegmentSeconds(prev => {
       const next = { ...prev }
       voiceSegments.forEach((seg, idx) => {
@@ -668,6 +693,13 @@ ${manualText || ''}`.trim()
 
 
   async function makeDigitalHuman() {
+    const currentStatus = String(digitalHuman?.status || '').toLowerCase()
+    const hasRunningJimengTask = Boolean(digitalHuman?.job_id && !digitalHuman?.video_url && !['failed', 'error', 'done'].includes(currentStatus))
+    if (hasRunningJimengTask) {
+      setError('已有火山即梦数字人任务正在生成中，不要重复提交。火山当前并发额度通常是 1 个任务；请直接查询当前任务结果，或等任务结束后再新建。')
+      await checkDigitalHumanStatus(false)
+      return
+    }
     if (!audio?.file_name) { setError('请先在配音导演里生成配音音频。'); setActive('voice'); return }
     if (!digitalHumanAvatarId) { setError('请先选择数字人形象素材：正脸照片、半身照片或本人视频。'); setActive('digitalHuman'); return }
     const res = await run('生成数字人片段', () => apiPost<DigitalHumanCreateResponse>('/api/digital-human/create', {
@@ -687,7 +719,7 @@ ${manualText || ''}`.trim()
       setLastHandoff('数字人片段已生成。可以把它作为素材进入素材选择和剪辑合成。')
       if (autoAdvance) setActive('assets')
     } else {
-      setLastHandoff('火山即梦任务已提交。等待 1-5 分钟后点击“查询数字人结果”。')
+      setLastHandoff('火山即梦任务已提交。不要重复提交；系统会自动查询，通常需要 5-30 分钟。')
     }
   }
 
@@ -790,6 +822,10 @@ ${manualText || ''}`.trim()
     { label: '6 字幕封面', done: Boolean(cover || subtitleAI), value: cover?.cover_name || (subtitleAI ? '重点字幕已生成' : '待处理') },
     { label: '7 平台发布', done: Boolean(publish), value: publish?.status || '草稿预留' }
   ]
+
+  const digitalHumanStatus = String(digitalHuman?.status || '').toLowerCase()
+  const hasRunningDigitalHumanTask = Boolean(digitalHuman?.job_id && !digitalHuman?.video_url && !['failed', 'error', 'done'].includes(digitalHumanStatus))
+  const digitalHumanPrimaryLabel = hasRunningDigitalHumanTask ? '查询当前数字人任务' : '生成数字人片段'
 
   return <div className="appShell">
     <aside className="studioNav">
@@ -1000,7 +1036,7 @@ https://www.douyin.com/user/..." /></Field>
       </section>}
 
       {active === 'digitalHuman' && <section className="card modulePanel">
-        <div className="sectionHeader"><div><h2>数字人工作台</h2><p>上传授权的本人照片或视频，用当前豆包配音生成老板数字人口播片段。未接 GPU/API 时会先生成静态头像预览。</p></div><Button busy={busy === '生成数字人片段' ? busy : ''} label="生成数字人片段" onClick={makeDigitalHuman} disabled={!audio?.file_name || !digitalHumanAvatarId || !digitalHumanConsent} /></div>
+        <div className="sectionHeader"><div><h2>数字人工作台</h2><p>上传授权的本人照片或视频，用当前豆包配音生成老板数字人口播片段。未接 GPU/API 时会先生成静态头像预览。</p></div><Button busy={busy === '生成数字人片段' || busy === '查询数字人结果' ? busy : ''} label={digitalHumanPrimaryLabel} onClick={hasRunningDigitalHumanTask ? () => checkDigitalHumanStatus(false) : makeDigitalHuman} disabled={!hasRunningDigitalHumanTask && (!audio?.file_name || !digitalHumanAvatarId || !digitalHumanConsent)} /></div>
         <div className="grid3">
           <Field label="数字人形象素材" hint="建议上传本人授权的正脸/半身照片，或 5-15 秒自然说话视频。"><select value={digitalHumanAvatarId} onChange={e => setDigitalHumanAvatarId(e.target.value)}><option value="">选择已上传照片/视频</option>{assets.map(a => <option key={a.id} value={a.id}>{a.kind} · {a.original_name || a.filename}</option>)}</select></Field>
           <Field label="动作参考视频（可选）" hint="后续接 LivePortrait/MuseTalk 时可参考表情和头部动作。"><select value={digitalHumanDriverId} onChange={e => setDigitalHumanDriverId(e.target.value)}><option value="">不用动作参考</option>{assets.filter(a => a.kind === 'video').map(a => <option key={a.id} value={a.id}>{a.original_name || a.filename}</option>)}</select></Field>
@@ -1009,6 +1045,7 @@ https://www.douyin.com/user/..." /></Field>
         </div>
         <label className="checkline"><input type="checkbox" checked={digitalHumanConsent} onChange={e => setDigitalHumanConsent(e.target.checked)} /> 我确认已获得本人形象和声音授权，仅用于合法商业内容。</label>
         <div className="infoGrid"><div><strong>当前输入</strong><p>形象素材：{digitalHumanAvatarId || '未选择'}<br />配音音频：{audio?.file_name || '未生成'}<br />脚本：{shortText(currentScript || '', 90) || '未生成'}</p></div><div><strong>接入建议</strong><p>需要真人口型同步时选择“火山即梦/OmniHuman”；不调用数字人时用“静态预览/素材合成”继续走上传素材合成流程。</p></div></div>
+        {hasRunningDigitalHumanTask && <div className="warn strongWarn">已有任务正在火山侧排队/生成中。请不要再次点击提交，否则会触发 429 并发限制；等待当前任务完成或点击“查询当前数字人任务”。</div>}
         {digitalHuman && <div className="resultBox"><h3>数字人结果</h3><p>{digitalHuman.message}</p><div className="resultMeta"><Pill tone={digitalHuman.video_url ? 'green' : digitalHuman.status === 'failed' ? 'red' : 'orange'}>状态：{digitalHuman.status || 'running'}</Pill>{digitalHumanLastChecked && <Pill tone="blue">最近查询：{digitalHumanLastChecked}</Pill>}{digitalHumanPollCount > 0 && <Pill tone="purple">已查询 {digitalHumanPollCount} 次</Pill>}</div>{digitalHuman.job_id && <p className="muted">任务 ID：{digitalHuman.job_id}</p>}{digitalHuman.job_id && !digitalHuman.video_url && <div className="warn">OmniHuman1.5 是排队生成任务，不是实时接口。系统会每 20 秒自动查一次；如果超过 20-30 分钟仍无结果，请去火山控制台 / API Explorer 用这个 task_id 查询任务详情。</div>}{digitalHuman.warnings?.map(w => <div className="warn" key={w}>{w}</div>)}{digitalHuman.job_id && !digitalHuman.video_url && <button className="btn soft" onClick={() => checkDigitalHumanStatus(false)} disabled={busy === '查询数字人结果'}>{busy === '查询数字人结果' ? '查询中…' : '立即查询数字人结果'}</button>}{digitalHuman.raw && <details className="rawBox"><summary>查看火山原始返回</summary><pre>{JSON.stringify(digitalHuman.raw, null, 2).slice(0, 2600)}</pre></details>}{digitalHuman.video_url && <video controls src={digitalHuman.video_url} className="previewVideo" />}{digitalHuman.video_url && <a className="download" href={digitalHuman.video_url} target="_blank">下载/打开数字人片段</a>}</div>}
       </section>}
 
