@@ -305,12 +305,47 @@ def _extract_status(data: dict[str, Any]) -> str:
         ('data', 'status'), ('data', 'state'), ('result', 'status'), ('result', 'state'),
     ]:
         cur = _get_path(data, path)
-        if cur:
+        if cur is not None and cur != '':
             return str(cur).lower()
     for k, v in _walk_values(data):
-        if k in {'status', 'Status', 'state', 'State'} and v:
+        if k in {'status', 'Status', 'state', 'State'} and v is not None and v != '':
             return str(v).lower()
     return ''
+
+
+def _extract_code(data: dict[str, Any]) -> str:
+    for path in [
+        ('Result', 'code'), ('Result', 'Code'), ('Result', 'status'), ('Result', 'Status'),
+        ('Result', 'data', 'code'), ('Result', 'data', 'Code'),
+        ('code',), ('Code',), ('status',), ('Status',),
+    ]:
+        cur = _get_path(data, path)
+        if cur is not None and cur != '':
+            return str(cur)
+    return ''
+
+
+def _extract_message(data: dict[str, Any]) -> str:
+    for path in [
+        ('Result', 'message'), ('Result', 'Message'), ('Result', 'msg'),
+        ('Result', 'data', 'message'), ('Result', 'data', 'Message'), ('Result', 'data', 'msg'),
+        ('message',), ('Message',), ('msg',),
+    ]:
+        cur = _get_path(data, path)
+        if cur:
+            return str(cur)
+    err = data.get('ResponseMetadata', {}).get('Error') if isinstance(data, dict) else None
+    if isinstance(err, dict):
+        return str(err.get('Message') or err.get('Code') or '')
+    return ''
+
+
+def _compact_raw(data: dict[str, Any], limit: int = 900) -> str:
+    try:
+        text = json.dumps(data, ensure_ascii=False, separators=(',', ':'))
+    except Exception:
+        text = str(data)
+    return text[:limit] + ('...' if len(text) > limit else '')
 
 
 def _asset_to_url_or_base64(path: Path, url: str) -> dict[str, str]:
@@ -433,33 +468,64 @@ async def call_jimeng_digital_human(
 
 
 async def query_jimeng_digital_human(settings: Settings, *, task_id: str, model: str = 'omnihuman15') -> DigitalHumanResult:
-    """Query Volcengine Jimeng task result by task_id without submitting a new job."""
+    """Query Volcengine Jimeng task result by task_id without submitting a new job.
+
+    Keep the body strict. Volcengine docs for OmniHuman1.5 GetResult use only:
+    {"req_key":"jimeng_realman_avatar_picture_omni_v15", "task_id":"<task_id>"}
+    Extra TaskId/JobId fields may be ignored by some Jimeng actions, so this version avoids them.
+    """
     if not task_id:
         raise RuntimeError('缺少 task_id，无法查询数字人任务。')
     _submit_action, get_action, req_key = _jimeng_actions(settings, model)
-    query_body = {'req_key': req_key, 'ReqKey': req_key, 'TaskId': task_id, 'task_id': task_id, 'JobId': task_id, 'id': task_id}
+    query_body = {'req_key': req_key, 'task_id': task_id}
     data = await _volc_call(settings, get_action, query_body)
+
     video_url = _extract_video_url(data)
     status = _extract_status(data)
+    code = _extract_code(data)
+    message = _extract_message(data)
+    raw_hint = _compact_raw(data, 700)
+
     if video_url:
         return DigitalHumanResult(
             status='done', engine=f'jimeng:{model}', message='火山即梦数字人视频已生成。',
             video_url=video_url, job_id=task_id, raw=data, warnings=[]
         )
-    if status in {'failed', 'fail', 'error', 'canceled', 'cancelled'}:
+
+    failed_codes = {'50200', '50400', '50500', '50000', '-1'}
+    failed_words = {'failed', 'fail', 'error', 'canceled', 'cancelled', 'timeout', 'rejected'}
+    if code in failed_codes or status in failed_words or any(w in (message or '').lower() for w in ['fail', 'error', 'denied', 'invalid']):
         return DigitalHumanResult(
-            status='failed', engine=f'jimeng:{model}', message=f'火山即梦任务失败：{status}',
-            job_id=task_id, raw=data, warnings=['请在火山控制台查看该任务失败原因。']
+            status='failed',
+            engine=f'jimeng:{model}',
+            message=f'火山即梦任务失败：{message or status or code or "unknown"}',
+            job_id=task_id,
+            raw=data,
+            warnings=[f'火山返回：code={code or "-"} status={status or "-"} message={message or "-"}', f'原始响应片段：{raw_hint}'],
         )
+
+    # Some Jimeng result APIs return code/status=10000 while the video is still queued, and only add video_url when ready.
+    if code == '10000' or status in {'10000', 'running', 'pending', 'queueing', 'queued', 'processing', 'created', 'submitted', '0', '1'} or not status:
+        return DigitalHumanResult(
+            status='running',
+            engine=f'jimeng:{model}',
+            message=(
+                '火山即梦任务仍在生成或排队中。OmniHuman1.5 不是实时接口，1 并发/排队时可能需要 10-30 分钟；'
+                '页面会自动轮询，生成完成后会出现视频 URL。'
+            ),
+            job_id=task_id,
+            raw=data,
+            warnings=[f'火山查询返回：code={code or "-"} status={status or "-"} message={message or "-"}'],
+        )
+
     return DigitalHumanResult(
         status=status or 'running',
         engine=f'jimeng:{model}',
-        message='火山即梦任务仍在生成中，请稍后再查询。',
+        message=f'火山即梦任务未返回视频 URL：status={status or "-"} code={code or "-"} message={message or "-"}',
         job_id=task_id,
         raw=data,
-        warnings=[]
+        warnings=[f'原始响应片段：{raw_hint}'],
     )
-
 
 async def _sleep_async(seconds: int) -> None:
     import asyncio
