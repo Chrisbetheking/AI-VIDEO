@@ -666,8 +666,19 @@ ${manualText || ''}`.trim()
       consent_confirmed: digitalHumanConsent
     }))
     setDigitalHuman(res!)
-    setLastHandoff('数字人片段已生成。可以把它作为素材进入素材选择和剪辑合成。')
-    if (autoAdvance) setActive('assets')
+    if (res?.video_url) {
+      setLastHandoff('数字人片段已生成。可以把它作为素材进入素材选择和剪辑合成。')
+      if (autoAdvance) setActive('assets')
+    } else {
+      setLastHandoff('火山即梦任务已提交。等待 1-5 分钟后点击“查询数字人结果”。')
+    }
+  }
+
+  async function checkDigitalHumanStatus() {
+    if (!digitalHuman?.job_id) { setError('当前没有可查询的数字人 task_id。'); return }
+    const res = await run('查询数字人结果', () => apiGet<DigitalHumanCreateResponse>(`/api/digital-human/status/${encodeURIComponent(digitalHuman.job_id || '')}?model=${encodeURIComponent(digitalHumanJimengModel)}`))
+    setDigitalHuman(res!)
+    if (res?.video_url) setLastHandoff('数字人片段已生成。可以把它作为素材进入素材选择和剪辑合成。')
   }
 
   async function composeVideo() {
@@ -967,7 +978,7 @@ https://www.douyin.com/user/..." /></Field>
         </div>
         <label className="checkline"><input type="checkbox" checked={digitalHumanConsent} onChange={e => setDigitalHumanConsent(e.target.checked)} /> 我确认已获得本人形象和声音授权，仅用于合法商业内容。</label>
         <div className="infoGrid"><div><strong>当前输入</strong><p>形象素材：{digitalHumanAvatarId || '未选择'}<br />配音音频：{audio?.file_name || '未生成'}<br />脚本：{shortText(currentScript || '', 90) || '未生成'}</p></div><div><strong>接入建议</strong><p>需要真人口型同步时选择“火山即梦/OmniHuman”；不调用数字人时用“静态预览/素材合成”继续走上传素材合成流程。</p></div></div>
-        {digitalHuman && <div className="resultBox"><h3>数字人结果</h3><p>{digitalHuman.message}</p>{digitalHuman.warnings?.map(w => <div className="warn" key={w}>{w}</div>)}{digitalHuman.video_url && <video controls src={digitalHuman.video_url} className="previewVideo" />}{digitalHuman.video_url && <a className="download" href={digitalHuman.video_url} target="_blank">下载/打开数字人片段</a>}</div>}
+        {digitalHuman && <div className="resultBox"><h3>数字人结果</h3><p>{digitalHuman.message}</p>{digitalHuman.job_id && <p className="muted">任务 ID：{digitalHuman.job_id}</p>}{digitalHuman.warnings?.map(w => <div className="warn" key={w}>{w}</div>)}{digitalHuman.job_id && !digitalHuman.video_url && <button className="btn soft" onClick={checkDigitalHumanStatus} disabled={busy === '查询数字人结果'}>{busy === '查询数字人结果' ? '查询中…' : '查询数字人结果'}</button>}{digitalHuman.video_url && <video controls src={digitalHuman.video_url} className="previewVideo" />}{digitalHuman.video_url && <a className="download" href={digitalHuman.video_url} target="_blank">下载/打开数字人片段</a>}</div>}
       </section>}
 
       {active === 'assets' && <section className="card modulePanel">

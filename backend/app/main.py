@@ -69,7 +69,7 @@ from app.services.ad_analysis import analyze_ad
 from app.services.cover import create_cover
 from app.services.deepseek import DeepSeekError, generate_copy, generate_edit_plan, generate_growth_decision, generate_shooting_plan, generate_subtitle_emphasis, generate_trend_radar, generate_voice_director, refine_copy_with_instruction, rewrite_from_inspiration, test_deepseek, video_edit_chat_advice
 from app.services.doubao import extract_with_doubao
-from app.services.digital_human import call_external_digital_human_worker, call_jimeng_digital_human, create_static_avatar_preview
+from app.services.digital_human import call_external_digital_human_worker, call_jimeng_digital_human, query_jimeng_digital_human, create_static_avatar_preview
 from app.services.collector import get_collector_cookie_status, save_collector_cookie_text
 from app.services.kb import KnowledgeBase
 from app.services.memory import MemoryStore
@@ -952,6 +952,29 @@ async def api_digital_human_create(
             video_url=file_url(request, preview.name, public_url),
             video_name=preview.name,
             warnings=warnings,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.get('/api/digital-human/status/{job_id}', response_model=DigitalHumanCreateResponse)
+async def api_digital_human_status(
+    job_id: str,
+    model: str = 'omnihuman15',
+    settings: Settings = Depends(get_settings),
+) -> DigitalHumanCreateResponse:
+    if not settings.enable_digital_human:
+        raise HTTPException(status_code=400, detail='数字人功能未启用。')
+    try:
+        result = await query_jimeng_digital_human(settings, task_id=job_id, model=model or 'omnihuman15')
+        return DigitalHumanCreateResponse(
+            status=result.status,
+            engine=result.engine,
+            message=result.message,
+            video_url=result.video_url,
+            job_id=result.job_id,
+            warnings=result.warnings or [],
+            raw=result.raw or {},
         )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc

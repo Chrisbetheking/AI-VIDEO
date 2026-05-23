@@ -405,28 +405,59 @@ async def call_jimeng_digital_human(
             job_id='', raw=submit_data, warnings=['未识别到 task_id，可能需要按你开通模型的接口文档调整 payload 字段。']
         )
 
-    deadline = time.time() + max(30, settings.jimeng_max_wait_seconds)
+    # Render 免费实例 / Cloudflare 前端不适合在一个 HTTP 请求里等 OmniHuman 跑完。
+    # 默认只提交任务并返回 task_id，前端点击“查询结果”再走 /api/digital-human/status/{task_id}。
+    if not getattr(settings, 'jimeng_wait_for_result', False):
+        return DigitalHumanResult(
+            status='running',
+            engine=f'jimeng:{model}',
+            message='火山即梦任务已提交，正在生成中。请稍等 1-5 分钟后点击“查询数字人结果”。',
+            job_id=task_id,
+            raw=submit_data,
+            warnings=['已改为异步提交模式，避免 Render 免费实例请求超时。']
+        )
+
+    deadline = time.time() + max(30, min(settings.jimeng_max_wait_seconds, settings.digital_human_timeout_seconds - 5))
     last_data: dict[str, Any] = submit_data
     while time.time() < deadline:
         await _sleep_async(max(2, settings.jimeng_poll_seconds))
-        query_body = {'req_key': req_key, 'ReqKey': req_key, 'TaskId': task_id, 'task_id': task_id, 'JobId': task_id, 'id': task_id}
-        last_data = await _volc_call(settings, get_action, query_body)
-        video_url = _extract_video_url(last_data)
-        status = _extract_status(last_data)
-        if video_url:
-            return DigitalHumanResult(
-                status='done', engine=f'jimeng:{model}', message='火山即梦数字人视频已生成。',
-                video_url=video_url, job_id=task_id, raw=last_data, warnings=[]
-            )
-        if status in {'failed', 'fail', 'error', 'canceled', 'cancelled'}:
-            return DigitalHumanResult(
-                status='failed', engine=f'jimeng:{model}', message=f'火山即梦任务失败：{status}',
-                job_id=task_id, raw=last_data, warnings=['请在火山控制台查看该任务失败原因。']
-            )
+        result = await query_jimeng_digital_human(settings, task_id=task_id, model=model)
+        last_data = result.raw or last_data
+        if result.video_url or result.status in {'done', 'failed'}:
+            return result
 
     return DigitalHumanResult(
-        status='running', engine=f'jimeng:{model}', message='火山即梦任务已提交，仍在生成中。稍后在火山控制台或后续查询接口查看结果。',
+        status='running', engine=f'jimeng:{model}', message='火山即梦任务已提交，仍在生成中。稍后点击“查询数字人结果”。',
         job_id=task_id, raw=last_data, warnings=['生成时间超过本次等待上限，任务可能仍在火山侧排队处理。']
+    )
+
+
+async def query_jimeng_digital_human(settings: Settings, *, task_id: str, model: str = 'omnihuman15') -> DigitalHumanResult:
+    """Query Volcengine Jimeng task result by task_id without submitting a new job."""
+    if not task_id:
+        raise RuntimeError('缺少 task_id，无法查询数字人任务。')
+    _submit_action, get_action, req_key = _jimeng_actions(settings, model)
+    query_body = {'req_key': req_key, 'ReqKey': req_key, 'TaskId': task_id, 'task_id': task_id, 'JobId': task_id, 'id': task_id}
+    data = await _volc_call(settings, get_action, query_body)
+    video_url = _extract_video_url(data)
+    status = _extract_status(data)
+    if video_url:
+        return DigitalHumanResult(
+            status='done', engine=f'jimeng:{model}', message='火山即梦数字人视频已生成。',
+            video_url=video_url, job_id=task_id, raw=data, warnings=[]
+        )
+    if status in {'failed', 'fail', 'error', 'canceled', 'cancelled'}:
+        return DigitalHumanResult(
+            status='failed', engine=f'jimeng:{model}', message=f'火山即梦任务失败：{status}',
+            job_id=task_id, raw=data, warnings=['请在火山控制台查看该任务失败原因。']
+        )
+    return DigitalHumanResult(
+        status=status or 'running',
+        engine=f'jimeng:{model}',
+        message='火山即梦任务仍在生成中，请稍后再查询。',
+        job_id=task_id,
+        raw=data,
+        warnings=[]
     )
 
 

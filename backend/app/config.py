@@ -106,6 +106,8 @@ class Settings(BaseSettings):
     jimeng_quick_get_action: str = 'JimengRealmanAvatarPictureGetResult'
     jimeng_video30_submit_action: str = 'JimengI2VFirstV30SubmitTask'
     jimeng_video30_get_action: str = 'JimengI2VFirstV30GetResult'
+    # Render 免费实例不适合在 HTTP 请求里长时间等待数字人结果，默认只提交任务并返回 task_id。
+    jimeng_wait_for_result: bool = False
     # 火山即梦 API 必填服务标识 req_key。不同 action 必须传对应 req_key。
     jimeng_omni15_req_key: str = 'jimeng_realman_avatar_picture_omni_v15'
     jimeng_quick_req_key: str = 'realman_avatar_picture_v2'
