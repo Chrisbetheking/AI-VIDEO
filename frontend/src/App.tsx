@@ -80,12 +80,12 @@ const modules: { key: ModuleKey; icon: string; title: string; desc: string; tag:
   { key: 'monitor', icon: '控', title: '运营中控台', desc: '总览进度、数据库、插件和待办', tag: '监控' },
   { key: 'lead', icon: '获', title: '获客自动化', desc: '截留、联动、监听、回复、私域承接', tag: '获客' },
   { key: 'oneClick', icon: '生', title: '一键生成中心', desc: '在一个窗口完成文案、配音分段、字幕、图文和发布草稿', tag: '一键' },
-  { key: 'collector', icon: '采', title: '1. 同行采集', desc: '采集同行视频、口令和钩子结构', tag: '采集' },
-  { key: 'copy', icon: '文', title: '2. 文案生产', desc: '仿写改写、细改、入知识库', tag: '文案' },
+  { key: 'assets', icon: '素', title: '1. 素材选择', desc: '先选/上传素材，确定图片停留和视频截取区间', tag: '素材' },
+  { key: 'copy', icon: '文', title: '2. 文案生产', desc: '根据素材和客户目标生成口播文案', tag: '文案' },
   { key: 'voice', icon: '声', title: '3. 配音导演', desc: '克隆音色、分段情绪、语速停顿', tag: '配音' },
-  { key: 'digitalHuman', icon: '人', title: '数字人', desc: '上传本人形象，生成老板口播片段', tag: '数字人' },
-  { key: 'assets', icon: '素', title: '4. 素材选择', desc: '自有素材和采集视频分开管理', tag: '素材' },
-  { key: 'video', icon: '剪', title: '5. 剪辑合成', desc: '分段衔接、转场、贴片、字幕', tag: '剪辑' },
+  { key: 'digitalHuman', icon: '人', title: '4. 数字人', desc: '上传本人形象，生成老板口播片段', tag: '数字人' },
+  { key: 'video', icon: '剪', title: '5. 剪辑合成', desc: '素材顺序、截取区间、字幕烧录和导出', tag: '剪辑' },
+  { key: 'collector', icon: '采', title: '同行采集', desc: '可选：采集同行视频、口令和钩子结构', tag: '采集' },
   { key: 'subtitleCover', icon: '视', title: '6. 字幕 / 封面 / 图文', desc: '抖音风字幕、素材截图封面、AI 图文素材', tag: '视觉' },
   { key: 'publish', icon: '发', title: '7. 平台发布', desc: '发布草稿、平台适配、开放接口预留', tag: '发布' },
   { key: 'strategy', icon: '客', title: '客户定位', desc: '行业、目标客户、成交路径、老板人设', tag: '定位' },
@@ -96,15 +96,14 @@ const modules: { key: ModuleKey; icon: string; title: string; desc: string; tag:
 ]
 
 const workflowSteps: { key: ModuleKey; step: string; title: string; desc: string; action: string }[] = [
-  { key: 'oneClick', step: '00', title: '一键生成中心', desc: '把行业、客户、目标和素材一次性生成成项目方案，并同步到具体步骤。', action: '一键生成' },
-  { key: 'collector', step: '01', title: '采集同行视频', desc: '上传参考视频，或粘贴抖音分享口令；先学习钩子、结构、话题和人群。', action: '去采集' },
-  { key: 'copy', step: '02', title: '仿写改写', desc: '基于同行结构做原创改写，保留打法，不照抄原文。', action: '去仿写' },
-  { key: 'copy', step: '03', title: '文案细改', desc: '细调黄金三秒、标题、口播稿、违禁词和发布简介。', action: '改文案' },
-  { key: 'voice', step: '04', title: '配音分段', desc: '选择叔叔音色，分段控制情绪、语速、停顿和语气。', action: '去配音' },
-  { key: 'digitalHuman', step: '04B', title: '数字人片段', desc: '可选：上传授权照片/视频，用配音生成老板数字人口播素材。', action: '做数字人' },
-  { key: 'assets', step: '05', title: '选择视频素材', desc: '选择老板、办公室、产品、案例素材；采集视频只作为学习参考。', action: '选素材' },
-  { key: 'video', step: '06', title: '剪辑与合成', desc: '每段匹配素材，设置叠化/虚化/快切/贴片/字幕，生成 MP4。', action: '去剪辑' },
-  { key: 'publish', step: '07', title: '平台发布', desc: '生成平台发布草稿，后续接抖音、视频号、快手、小红书开放平台。', action: '去发布' }
+  { key: 'oneClick', step: '00', title: '一键生成中心', desc: '一个窗口统筹，但第一步仍然先确认素材，避免后面只有文字稿。', action: '开始' },
+  { key: 'assets', step: '01', title: '选择素材', desc: '先上传/选择视频和图片，排好出现顺序，图片停留和视频截取都在这里调。', action: '选素材' },
+  { key: 'copy', step: '02', title: '文案生产', desc: '根据已选素材、行业、客户和转化目标生成短视频口播稿。', action: '写文案' },
+  { key: 'voice', step: '03', title: '配音分段', desc: '分段控制情绪、语速、音量和停顿，并生成真实时间轴。', action: '去配音' },
+  { key: 'digitalHuman', step: '04', title: '数字人片段', desc: '可选：用配音生成老板数字人口播素材，或者跳过直接素材混剪。', action: '做数字人' },
+  { key: 'video', step: '05', title: '剪辑合成', desc: '按素材顺序和配音时长自动铺满，字幕直接在剪辑页调整。', action: '去剪辑' },
+  { key: 'subtitleCover', step: '06', title: '字幕/封面/图文', desc: '生成视频封面和图文引流包，字幕也可在剪辑页直接处理。', action: '做包装' },
+  { key: 'publish', step: '07', title: '平台发布', desc: '自动继承视频、封面、标题、简介和话题，生成发布草稿。', action: '去发布' }
 ]
 
 const badWords = ['最', '第一', '保证', '包赚', '稳赚', '绝对', '唯一', '国家级', '100%', '躺赚', '无风险']
@@ -300,9 +299,9 @@ export default function App() {
     }, 0) * 10) / 10
   }, [voiceSegments, audio?.segments, segmentSeconds])
   const autoProjectSeconds = useMemo(() => {
-    const base = audio?.duration_seconds || voiceEstimatedSeconds || selectedAssetEstimatedSeconds || duration
+    const base = audio?.duration_seconds || voiceEstimatedSeconds || selectedAssetEstimatedSeconds || 35
     return Math.round(Math.min(180, Math.max(10, base)))
-  }, [audio?.duration_seconds, voiceEstimatedSeconds, selectedAssetEstimatedSeconds, duration])
+  }, [audio?.duration_seconds, voiceEstimatedSeconds, selectedAssetEstimatedSeconds])
 
   const leadScore = useMemo(() => {
     let score = 35
@@ -715,7 +714,7 @@ ${manualText || ''}`.trim()
       audience,
       selling_points: sellingPoints,
       available_assets: [...materialAssets, ...collectedVideos].map(a => `${a.kind}:${a.original_name}`).join('；'),
-      duration_seconds: duration
+      duration_seconds: autoProjectSeconds
     }))
     setShootingPlan(res!)
     setActive('shooting')
@@ -751,7 +750,7 @@ ${manualText || ''}`.trim()
       audience,
       selling_points: `${sellingPoints}\n获客地域/人群：${leadRegion}\n转化目标：${conversionGoal}`,
       style,
-      duration_seconds: duration,
+      duration_seconds: autoProjectSeconds,
       knowledge_examples: manualText ? [manualText] : []
     }))
     setCopy(res!)
@@ -767,7 +766,7 @@ ${manualText || ''}`.trim()
       audience,
       selling_points: `${sellingPoints}\n获客地域/人群：${leadRegion}\n转化目标：${conversionGoal}`,
       style,
-      duration_seconds: duration
+      duration_seconds: autoProjectSeconds
     }))
     setCopy(res!)
     openKnowledgeSave('同行仿写改写', res!)
@@ -792,7 +791,7 @@ ${manualText || ''}`.trim()
     const res = await run('生成深度剪辑方案', () => apiPost<EditPlanResponse>('/api/edit-plan', {
       title: copy.title,
       script: currentScript,
-      duration_seconds: duration,
+      duration_seconds: autoProjectSeconds,
       asset_summary: [...materialAssets, ...collectedVideos].map(a => `${a.kind}:${a.original_name}`).join('；')
     }))
     setEditPlan(res!)
@@ -805,7 +804,7 @@ ${manualText || ''}`.trim()
       script: currentScript,
       style: voiceStyle,
       intensity: voiceIntensity,
-      target_seconds: duration,
+      target_seconds: autoProjectSeconds,
       audience,
       selling_points: sellingPoints
     }))
@@ -1045,10 +1044,10 @@ ${manualText || ''}`.trim()
   }
 
   const stageCards = [
-    { label: '1 同行采集', done: Boolean(extract), value: extract?.collector_status || extract?.status || '待采集' },
-    { label: '2 仿写改写', done: Boolean(copy.hook || copy.script), value: copy.title || '待生成' },
+    { label: '1 素材选择', done: selectedMaterialIds.length > 0, value: selectedMaterialIds.length ? `已选 ${selectedMaterialIds.length} 个素材` : '先选素材' },
+    { label: '2 文案生产', done: Boolean(copy.hook || copy.script), value: copy.title || '待生成' },
     { label: '3 配音分段', done: Boolean(audio), value: voiceSegments.length ? `${voiceSegments.length} 段 · ${selectedVoiceName}` : '待配音' },
-    { label: '4 素材选择', done: selectedMaterialIds.length > 0, value: selectedMaterialIds.length ? `已选 ${selectedMaterialIds.length} 个素材` : '待选择' },
+    { label: '4 数字人', done: Boolean(digitalHuman?.video_url), value: digitalHuman?.video_url ? `数字人 #${digitalHumanVersion}` : '可选' },
     { label: '5 剪辑合成', done: Boolean(video?.video_url), value: video?.video_name || '待合成' },
     { label: '6 字幕/封面/图文', done: Boolean(cover || subtitleAI || generatedImage || graphicPost), value: graphicPost ? `${graphicPost.images.length}张图文` : cover?.cover_name || generatedImage?.image_name || (subtitleAI ? '重点字幕已生成' : '待处理') },
     { label: '7 平台发布', done: Boolean(publish), value: publish?.status || '草稿预留' }
@@ -1057,6 +1056,7 @@ ${manualText || ''}`.trim()
   const digitalHumanStatus = String(digitalHuman?.status || '').toLowerCase()
   const hasRunningDigitalHumanTask = Boolean(digitalHuman?.job_id && !digitalHuman?.video_url && !['failed', 'error', 'done'].includes(digitalHumanStatus))
   const digitalHumanPrimaryLabel = hasRunningDigitalHumanTask ? '查询当前数字人任务' : '生成数字人片段'
+  const contentNavKeys: ModuleKey[] = ['oneClick','assets','copy','voice','digitalHuman','video','subtitleCover','publish','collector']
 
   return <div className="appShell">
     <aside className="studioNav">
@@ -1072,8 +1072,8 @@ ${manualText || ''}`.trim()
         <button className={contentNavOpen ? 'groupHeader open' : 'groupHeader'} onClick={() => setContentNavOpen(!contentNavOpen)}>
           <span>生</span><b>内容生产</b><em>{contentNavOpen ? '收起' : '展开'}</em>
         </button>
-        {contentNavOpen && modules.filter(item => ['oneClick','collector','copy','voice','digitalHuman','assets','video','subtitleCover','publish'].includes(item.key)).map(item => <button key={item.key} className={`subNav ${active === item.key ? 'active' : ''}`} onClick={() => setActive(item.key)}>
-          <span>{item.icon}</span><b>{item.title}</b><em>{item.tag}</em>
+        {contentNavOpen && contentNavKeys.map(key => modules.find(item => item.key === key)).filter(Boolean).map(item => <button key={item!.key} className={`subNav ${active === item!.key ? 'active' : ''}`} onClick={() => setActive(item!.key)}>
+          <span>{item!.icon}</span><b>{item!.title}</b><em>{item!.tag}</em>
         </button>)}
         {modules.filter(item => ['strategy','competitor','trend','shooting','growth'].includes(item.key)).map(item => <button key={item.key} className={active === item.key ? 'active' : ''} onClick={() => setActive(item.key)}>
           <span>{item.icon}</span><b>{item.title}</b><em>{item.tag}</em>
@@ -1120,7 +1120,15 @@ ${manualText || ''}`.trim()
         <div className="sectionHeader"><div><h2>一键生成中心</h2><p>不跳步骤，也能在一个窗口里生成和修改完整项目；同步后仍可去文案、配音、数字人、素材、剪辑等单独步骤精修。</p></div><Button busy={busy === '一键生成完整方案' ? busy : ''} label="一键生成方案" onClick={runOneClickGenerate} /></div>
         <div className="oneClickIntro">
           <strong>推荐顺序</strong>
-          <span>先定行业和转化目标 → 选择输出类型和素材方式 → 写清风格要求 → 一键生成并同步到各步骤。</span>
+          <span>先选/上传素材 → 填行业和目标客户 → 一键生成文案、配音分段、剪辑和图文方案。没有素材时也能先出方案，但演示建议先选素材。</span>
+        </div>
+        <div className="materialFirstPanel">
+          <div>
+            <strong>第一步：选择素材</strong>
+            <p>{selectedMaterialAssets.length ? `已选 ${selectedMaterialAssets.length} 个素材，顺序会直接同步到剪辑。` : '还没选素材。演示时请先选素材，后面文案和剪辑会围绕素材生成。'}</p>
+            {selectedMaterialAssets.length > 0 && <small>{selectedMaterialAssets.map((a, i) => `${i + 1}.${a.original_name || a.filename}`).slice(0, 5).join(' → ')}{selectedMaterialAssets.length > 5 ? '…' : ''}</small>}
+          </div>
+          <button className="btn soft" onClick={() => setActive('assets')}>{selectedMaterialAssets.length ? '调整素材顺序/截取' : '去选择素材'}</button>
         </div>
         <div className="grid2">
           <Field label="行业/产品"><input value={industry} onChange={e => setIndustry(e.target.value)} /></Field>
@@ -1131,7 +1139,7 @@ ${manualText || ''}`.trim()
         <div className="grid3">
           <Field label="输出类型"><select value={oneClickOutputType} onChange={e => setOneClickOutputType(e.target.value)}><option value="digital_human">数字人口播</option><option value="mixed_video">素材混剪</option><option value="image_text">图文引流包</option><option value="all">视频 + 图文都要</option></select></Field>
           <Field label="素材方式"><select value={oneClickMaterialMode} onChange={e => setOneClickMaterialMode(e.target.value)}><option value="selected_assets">使用已选素材</option><option value="digital_human_only">只做数字人</option><option value="ai_image">AI 生成图文素材</option><option value="manual_later">先出方案，素材后补</option></select></Field>
-          <div className="autoDurationCard"><span>自动估算时长</span><strong>{autoProjectSeconds} 秒</strong><em>{selectedMaterialAssets.length ? `按 ${selectedMaterialAssets.length} 个素材顺序和截取区间估算` : voiceSegments.length ? '按配音分段估算' : '生成后按配音真实时长校准'}</em></div>
+          <div className="autoDurationCard"><span>生成长度</span><strong>自动跟随素材/配音</strong><em>{selectedMaterialAssets.length ? `已按 ${selectedMaterialAssets.length} 个素材顺序计算，不用手填。` : '配音生成后自动校准，不再手填秒数。'}</em></div>
         </div>
         <div className="grid2">
           <Field label="风格要求"><textarea value={style} onChange={e => setStyle(e.target.value)} /></Field>
@@ -1297,8 +1305,8 @@ https://www.douyin.com/user/..." /></Field>
       </section>}
 
       {active === 'copy' && <section className="card modulePanel">
-        <div className="sectionHeader"><div><h2>第二步：仿写改写 / 第三步：文案细改</h2><p>先学习同行视频的钩子和结构，再生成自己的原创文案。下面可以细改标题、开头、口播稿和发布简介。</p></div></div>
-        <div className="grid4"><Field label="视频时长"><input type="number" min={5} max={180} value={duration} onChange={e => setDuration(Number(e.target.value || 35))} /></Field><Field label="标题字数方向"><input value="短、狠、直给" readOnly /></Field><Field label="开头策略"><input value="痛点/反差/警告/结果" readOnly /></Field><Field label="当前风险"><input value={matchedBadWords.length ? `${matchedBadWords.length} 个敏感词` : '暂无明显风险'} readOnly /></Field></div>
+        <div className="sectionHeader"><div><h2>第二步：文案生产</h2><p>文案不再手填时长，系统会按已选素材和最终配音自动决定长度。这里专注改标题、开头、口播稿和发布简介。</p></div></div>
+        <div className="grid4"><Field label="素材状态"><input value={selectedMaterialIds.length ? `已选 ${selectedMaterialIds.length} 个素材` : '未选素材，建议先去素材选择'} readOnly /></Field><Field label="标题字数方向"><input value="短、狠、直给" readOnly /></Field><Field label="开头策略"><input value="痛点/反差/警告/结果" readOnly /></Field><Field label="当前风险"><input value={matchedBadWords.length ? `${matchedBadWords.length} 个敏感词` : '暂无明显风险'} readOnly /></Field></div>
         <div className="buttonRow"><Button busy={busy === '原创改写' ? busy : ''} label="第二步：仿写改写" onClick={rewrite} /><Button busy={busy === '生成文案' ? busy : ''} label="直接生成新文案" onClick={generateDirectCopy} kind="ghost" /><Button busy={busy === '文案细改' ? busy : ''} label="细改/优化文案" onClick={refineCopy} kind="soft" disabled={!currentScript} /><Button label="把当前文案放进知识库" onClick={() => openKnowledgeSave('手动保存当前文案', copy)} kind="ghost" disabled={!currentScript} /><Button label="继续去配音分段" onClick={() => setActive('voice')} kind="soft" disabled={!currentScript} /></div>
         <div className="flowSource"><strong>自动带入来源</strong><span>客户定位：{industry} / {audience}</span><span>同行采集：{extract?.summary ? shortText(extract.summary) : '暂无'}</span><span>数据库记忆：{memoryContext?.memory_enabled ? 'Supabase 已启用' : '本地调试记忆'}</span></div>
         <div className="copyEditor"><Field label="标题"><input value={copy.title} onChange={e => setCopy({ ...copy, title: e.target.value })} /></Field><Field label="黄金三秒钩子"><textarea value={copy.hook} onChange={e => setCopy({ ...copy, hook: e.target.value })} /></Field><Field label="完整口播稿"><textarea className="scriptArea" value={copy.script} onChange={e => setCopy({ ...copy, script: e.target.value })} placeholder="这里可以精修口播稿；选中文本后点“加入分段”。" /></Field><Field label="发布简介"><textarea value={copy.description} onChange={e => setCopy({ ...copy, description: e.target.value })} /></Field><Field label="细改要求"><input value={refineInstruction} onChange={e => setRefineInstruction(e.target.value)} /></Field></div>
@@ -1330,7 +1338,7 @@ https://www.douyin.com/user/..." /></Field>
       </section>}
 
       {active === 'assets' && <section className="card modulePanel">
-        <div className="sectionHeader"><div><h2>第五步：素材选择与截取</h2><p>选择素材后可以调整出现顺序；图片可选停留秒数，视频可设置截取开始/结束时间。剪辑时不再手填素材总时长，会按配音和素材数量自动生成。</p></div></div>
+        <div className="sectionHeader"><div><h2>第一步：素材选择与截取</h2><p>先选素材，再生成文案。图片可设置停留秒数，视频可预览并截取开始/结束时间；素材顺序会直接同步到剪辑。</p></div></div>
         <div className={`uploadDrop ${isDraggingAssets ? 'dragging' : ''}`} onDragOver={onAssetDragOver} onDragLeave={onAssetDragLeave} onDrop={onAssetDrop}>
           <strong>拖拽上传图片 / 视频素材</strong><span>支持 jpg、png、webp、mp4、mov；上传后自动进入 R2，Render 重启也能找回。</span><input type="file" multiple accept="image/*,video/*" onChange={e => handleUpload(e.target.files)} />
         </div>
