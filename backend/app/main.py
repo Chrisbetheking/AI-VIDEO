@@ -27,6 +27,8 @@ from app.schemas import (
     CopyRefineRequest,
     CoverRequest,
     CoverResponse,
+    ImageGenerateRequest,
+    ImageGenerateResponse,
     EditPlanRequest,
     EditPlanResponse,
     GeneratedCopy,
@@ -74,6 +76,7 @@ from app.schemas import (
 )
 from app.services.ad_analysis import analyze_ad
 from app.services.cover import create_cover
+from app.services.image_generation import generate_image_to_file
 from app.services.deepseek import DeepSeekError, generate_copy, generate_edit_plan, generate_growth_decision, generate_shooting_plan, generate_subtitle_emphasis, generate_trend_radar, generate_voice_director, refine_copy_with_instruction, rewrite_from_inspiration, test_deepseek, video_edit_chat_advice
 from app.services.doubao import extract_with_doubao
 from app.services.digital_human import call_external_digital_human_worker, call_jimeng_digital_human, query_jimeng_digital_human, create_static_avatar_preview
@@ -393,6 +396,83 @@ def find_media_file(settings: Settings, file_name: str | None) -> Optional[Path]
             return matches[0]
     return None
 
+
+
+def _public_r2_url_by_key(settings: Settings, key: str) -> str:
+    base = settings.r2_public_base_url.strip().rstrip('/')
+    if not base or not key:
+        return ''
+    return f"{base}/{key.strip('/')}"
+
+
+def _find_r2_public_url_by_name(settings: Settings, prefixes: list[str], name: str, limit: int = 500) -> str:
+    """Find a public R2 URL by filename across possible prefixes.
+
+    This fixes old Render-local URLs after instance restart/OOM. Instead of
+    guessing only one prefix, list R2 and match the actual object name.
+    """
+    safe_name = Path(name).name
+    if not safe_name or not settings.r2_public_base_url.strip():
+        return ''
+    for prefix in prefixes:
+        try:
+            for obj in maybe_list_r2_objects(settings, prefix=prefix, limit=limit):
+                if Path(str(obj.get('name') or '')).name == safe_name:
+                    url = str(obj.get('url') or '')
+                    if url.startswith(('http://', 'https://')):
+                        return url
+        except Exception:
+            continue
+    return ''
+
+
+def _asset_remote_url(settings: Settings, asset_id: str | None, filename: str | None = None) -> str:
+    """Resolve an asset selected from the UI even when it only exists in R2."""
+    safe_id = ''.join(ch for ch in (asset_id or '') if ch.isalnum() or ch in {'_', '-'})[:128]
+    safe_name = Path(filename or '').name if filename else ''
+
+    for raw in read_manifest(settings):
+        raw_id = str(raw.get('id') or '')
+        raw_name = Path(str(raw.get('filename') or '')).name
+        if (safe_id and (raw_id == safe_id or Path(raw_name).stem == safe_id)) or (safe_name and raw_name == safe_name):
+            for key in ['r2_url', 'url']:
+                url = str(raw.get(key) or '')
+                if url.startswith(('http://', 'https://')):
+                    return url
+            r2_key = str(raw.get('r2_key') or '').strip().strip('/')
+            if r2_key:
+                return _public_r2_url_by_key(settings, r2_key)
+
+    if safe_name:
+        url = _find_r2_public_url_by_name(settings, _upload_r2_prefix_candidates(safe_name), safe_name)
+        if url:
+            return url
+    if safe_id:
+        for prefix in ['uploads', 'digital-human/avatar', 'digital-human/driver']:
+            for obj in maybe_list_r2_objects(settings, prefix=prefix, limit=500):
+                name = Path(str(obj.get('name') or '')).name
+                if Path(name).stem == safe_id:
+                    url = str(obj.get('url') or '')
+                    if url.startswith(('http://', 'https://')):
+                        return url
+    return ''
+
+
+def _output_remote_url(settings: Settings, filename: str | None) -> str:
+    safe_name = Path(filename or '').name
+    if not safe_name:
+        return ''
+    return _find_r2_public_url_by_name(settings, _output_r2_prefix_candidates(safe_name), safe_name)
+
+
+def _path_from_url_download_name(settings: Settings, url: str, fallback_ext: str = '.jpg') -> Path | None:
+    """Only returns a local path if this URL has already been downloaded as output; remote download is done by callers when needed."""
+    if not url:
+        return None
+    suffix = _safe_suffix_from_url(url, fallback_ext)
+    name = hashlib.sha256(url.encode('utf-8')).hexdigest()[:24] + suffix
+    path = settings.tmp_dir / name
+    return path if path.exists() else None
 
 @app.get('/api/health')
 def health(settings: Settings = Depends(get_settings)) -> dict:
@@ -1048,14 +1128,76 @@ async def api_compose_video(req: ComposeRequest, request: Request, settings: Set
     )
 
 
-@app.post('/api/cover', response_model=CoverResponse)
-def api_cover(req: CoverRequest, request: Request, settings: Settings = Depends(get_settings)) -> CoverResponse:
+
+
+async def _download_remote_image_for_cover(settings: Settings, url: str) -> Optional[Path]:
+    if not url or not url.startswith(('http://', 'https://')):
+        return None
+    suffix = _safe_suffix_from_url(url, '.jpg')
+    if suffix not in {'.jpg', '.jpeg', '.png', '.webp'}:
+        suffix = '.jpg'
+    dest = settings.tmp_dir / f'cover_bg_{hashlib.sha256(url.encode("utf-8")).hexdigest()[:24]}{suffix}'
+    if dest.exists() and dest.stat().st_size > 1024:
+        return dest
     try:
-        path, prompt = create_cover(settings, req.title, hook=req.hook, subtitle=req.subtitle, brand=req.brand)
+        async with httpx.AsyncClient(timeout=60, follow_redirects=True) as client:
+            resp = await client.get(url)
+            resp.raise_for_status()
+            if len(resp.content) < 1024:
+                return None
+            dest.write_bytes(resp.content)
+            return dest
+    except Exception:
+        return None
+
+
+def _cover_source_local_path(settings: Settings, req: CoverRequest) -> Optional[Path]:
+    if req.source_asset_id:
+        path = find_asset_path(settings, req.source_asset_id)
+        if path:
+            return path
+    if req.source_file_name:
+        path = find_media_file(settings, req.source_file_name)
+        if path:
+            return path
+    return None
+@app.post('/api/cover', response_model=CoverResponse)
+async def api_cover(req: CoverRequest, request: Request, settings: Settings = Depends(get_settings)) -> CoverResponse:
+    try:
+        source_path = _cover_source_local_path(settings, req)
+        if source_path is None and req.background_url:
+            source_path = await _download_remote_image_for_cover(settings, req.background_url)
+        path, prompt = create_cover(
+            settings,
+            req.title,
+            hook=req.hook,
+            subtitle=req.subtitle,
+            brand=req.brand,
+            source_path=source_path,
+            template=req.template or 'douyin',
+        )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     public_url = maybe_upload_to_r2(settings, path, prefix='covers')
     return CoverResponse(cover_url=file_url(request, path.name, public_url), cover_name=path.name, prompt=prompt)
+
+
+@app.post('/api/image/generate', response_model=ImageGenerateResponse)
+async def api_image_generate(req: ImageGenerateRequest, request: Request, settings: Settings = Depends(get_settings)) -> ImageGenerateResponse:
+    final_prompt = f"{req.prompt}\n风格要求：{req.style}\n要求：适合短视频封面/图文素材，精美商业感，高清，画面不要直接生成大量中文字，文字后续由系统叠加。"
+    try:
+        path, source_url, warnings = await generate_image_to_file(settings, final_prompt, size=req.size or settings.image_size, quality=req.quality or settings.image_quality)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    public_url = maybe_upload_to_r2(settings, path, prefix='generated-images')
+    return ImageGenerateResponse(
+        image_url=file_url(request, path.name, public_url),
+        image_name=path.name,
+        prompt=final_prompt,
+        provider=settings.image_provider,
+        model=settings.image_model,
+        warnings=[*warnings, '图片已下载到后端并尝试转存 R2。' if public_url else '图片已生成到 Render 本地；如需长期保存请确认 R2 正常。'],
+    )
 
 
 @app.post('/api/publish-package', response_model=PublishPackageResponse)
@@ -1085,21 +1227,27 @@ async def api_digital_human_create(
     audio_path = find_media_file(settings, req.audio_file_name)
     driver_video_path = find_asset_path(settings, req.driver_video_asset_id)
 
-    if avatar_path is None:
-        raise HTTPException(status_code=400, detail='请先上传或选择数字人形象素材：正脸照片、半身照片或一段本人视频。')
-    if audio_path is None:
-        raise HTTPException(status_code=400, detail='请先生成或选择配音音频。')
+    # Render 免费实例重启后，本地 /app/data 可能丢失，但老素材已经在 R2。
+    # 这里允许直接用 R2 公网 URL 提交给火山 OmniHuman，而不是强制要求本地文件存在。
+    avatar_remote_url = _asset_remote_url(settings, req.avatar_asset_id, req.avatar_file_name) if avatar_path is None else ''
+    audio_remote_url = _output_remote_url(settings, req.audio_file_name) if audio_path is None else ''
+    driver_remote_url = _asset_remote_url(settings, req.driver_video_asset_id, None) if driver_video_path is None and req.driver_video_asset_id else ''
+
+    if avatar_path is None and not avatar_remote_url:
+        raise HTTPException(status_code=400, detail='请先上传或选择数字人形象素材：正脸照片、半身照片或一段本人视频。旧素材如果只在 R2，请确认 R2 公共访问已开启并刷新素材库。')
+    if audio_path is None and not audio_remote_url:
+        raise HTTPException(status_code=400, detail='请先生成或选择配音音频。旧音频如果只在 R2，请确认 R2 公共访问已开启。')
 
     engine = (req.engine or 'auto').strip().lower()
     if engine == 'auto':
         engine = settings.digital_human_engine.strip().lower() or 'preview'
 
-    avatar_public = maybe_upload_to_r2(settings, avatar_path, prefix='digital-human/avatar')
-    audio_public = maybe_upload_to_r2(settings, audio_path, prefix='digital-human/audio')
-    driver_public = maybe_upload_to_r2(settings, driver_video_path, prefix='digital-human/driver') if driver_video_path else None
-    avatar_url_value = upload_url(request, avatar_path.name, avatar_public)
-    audio_url_value = file_url(request, audio_path.name, audio_public)
-    driver_url_value = upload_url(request, driver_video_path.name, driver_public) if driver_video_path else ''
+    avatar_public = maybe_upload_to_r2(settings, avatar_path, prefix='digital-human/avatar') if avatar_path else avatar_remote_url
+    audio_public = maybe_upload_to_r2(settings, audio_path, prefix='digital-human/audio') if audio_path else audio_remote_url
+    driver_public = maybe_upload_to_r2(settings, driver_video_path, prefix='digital-human/driver') if driver_video_path else driver_remote_url
+    avatar_url_value = upload_url(request, avatar_path.name, avatar_public) if avatar_path else avatar_public
+    audio_url_value = file_url(request, audio_path.name, audio_public) if audio_path else audio_public
+    driver_url_value = upload_url(request, driver_video_path.name, driver_public) if driver_video_path else driver_public
 
     warnings: List[str] = []
     try:
@@ -1177,6 +1325,8 @@ async def api_digital_human_create(
                 raw=raw,
             )
 
+        if avatar_path is None or audio_path is None:
+            raise HTTPException(status_code=400, detail='静态预览需要本地素材文件。当前素材只在 R2；请选择“火山即梦/OmniHuman”真实数字人引擎，或重新上传素材。')
         preview = create_static_avatar_preview(settings, avatar_path, audio_path, title=req.title)
         public_url = maybe_upload_to_r2(settings, preview, prefix='digital-human/preview')
         warnings.append('当前未配置真实数字人 GPU/API 引擎，已生成静态头像预览视频。要真实口型同步，请配置 DIGITAL_HUMAN_WEBHOOK_URL。')
@@ -1330,7 +1480,8 @@ def _safe_public_r2_url(settings: Settings, prefix: str, name: str) -> str:
     base = settings.r2_public_base_url.strip().rstrip('/')
     if not base:
         return ''
-    return f'{base}/{prefix.strip('/')}/{Path(name).name}'
+    clean_prefix = prefix.strip('/')
+    return f"{base}/{clean_prefix}/{Path(name).name}"
 
 
 def _output_r2_prefix_candidates(name: str) -> list[str]:
@@ -1339,11 +1490,11 @@ def _output_r2_prefix_candidates(name: str) -> list[str]:
     if lower.startswith('tts') or lower.endswith(('.mp3', '.wav', '.m4a', '.aac')):
         return ['audio', 'digital-human/audio', 'outputs']
     if lower.endswith('.mp4'):
-        return ['videos', 'digital-human/preview', 'digital-human/result', 'outputs']
+        return ['digital-human/final', 'videos', 'digital-human/preview', 'digital-human/result', 'outputs']
     if lower.endswith(('.srt', '.ass', '.vtt')):
         return ['subtitles', 'outputs']
     if lower.endswith(('.jpg', '.jpeg', '.png', '.webp')):
-        return ['covers', 'outputs']
+        return ['covers', 'generated-images', 'outputs']
     if lower.endswith('.zip'):
         return ['packages', 'outputs']
     return ['outputs']
@@ -1369,7 +1520,7 @@ def get_output_file(name: str, settings: Settings = Depends(get_settings)):
     # Render 免费实例重启/OOM 后，本地临时文件可能丢失；如果 R2 已开启，直接跳到可能的长期存储地址。
     # 这样旧的 audio/video URL 不会立刻变成 404，本地文件丢失时仍优先尝试 R2。
     if settings.r2_public_base_url.strip():
-        url = _safe_public_r2_url(settings, _output_r2_prefix_candidates(safe_name)[0], safe_name)
+        url = _find_r2_public_url_by_name(settings, _output_r2_prefix_candidates(safe_name), safe_name) or _safe_public_r2_url(settings, _output_r2_prefix_candidates(safe_name)[0], safe_name)
         if url:
             return RedirectResponse(url=url, status_code=302)
     raise HTTPException(status_code=404, detail='文件不存在：本地临时文件可能因 Render 重启/OOM 被清理。请确认 R2 已成功上传，或重新生成该音频/视频。')
@@ -1383,7 +1534,7 @@ def get_upload_file(name: str, settings: Settings = Depends(get_settings)):
         media_type = mimetypes.guess_type(path.name)[0] or 'application/octet-stream'
         return FileResponse(path, media_type=media_type, filename=path.name)
     if settings.r2_public_base_url.strip():
-        url = _safe_public_r2_url(settings, _upload_r2_prefix_candidates(safe_name)[0], safe_name)
+        url = _find_r2_public_url_by_name(settings, _upload_r2_prefix_candidates(safe_name), safe_name) or _safe_public_r2_url(settings, _upload_r2_prefix_candidates(safe_name)[0], safe_name)
         if url:
             return RedirectResponse(url=url, status_code=302)
     raise HTTPException(status_code=404, detail='上传素材文件不存在：本地临时文件可能因 Render 重启/OOM 被清理。请确认 R2 已成功上传，或重新上传素材。')

@@ -109,6 +109,7 @@ export async function uploadCollectorCookies(cookie_text: string): Promise<Colle
 }
 export interface ComposeResponse { video_url: string; video_name: string; subtitle_url?: string; audio_url?: string; duration_seconds: number; warnings: string[] }
 export interface CoverResponse { cover_url: string; cover_name: string; prompt: string }
+export interface ImageGenerateResponse { image_url: string; image_name: string; prompt: string; provider: string; model: string; warnings: string[] }
 export interface PublishPackageResponse { package_url: string; package_name: string; status: string; checklist: string[] }
 
 export interface InspirationExtractResponse {

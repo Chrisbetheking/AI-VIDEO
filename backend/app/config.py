@@ -23,9 +23,15 @@ class Settings(BaseSettings):
     qwen_model: str = 'qwen-max'
     asr_provider: str = 'volcengine'
     asr_model: str = 'doubao-record-file-recognition-2.0'
-    image_provider: str = 'dashscope'
-    image_model: str = 'qwen-image'
-    image_edit_model: str = 'qwen-image-edit'
+    image_provider: str = 'volcengine'
+    image_model: str = 'doubao-seedream-5-0-260128'
+    image_edit_model: str = 'doubao-seedream-5-0-260128'
+    image_backup_provider: str = 'dashscope'
+    image_backup_model: str = 'qwen-image'
+    image_base_url: str = 'https://ark.cn-beijing.volces.com/api/v3'
+    image_size: str = '2K'
+    image_quality: str = 'high'
+    volcengine_image_api_key: str = ''
 
     # Google Gemini：复杂分析/素材理解/备用强模型
     gemini_api_key: str = ''

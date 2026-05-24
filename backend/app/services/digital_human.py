@@ -374,7 +374,7 @@ def _compact_raw(data: dict[str, Any], limit: int = 900) -> str:
     return text[:limit] + ('...' if len(text) > limit else '')
 
 
-def _asset_to_url_or_base64(path: Path, url: str) -> dict[str, str]:
+def _asset_to_url_or_base64(path: Optional[Path], url: str) -> dict[str, str]:
     """Prefer public URL. If not public, send base64. Different Jimeng APIs may require one or the other.
 
     The request includes both url/base64 to maximize compatibility; if your API docs require exact field names,
@@ -382,8 +382,10 @@ def _asset_to_url_or_base64(path: Path, url: str) -> dict[str, str]:
     """
     if url.startswith(('http://', 'https://')):
         return {'url': url}
-    raw = path.read_bytes()
-    return {'base64': base64.b64encode(raw).decode('utf-8')}
+    if path and path.exists():
+        raw = path.read_bytes()
+        return {'base64': base64.b64encode(raw).decode('utf-8')}
+    raise RuntimeError('缺少可访问的素材 URL 或本地文件，无法提交数字人任务。')
 
 
 def _jimeng_actions(settings: Settings, model: str) -> tuple[str, str, str]:
@@ -403,8 +405,8 @@ def _jimeng_actions(settings: Settings, model: str) -> tuple[str, str, str]:
 async def call_jimeng_digital_human(
     settings: Settings,
     *,
-    avatar_path: Path,
-    audio_path: Path,
+    avatar_path: Optional[Path],
+    audio_path: Optional[Path],
     avatar_url: str,
     audio_url: str,
     script: str,

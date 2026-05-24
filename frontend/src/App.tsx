@@ -5,6 +5,7 @@ import {
   AssetItem,
   ComposeResponse,
   CoverResponse,
+  ImageGenerateResponse,
   EditPlanResponse,
   GeneratedCopy,
   InspirationExtractResponse,
@@ -82,7 +83,7 @@ const modules: { key: ModuleKey; icon: string; title: string; desc: string; tag:
   { key: 'digitalHuman', icon: '人', title: '数字人', desc: '上传本人形象，生成老板口播片段', tag: '数字人' },
   { key: 'assets', icon: '素', title: '4. 素材选择', desc: '自有素材和采集视频分开管理', tag: '素材' },
   { key: 'video', icon: '剪', title: '5. 剪辑合成', desc: '分段衔接、转场、贴片、字幕', tag: '剪辑' },
-  { key: 'subtitleCover', icon: '字', title: '6. 字幕封面', desc: '重点词高亮、封面样式、下载', tag: '视觉' },
+  { key: 'subtitleCover', icon: '视', title: '6. 字幕 / 封面 / 图文', desc: '抖音风字幕、素材截图封面、AI 图文素材', tag: '视觉' },
   { key: 'publish', icon: '发', title: '7. 平台发布', desc: '发布草稿、平台适配、开放接口预留', tag: '发布' },
   { key: 'strategy', icon: '客', title: '客户定位', desc: '行业、目标客户、成交路径、老板人设', tag: '定位' },
   { key: 'competitor', icon: '竞', title: '竞品账号库', desc: '长期沉淀同行账号和爆款特征', tag: '账号' },
@@ -218,6 +219,11 @@ export default function App() {
 
   const [video, setVideo] = useState<ComposeResponse | null>(null)
   const [cover, setCover] = useState<CoverResponse | null>(null)
+  const [generatedImage, setGeneratedImage] = useState<ImageGenerateResponse | null>(null)
+  const [coverSourceMode, setCoverSourceMode] = useState<'asset' | 'digitalHuman' | 'aiImage' | 'clean'>('asset')
+  const [coverSourceAssetId, setCoverSourceAssetId] = useState('')
+  const [imagePrompt, setImagePrompt] = useState('高端海外第二家园置业场景，阳光、现代住宅、商务顾问感，适合作为短视频封面背景，不要文字')
+  const [digitalHumanVersion, setDigitalHumanVersion] = useState(() => Number(window.localStorage.getItem('ai_video_digital_human_version_v1') || '1'))
   const [editInstruction, setEditInstruction] = useState('把开头节奏加快，保留重点字幕；转场更自然，并重新导出 9:16。')
   const [editChat, setEditChat] = useState<VideoEditChatResponse[]>([])
   const [ad, setAd] = useState<AdAnalysisResponse | null>(null)
@@ -506,6 +512,10 @@ export default function App() {
   }, [])
 
   useEffect(() => {
+    try { window.localStorage.setItem('ai_video_digital_human_version_v1', String(digitalHumanVersion || 1)) } catch {}
+  }, [digitalHumanVersion])
+
+  useEffect(() => {
     try {
       if (digitalHuman?.job_id) {
         window.localStorage.setItem(DIGITAL_HUMAN_TASK_KEY, JSON.stringify(digitalHuman))
@@ -782,6 +792,7 @@ ${manualText || ''}`.trim()
       consent_confirmed: digitalHumanConsent
     }))
     setDigitalHuman(res!)
+    setDigitalHumanVersion(prev => digitalHuman?.job_id || digitalHuman?.video_url ? prev + 1 : prev)
     setDigitalHumanPollCount(0)
     setDigitalHumanLastChecked(new Date().toLocaleTimeString())
     if (res?.video_url) {
@@ -856,15 +867,35 @@ ${manualText || ''}`.trim()
     setActive('video')
   }
 
+  async function makeAiImage() {
+    const res = await run('AI 生成精美背景图', () => apiPost<ImageGenerateResponse>('/api/image/generate', {
+      prompt: imagePrompt,
+      title: copy.title || industry,
+      style: '精美商业短视频素材，真实感，高级质感，适合做抖音/小红书封面背景，不直接生成文字',
+      size: '2K',
+      quality: 'high'
+    }))
+    setGeneratedImage(res!)
+    setCoverSourceMode('aiImage')
+    setLastHandoff('AI 背景图已生成。现在可以用它叠加大标题生成封面，也可以只作为图文素材使用。')
+    setActive('subtitleCover')
+  }
+
   async function makeCover() {
-    const res = await run('生成封面', () => apiPost<CoverResponse>('/api/cover', {
+    const fallbackAsset = coverSourceAssetId || selectedMaterialIds[0] || materialAssets.find(a => a.kind === 'image')?.id || materialAssets[0]?.id || ''
+    const payload: any = {
       title: copy.title || '短视频封面',
       hook: copy.hook,
       subtitle: `${coverStyle} · ${copy.tags?.slice(0, 3).join(' · ')}`,
-      brand: industry
-    }))
+      brand: industry,
+      template: 'douyin'
+    }
+    if (coverSourceMode === 'asset' && fallbackAsset) payload.source_asset_id = fallbackAsset
+    if (coverSourceMode === 'digitalHuman' && digitalHuman?.video_name) payload.source_file_name = digitalHuman.video_name
+    if (coverSourceMode === 'aiImage' && generatedImage?.image_url) payload.background_url = generatedImage.image_url
+    const res = await run('生成封面', () => apiPost<CoverResponse>('/api/cover', payload))
     setCover(res!)
-    setLastHandoff('封面已生成。平台发布模块会自动读取视频、封面、标题和简介。')
+    setLastHandoff('封面已生成：真实素材/AI背景 + 抖音大标题模板。平台发布模块会自动读取视频、封面、标题和简介。')
     setActive('subtitleCover')
   }
 
@@ -899,7 +930,7 @@ ${manualText || ''}`.trim()
     { label: '3 配音分段', done: Boolean(audio), value: voiceSegments.length ? `${voiceSegments.length} 段 · ${selectedVoiceName}` : '待配音' },
     { label: '4 素材选择', done: selectedMaterialIds.length > 0, value: selectedMaterialIds.length ? `已选 ${selectedMaterialIds.length} 个素材` : '待选择' },
     { label: '5 剪辑合成', done: Boolean(video?.video_url), value: video?.video_name || '待合成' },
-    { label: '6 字幕封面', done: Boolean(cover || subtitleAI), value: cover?.cover_name || (subtitleAI ? '重点字幕已生成' : '待处理') },
+    { label: '6 字幕/封面/图文', done: Boolean(cover || subtitleAI || generatedImage), value: cover?.cover_name || generatedImage?.image_name || (subtitleAI ? '重点字幕已生成' : '待处理') },
     { label: '7 平台发布', done: Boolean(publish), value: publish?.status || '草稿预留' }
   ]
 
@@ -1158,7 +1189,7 @@ https://www.douyin.com/user/..." /></Field>
       </section>}
 
       {active === 'digitalHuman' && <section className="card modulePanel">
-        <div className="sectionHeader"><div><h2>数字人工作台</h2><p>上传授权的本人照片或视频，用当前豆包配音生成老板数字人口播片段。未接 GPU/API 时会先生成静态头像预览。</p></div><Button busy={busy === '生成数字人片段' || busy === '查询数字人结果' ? busy : ''} label={digitalHumanPrimaryLabel} onClick={hasRunningDigitalHumanTask ? () => checkDigitalHumanStatus(false) : makeDigitalHuman} disabled={!hasRunningDigitalHumanTask && (!audio?.file_name || !digitalHumanAvatarId || !digitalHumanConsent)} /></div>
+        <div className="sectionHeader"><div><h2>数字人工作台</h2><p>每次生成都会有版本号，方便区分文案/配音修改后的不同数字人片段。旧素材只在 R2 时，也会尽量直接用 R2 链接提交。</p></div><Button busy={busy === '生成数字人片段' || busy === '查询数字人结果' ? busy : ''} label={digitalHumanPrimaryLabel} onClick={hasRunningDigitalHumanTask ? () => checkDigitalHumanStatus(false) : makeDigitalHuman} disabled={!hasRunningDigitalHumanTask && (!audio?.file_name || !digitalHumanAvatarId || !digitalHumanConsent)} /></div>
         <div className="grid3">
           <Field label="数字人形象素材" hint="建议上传本人授权的正脸/半身照片，或 5-15 秒自然说话视频。"><select value={digitalHumanAvatarId} onChange={e => setDigitalHumanAvatarId(e.target.value)}><option value="">选择已上传照片/视频</option>{assets.map(a => <option key={a.id} value={a.id}>{a.kind} · {a.original_name || a.filename}</option>)}</select></Field>
           <Field label="动作参考视频（可选）" hint="后续接 LivePortrait/MuseTalk 时可参考表情和头部动作。"><select value={digitalHumanDriverId} onChange={e => setDigitalHumanDriverId(e.target.value)}><option value="">不用动作参考</option>{assets.filter(a => a.kind === 'video').map(a => <option key={a.id} value={a.id}>{a.original_name || a.filename}</option>)}</select></Field>
@@ -1166,9 +1197,9 @@ https://www.douyin.com/user/..." /></Field>
           {digitalHumanEngine === 'jimeng' && <Field label="即梦模型" hint="模拟真人优先选 OmniHuman1.5；普通视频生成可用视频3.0。"><select value={digitalHumanJimengModel} onChange={e => setDigitalHumanJimengModel(e.target.value)}><option value="omnihuman15">OmniHuman1.5（单图+音频真人口播）</option><option value="quick">数字人快速模式</option><option value="video30">即梦视频生成3.0（图生视频）</option></select></Field>}
         </div>
         <label className="checkline"><input type="checkbox" checked={digitalHumanConsent} onChange={e => setDigitalHumanConsent(e.target.checked)} /> 我确认已获得本人形象和声音授权，仅用于合法商业内容。</label>
-        <div className="infoGrid"><div><strong>当前输入</strong><p>形象素材：{digitalHumanAvatarId || '未选择'}<br />配音音频：{audio?.file_name || '未生成'}<br />脚本：{shortText(currentScript || '', 90) || '未生成'}</p></div><div><strong>接入建议</strong><p>需要真人口型同步时选择“火山即梦/OmniHuman”；不调用数字人时用“静态预览/素材合成”继续走上传素材合成流程。</p></div></div>
+        <div className="infoGrid"><div><strong>当前输入</strong><p>数字人版本：#{digitalHumanVersion}<br />形象素材：{digitalHumanAvatarId || '未选择'}<br />配音音频：{audio?.file_name || '未生成'}<br />脚本：{shortText(currentScript || '', 90) || '未生成'}</p></div><div><strong>接入建议</strong><p>需要真人口型同步时选择“火山即梦/OmniHuman”；旧素材如果存在 R2，刷新素材库后也能选择使用。</p></div></div>
         {hasRunningDigitalHumanTask && <div className="warn strongWarn">已有任务正在火山侧排队/生成中。请不要再次点击提交，否则会触发 429 并发限制；等待当前任务完成或点击“查询当前数字人任务”。</div>}
-        {digitalHuman && <div className="resultBox"><h3>数字人结果</h3><p>{digitalHuman.message}</p><div className="resultMeta"><Pill tone={digitalHuman.video_url ? 'green' : digitalHuman.status === 'failed' ? 'red' : 'orange'}>状态：{digitalHuman.status || 'running'}</Pill>{digitalHumanLastChecked && <Pill tone="blue">最近查询：{digitalHumanLastChecked}</Pill>}{digitalHumanPollCount > 0 && <Pill tone="purple">已查询 {digitalHumanPollCount} 次</Pill>}</div>{digitalHuman.job_id && <p className="muted">任务 ID：{digitalHuman.job_id}<br />查询模型：{getDigitalHumanTaskModel(digitalHuman, digitalHumanJimengModel)}</p>}{digitalHuman.job_id && !digitalHuman.video_url && <div className="warn">OmniHuman1.5 是排队生成任务，不是实时接口。系统会每 20 秒自动查一次；如果超过 20-30 分钟仍无结果，请去火山控制台 / API Explorer 用这个 task_id 查询任务详情。</div>}{digitalHuman.warnings?.map(w => <div className="warn" key={w}>{w}</div>)}{digitalHuman.job_id && !digitalHuman.video_url && <div className="buttonRow"><button className="btn soft" onClick={() => checkDigitalHumanStatus(false)} disabled={busy === '查询数字人结果'}>{busy === '查询数字人结果' ? '查询中…' : '立即查询数字人结果'}</button><button className="btn ghost danger" onClick={clearDigitalHumanTask}>清除当前任务</button></div>}{digitalHuman.raw && <details className="rawBox"><summary>查看火山原始返回</summary><pre>{JSON.stringify(digitalHuman.raw, null, 2).slice(0, 2600)}</pre></details>}{digitalHuman.video_url && <video controls src={digitalHuman.video_url} className="previewVideo" />}{digitalHuman.video_url && <a className="download" href={digitalHuman.video_url} target="_blank">下载/打开数字人片段</a>}</div>}
+        {digitalHuman && <div className="resultBox"><h3>数字人 #{digitalHumanVersion} 结果</h3><p>{digitalHuman.message}</p><div className="resultMeta"><Pill tone={digitalHuman.video_url ? 'green' : digitalHuman.status === 'failed' ? 'red' : 'orange'}>状态：{digitalHuman.status || 'running'}</Pill>{digitalHumanLastChecked && <Pill tone="blue">最近查询：{digitalHumanLastChecked}</Pill>}{digitalHumanPollCount > 0 && <Pill tone="purple">已查询 {digitalHumanPollCount} 次</Pill>}</div>{digitalHuman.job_id && <p className="muted">任务 ID：{digitalHuman.job_id}<br />查询模型：{getDigitalHumanTaskModel(digitalHuman, digitalHumanJimengModel)}</p>}{digitalHuman.job_id && !digitalHuman.video_url && <div className="warn">OmniHuman1.5 是排队生成任务，不是实时接口。系统会每 20 秒自动查一次；如果超过 20-30 分钟仍无结果，请去火山控制台 / API Explorer 用这个 task_id 查询任务详情。</div>}{digitalHuman.warnings?.map(w => <div className="warn" key={w}>{w}</div>)}{digitalHuman.job_id && !digitalHuman.video_url && <div className="buttonRow"><button className="btn soft" onClick={() => checkDigitalHumanStatus(false)} disabled={busy === '查询数字人结果'}>{busy === '查询数字人结果' ? '查询中…' : '立即查询数字人结果'}</button><button className="btn ghost danger" onClick={clearDigitalHumanTask}>清除当前任务</button></div>}{digitalHuman.raw && <details className="rawBox"><summary>查看火山原始返回</summary><pre>{JSON.stringify(digitalHuman.raw, null, 2).slice(0, 2600)}</pre></details>}{digitalHuman.video_url && <video controls src={digitalHuman.video_url} className="previewVideo" />}{digitalHuman.video_url && <a className="download" href={digitalHuman.video_url} target="_blank">下载/打开数字人 #{digitalHumanVersion} 片段</a>}</div>}
       </section>}
 
       {active === 'assets' && <section className="card modulePanel">
@@ -1200,11 +1231,27 @@ https://www.douyin.com/user/..." /></Field>
         <div className="editChatBox"><Field label="AI + 插件剪辑指令"><textarea value={editInstruction} onChange={e => setEditInstruction(e.target.value)} placeholder="例如：去掉开头2秒、整体加速1.1倍、重新加字幕、转成9:16。" /></Field><Button busy={busy === 'AI + 插件修改视频' ? busy : ''} label="AI + 插件修改视频" onClick={chatEditVideo} kind="ghost" disabled={!currentVideoName} />{editChat.map((msg, i) => <div className="chatMsg" key={i}><strong>AI：</strong>{msg.assistant_message}<p>{msg.summary}</p><div className="chips">{msg.actions?.map(x => <Pill key={x}>{x}</Pill>)}</div>{msg.new_video_url && <a href={msg.new_video_url} target="_blank">打开修改后视频</a>}{msg.warnings?.map(w => <div className="warn" key={w}>{w}</div>)}</div>)}</div>
       </section>}
 
-      {active === 'subtitleCover' && <section className="card modulePanel">
-        <div className="sectionHeader"><div><h2>字幕重点与封面</h2><p>自动识别重点词，生成放大、高亮、描边字幕方案，并输出封面样式。</p></div><div className="stackButtons"><Button busy={busy === '智能字幕重点' ? busy : ''} label="智能识别重点字幕" onClick={makeSubtitleAI} disabled={!currentScript} kind="ghost" /><Button busy={busy === '生成封面' ? busy : ''} label="生成封面" onClick={makeCover} /></div></div>
-        <div className="grid4"><Field label="字幕字号"><input type="number" value={subtitleSize} onChange={e => setSubtitleSize(Number(e.target.value || 58))} /></Field><Field label="字幕颜色"><input type="color" value={subtitleColor} onChange={e => setSubtitleColor(e.target.value)} /></Field><Field label="重点词"><input value={subtitleHighlight} onChange={e => setSubtitleHighlight(e.target.value)} /></Field><Field label="封面样式"><select value={coverStyle} onChange={e => setCoverStyle(e.target.value)}><option>老板口播强钩子封面</option><option>痛点警告型封面</option><option>案例结果型封面</option><option>产品服务型封面</option><option>同城获客型封面</option></select></Field></div>
+      {active === 'subtitleCover' && <section className="card modulePanel visualPanel">
+        <div className="sectionHeader"><div><h2>第六步：字幕 / 封面 / 图文</h2><p>封面不再用手机壳卡片：优先从素材或数字人视频截一张画面，再叠加抖音式大标题；也可以用 Seedream 生成精美背景图。</p></div><div className="stackButtons"><Button busy={busy === '智能字幕重点' ? busy : ''} label="智能识别重点字幕" onClick={makeSubtitleAI} disabled={!currentScript} kind="ghost" /><Button busy={busy === '生成封面' ? busy : ''} label="生成抖音封面" onClick={makeCover} /></div></div>
+        <div className="visualTabs"><span>字幕</span><span>封面</span><span>图文素材</span></div>
+        <div className="grid4"><Field label="字幕字号"><input type="number" value={subtitleSize} onChange={e => setSubtitleSize(Number(e.target.value || 58))} /></Field><Field label="字幕颜色"><input type="color" value={subtitleColor} onChange={e => setSubtitleColor(e.target.value)} /></Field><Field label="重点词"><input value={subtitleHighlight} onChange={e => setSubtitleHighlight(e.target.value)} /></Field><Field label="封面大标题"><input value={copy.title || coverStyle} onChange={e => setCopy({ ...copy, title: e.target.value })} placeholder="例如：海外买房避坑指南" /></Field></div>
+        <div className="coverBuilder">
+          <div>
+            <h3>封面生成方式</h3>
+            <div className="coverModeGrid">
+              {[['asset','从素材截一张图'],['digitalHuman','从数字人视频截帧'],['aiImage','AI 精美背景图'],['clean','无素材纯标题']].map(([value,label]) => <button key={value} className={coverSourceMode === value ? 'selected' : ''} onClick={() => setCoverSourceMode(value as any)}>{label}</button>)}
+            </div>
+            {coverSourceMode === 'asset' && <Field label="选择封面素材" hint="建议选真实人物/项目环境/客户场景图，不要用纯卡片。"><select value={coverSourceAssetId} onChange={e => setCoverSourceAssetId(e.target.value)}><option value="">自动用已选素材第一张</option>{materialAssets.map(a => <option key={a.id} value={a.id}>{a.kind} · {a.original_name || a.filename}</option>)}</select></Field>}
+            {coverSourceMode === 'digitalHuman' && <div className="hintBox">会优先用当前数字人视频截帧。当前数字人：{digitalHuman?.video_name || digitalHuman?.job_id || '暂无'}</div>}
+            {coverSourceMode === 'aiImage' && <div className="aiImageBox"><Field label="Seedream 图片提示词"><textarea value={imagePrompt} onChange={e => setImagePrompt(e.target.value)} /></Field><Button busy={busy === 'AI 生成精美背景图' ? busy : ''} label="AI 生成精美背景图" onClick={makeAiImage} kind="soft" /></div>}
+            <div className="buttonRow"><Button busy={busy === '生成封面' ? busy : ''} label="生成：素材截图 + 大标题封面" onClick={makeCover} /><Button label="去平台发布" onClick={() => setActive('publish')} kind="ghost" /></div>
+          </div>
+          <div className="coverPreviewStack">
+            {generatedImage && <div className="coverPreview compact"><img src={generatedImage.image_url} /><div><h3>AI 背景图已生成</h3><p>{generatedImage.model}</p><a className="download" href={generatedImage.image_url} target="_blank">打开图片</a>{generatedImage.warnings?.map(w => <div className="warn" key={w}>{w}</div>)}</div></div>}
+            {cover ? <div className="coverPreview"><img src={cover.cover_url} /><div><h3>封面已生成</h3><p>{cover.prompt}</p><a className="download" href={cover.cover_url} target="_blank">下载封面</a></div></div> : <Empty>封面建议：真实画面做底，大标题 6-12 字，副标题一行即可。不要再用手机壳/PPT 卡片。</Empty>}
+          </div>
+        </div>
         {subtitleAI && <div className="resultBox"><h3>{subtitleAI.template}</h3><div className="chips">{subtitleAI.keywords?.map(k => <Pill key={k.word} tone="orange">{k.word} · {k.effect}</Pill>)}</div><div className="splitGrid"><div><h4>字幕建议</h4>{subtitleAI.srt_tips?.map(x => <p key={x}>· {x}</p>)}</div><div><h4>封面大字</h4>{subtitleAI.cover_text_options?.map(x => <p key={x}>· {x}</p>)}</div><div><h4>已写入重点词</h4><p>{subtitleHighlight}</p></div></div></div>}
-        {cover && <div className="coverPreview"><img src={cover.cover_url} /><div><h3>封面已生成</h3><p>{cover.prompt}</p><a className="download" href={cover.cover_url} target="_blank">下载封面</a></div></div>}
       </section>}
 
       {active === 'growth' && <section className="card modulePanel">

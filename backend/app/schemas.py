@@ -175,12 +175,33 @@ class CoverRequest(BaseModel):
     hook: str = ''
     subtitle: str = ''
     brand: str = ''
+    source_asset_id: Optional[str] = None
+    source_file_name: Optional[str] = None
+    background_url: str = ''
+    template: str = 'douyin'
 
 
 class CoverResponse(BaseModel):
     cover_url: str
     cover_name: str
     prompt: str
+
+
+class ImageGenerateRequest(BaseModel):
+    prompt: str = Field(..., min_length=4, max_length=2000)
+    title: str = Field(default='', max_length=120)
+    style: str = Field(default='精美商业短视频封面背景，真实感，高级质感', max_length=300)
+    size: str = Field(default='2K', max_length=40)
+    quality: str = Field(default='high', max_length=40)
+
+
+class ImageGenerateResponse(BaseModel):
+    image_url: str
+    image_name: str
+    prompt: str
+    provider: str
+    model: str
+    warnings: List[str] = Field(default_factory=list)
 
 
 class PublishPackageRequest(BaseModel):
