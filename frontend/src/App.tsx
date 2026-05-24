@@ -6,6 +6,7 @@ import {
   ComposeResponse,
   CoverResponse,
   ImageGenerateResponse,
+  GraphicPostResponse,
   EditPlanResponse,
   GeneratedCopy,
   InspirationExtractResponse,
@@ -220,6 +221,10 @@ export default function App() {
   const [video, setVideo] = useState<ComposeResponse | null>(null)
   const [cover, setCover] = useState<CoverResponse | null>(null)
   const [generatedImage, setGeneratedImage] = useState<ImageGenerateResponse | null>(null)
+  const [graphicPost, setGraphicPost] = useState<GraphicPostResponse | null>(null)
+  const [graphicPlatform, setGraphicPlatform] = useState('xiaohongshu')
+  const [graphicSlideCount, setGraphicSlideCount] = useState(5)
+  const [graphicBackgroundMode, setGraphicBackgroundMode] = useState<'asset' | 'ai' | 'generated' | 'clean'>('asset')
   const [coverSourceMode, setCoverSourceMode] = useState<'asset' | 'digitalHuman' | 'aiImage' | 'clean'>('asset')
   const [coverSourceAssetId, setCoverSourceAssetId] = useState('')
   const [imagePrompt, setImagePrompt] = useState('高端海外第二家园置业场景，阳光、现代住宅、商务顾问感，适合作为短视频封面背景，不要文字')
@@ -881,6 +886,31 @@ ${manualText || ''}`.trim()
     setActive('subtitleCover')
   }
 
+
+  async function makeGraphicPost() {
+    const fallbackAsset = coverSourceAssetId || selectedMaterialIds.find(id => assets.find(a => a.id === id)?.kind === 'image') || materialAssets.find(a => a.kind === 'image')?.id || ''
+    const payload: any = {
+      title: copy.title || industry || '图文引流包',
+      hook: copy.hook || '先收藏，这几件事一定要弄懂。',
+      script: currentScript || copy.description || sellingPoints,
+      industry,
+      audience,
+      selling_points: sellingPoints,
+      style: `${style}；图文引流，不是封面；要像小红书/抖音收藏图文，精美、真实、强转化`,
+      platform: graphicPlatform,
+      slide_count: graphicSlideCount,
+      cta: conversionGoal || '想要完整清单，私信发你。',
+      background_mode: graphicBackgroundMode,
+      image_prompt: imagePrompt
+    }
+    if (graphicBackgroundMode === 'asset' && fallbackAsset) payload.source_asset_id = fallbackAsset
+    if (graphicBackgroundMode === 'generated' && generatedImage?.image_url) payload.background_url = generatedImage.image_url
+    const res = await run('生成图文引流包', () => apiPost<GraphicPostResponse>('/api/graphic-post/generate', payload))
+    setGraphicPost(res!)
+    setLastHandoff('图文引流包已生成：这是给小红书/抖音图文/朋友圈引流用的，不是视频封面。')
+    setActive('subtitleCover')
+  }
+
   async function makeCover() {
     const fallbackAsset = coverSourceAssetId || selectedMaterialIds[0] || materialAssets.find(a => a.kind === 'image')?.id || materialAssets[0]?.id || ''
     const payload: any = {
@@ -930,7 +960,7 @@ ${manualText || ''}`.trim()
     { label: '3 配音分段', done: Boolean(audio), value: voiceSegments.length ? `${voiceSegments.length} 段 · ${selectedVoiceName}` : '待配音' },
     { label: '4 素材选择', done: selectedMaterialIds.length > 0, value: selectedMaterialIds.length ? `已选 ${selectedMaterialIds.length} 个素材` : '待选择' },
     { label: '5 剪辑合成', done: Boolean(video?.video_url), value: video?.video_name || '待合成' },
-    { label: '6 字幕/封面/图文', done: Boolean(cover || subtitleAI || generatedImage), value: cover?.cover_name || generatedImage?.image_name || (subtitleAI ? '重点字幕已生成' : '待处理') },
+    { label: '6 字幕/封面/图文', done: Boolean(cover || subtitleAI || generatedImage || graphicPost), value: graphicPost ? `${graphicPost.images.length}张图文` : cover?.cover_name || generatedImage?.image_name || (subtitleAI ? '重点字幕已生成' : '待处理') },
     { label: '7 平台发布', done: Boolean(publish), value: publish?.status || '草稿预留' }
   ]
 
@@ -1232,7 +1262,7 @@ https://www.douyin.com/user/..." /></Field>
       </section>}
 
       {active === 'subtitleCover' && <section className="card modulePanel visualPanel">
-        <div className="sectionHeader"><div><h2>第六步：字幕 / 封面 / 图文</h2><p>封面不再用手机壳卡片：优先从素材或数字人视频截一张画面，再叠加抖音式大标题；也可以用 Seedream 生成精美背景图。</p></div><div className="stackButtons"><Button busy={busy === '智能字幕重点' ? busy : ''} label="智能识别重点字幕" onClick={makeSubtitleAI} disabled={!currentScript} kind="ghost" /><Button busy={busy === '生成封面' ? busy : ''} label="生成抖音封面" onClick={makeCover} /></div></div>
+        <div className="sectionHeader"><div><h2>第六步：字幕 / 封面 / 图文引流</h2><p>这里分清楚：封面负责视频点击；图文引流负责小红书/抖音图文/朋友圈获客，可以直接生成 3-8 张收藏型图文。</p></div><div className="stackButtons"><Button busy={busy === '智能字幕重点' ? busy : ''} label="智能识别重点字幕" onClick={makeSubtitleAI} disabled={!currentScript} kind="ghost" /><Button busy={busy === '生成图文引流包' ? busy : ''} label="生成图文引流包" onClick={makeGraphicPost} /></div></div>
         <div className="visualTabs"><span>字幕</span><span>封面</span><span>图文素材</span></div>
         <div className="grid4"><Field label="字幕字号"><input type="number" value={subtitleSize} onChange={e => setSubtitleSize(Number(e.target.value || 58))} /></Field><Field label="字幕颜色"><input type="color" value={subtitleColor} onChange={e => setSubtitleColor(e.target.value)} /></Field><Field label="重点词"><input value={subtitleHighlight} onChange={e => setSubtitleHighlight(e.target.value)} /></Field><Field label="封面大标题"><input value={copy.title || coverStyle} onChange={e => setCopy({ ...copy, title: e.target.value })} placeholder="例如：海外买房避坑指南" /></Field></div>
         <div className="coverBuilder">
@@ -1251,6 +1281,13 @@ https://www.douyin.com/user/..." /></Field>
             {cover ? <div className="coverPreview"><img src={cover.cover_url} /><div><h3>封面已生成</h3><p>{cover.prompt}</p><a className="download" href={cover.cover_url} target="_blank">下载封面</a></div></div> : <Empty>封面建议：真实画面做底，大标题 6-12 字，副标题一行即可。不要再用手机壳/PPT 卡片。</Empty>}
           </div>
         </div>
+        <div className="graphicPostPanel">
+          <div className="sectionHeader mini"><div><h3>图文引流包</h3><p>这个不是封面，是给小红书、抖音图文、朋友圈发出去引流用的多张图。首图强钩子，中间讲重点，最后引导私信。</p></div><Button busy={busy === '生成图文引流包' ? busy : ''} label="生成 3-8 张图文" onClick={makeGraphicPost} kind="soft" /></div>
+          <div className="grid4"><Field label="发布平台"><select value={graphicPlatform} onChange={e => setGraphicPlatform(e.target.value)}><option value="xiaohongshu">小红书 / 收藏图文</option><option value="douyin">抖音图文 9:16</option><option value="wechat">朋友圈 / 视频号图文</option></select></Field><Field label="图片张数"><input type="number" min="3" max="8" value={graphicSlideCount} onChange={e => setGraphicSlideCount(Number(e.target.value || 5))} /></Field><Field label="背景来源"><select value={graphicBackgroundMode} onChange={e => setGraphicBackgroundMode(e.target.value as any)}><option value="asset">用素材/旧 R2 图片</option><option value="ai">Seedream 生成精美背景</option><option value="generated">使用上方已生成 AI 图</option><option value="clean">系统高级背景</option></select></Field><Field label="素材图"><select value={coverSourceAssetId} onChange={e => setCoverSourceAssetId(e.target.value)}><option value="">自动选一张图片素材</option>{materialAssets.filter(a => a.kind === 'image').map(a => <option key={a.id} value={a.id}>{a.original_name || a.filename}</option>)}</select></Field></div>
+          <Field label="图文背景提示词" hint="如果选择 Seedream 生成背景，这里用来生成精美行业视觉；文字由系统叠加，避免 AI 乱写中文。"><textarea value={imagePrompt} onChange={e => setImagePrompt(e.target.value)} /></Field>
+          {graphicPost ? <div className="graphicPreview"><div className="miniResult"><h3>{graphicPost.package_title}</h3><p>{graphicPost.publish_description}</p>{graphicPost.checklist?.map(x => <p key={x}>· {x}</p>)}{graphicPost.warnings?.map(w => <div className="warn" key={w}>{w}</div>)}</div><div className="graphicGrid">{graphicPost.images.map((img, i) => <a key={img.image_name} href={img.image_url} target="_blank" className="graphicCard"><img src={img.image_url} /><strong>{i + 1}. {img.role}</strong><span>{img.title}</span></a>)}</div></div> : <Empty>图文引流建议：不要做成视频封面；要做成“首图吸引 + 多页干货 + 结尾私信”的收藏型图片包。</Empty>}
+        </div>
+
         {subtitleAI && <div className="resultBox"><h3>{subtitleAI.template}</h3><div className="chips">{subtitleAI.keywords?.map(k => <Pill key={k.word} tone="orange">{k.word} · {k.effect}</Pill>)}</div><div className="splitGrid"><div><h4>字幕建议</h4>{subtitleAI.srt_tips?.map(x => <p key={x}>· {x}</p>)}</div><div><h4>封面大字</h4>{subtitleAI.cover_text_options?.map(x => <p key={x}>· {x}</p>)}</div><div><h4>已写入重点词</h4><p>{subtitleHighlight}</p></div></div></div>}
       </section>}
 

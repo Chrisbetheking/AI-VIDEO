@@ -73,6 +73,9 @@ from app.schemas import (
     OneClickGenerateResponse,
     OneClickChatRequest,
     ModelStatusResponse,
+    GraphicPostRequest,
+    GraphicPostResponse,
+    GraphicPostImage,
 )
 from app.services.ad_analysis import analyze_ad
 from app.services.cover import create_cover
@@ -91,6 +94,7 @@ from app.services.video import IMAGE_EXTS, VIDEO_EXTS, compose_video
 from app.services.video_edit import apply_video_edit
 from app.services.auto_collector import run_auto_collection
 from app.services.one_click import generate_one_click, revise_one_click
+from app.services.graphic_post import create_graphic_post
 
 app = FastAPI(title='AI-VIDEO 正式版 API', version='1.0.0')
 settings = get_settings()
@@ -1197,6 +1201,89 @@ async def api_image_generate(req: ImageGenerateRequest, request: Request, settin
         provider=settings.image_provider,
         model=settings.image_model,
         warnings=[*warnings, '图片已下载到后端并尝试转存 R2。' if public_url else '图片已生成到 Render 本地；如需长期保存请确认 R2 正常。'],
+    )
+
+
+
+
+@app.post('/api/graphic-post/generate', response_model=GraphicPostResponse)
+async def api_graphic_post_generate(req: GraphicPostRequest, request: Request, settings: Settings = Depends(get_settings)) -> GraphicPostResponse:
+    """Generate a real lead-generation graphic post package, not just a video cover.
+
+    It creates 3-8 vertical images suitable for Xiaohongshu / Douyin image posts / WeChat Moments.
+    Background can come from selected material, an existing generated image, or Seedream AI image generation.
+    """
+    warnings: list[str] = []
+    source_path: Optional[Path] = None
+    mode = (req.background_mode or 'asset').strip().lower()
+
+    if mode in {'asset', 'material', 'selected_asset'} and req.source_asset_id:
+        source_path = find_asset_path(settings, req.source_asset_id)
+        if source_path is None:
+            remote = _asset_remote_url(settings, req.source_asset_id)
+            if remote:
+                source_path = await _download_remote_image_for_cover(settings, remote)
+            if source_path is None:
+                warnings.append('选中的素材当前只存在远端或不是图片，图文包已使用系统背景。')
+
+    if source_path is None and req.background_url:
+        source_path = await _download_remote_image_for_cover(settings, req.background_url)
+        if source_path is None:
+            warnings.append('背景图下载失败，已使用系统背景。')
+
+    if source_path is None and mode in {'ai', 'ai_image', 'seedream'}:
+        prompt = req.image_prompt.strip() or f"{req.industry or req.title}，商业引流图文背景，真实高级，适合小红书和抖音图文，画面精美，不要文字"
+        try:
+            source_path, _source_url, ai_warnings = await generate_image_to_file(settings, prompt, size=settings.image_size, quality=settings.image_quality)
+            warnings.extend(ai_warnings)
+            maybe_upload_to_r2(settings, source_path, prefix='graphic-backgrounds')
+        except Exception as exc:
+            warnings.append(f'AI 背景图生成失败，已使用系统背景：{str(exc)[:300]}')
+
+    title = req.title or req.industry or '图文引流包'
+    hook = req.hook or '先收藏，这几件事一定要弄懂。'
+    try:
+        slides = create_graphic_post(
+            settings,
+            title=title,
+            hook=hook,
+            script=req.script,
+            selling_points=req.selling_points,
+            cta=req.cta,
+            platform=req.platform,
+            slide_count=req.slide_count,
+            source_path=source_path,
+            style=req.style,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f'图文引流包生成失败：{str(exc)[:1200]}') from exc
+
+    images: list[GraphicPostImage] = []
+    for slide in slides:
+        public_url = maybe_upload_to_r2(settings, slide.path, prefix='graphic-posts')
+        images.append(GraphicPostImage(
+            image_url=file_url(request, slide.path.name, public_url),
+            image_name=slide.path.name,
+            title=slide.title,
+            caption=slide.caption,
+            role=slide.role,
+        ))
+
+    tags = ' '.join([f'#{x.strip()}' for x in [req.industry, '图文引流', '避坑指南'] if x.strip()])
+    description = f"{hook}\n\n{req.cta or '想要完整清单，私信发你。'}\n{tags}".strip()
+    return GraphicPostResponse(
+        package_title=title,
+        platform=req.platform,
+        images=images,
+        publish_title=title,
+        publish_description=description,
+        checklist=[
+            '首图只放一个强标题，负责让人停下来。',
+            '中间每页只讲一个重点，负责收藏和转发。',
+            '最后一页必须有私信/评论/领取清单的动作。',
+            '发布时优先选择小红书图文、抖音图文或朋友圈九宫格。',
+        ],
+        warnings=warnings,
     )
 
 

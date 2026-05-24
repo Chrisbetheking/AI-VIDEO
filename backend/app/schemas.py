@@ -604,6 +604,43 @@ class OneClickChatRequest(BaseModel):
     selling_points: str = Field(default='', max_length=1500)
 
 
+
+
+class GraphicPostImage(BaseModel):
+    image_url: str
+    image_name: str
+    title: str
+    caption: str
+    role: str
+
+
+class GraphicPostRequest(BaseModel):
+    title: str = Field(default='', max_length=120)
+    hook: str = Field(default='', max_length=300)
+    script: str = Field(default='', max_length=12000)
+    industry: str = Field(default='', max_length=160)
+    audience: str = Field(default='', max_length=300)
+    selling_points: str = Field(default='', max_length=1500)
+    style: str = Field(default='精美商业感、抖音图文、小红书收藏感', max_length=500)
+    platform: str = Field(default='xiaohongshu', max_length=40)
+    slide_count: int = Field(default=5, ge=3, le=8)
+    cta: str = Field(default='想要完整清单，私信发你。', max_length=300)
+    background_mode: str = Field(default='asset', max_length=40)
+    source_asset_id: Optional[str] = None
+    background_url: str = Field(default='', max_length=1500)
+    image_prompt: str = Field(default='', max_length=3000)
+
+
+class GraphicPostResponse(BaseModel):
+    package_title: str
+    platform: str
+    images: List[GraphicPostImage] = Field(default_factory=list)
+    publish_title: str = ''
+    publish_description: str = ''
+    checklist: List[str] = Field(default_factory=list)
+    warnings: List[str] = Field(default_factory=list)
+
+
 class ModelStatusResponse(BaseModel):
     ai_provider: str
     ai_text_model: str
