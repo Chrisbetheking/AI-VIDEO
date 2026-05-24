@@ -84,6 +84,19 @@ function safeText(value: unknown, fallback = '') {
   return text || fallback
 }
 
+function safeNumber(value: unknown, fallback = 0) {
+  const n = Number(value)
+  return Number.isFinite(n) ? n : fallback
+}
+
+function safeProjectDuration(...values: unknown[]) {
+  for (const value of values) {
+    const n = safeNumber(value, 0)
+    if (n > 0) return Math.round(Math.min(180, Math.max(5, n)))
+  }
+  return 12
+}
+
 function normalizeAsset(raw: any, index = 0): AssetItem {
   const filename = safeText(raw?.filename, safeText(raw?.file_name, safeText(raw?.name, safeText(raw?.original_name, `asset_${index}`))))
   const originalName = safeText(raw?.original_name, filename)
@@ -977,31 +990,53 @@ ${manualText || ''}`.trim()
   }
 
   async function composeVideo() {
-    const chosen = selectedMaterialAssets.length ? selectedMaterialAssets : materialAssets.slice(0, 6)
+    if (!currentScript.trim()) {
+      setError('请先生成或填写文案，再合成视频。')
+      return
+    }
+    const chosen = (selectedMaterialAssets.length ? selectedMaterialAssets : materialAssets.slice(0, 6))
+      .map((asset, index) => normalizeAsset(asset, index))
+      .filter(asset => Boolean(asset.id && asset.url))
+    if (!chosen.length) {
+      setError('请先在素材选择页上传或选择至少 1 个图片/视频素材。')
+      setActive('assets')
+      return
+    }
     const assetPlan = chosen.map((asset, index) => {
       const cfg = getClipSetting(asset, index)
+      const imageSeconds = safeNumber(cfg.image_seconds, 2.8)
+      const start = Math.max(0, safeNumber(cfg.video_start, 0))
+      const rawEnd = safeNumber(cfg.video_end, 0)
       return {
-        asset_id: asset.id,
+        asset_id: String(asset.id),
         order: index,
-        kind: asset.kind,
-        image_seconds: asset.kind === 'image' ? cfg.image_seconds : 0,
-        video_start: asset.kind === 'video' ? cfg.video_start : 0,
-        video_end: asset.kind === 'video' ? cfg.video_end : 0,
+        kind: asset.kind === 'video' ? 'video' : 'image',
+        image_seconds: asset.kind === 'image' ? Math.min(20, Math.max(0.8, imageSeconds)) : 0,
+        video_start: asset.kind === 'video' ? start : 0,
+        video_end: asset.kind === 'video' && rawEnd > start ? rawEnd : 0,
       }
     })
+    const safeSubtitleSegments = Array.isArray(audio?.segments) ? audio.segments.map((seg: any, index: number) => ({
+      index: Number.isFinite(Number(seg?.index)) ? Number(seg.index) : index,
+      text: safeText(seg?.text, ''),
+      start: Math.max(0, safeNumber(seg?.start, 0)),
+      end: Math.max(0, safeNumber(seg?.end, safeNumber(seg?.start, 0) + safeNumber(seg?.duration, 0))),
+      duration: Math.max(0, safeNumber(seg?.duration, safeNumber(seg?.end, 0) - safeNumber(seg?.start, 0))),
+    })).filter((seg: any) => seg.text && seg.end > seg.start) : []
+    const durationSeconds = safeProjectDuration(audio?.duration_seconds, selectedAssetEstimatedSeconds, voiceEstimatedSeconds, autoProjectSeconds)
     const res = await run('合成视频并烧字幕', () => apiPost<ComposeResponse>('/api/compose-video', {
-      title: copy.title,
-      script: currentScript,
-      asset_ids: chosen.map(a => a.id),
+      title: safeText(copy.title, '短视频'),
+      script: currentScript.trim(),
+      asset_ids: chosen.map(a => String(a.id)),
       asset_plan: assetPlan,
-      audio_file_name: audio?.file_name,
-      duration_seconds: Math.round(audio?.duration_seconds || selectedAssetEstimatedSeconds || autoProjectSeconds),
+      audio_file_name: audio?.file_name || undefined,
+      duration_seconds: durationSeconds,
       voice,
       rate: '+0%',
       subtitle_size: subtitleSize,
       subtitle_margin_v: subtitleMarginV,
       subtitle_position: subtitlePosition,
-      subtitle_segments: audio?.segments || []
+      subtitle_segments: safeSubtitleSegments
     }))
     setVideo(res!)
     setLastHandoff('视频已合成。字幕已按配音分段时间轴烧录；封面和平台发布会自动读取这条成片。')

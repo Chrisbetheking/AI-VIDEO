@@ -12,6 +12,25 @@ function withTimeout(ms = 90000) {
   return { controller, timer }
 }
 
+function formatApiDetail(value: unknown): string {
+  if (value === null || value === undefined) return ''
+  if (typeof value === 'string') return value
+  if (Array.isArray(value)) {
+    return value.map((item: any) => {
+      if (typeof item === 'string') return item
+      const loc = Array.isArray(item?.loc) ? item.loc.join('.') : ''
+      const msg = item?.msg || item?.message || JSON.stringify(item)
+      return loc ? `${loc}: ${msg}` : String(msg)
+    }).join('；')
+  }
+  if (typeof value === 'object') {
+    const obj: any = value
+    if (obj.message || obj.msg) return String(obj.message || obj.msg)
+    try { return JSON.stringify(value, null, 2) } catch { return String(value) }
+  }
+  return String(value)
+}
+
 async function parseResponse<T>(res: Response, url: string): Promise<T> {
   const contentType = res.headers.get('content-type') || ''
   if (!res.ok) {
@@ -19,7 +38,7 @@ async function parseResponse<T>(res: Response, url: string): Promise<T> {
     try {
       if (contentType.includes('application/json')) {
         const data = await res.json()
-        detail = data.detail || JSON.stringify(data)
+        detail = formatApiDetail((data as any).detail ?? data) || detail
       } else {
         detail = await res.text()
       }
