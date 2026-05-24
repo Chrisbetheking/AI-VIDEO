@@ -201,6 +201,90 @@ def _safe_suffix_from_url(url: str, default: str = '.mp4') -> str:
     return default
 
 
+async def _download_remote_video_with_resume(
+    settings: Settings,
+    source_url: str,
+    tmp: Path,
+    *,
+    max_bytes: int,
+) -> int:
+    """Download remote video with retries and HTTP Range resume.
+
+    Some Jimeng/OmniHuman result URLs close the connection midway on Render,
+    which surfaces as httpx.ReadError. Retrying from byte 0 often wastes the
+    temporary URL window, so we keep the partial file and resume with Range.
+    """
+    base_headers = {
+        'User-Agent': settings.collector_user_agent or 'Mozilla/5.0',
+        'Accept': 'video/mp4,video/*,*/*;q=0.8',
+        'Connection': 'keep-alive',
+    }
+    last_error: Exception | None = None
+    expected_total: int | None = None
+
+    for attempt in range(1, 7):
+        downloaded = tmp.stat().st_size if tmp.exists() else 0
+        if downloaded > max_bytes:
+            raise RuntimeError(f'数字人视频超过 {settings.max_upload_mb}MB，已停止缓存。')
+
+        headers = dict(base_headers)
+        if downloaded > 0:
+            headers['Range'] = f'bytes={downloaded}-'
+
+        try:
+            timeout = httpx.Timeout(connect=20.0, read=360.0, write=60.0, pool=60.0)
+            async with httpx.AsyncClient(timeout=timeout, follow_redirects=True, headers=headers) as client:
+                async with client.stream('GET', source_url) as resp:
+                    # If the server ignores Range and returns 200, restart cleanly.
+                    if downloaded > 0 and resp.status_code == 200:
+                        tmp.unlink(missing_ok=True)
+                        downloaded = 0
+                    elif resp.status_code == 416 and downloaded > 1024:
+                        return downloaded
+
+                    resp.raise_for_status()
+
+                    content_range = resp.headers.get('content-range') or ''
+                    if '/' in content_range:
+                        try:
+                            expected_total = int(content_range.rsplit('/', 1)[-1])
+                        except Exception:
+                            expected_total = None
+                    elif resp.headers.get('content-length') and downloaded == 0:
+                        try:
+                            expected_total = int(resp.headers['content-length'])
+                        except Exception:
+                            expected_total = None
+
+                    mode = 'ab' if tmp.exists() and downloaded > 0 and resp.status_code == 206 else 'wb'
+                    with tmp.open(mode) as f:
+                        async for chunk in resp.aiter_bytes(512 * 1024):
+                            if not chunk:
+                                continue
+                            downloaded += len(chunk)
+                            if downloaded > max_bytes:
+                                raise RuntimeError(f'数字人视频超过 {settings.max_upload_mb}MB，已停止缓存。')
+                            f.write(chunk)
+
+                    if downloaded >= 1024 and (expected_total is None or downloaded >= expected_total):
+                        return downloaded
+
+        except Exception as exc:
+            last_error = exc
+            # Keep partial .download file for the next Range retry.
+            if attempt < 6:
+                await asyncio.sleep(min(12.0, 1.5 * attempt))
+                continue
+            break
+
+    downloaded = tmp.stat().st_size if tmp.exists() else 0
+    if downloaded >= 1024:
+        return downloaded
+    if last_error is not None:
+        raise RuntimeError(f'{type(last_error).__name__}: {str(last_error) or "连接被远端中断"}') from last_error
+    raise RuntimeError('下载到的视频文件过小，可能是火山临时 URL 已失效或返回了错误页。')
+
+
 async def cache_remote_video_to_own_storage(
     settings: Settings,
     request: Request,
@@ -233,31 +317,14 @@ async def cache_remote_video_to_own_storage(
 
     if not dest.exists() or dest.stat().st_size < 1024:
         tmp = settings.tmp_dir / f'{dest.name}.download'
-        tmp.unlink(missing_ok=True)
+        tmp.parent.mkdir(parents=True, exist_ok=True)
         max_bytes = max(50, settings.max_upload_mb) * 1024 * 1024
-        downloaded = 0
         try:
-            timeout = httpx.Timeout(connect=12.0, read=180.0, write=30.0, pool=30.0)
-            headers = {
-                'User-Agent': settings.collector_user_agent,
-                'Accept': 'video/mp4,video/*,*/*;q=0.8',
-            }
-            async with httpx.AsyncClient(timeout=timeout, follow_redirects=True, headers=headers) as client:
-                async with client.stream('GET', source_url) as resp:
-                    resp.raise_for_status()
-                    with tmp.open('wb') as f:
-                        async for chunk in resp.aiter_bytes(1024 * 1024):
-                            if not chunk:
-                                continue
-                            downloaded += len(chunk)
-                            if downloaded > max_bytes:
-                                raise RuntimeError(f'数字人视频超过 {settings.max_upload_mb}MB，已停止缓存。')
-                            f.write(chunk)
+            downloaded = await _download_remote_video_with_resume(settings, source_url, tmp, max_bytes=max_bytes)
             if downloaded < 1024:
                 raise RuntimeError('下载到的视频文件过小，可能是火山临时 URL 已失效或返回了错误页。')
             tmp.replace(dest)
         except Exception as exc:
-            tmp.unlink(missing_ok=True)
             warnings.append(f'后端转存火山视频失败，暂时保留火山原始链接：{type(exc).__name__}: {str(exc)[:500]}')
             return source_url, '', warnings
 
