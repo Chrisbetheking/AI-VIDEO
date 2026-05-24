@@ -61,7 +61,7 @@ async function safeFetch<T>(url: string, init?: RequestInit, timeoutMs = 240000)
     }
     const msg = err?.message || String(err)
     if (msg === 'Failed to fetch') {
-      throw new Error(`无法连接后端：${url}\n请检查 Render 服务是否正常、Cloudflare VITE_API_BASE 是否为 ${defaultRenderApi}、CORS_ORIGINS 是否允许当前前端域名。`)
+      throw new Error(`无法连接后端：${url}\n大概率是 Render 免费实例在合成视频时重启/冷启动。请等 30-60 秒后先打开 ${defaultRenderApi}/api/health，显示 ok 后再试；若仍失败，请发 Render 最新 Logs。`)
     }
     throw err
   } finally {
@@ -76,7 +76,7 @@ export async function apiGet<T>(path: string): Promise<T> {
 
 export async function apiPost<T>(path: string, body: unknown): Promise<T> {
   const url = `${API_BASE}${path}`
-  const timeoutMs = path.includes('compose-video') ? 300000 : 240000
+  const timeoutMs = path.includes('compose-video') ? 360000 : 240000
   return safeFetch<T>(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

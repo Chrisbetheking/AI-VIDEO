@@ -4,6 +4,7 @@ import asyncio
 import hashlib
 import json
 import mimetypes
+import os
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -491,7 +492,13 @@ async def _download_remote_media_for_compose(settings: Settings, url: str, fallb
     dest = settings.tmp_dir / f'compose_asset_{hashlib.sha256(url.encode("utf-8")).hexdigest()[:24]}{suffix}'
     if dest.exists() and dest.stat().st_size > 2048:
         return dest
-    max_bytes = max(50, settings.max_upload_mb) * 1024 * 1024
+    # Compose runs on a small Render instance. Never download huge remote materials for one demo render;
+    # huge R2 videos were the main reason the backend restarted and the browser showed Failed to fetch.
+    try:
+        compose_remote_mb = int(os.getenv('COMPOSE_MAX_REMOTE_MB', '60'))
+    except Exception:
+        compose_remote_mb = 60
+    max_bytes = max(8, min(max(8, settings.max_upload_mb), compose_remote_mb)) * 1024 * 1024
     try:
         headers = {'User-Agent': settings.collector_user_agent or 'Mozilla/5.0', 'Accept': '*/*'}
         async with httpx.AsyncClient(timeout=httpx.Timeout(connect=20.0, read=180.0, write=60.0, pool=60.0), follow_redirects=True, headers=headers) as client:
@@ -1152,14 +1159,29 @@ async def api_compose_video(req: ComposeRequest, request: Request, settings: Set
     missing_asset_ids: list[str] = []
 
     if req.asset_plan:
-        for clip_req in sorted(req.asset_plan, key=lambda x: x.order):
+        try:
+            compose_max_assets = int(os.getenv('COMPOSE_MAX_ASSETS', '3'))
+        except Exception:
+            compose_max_assets = 3
+        compose_max_assets = max(1, min(5, compose_max_assets))
+        sorted_plan = sorted(req.asset_plan, key=lambda x: x.order)
+        if len(sorted_plan) > compose_max_assets:
+            pre_warnings.append(f'当前 Render 免费实例为稳定演示，剪辑合成先使用前 {compose_max_assets} 个素材；其余素材不会下载，避免后端重启。')
+        for clip_req in sorted_plan[:compose_max_assets]:
             clip = await _resolve_compose_clip(settings, clip_req)
             if clip:
                 media_clips.append(clip)
             else:
                 missing_asset_ids.append(str(clip_req.asset_id))
     elif req.asset_ids:
-        for order, asset_id in enumerate(req.asset_ids):
+        try:
+            compose_max_assets = int(os.getenv('COMPOSE_MAX_ASSETS', '3'))
+        except Exception:
+            compose_max_assets = 3
+        compose_max_assets = max(1, min(5, compose_max_assets))
+        if len(req.asset_ids) > compose_max_assets:
+            pre_warnings.append(f'当前 Render 免费实例为稳定演示，剪辑合成先使用前 {compose_max_assets} 个素材；其余素材不会下载，避免后端重启。')
+        for order, asset_id in enumerate(req.asset_ids[:compose_max_assets]):
             class _Tmp:
                 pass
             tmp = _Tmp()
