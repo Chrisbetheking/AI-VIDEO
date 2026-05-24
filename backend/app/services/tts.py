@@ -7,7 +7,7 @@ import subprocess
 import tempfile
 import uuid
 from pathlib import Path
-from typing import Optional, Tuple, Iterable
+from typing import Optional, Tuple, Iterable, Any
 
 import httpx
 
@@ -233,7 +233,7 @@ def _concat_wavs(parts: Iterable[Path], output: Path) -> None:
         raise RuntimeError(f'分段音频合并失败：{proc.stderr[-1200:]}')
 
 
-async def synthesize_tts_segments(settings: Settings, segments: list[VoiceSegment], voice: Optional[str] = None, overall_rate: Optional[str] = None) -> Tuple[Path, float, Optional[str]]:
+async def synthesize_tts_segments(settings: Settings, segments: list[VoiceSegment], voice: Optional[str] = None, overall_rate: Optional[str] = None) -> Tuple[Path, float, Optional[str], list[dict[str, Any]]]:
     if not segments:
         raise RuntimeError('缺少分段配音内容。')
 
@@ -242,12 +242,13 @@ async def synthesize_tts_segments(settings: Settings, segments: list[VoiceSegmen
     tmp_dir.mkdir(parents=True, exist_ok=True)
     wav_parts: list[Path] = []
     warnings: list[str] = []
+    timings: list[dict[str, Any]] = []
+    cursor = 0.0
 
     try:
-        for index, segment in enumerate(segments[:30], start=1):
+        usable_segments = [seg for seg in segments[:30] if seg.text.strip()]
+        for index, segment in enumerate(usable_segments, start=1):
             text = segment.text.strip()
-            if not text:
-                continue
             try:
                 if provider in {'volcengine', 'doubao', 'bytedance'}:
                     raw = await synthesize_volcengine_v1(
@@ -270,24 +271,47 @@ async def synthesize_tts_segments(settings: Settings, segments: list[VoiceSegmen
                     await asyncio.to_thread(synthesize_sapi_to_wav, wav, text, voice or 'default', str(segment.speed_ratio))
                 else:
                     raise RuntimeError(f'未知 TTS_PROVIDER={settings.tts_provider}')
+
+                seg_duration = probe_duration(wav) or estimate_speech_duration(text)
+                start_time = cursor
+                end_time = start_time + seg_duration
+                timings.append({
+                    'index': index,
+                    'text': text,
+                    'start': round(start_time, 3),
+                    'end': round(end_time, 3),
+                    'duration': round(seg_duration, 3),
+                })
                 wav_parts.append(wav)
-                if segment.pause_after_ms > 0 and index < len(segments):
+                cursor = end_time
+                if segment.pause_after_ms > 0 and index < len(usable_segments):
+                    pause_ms = int(segment.pause_after_ms)
                     pause = tmp_dir / f'{index:02d}_pause.wav'
-                    await asyncio.to_thread(_make_silence_wav, pause, segment.pause_after_ms)
+                    await asyncio.to_thread(_make_silence_wav, pause, pause_ms)
                     wav_parts.append(pause)
+                    cursor += max(0.0, pause_ms / 1000)
             except Exception as exc:
                 warnings.append(f'第 {index} 段配音失败：{exc}')
                 if not settings.allow_mock_tts:
                     raise
+                silent_duration = estimate_speech_duration(text)
                 silent = tmp_dir / f'{index:02d}_silent.wav'
-                await asyncio.to_thread(_make_silence_wav, silent, int(estimate_speech_duration(text) * 1000))
+                await asyncio.to_thread(_make_silence_wav, silent, int(silent_duration * 1000))
+                timings.append({
+                    'index': index,
+                    'text': text,
+                    'start': round(cursor, 3),
+                    'end': round(cursor + silent_duration, 3),
+                    'duration': round(silent_duration, 3),
+                })
+                cursor += silent_duration + max(0, segment.pause_after_ms) / 1000
                 wav_parts.append(silent)
 
         output = settings.outputs_dir / f'tts_segments_{uuid.uuid4().hex}.mp3'
         await asyncio.to_thread(_concat_wavs, wav_parts, output)
-        duration = probe_duration(output) or sum(estimate_speech_duration(seg.text) + seg.pause_after_ms / 1000 for seg in segments)
+        duration = probe_duration(output) or cursor or sum(estimate_speech_duration(seg.text) + seg.pause_after_ms / 1000 for seg in segments)
         warning = '；'.join(warnings) if warnings else None
-        return output, duration, warning
+        return output, duration, warning, timings
     finally:
         # 保留最终输出，清理临时分段文件。
         try:

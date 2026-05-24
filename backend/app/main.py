@@ -80,7 +80,7 @@ from app.schemas import (
 from app.services.ad_analysis import analyze_ad
 from app.services.cover import create_cover
 from app.services.image_generation import generate_image_to_file
-from app.services.deepseek import DeepSeekError, generate_copy, generate_edit_plan, generate_growth_decision, generate_shooting_plan, generate_subtitle_emphasis, generate_trend_radar, generate_voice_director, refine_copy_with_instruction, rewrite_from_inspiration, test_deepseek, video_edit_chat_advice
+from app.services.deepseek import DeepSeekError, generate_copy, generate_edit_plan, generate_growth_decision, generate_lead_acquisition_plan, generate_shooting_plan, generate_subtitle_emphasis, generate_trend_radar, generate_voice_director, refine_copy_with_instruction, rewrite_from_inspiration, test_deepseek, video_edit_chat_advice
 from app.services.doubao import extract_with_doubao
 from app.services.digital_human import call_external_digital_human_worker, call_jimeng_digital_human, query_jimeng_digital_human, create_static_avatar_preview
 from app.services.collector import get_collector_cookie_status, save_collector_cookie_text
@@ -90,7 +90,7 @@ from app.services.publisher import create_publish_package
 from app.services.storage import maybe_upload_to_r2, maybe_delete_from_r2, maybe_list_r2_objects, read_last_storage_error, test_r2_connection
 from app.services.tts import get_tts_voices, synthesize_tts, synthesize_tts_segments
 from app.services.assets_store import read_manifest, upsert_asset, remove_asset, now_iso
-from app.services.video import IMAGE_EXTS, VIDEO_EXTS, compose_video
+from app.services.video import IMAGE_EXTS, VIDEO_EXTS, MediaClip, compose_video
 from app.services.video_edit import apply_video_edit
 from app.services.auto_collector import run_auto_collection
 from app.services.one_click import generate_one_click, revise_one_click
@@ -478,6 +478,62 @@ def _path_from_url_download_name(settings: Settings, url: str, fallback_ext: str
     path = settings.tmp_dir / name
     return path if path.exists() else None
 
+
+async def _download_remote_media_for_compose(settings: Settings, url: str, fallback_ext: str = '.mp4') -> Optional[Path]:
+    if not url or not url.startswith(('http://', 'https://')):
+        return None
+    suffix = _safe_suffix_from_url(url, fallback_ext)
+    allowed_media_exts = IMAGE_EXTS | VIDEO_EXTS | {'.mp3', '.wav', '.m4a', '.aac'}
+    if suffix not in allowed_media_exts:
+        suffix = fallback_ext if fallback_ext in allowed_media_exts else '.mp4'
+    dest = settings.tmp_dir / f'compose_asset_{hashlib.sha256(url.encode("utf-8")).hexdigest()[:24]}{suffix}'
+    if dest.exists() and dest.stat().st_size > 2048:
+        return dest
+    max_bytes = max(50, settings.max_upload_mb) * 1024 * 1024
+    try:
+        headers = {'User-Agent': settings.collector_user_agent or 'Mozilla/5.0', 'Accept': '*/*'}
+        async with httpx.AsyncClient(timeout=httpx.Timeout(connect=20.0, read=180.0, write=60.0, pool=60.0), follow_redirects=True, headers=headers) as client:
+            async with client.stream('GET', url) as resp:
+                resp.raise_for_status()
+                total = 0
+                with dest.open('wb') as f:
+                    async for chunk in resp.aiter_bytes(512 * 1024):
+                        if not chunk:
+                            continue
+                        total += len(chunk)
+                        if total > max_bytes:
+                            dest.unlink(missing_ok=True)
+                            raise RuntimeError(f'远端素材超过 {settings.max_upload_mb}MB')
+                        f.write(chunk)
+        if dest.exists() and dest.stat().st_size > 2048:
+            return dest
+    except Exception:
+        try:
+            dest.unlink(missing_ok=True)
+        except Exception:
+            pass
+    return None
+
+
+async def _resolve_compose_clip(settings: Settings, clip_req) -> Optional[MediaClip]:
+    asset_id = str(getattr(clip_req, 'asset_id', '') or '').strip()
+    kind_hint = str(getattr(clip_req, 'kind', '') or '').strip()
+    local = find_asset_path(settings, asset_id)
+    if local is None:
+        remote = _asset_remote_url(settings, asset_id)
+        fallback_ext = '.jpg' if kind_hint == 'image' else '.mp4'
+        local = await _download_remote_media_for_compose(settings, remote, fallback_ext=fallback_ext)
+    if local is None:
+        return None
+    return MediaClip(
+        path=local,
+        kind=kind_hint or ('image' if local.suffix.lower() in IMAGE_EXTS else 'video'),
+        image_seconds=float(getattr(clip_req, 'image_seconds', 2.8) or 2.8),
+        video_start=float(getattr(clip_req, 'video_start', 0.0) or 0.0),
+        video_end=float(getattr(clip_req, 'video_end', 0.0) or 0.0),
+        order=int(getattr(clip_req, 'order', 0) or 0),
+    )
+
 @app.get('/api/health')
 def health(settings: Settings = Depends(get_settings)) -> dict:
     return {
@@ -558,6 +614,16 @@ async def api_one_click_generate(req: OneClickGenerateRequest, settings: Setting
 async def api_one_click_chat(req: OneClickChatRequest, settings: Settings = Depends(get_settings), memory: MemoryStore = Depends(get_memory)) -> OneClickGenerateResponse:
     result = await revise_one_click(settings, req.current, req.instruction, industry=req.industry, audience=req.audience, selling_points=req.selling_points)
     memory.save_script_version({**result.copy.model_dump(), 'source': 'one_click_chat', 'raw': {'instruction': req.instruction, 'response': result.model_dump()}})
+    return result
+
+
+@app.post('/api/lead-acquisition/plan', response_model=LeadAcquisitionPlanResponse)
+async def api_lead_acquisition_plan(req: LeadAcquisitionRequest, settings: Settings = Depends(get_settings), memory: MemoryStore = Depends(get_memory)) -> LeadAcquisitionPlanResponse:
+    ctx = memory.context()
+    if ctx.get('learning_summary') and not req.existing_context:
+        req.existing_context = str(ctx.get('learning_summary') or '')[:8000]
+    result = await generate_lead_acquisition_plan(settings, req)
+    memory.save_learning_event({'event_type': 'lead_acquisition_plan', 'title': req.industry or '获客自动化作战图', 'payload': result.model_dump()})
     return result
 
 
@@ -811,11 +877,11 @@ async def api_tts(req: TTSRequest, request: Request, settings: Settings = Depend
 @app.post('/api/tts-segments', response_model=TTSResponse)
 async def api_tts_segments(req: TTSSegmentsRequest, request: Request, settings: Settings = Depends(get_settings)) -> TTSResponse:
     try:
-        path, duration, warning = await synthesize_tts_segments(settings, req.segments, voice=req.voice, overall_rate=req.overall_rate)
+        path, duration, warning, timings = await synthesize_tts_segments(settings, req.segments, voice=req.voice, overall_rate=req.overall_rate)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     public_url = maybe_upload_to_r2(settings, path, prefix='audio')
-    return TTSResponse(file_url=file_url(request, path.name, public_url), file_name=path.name, duration_seconds=duration, warning=warning)
+    return TTSResponse(file_url=file_url(request, path.name, public_url), file_name=path.name, duration_seconds=duration, warning=warning, segments=timings)
 
 
 
@@ -1072,51 +1138,71 @@ def api_list_collected_videos(request: Request, settings: Settings = Depends(get
 
 @app.post('/api/compose-video', response_model=ComposeResponse)
 async def api_compose_video(req: ComposeRequest, request: Request, settings: Settings = Depends(get_settings)) -> ComposeResponse:
-    """Compose the final video.
+    """Compose the final video with ordered material clips and safer subtitles.
 
-    Render free instances can restart/OOM and delete local /app/data files.
-    The old implementation used safe_output_path() for audio and returned 404
-    when an old TTS filename was no longer on disk, which showed as
-    "文件不存在 /api/compose-video" in the frontend.  For production flow we
-    should not fail the whole compose step just because the previous audio file
-    was lost; instead regenerate TTS from the current script and continue.
+    Fixes:
+    - R2-only old materials are downloaded back to Render before FFmpeg.
+    - Selected material order, image duration, and video trim ranges are respected.
+    - Final duration follows the generated audio, so subtitles do not drift away from speech.
     """
     pre_warnings: list[str] = []
-    asset_paths: List[Path] = []
+    media_clips: List[MediaClip] = []
     missing_asset_ids: list[str] = []
 
-    if req.asset_ids:
-        for asset_id in req.asset_ids:
-            path = find_asset_path(settings, asset_id)
-            if path:
-                asset_paths.append(path)
+    if req.asset_plan:
+        for clip_req in sorted(req.asset_plan, key=lambda x: x.order):
+            clip = await _resolve_compose_clip(settings, clip_req)
+            if clip:
+                media_clips.append(clip)
+            else:
+                missing_asset_ids.append(str(clip_req.asset_id))
+    elif req.asset_ids:
+        for order, asset_id in enumerate(req.asset_ids):
+            class _Tmp:
+                pass
+            tmp = _Tmp()
+            tmp.asset_id = str(asset_id)
+            tmp.order = order
+            tmp.kind = ''
+            tmp.image_seconds = 2.8
+            tmp.video_start = 0.0
+            tmp.video_end = 0.0
+            clip = await _resolve_compose_clip(settings, tmp)
+            if clip:
+                media_clips.append(clip)
             else:
                 missing_asset_ids.append(str(asset_id))
         if missing_asset_ids:
-            pre_warnings.append('部分素材只存在于旧临时目录或 R2 远端，Render 当前本地找不到，已自动跳过并使用可用素材/默认背景。')
+            pre_warnings.append('部分素材只存在于旧临时目录或 R2 远端不可访问，已自动跳过；可在素材页重新上传或检查 R2 公开访问。')
     else:
-        asset_paths = [p for p in settings.uploads_dir.glob('*') if p.is_file()][:6]
+        media_clips = [MediaClip(path=p, order=i) for i, p in enumerate(settings.uploads_dir.glob('*')) if p.is_file()][:6]
 
     audio_path: Optional[Path] = None
     if req.audio_file_name:
-        # Do NOT call safe_output_path here. If Render restarted, the old local
-        # mp3/wav is gone. Let compose_video() regenerate audio instead.
         audio_path = find_media_file(settings, req.audio_file_name)
         if audio_path is None:
-            pre_warnings.append(f'配音文件 {Path(req.audio_file_name).name} 不在当前 Render 本地磁盘，已根据当前文案自动重新生成配音。')
+            remote_audio = _output_remote_url(settings, req.audio_file_name)
+            downloaded = await _download_remote_media_for_compose(settings, remote_audio, fallback_ext=Path(req.audio_file_name).suffix or '.mp3')
+            if downloaded:
+                audio_path = downloaded
+            else:
+                pre_warnings.append(f'配音文件 {Path(req.audio_file_name).name} 不在当前 Render 本地磁盘，已根据当前文案自动重新生成配音。')
 
     try:
         result = await compose_video(
             settings=settings,
             script=req.script,
-            asset_paths=asset_paths,
+            asset_paths=media_clips,
             duration_seconds=req.duration_seconds,
             audio_path=audio_path,
             voice=req.voice,
             rate=req.rate,
+            subtitle_segments=[x.model_dump() for x in req.subtitle_segments],
+            subtitle_size=req.subtitle_size,
+            subtitle_margin_v=req.subtitle_margin_v,
+            subtitle_position=req.subtitle_position,
         )
     except Exception as exc:
-        # Return a clear API error instead of leaving the browser with a vague Failed to fetch.
         raise HTTPException(status_code=500, detail=f'视频合成失败：{str(exc)[:1800]}') from exc
 
     video_public = maybe_upload_to_r2(settings, result.video_path, prefix='videos')

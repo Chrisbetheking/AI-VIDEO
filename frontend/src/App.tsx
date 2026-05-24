@@ -39,6 +39,7 @@ import {
 } from './api'
 
 type ModuleKey = 'dashboard' | 'monitor' | 'lead' | 'oneClick' | 'collector' | 'copy' | 'voice' | 'digitalHuman' | 'assets' | 'video' | 'subtitleCover' | 'publish' | 'strategy' | 'competitor' | 'trend' | 'shooting' | 'growth'
+type AssetClipSetting = { order: number; image_seconds: number; video_start: number; video_end: number }
 
 function Field({ label, children, hint }: { label: string; children: ReactNode; hint?: string }) {
   return <label className="field"><span>{label}</span>{children}{hint && <em>{hint}</em>}</label>
@@ -56,6 +57,7 @@ function Empty({ children }: { children: ReactNode }) { return <div className="e
 
 const emptyCopy: GeneratedCopy = { title: '', hook: '', script: '', description: '', tags: [], shots: [], kb_refs: [] }
 const DIGITAL_HUMAN_TASK_KEY = 'ai_video_current_digital_human_task_v1'
+const emotionOptions = ['自然可信', '提醒警示', '紧张急迫', '坚定有力', '朋友聊天', '专业冷静', '惊讶反问', '收尾号召']
 
 function getDigitalHumanTaskModel(task: DigitalHumanCreateResponse | null, fallback: string) {
   const engine = String(task?.engine || '')
@@ -168,6 +170,8 @@ export default function App() {
 
   const [assets, setAssets] = useState<AssetItem[]>([])
   const [selectedMaterialIds, setSelectedMaterialIds] = useState<string[]>([])
+  const [assetClipSettings, setAssetClipSettings] = useState<Record<string, AssetClipSetting>>({})
+  const [assetDurations, setAssetDurations] = useState<Record<string, number>>({})
   const [selectedReferenceAssetId, setSelectedReferenceAssetId] = useState('')
   const [assetSearch, setAssetSearch] = useState('')
   const [assetKindFilter, setAssetKindFilter] = useState<'all' | 'image' | 'video'>('all')
@@ -213,7 +217,9 @@ export default function App() {
 
   const [segmentSeconds, setSegmentSeconds] = useState<Record<number, number>>({})
   const [segmentTransitions, setSegmentTransitions] = useState<Record<number, string>>({})
-  const [subtitleSize, setSubtitleSize] = useState(58)
+  const [subtitleSize, setSubtitleSize] = useState(18)
+  const [subtitleMarginV, setSubtitleMarginV] = useState(70)
+  const [subtitlePosition, setSubtitlePosition] = useState<'bottom_safe' | 'middle_low' | 'center'>('bottom_safe')
   const [subtitleColor, setSubtitleColor] = useState('#ffffff')
   const [subtitleHighlight, setSubtitleHighlight] = useState('第二家园,海外置业,子女教育,养老度假,资产配置,私信咨询')
   const [coverStyle, setCoverStyle] = useState('海外第二家园强钩子封面')
@@ -265,7 +271,7 @@ export default function App() {
       return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
     })
   }, [materialAssets, assetKindFilter, assetSearch, assetSort, assetTimeFilter])
-  const selectedMaterialAssets = useMemo(() => materialAssets.filter(a => selectedMaterialIds.includes(a.id)), [materialAssets, selectedMaterialIds])
+  const selectedMaterialAssets = useMemo(() => selectedMaterialIds.map(id => materialAssets.find(a => a.id === id)).filter(Boolean) as AssetItem[], [materialAssets, selectedMaterialIds])
   const referenceText = useMemo(() => extract?.transcript || manualText || sourceUrl, [extract, manualText, sourceUrl])
   const competitorNotes = useMemo(() => competitors.map(c => `${c.platform}｜${c.name}｜${c.positioning}｜${c.notes}`).join('\n'), [competitors])
   const learningSummary = memoryContext?.learning_summary || '保存客户定位、竞品账号和采集结果后，AI 会在文案、雷达、投流建议里自动读取。'
@@ -563,8 +569,51 @@ export default function App() {
     if (ids.length) setSelectedMaterialIds(prev => Array.from(new Set([...ids, ...prev])))
   }
 
+  function defaultClipSetting(asset: AssetItem, order: number): AssetClipSetting {
+    return { order, image_seconds: asset.kind === 'image' ? 2.8 : 3, video_start: 0, video_end: 0 }
+  }
+
+  function getClipSetting(asset: AssetItem, index: number): AssetClipSetting {
+    return assetClipSettings[asset.id] || defaultClipSetting(asset, index)
+  }
+
+  function updateClipSetting(id: string, patch: Partial<AssetClipSetting>) {
+    setAssetClipSettings(prev => ({ ...prev, [id]: { ...(prev[id] || { order: selectedMaterialIds.indexOf(id), image_seconds: 2.8, video_start: 0, video_end: 0 }), ...patch } }))
+  }
+
   function toggleMaterial(id: string) {
-    setSelectedMaterialIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])
+    setSelectedMaterialIds(prev => {
+      if (prev.includes(id)) return prev.filter(x => x !== id)
+      const next = [...prev, id]
+      const asset = materialAssets.find(a => a.id === id)
+      if (asset) setAssetClipSettings(current => ({ ...current, [id]: current[id] || defaultClipSetting(asset, next.length - 1) }))
+      return next
+    })
+  }
+
+  function moveSelectedMaterial(index: number, dir: -1 | 1) {
+    setSelectedMaterialIds(prev => {
+      const target = index + dir
+      if (target < 0 || target >= prev.length) return prev
+      const next = [...prev]
+      ;[next[index], next[target]] = [next[target], next[index]]
+      setAssetClipSettings(current => {
+        const copy = { ...current }
+        next.forEach((id, order) => { copy[id] = { ...(copy[id] || { image_seconds: 2.8, video_start: 0, video_end: 0, order }), order } })
+        return copy
+      })
+      return next
+    })
+  }
+
+  function applyVoicePreset(index: number, preset: 'urgent' | 'calm' | 'emphasis' | 'cta') {
+    const presetMap = {
+      urgent: { emotion: '紧张急迫', speed_ratio: 1.22, volume_ratio: 1.35, pause_after_ms: 220 },
+      calm: { emotion: '专业冷静', speed_ratio: 0.92, volume_ratio: 1.0, pause_after_ms: 650 },
+      emphasis: { emotion: '坚定有力', speed_ratio: 1.06, volume_ratio: 1.55, pause_after_ms: 420 },
+      cta: { emotion: '收尾号召', speed_ratio: 1.12, volume_ratio: 1.45, pause_after_ms: 260 },
+    } as const
+    updateVoiceSegment(index, presetMap[preset])
   }
 
   async function removeAsset(asset: AssetItem) {
@@ -841,18 +890,34 @@ ${manualText || ''}`.trim()
   }
 
   async function composeVideo() {
-    const ids = selectedMaterialIds.length ? selectedMaterialIds : materialAssets.slice(0, 8).map(a => a.id)
+    const chosen = selectedMaterialAssets.length ? selectedMaterialAssets : materialAssets.slice(0, 6)
+    const assetPlan = chosen.map((asset, index) => {
+      const cfg = getClipSetting(asset, index)
+      return {
+        asset_id: asset.id,
+        order: index,
+        kind: asset.kind,
+        image_seconds: asset.kind === 'image' ? cfg.image_seconds : 0,
+        video_start: asset.kind === 'video' ? cfg.video_start : 0,
+        video_end: asset.kind === 'video' ? cfg.video_end : 0,
+      }
+    })
     const res = await run('合成视频并烧字幕', () => apiPost<ComposeResponse>('/api/compose-video', {
       title: copy.title,
       script: currentScript,
-      asset_ids: ids,
+      asset_ids: chosen.map(a => a.id),
+      asset_plan: assetPlan,
       audio_file_name: audio?.file_name,
-      duration_seconds: duration,
+      duration_seconds: Math.round(audio?.duration_seconds || duration),
       voice,
-      rate: '+0%'
+      rate: '+0%',
+      subtitle_size: subtitleSize,
+      subtitle_margin_v: subtitleMarginV,
+      subtitle_position: subtitlePosition,
+      subtitle_segments: audio?.segments || []
     }))
     setVideo(res!)
-    setLastHandoff('视频已合成。字幕封面和平台发布会自动读取这条成片。')
+    setLastHandoff('视频已合成。字幕已按配音分段时间轴烧录；封面和平台发布会自动读取这条成片。')
     if (autoAdvance) setActive('subtitleCover')
   }
 
@@ -1210,12 +1275,13 @@ https://www.douyin.com/user/..." /></Field>
       </section>}
 
       {active === 'voice' && <section className="card modulePanel">
-        <div className="sectionHeader"><div><h2>第四步：配音导演</h2><p>选择克隆音色，把口播稿拆成多段。每段可以自己加文案、调情绪、语速、音量和停顿。</p></div></div>
-        <div className="grid4"><Field label="音色"><select value={voice} onChange={e => setVoice(e.target.value)}>{voices.map(v => <option key={v.id} value={v.id}>{v.name || v.id}</option>)}</select></Field><Field label="配音风格"><select value={voiceStyle} onChange={e => setVoiceStyle(e.target.value)}>{['老板压迫感','真实聊天感','短视频强钩子','销售转化感','案例讲述感','沉稳信任感'].map(x => <option key={x}>{x}</option>)}</select></Field><Field label="情绪强度"><select value={voiceIntensity} onChange={e => setVoiceIntensity(e.target.value)}>{['轻微','标准','强烈'].map(x => <option key={x}>{x}</option>)}</select></Field><div className="stackButtons"><Button busy={busy === '生成配音导演稿' ? busy : ''} label="生成配音导演稿" onClick={makeVoiceDirector} kind="ghost" disabled={!currentScript} /><Button busy={busy === '生成分段情绪配音' ? busy : ''} label="生成分段情绪配音" onClick={makeSegmentTTS} disabled={!currentScript} /></div></div>
+        <div className="sectionHeader"><div><h2>第四步：配音导演</h2><p>情绪改成纯中文选项；语速、音量范围加大。调完以后必须重新生成配音，剪辑会用配音时间轴自动对齐字幕。</p></div></div>
+        <div className="grid4"><Field label="音色"><select value={voice} onChange={e => setVoice(e.target.value)}>{voices.map(v => <option key={v.id} value={v.id}>{v.name || v.id}</option>)}</select></Field><Field label="配音风格"><select value={voiceStyle} onChange={e => setVoiceStyle(e.target.value)}>{['老板压迫感','真实聊天感','短视频强钩子','销售转化感','案例讲述感','沉稳信任感'].map(x => <option key={x}>{x}</option>)}</select></Field><Field label="情绪强度"><select value={voiceIntensity} onChange={e => setVoiceIntensity(e.target.value)}>{['轻微','标准','强烈'].map(x => <option key={x}>{x}</option>)}</select></Field><div className="stackButtons"><Button busy={busy === '生成配音导演稿' ? busy : ''} label="生成配音导演稿" onClick={makeVoiceDirector} kind="ghost" disabled={!currentScript} /><Button busy={busy === '生成分段情绪配音' ? busy : ''} label="重新生成配音并校准时间轴" onClick={makeSegmentTTS} disabled={!currentScript} /></div></div>
         {voiceNotes.length > 0 && <div className="tips">{voiceNotes.map(x => <span key={x}>{x}</span>)}</div>}
+        <div className="hintBox">说明：豆包音色对不同 voice_type 的“情绪词”支持不完全一致，真正生效的是语速/音量/停顿参数；本版把范围加大，并把字幕对齐改为读取配音实际分段时间。</div>
         <div className="buttonRow"><button className="addSegment" onClick={addVoiceSegment}>+ 手动添加空白分段</button><button className="addSegment" onClick={addSelectedScriptAsSegment}>+ 把选中文案加入分段</button></div>
-        <div className="segments">{voiceSegments.map((seg, i) => <div className="segmentCard" key={i}><div className="segmentHead"><strong>第 {i + 1} 段 · {segmentSeconds[i] || estimateSeconds(seg.text, seg.speed_ratio)} 秒</strong><div><button onClick={() => moveVoiceSegment(i, -1)}>↑</button><button onClick={() => moveVoiceSegment(i, 1)}>↓</button><button onClick={() => removeVoiceSegment(i)}>删除</button></div></div><textarea value={seg.text} onChange={e => updateVoiceSegment(i, { text: e.target.value })} /><div className="segmentGrid"><Field label="情绪"><input value={seg.emotion} onChange={e => updateVoiceSegment(i, { emotion: e.target.value })} /></Field><Field label={`语速 ${seg.speed_ratio}`}><input type="range" min="0.75" max="1.35" step="0.01" value={seg.speed_ratio} onChange={e => updateVoiceSegment(i, { speed_ratio: Number(e.target.value) })} /></Field><Field label={`音量 ${seg.volume_ratio}`}><input type="range" min="0.7" max="1.4" step="0.01" value={seg.volume_ratio} onChange={e => updateVoiceSegment(i, { volume_ratio: Number(e.target.value) })} /></Field><Field label={`停顿 ${seg.pause_after_ms}ms`}><input type="range" min="0" max="1500" step="50" value={seg.pause_after_ms} onChange={e => updateVoiceSegment(i, { pause_after_ms: Number(e.target.value) })} /></Field></div></div>)}</div>
-        {audio && <div className="mediaBox"><audio controls src={audio.file_url} /><a href={audio.file_url} target="_blank">下载配音</a>{audio.warning && <div className="warn">{audio.warning}</div>}</div>}
+        <div className="segments">{voiceSegments.map((seg, i) => <div className="segmentCard" key={i}><div className="segmentHead"><strong>第 {i + 1} 段 · {audio?.segments?.[i]?.duration?.toFixed?.(1) || segmentSeconds[i] || estimateSeconds(seg.text, seg.speed_ratio)} 秒</strong><div><button onClick={() => moveVoiceSegment(i, -1)}>↑</button><button onClick={() => moveVoiceSegment(i, 1)}>↓</button><button onClick={() => removeVoiceSegment(i)}>删除</button></div></div><textarea value={seg.text} onChange={e => updateVoiceSegment(i, { text: e.target.value })} /><div className="presetRow"><button onClick={() => applyVoicePreset(i, 'urgent')}>急迫提醒</button><button onClick={() => applyVoicePreset(i, 'emphasis')}>重点加重</button><button onClick={() => applyVoicePreset(i, 'calm')}>冷静信任</button><button onClick={() => applyVoicePreset(i, 'cta')}>结尾号召</button></div><div className="segmentGrid"><Field label="情绪"><select value={seg.emotion} onChange={e => updateVoiceSegment(i, { emotion: e.target.value })}>{emotionOptions.map(x => <option key={x}>{x}</option>)}</select></Field><Field label={`语速 ${seg.speed_ratio.toFixed(2)}x`}><input type="range" min="0.65" max="1.55" step="0.01" value={seg.speed_ratio} onChange={e => updateVoiceSegment(i, { speed_ratio: Number(e.target.value) })} /></Field><Field label={`音量 ${seg.volume_ratio.toFixed(2)}x`}><input type="range" min="0.45" max="2.2" step="0.01" value={seg.volume_ratio} onChange={e => updateVoiceSegment(i, { volume_ratio: Number(e.target.value) })} /></Field><Field label={`停顿 ${seg.pause_after_ms}ms`}><input type="range" min="0" max="2200" step="50" value={seg.pause_after_ms} onChange={e => updateVoiceSegment(i, { pause_after_ms: Number(e.target.value) })} /></Field></div></div>)}</div>
+        {audio && <div className="mediaBox"><audio controls src={audio.file_url} /><a href={audio.file_url} target="_blank">下载配音</a><Pill tone="green">已生成 {audio.segments?.length || voiceSegments.length} 段时间轴</Pill>{audio.warning && <div className="warn">{audio.warning}</div>}</div>}
       </section>}
 
       {active === 'digitalHuman' && <section className="card modulePanel">
@@ -1233,20 +1299,21 @@ https://www.douyin.com/user/..." /></Field>
       </section>}
 
       {active === 'assets' && <section className="card modulePanel">
-        <div className="sectionHeader"><div><h2>第五步：选择视频素材</h2><p>素材库用于长期管理自有图片/视频；支持拖动上传、筛选、选择和在线删除。采集视频只用于学习同行结构，不直接搬运画面。</p></div><label className="btn soft fileButton"><input type="file" multiple accept="image/*,video/*" onChange={e => handleUpload(e.target.files)} />上传素材</label></div>
-        <div className={`dropZone ${isDraggingAssets ? 'dragging' : ''}`} onDragOver={onAssetDragOver} onDragLeave={onAssetDragLeave} onDrop={onAssetDrop}>
-          <strong>拖动图片/视频到这里上传</strong><span>支持 JPG、PNG、WEBP、MP4、MOV、WEBM；建议老板出镜、项目环境、客户交流、流程讲解分别归档。</span>
+        <div className="sectionHeader"><div><h2>第五步：素材选择与截取</h2><p>选择素材后可以调整出现顺序；图片可选停留秒数，视频可设置截取开始/结束时间。剪辑时不再手填素材总时长，会按配音和素材数量自动生成。</p></div></div>
+        <div className={`uploadDrop ${isDraggingAssets ? 'dragging' : ''}`} onDragOver={onAssetDragOver} onDragLeave={onAssetDragLeave} onDrop={onAssetDrop}>
+          <strong>拖拽上传图片 / 视频素材</strong><span>支持 jpg、png、webp、mp4、mov；上传后自动进入 R2，Render 重启也能找回。</span><input type="file" multiple accept="image/*,video/*" onChange={e => handleUpload(e.target.files)} />
         </div>
         <div className="assetToolbar">
-          <input value={assetSearch} onChange={e => setAssetSearch(e.target.value)} placeholder="搜索素材名称 / 文件名" />
+          <input placeholder="搜索文件名" value={assetSearch} onChange={e => setAssetSearch(e.target.value)} />
           <select value={assetKindFilter} onChange={e => setAssetKindFilter(e.target.value as any)}><option value="all">全部类型</option><option value="video">只看视频</option><option value="image">只看图片</option></select>
           <select value={assetTimeFilter} onChange={e => setAssetTimeFilter(e.target.value as any)}><option value="all">全部时间</option><option value="today">今天上传</option><option value="7d">近 7 天</option><option value="30d">近 30 天</option></select>
           <select value={assetSort} onChange={e => setAssetSort(e.target.value as any)}><option value="new">最新优先</option><option value="old">最早优先</option><option value="size_desc">文件从大到小</option><option value="size_asc">文件从小到大</option><option value="name">名称排序</option></select>
           <button className="btn ghost" onClick={() => { setAssetSearch(''); setAssetKindFilter('all'); setAssetTimeFilter('all'); setAssetSort('new') }}>重置</button>
         </div>
-        <div className="assetStats"><Pill tone="blue">自有素材 {materialAssets.length}</Pill><Pill tone="green">已选 {selectedMaterialIds.length}</Pill><Pill tone="purple">采集视频 {collectedVideos.length}</Pill>{selectedMaterialAssets.length > 0 && <span>已选：{selectedMaterialAssets.map(a => a.original_name || a.filename).slice(0, 4).join(' / ')}{selectedMaterialAssets.length > 4 ? ` 等 ${selectedMaterialAssets.length} 个` : ''}</span>}</div>
-        <div className="grid2 assetGridWrap"><div><h3>自有素材库</h3><div className="assetCards">{filteredMaterialAssets.length === 0 && <Empty>没有匹配的素材。可以拖动上传或调整筛选条件。</Empty>}{filteredMaterialAssets.map(a => <div key={a.id} className={`assetCard ${selectedMaterialIds.includes(a.id) ? 'selected' : ''}`}><button className="assetPreview" onClick={() => window.open(a.url, '_blank')}>{a.kind === 'video' ? <video src={a.url} muted /> : <img src={a.url} alt={a.original_name || a.filename} />}</button><div className="assetMeta"><strong title={a.original_name || a.filename}>{a.original_name || a.filename}</strong><span>{a.kind === 'video' ? '视频' : '图片'} · {formatBytes(a.size_bytes)} · {new Date(a.created_at).toLocaleDateString()}</span></div><div className="assetActions"><button className={selectedMaterialIds.includes(a.id) ? 'mini active' : 'mini'} onClick={() => toggleMaterial(a.id)}>{selectedMaterialIds.includes(a.id) ? '已选' : '选择'}</button><a className="mini" href={a.url} target="_blank">预览</a><button className="mini danger" onClick={() => removeAsset(a)}>删除</button></div></div>)}</div></div><div><h3>采集视频库</h3><div className="assetList">{collectedVideos.length === 0 && <Empty>暂时没有采集到视频。</Empty>}{collectedVideos.map(a => <div key={a.id} className={`assetRow collected ${selectedReferenceAssetId === a.id ? 'selected' : ''}`}><button onClick={() => setSelectedReferenceAssetId(a.id)}>作为参考</button><span>{a.original_name || a.filename}</span><em>{formatBytes(a.size_bytes)}</em><button className="mini danger" onClick={() => removeAsset(a)}>删除</button></div>)}</div></div></div>
-        <div className="resultBox"><h3>素材匹配建议</h3><p>把老板出镜、项目环境、客户交流、流程讲解、客户疑问分别对应到口播分段。素材选中后会自动进入剪辑合成；不够时先生成拍摄任务单补拍。</p></div>
+        <div className="assetStats"><Pill tone="blue">自有素材 {materialAssets.length}</Pill><Pill tone="green">已选 {selectedMaterialIds.length}</Pill><Pill tone="purple">采集视频 {collectedVideos.length}</Pill>{selectedMaterialAssets.length > 0 && <span>已选顺序：{selectedMaterialAssets.map(a => a.original_name || a.filename).slice(0, 4).join(' → ')}{selectedMaterialAssets.length > 4 ? ` 等 ${selectedMaterialAssets.length} 个` : ''}</span>}</div>
+        <div className="grid2 assetGridWrap"><div><h3>自有素材库</h3><div className="assetCards">{filteredMaterialAssets.length === 0 && <Empty>没有匹配的素材。可以拖动上传或调整筛选条件。</Empty>}{filteredMaterialAssets.map(a => <div key={a.id} className={`assetCard ${selectedMaterialIds.includes(a.id) ? 'selected' : ''}`}><button className="assetPreview" onClick={() => window.open(a.url, '_blank')}>{a.kind === 'video' ? <video src={a.url} muted onLoadedMetadata={e => setAssetDurations(prev => ({ ...prev, [a.id]: e.currentTarget.duration || 0 }))} /> : <img src={a.url} alt={a.original_name || a.filename} />}</button><div className="assetMeta"><strong title={a.original_name || a.filename}>{a.original_name || a.filename}</strong><span>{a.kind === 'video' ? '视频' : '图片'} · {formatBytes(a.size_bytes)} · {new Date(a.created_at).toLocaleDateString()}</span></div><div className="assetActions"><button className={selectedMaterialIds.includes(a.id) ? 'mini active' : 'mini'} onClick={() => toggleMaterial(a.id)}>{selectedMaterialIds.includes(a.id) ? '已选' : '选择'}</button><a className="mini" href={a.url} target="_blank">预览</a><button className="mini danger" onClick={() => removeAsset(a)}>删除</button></div></div>)}</div></div><div><h3>采集视频库</h3><div className="assetList">{collectedVideos.length === 0 && <Empty>暂时没有采集到视频。</Empty>}{collectedVideos.map(a => <div key={a.id} className={`assetRow collected ${selectedReferenceAssetId === a.id ? 'selected' : ''}`}><button onClick={() => setSelectedReferenceAssetId(a.id)}>作为参考</button><span>{a.original_name || a.filename}</span><em>{formatBytes(a.size_bytes)}</em><button className="mini danger" onClick={() => removeAsset(a)}>删除</button></div>)}</div></div></div>
+        <div className="selectedTimeline"><h3>已选素材顺序 / 截取设置</h3>{selectedMaterialAssets.length === 0 && <Empty>先选择素材。剪辑会按照这里的顺序出现，不会再因为多段素材丢失而只剩纯文字背景。</Empty>}{selectedMaterialAssets.map((asset, index) => { const cfg = getClipSetting(asset, index); const maxDur = Math.max(1, assetDurations[asset.id] || 60); return <div key={asset.id} className="selectedClip"><div className="clipPreview">{asset.kind === 'video' ? <video controls src={asset.url} onLoadedMetadata={e => setAssetDurations(prev => ({ ...prev, [asset.id]: e.currentTarget.duration || prev[asset.id] || 0 }))} /> : <img src={asset.url} />}</div><div className="clipControls"><div className="segmentHead"><strong>{index + 1}. {asset.original_name || asset.filename}</strong><div><button onClick={() => moveSelectedMaterial(index, -1)}>↑</button><button onClick={() => moveSelectedMaterial(index, 1)}>↓</button><button onClick={() => toggleMaterial(asset.id)}>移除</button></div></div>{asset.kind === 'image' ? <Field label={`图片停留 ${cfg.image_seconds.toFixed(1)} 秒`}><input type="range" min="0.8" max="8" step="0.1" value={cfg.image_seconds} onChange={e => updateClipSetting(asset.id, { image_seconds: Number(e.target.value) })} /></Field> : <div className="trimGrid"><Field label={`开始 ${cfg.video_start.toFixed(1)}s`}><input type="range" min="0" max={maxDur} step="0.1" value={cfg.video_start} onChange={e => updateClipSetting(asset.id, { video_start: Math.min(Number(e.target.value), cfg.video_end && cfg.video_end > 0 ? cfg.video_end - 0.3 : maxDur) })} /></Field><Field label={`结束 ${cfg.video_end ? cfg.video_end.toFixed(1) : '自动'}s`}><input type="range" min="0" max={maxDur} step="0.1" value={cfg.video_end || Math.min(maxDur, cfg.video_start + 3)} onChange={e => updateClipSetting(asset.id, { video_end: Number(e.target.value) })} /></Field><span>截取约 {Math.max(0.5, (cfg.video_end || Math.min(maxDur, cfg.video_start + 3)) - cfg.video_start).toFixed(1)} 秒</span></div>}<small>顺序会同步到剪辑合成；如果 R2 旧素材本地丢失，后端会先下载再合成。</small></div></div>})}</div>
+        <div className="resultBox"><h3>素材匹配建议</h3><p>图片：每张建议 2-4 秒；视频：每段截 2-5 秒。人物口播主体在画面中间时，字幕建议放底部安全区，避免挡脸。</p></div>
       </section>}
 
       {active === 'shooting' && <section className="card modulePanel">
@@ -1255,8 +1322,11 @@ https://www.douyin.com/user/..." /></Field>
       </section>}
 
       {active === 'video' && <section className="card modulePanel">
-        <div className="sectionHeader"><div><h2>第六步：剪辑、转场、贴片与合成</h2><p>给每段分配时长和转场，后续可接贴片、叠化、虚化、快切、重点字幕和 AI 指令重剪。</p></div><Button busy={busy === '合成视频并烧字幕' ? busy : ''} label="生成视频并下载 MP4" onClick={composeVideo} disabled={!currentScript} /></div>
-        <div className="timelineEditor"><h3>分段时长 / 转场</h3>{voiceSegments.length === 0 && <Empty>先生成配音导演稿，或手动添加分段。</Empty>}{voiceSegments.map((seg, i) => <div className="timelineRow" key={i}><span>第{i + 1}段</span><input type="number" min="1" max="60" step="0.5" value={segmentSeconds[i] || estimateSeconds(seg.text, seg.speed_ratio)} onChange={e => setSegmentSeconds(prev => ({ ...prev, [i]: Number(e.target.value) }))} /><select value={segmentTransitions[i] || '叠化'} onChange={e => setSegmentTransitions(prev => ({ ...prev, [i]: e.target.value }))}><option>叠化</option><option>虚化</option><option>快切</option><option>推近</option><option>闪白</option></select><em>{seg.text.slice(0, 28)}...</em></div>)}</div>
+        <div className="sectionHeader"><div><h2>第六步：剪辑合成 / 字幕烧录</h2><p>这里直接调字幕位置和素材顺序。时长跟配音走，素材按已选顺序自动铺满；字幕优先使用配音分段时间轴，减少音画不同步。</p></div><Button busy={busy === '合成视频并烧字幕' ? busy : ''} label="生成视频并下载 MP4" onClick={composeVideo} disabled={!currentScript} /></div>
+        <div className="grid4"><Field label="字幕字号"><input type="number" min="12" max="36" value={subtitleSize} onChange={e => setSubtitleSize(Number(e.target.value || 18))} /></Field><Field label="字幕位置"><select value={subtitlePosition} onChange={e => setSubtitlePosition(e.target.value as any)}><option value="bottom_safe">底部安全区，不挡脸</option><option value="middle_low">中下方，大字口播</option><option value="center">居中强调，慎用</option></select></Field><Field label={`离底部 ${subtitleMarginV}px`}><input type="range" min="20" max="260" step="5" value={subtitleMarginV} onChange={e => setSubtitleMarginV(Number(e.target.value))} /></Field><Field label="字幕颜色"><input type="color" value={subtitleColor} onChange={e => setSubtitleColor(e.target.value)} /></Field></div>
+        <div className="hintBox">字幕对齐规则：优先用“重新生成配音并校准时间轴”得到的分段时间；没有时间轴时才按文案长度估算。演示前建议先重新生成配音一次。</div>
+        <div className="timelineEditor"><h3>配音分段 / 转场参考</h3>{voiceSegments.length === 0 && <Empty>先生成配音导演稿，或手动添加分段。</Empty>}{voiceSegments.map((seg, i) => <div className="timelineRow" key={i}><span>第{i + 1}段</span><input type="number" min="1" max="60" step="0.5" value={audio?.segments?.[i]?.duration || segmentSeconds[i] || estimateSeconds(seg.text, seg.speed_ratio)} onChange={e => setSegmentSeconds(prev => ({ ...prev, [i]: Number(e.target.value) }))} /><select value={segmentTransitions[i] || '叠化'} onChange={e => setSegmentTransitions(prev => ({ ...prev, [i]: e.target.value }))}><option>叠化</option><option>虚化</option><option>快切</option><option>推近</option><option>闪白</option></select><em>{seg.text.slice(0, 28)}...</em></div>)}</div>
+        <div className="selectedTimeline compact"><h3>本次合成素材顺序</h3>{selectedMaterialAssets.length === 0 ? <Empty>未选择素材，会自动使用前几个素材；建议先去素材选择页确认顺序和截取区间。</Empty> : selectedMaterialAssets.map((asset, index) => { const cfg = getClipSetting(asset, index); return <div key={asset.id} className="assetRow"><span>{index + 1}</span><strong>{asset.original_name || asset.filename}</strong><em>{asset.kind === 'image' ? `${cfg.image_seconds.toFixed(1)}秒` : `${cfg.video_start.toFixed(1)}-${cfg.video_end ? cfg.video_end.toFixed(1) : '自动'}秒`}</em><button className="mini" onClick={() => setActive('assets')}>调整</button></div>})}</div>
         {video && <div className="videoGrid"><video controls src={video.video_url} /><div className="downloadPanel"><a className="download" href={video.video_url} target="_blank">下载视频 MP4</a>{video.subtitle_url && <a href={video.subtitle_url} target="_blank">下载字幕 SRT</a>}{video.audio_url && <a href={video.audio_url} target="_blank">下载音频</a>}{video.warnings?.map(w => <div className="warn" key={w}>{w}</div>)}</div></div>}
         <div className="editChatBox"><Field label="AI + 插件剪辑指令"><textarea value={editInstruction} onChange={e => setEditInstruction(e.target.value)} placeholder="例如：去掉开头2秒、整体加速1.1倍、重新加字幕、转成9:16。" /></Field><Button busy={busy === 'AI + 插件修改视频' ? busy : ''} label="AI + 插件修改视频" onClick={chatEditVideo} kind="ghost" disabled={!currentVideoName} />{editChat.map((msg, i) => <div className="chatMsg" key={i}><strong>AI：</strong>{msg.assistant_message}<p>{msg.summary}</p><div className="chips">{msg.actions?.map(x => <Pill key={x}>{x}</Pill>)}</div>{msg.new_video_url && <a href={msg.new_video_url} target="_blank">打开修改后视频</a>}{msg.warnings?.map(w => <div className="warn" key={w}>{w}</div>)}</div>)}</div>
       </section>}

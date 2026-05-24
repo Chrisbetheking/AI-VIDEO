@@ -3,12 +3,11 @@ from __future__ import annotations
 import math
 import os
 import re
-import shlex
 import subprocess
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, List, Optional, Tuple
+from typing import Any, Iterable, List, Optional, Tuple, Union
 
 from app.config import Settings
 from app.services.tts import probe_duration, synthesize_tts
@@ -26,6 +25,16 @@ class VideoResult:
     warnings: List[str]
 
 
+@dataclass
+class MediaClip:
+    path: Path
+    kind: str = ""
+    image_seconds: float = 2.8
+    video_start: float = 0.0
+    video_end: float = 0.0
+    order: int = 0
+
+
 def _env_int(name: str, default: int, low: int, high: int) -> int:
     try:
         value = int(os.getenv(name, str(default)))
@@ -35,17 +44,15 @@ def _env_int(name: str, default: int, low: int, high: int) -> int:
 
 
 def target_size() -> tuple[int, int]:
-    # Render free instance只有 512MB。默认改成 720x1280，避免 1080x1920 合成时 OOM 导致前端 Failed to fetch。
+    # Render free instance只有 512MB。默认 720x1280，避免 1080x1920 合成时 OOM。
     width = _env_int("COMPOSE_VIDEO_WIDTH", 720, 360, 1080)
     height = _env_int("COMPOSE_VIDEO_HEIGHT", 1280, 640, 1920)
-    # x264/yuv420p 要求偶数尺寸。
     width = width if width % 2 == 0 else width - 1
     height = height if height % 2 == 0 else height - 1
     return width, height
 
 
 def run_cmd(cmd: list[str], timeout: int = 480) -> subprocess.CompletedProcess[str]:
-    # 限制线程数，防止免费实例内存/CPU 被 ffmpeg 打满。
     env = os.environ.copy()
     env.setdefault("OMP_NUM_THREADS", "1")
     env.setdefault("OPENBLAS_NUM_THREADS", "1")
@@ -64,7 +71,7 @@ def normalize_text(text: str) -> str:
     return re.sub(r"\s+", " ", text.replace("\u3000", " ")).strip()
 
 
-def split_script(text: str, max_chars: int = 18) -> List[str]:
+def split_script(text: str, max_chars: int = 14) -> List[str]:
     text = normalize_text(text)
     if not text:
         return [" "]
@@ -94,21 +101,50 @@ def fmt_srt_time(seconds: float) -> str:
     return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
 
 
-def create_srt(script: str, duration: float, output_path: Path) -> None:
-    chunks = split_script(script)
-    duration = max(duration, len(chunks) * 1.2)
-    weights = [max(4, len(chunk)) for chunk in chunks]
-    total_weight = sum(weights)
-    cursor = 0.0
+def _append_srt_line(lines: list[str], index: int, start: float, end: float, text: str) -> int:
+    if end <= start:
+        end = start + 0.8
+    clean = normalize_text(text)
+    # 口播字幕不要太长，否则会挡住人物主体。每句尽量 12-14 字。
+    chunks = split_script(clean, max_chars=14)
+    if len(chunks) <= 1:
+        lines.append(f"{index}\n{fmt_srt_time(start)} --> {fmt_srt_time(end)}\n{clean}\n")
+        return index + 1
+    span = max(0.4, (end - start) / len(chunks))
+    cursor = start
+    for chunk in chunks:
+        next_end = min(end, cursor + span)
+        lines.append(f"{index}\n{fmt_srt_time(cursor)} --> {fmt_srt_time(next_end)}\n{chunk}\n")
+        cursor = next_end
+        index += 1
+    return index
+
+
+def create_srt(script: str, duration: float, output_path: Path, subtitle_segments: Optional[list[dict[str, Any]]] = None) -> None:
     lines: List[str] = []
-    for idx, (chunk, weight) in enumerate(zip(chunks, weights), start=1):
-        seg = max(1.2, duration * weight / total_weight)
-        start = cursor
-        end = min(duration, cursor + seg)
-        if idx == len(chunks):
-            end = duration
-        cursor = end
-        lines.append(f"{idx}\n{fmt_srt_time(start)} --> {fmt_srt_time(end)}\n{chunk}\n")
+    index = 1
+    if subtitle_segments:
+        for seg in subtitle_segments:
+            try:
+                text = str(seg.get('text') or '').strip()
+                start = float(seg.get('start') or 0)
+                end = float(seg.get('end') or 0)
+            except Exception:
+                continue
+            if text:
+                index = _append_srt_line(lines, index, start, min(end, duration), text)
+    if not lines:
+        chunks = split_script(script)
+        duration = max(duration, len(chunks) * 1.2)
+        weights = [max(4, len(chunk)) for chunk in chunks]
+        total_weight = sum(weights)
+        cursor = 0.0
+        for chunk, weight in zip(chunks, weights):
+            seg = max(1.0, duration * weight / total_weight)
+            start = cursor
+            end = min(duration, cursor + seg)
+            cursor = end
+            index = _append_srt_line(lines, index, start, end, chunk)
     output_path.write_text("\n".join(lines), encoding="utf-8")
 
 
@@ -118,7 +154,6 @@ def ffmpeg_subtitle_path(path: Path) -> str:
 
 
 def _video_codec_args() -> list[str]:
-    # ultrafast + CRF 30：牺牲一点体积换稳定，防止 Render 免费实例爆内存。
     return ["-c:v", "libx264", "-preset", "ultrafast", "-crf", os.getenv("COMPOSE_VIDEO_CRF", "30"), "-threads", "1", "-pix_fmt", "yuv420p"]
 
 
@@ -140,50 +175,79 @@ def build_default_base(duration: float, output_path: Path) -> Tuple[Path, List[s
     return output_path, ["素材不可用或合成压力过高，已使用轻量默认背景，避免 Render 免费实例崩溃。"]
 
 
-def build_video_base(asset_paths: List[Path], duration: float, output_path: Path) -> Tuple[Path, List[str]]:
+def _coerce_clip(item: Union[Path, MediaClip], order: int = 0) -> Optional[MediaClip]:
+    if isinstance(item, MediaClip):
+        return item if item.path.exists() else None
+    if isinstance(item, Path) and item.exists() and (is_image(item) or is_video(item)):
+        return MediaClip(path=item, kind='image' if is_image(item) else 'video', order=order)
+    return None
+
+
+def _clip_duration(clip: MediaClip, fallback: float) -> float:
+    if is_image(clip.path):
+        return max(0.5, min(20.0, float(clip.image_seconds or fallback)))
+    start = max(0.0, float(clip.video_start or 0.0))
+    end = max(0.0, float(clip.video_end or 0.0))
+    if end > start + 0.3:
+        return max(0.5, min(30.0, end - start))
+    return max(1.0, min(12.0, fallback))
+
+
+def build_video_base(asset_paths: Iterable[Union[Path, MediaClip]], duration: float, output_path: Path) -> Tuple[Path, List[str]]:
     warnings: List[str] = []
-    duration = max(3.0, min(float(duration), float(_env_int("COMPOSE_MAX_SECONDS", 75, 5, 180))))
-    max_assets = _env_int("COMPOSE_MAX_ASSETS", 4, 1, 8)
-    valid_paths = [p for p in asset_paths if p.exists() and (is_image(p) or is_video(p))][:max_assets]
-    if not valid_paths:
+    duration = max(3.0, min(float(duration), float(_env_int("COMPOSE_MAX_SECONDS", 90, 5, 180))))
+    max_assets = _env_int("COMPOSE_MAX_ASSETS", 6, 1, 12)
+    clips = [_coerce_clip(item, idx) for idx, item in enumerate(asset_paths)]
+    valid_clips = [c for c in clips if c is not None and c.path.exists() and (is_image(c.path) or is_video(c.path))]
+    valid_clips.sort(key=lambda c: c.order)
+    valid_clips = valid_clips[:max_assets]
+    if not valid_clips:
         return build_default_base(duration, output_path)
 
     w, h = target_size()
     fps = _env_int("COMPOSE_FPS", 24, 12, 30)
-    per_duration = max(2.0, duration / len(valid_paths))
+    fallback_per_duration = max(1.5, duration / len(valid_clips))
     cmd: List[str] = ["ffmpeg", "-hide_banner", "-loglevel", "warning", "-y"]
-    for path in valid_paths:
-        if is_image(path):
-            cmd += ["-loop", "1", "-t", f"{per_duration:.2f}", "-i", str(path)]
+    input_durations: list[float] = []
+
+    for clip in valid_clips:
+        dur = _clip_duration(clip, fallback_per_duration)
+        input_durations.append(dur)
+        if is_image(clip.path):
+            cmd += ["-loop", "1", "-t", f"{dur:.2f}", "-i", str(clip.path)]
         else:
-            # 视频素材只拿前几秒，循环会显著增加内存/CPU，免费实例先稳。
-            cmd += ["-t", f"{per_duration:.2f}", "-i", str(path)]
+            start = max(0.0, float(clip.video_start or 0.0))
+            if start > 0:
+                cmd += ["-ss", f"{start:.2f}"]
+            cmd += ["-t", f"{dur:.2f}", "-i", str(clip.path)]
 
     filter_parts: List[str] = []
     video_labels: List[str] = []
-    for i, _path in enumerate(valid_paths):
+    for i, _clip in enumerate(valid_clips):
         label = f"v{i}"
         filter_parts.append(
             f"[{i}:v]scale={w}:{h}:force_original_aspect_ratio=increase,"
             f"crop={w}:{h},setsar=1,fps={fps},format=yuv420p[{label}]"
         )
         video_labels.append(f"[{label}]")
-    filter_parts.append("".join(video_labels) + f"concat=n={len(valid_paths)}:v=1:a=0[outv]")
+    filter_parts.append("".join(video_labels) + f"concat=n={len(valid_clips)}:v=1:a=0[outv]")
 
+    target_duration = min(duration, max(3.0, sum(input_durations)))
     cmd += [
         "-filter_complex", ";".join(filter_parts),
         "-map", "[outv]",
-        "-t", f"{duration:.2f}",
+        "-t", f"{target_duration:.2f}",
         *_video_codec_args(),
         str(output_path),
     ]
-    proc = run_cmd(cmd, timeout=max(240, int(duration * 12)))
+    proc = run_cmd(cmd, timeout=max(240, int(target_duration * 14)))
     if proc.returncode == 0:
-        if len(asset_paths) > len(valid_paths):
-            warnings.append(f"为保证 Render 稳定，本次只使用前 {len(valid_paths)} 个可用素材。")
+        original_count = len([c for c in clips if c is not None])
+        if original_count > len(valid_clips):
+            warnings.append(f"为保证 Render 稳定，本次只使用前 {len(valid_clips)} 个可用素材；需要更多素材请升级后端或降低视频时长。")
         return output_path, warnings
 
-    warnings.append(f"素材合成失败，已降级默认背景：{proc.stderr[-900:]}")
+    warnings.append(f"素材合成失败，已降级默认背景：{proc.stderr[-1000:]}")
     try:
         output_path.unlink(missing_ok=True)
     except Exception:
@@ -199,15 +263,24 @@ def burn_subtitles_and_audio(
     audio_path: Optional[Path],
     output_path: Path,
     duration: float,
+    *,
+    subtitle_size: int = 18,
+    subtitle_margin_v: int = 70,
+    subtitle_position: str = 'bottom_safe',
 ) -> List[str]:
     warnings: List[str] = []
     w, h = target_size()
     vf = f"scale={w}:{h},format=yuv420p"
     if subtitle_path and subtitle_path.exists():
         sub_path = ffmpeg_subtitle_path(subtitle_path)
-        font_size = _env_int("COMPOSE_SUBTITLE_SIZE", 16, 12, 28)
-        margin_v = _env_int("COMPOSE_SUBTITLE_MARGIN", 120, 40, 260)
-        style = f"FontName=Noto Sans CJK SC,FontSize={font_size},PrimaryColour=&H00FFFFFF,OutlineColour=&H80000000,BorderStyle=1,Outline=2,Shadow=1,Alignment=2,MarginV={margin_v}"
+        font_size = max(12, min(36, int(subtitle_size or 18)))
+        margin_v = max(20, min(320, int(subtitle_margin_v or 70)))
+        if subtitle_position == 'middle_low':
+            margin_v = max(margin_v, 220)
+        elif subtitle_position == 'center':
+            margin_v = max(margin_v, 360)
+        # 默认放底部安全区：不压脸；用半透明描边保证不同素材上可读。
+        style = f"FontName=Noto Sans CJK SC,FontSize={font_size},PrimaryColour=&H00FFFFFF,OutlineColour=&H70000000,BorderStyle=1,Outline=2.4,Shadow=0.7,Alignment=2,MarginV={margin_v},Bold=1"
         vf += f",subtitles='{sub_path}':force_style='{style}'"
 
     cmd = ["ffmpeg", "-hide_banner", "-loglevel", "warning", "-y", "-i", str(base_video)]
@@ -221,12 +294,11 @@ def burn_subtitles_and_audio(
         cmd += ["-c:a", "aac", "-b:a", "96k"]
     cmd += ["-movflags", "+faststart", str(output_path)]
 
-    proc = run_cmd(cmd, timeout=max(240, int(duration * 12)))
+    proc = run_cmd(cmd, timeout=max(240, int(duration * 14)))
     if proc.returncode == 0:
         return warnings
 
-    # 字幕滤镜最容易因为字体/路径失败；自动降级无字幕，但不能让前端直接 Failed to fetch。
-    warnings.append(f"字幕烧录失败，已降级为无字幕视频：{proc.stderr[-900:]}")
+    warnings.append(f"字幕烧录失败，已降级为无字幕视频：{proc.stderr[-1000:]}")
     try:
         output_path.unlink(missing_ok=True)
     except Exception:
@@ -242,7 +314,7 @@ def burn_subtitles_and_audio(
     if audio_path and audio_path.exists():
         cmd += ["-c:a", "aac", "-b:a", "96k"]
     cmd += ["-movflags", "+faststart", str(output_path)]
-    proc2 = run_cmd(cmd, timeout=max(240, int(duration * 10)))
+    proc2 = run_cmd(cmd, timeout=max(240, int(duration * 12)))
     if proc2.returncode != 0:
         raise RuntimeError(f"最终视频合成失败：{proc2.stderr[-1500:]}")
     return warnings
@@ -251,11 +323,15 @@ def burn_subtitles_and_audio(
 async def compose_video(
     settings: Settings,
     script: str,
-    asset_paths: Iterable[Path],
+    asset_paths: Iterable[Union[Path, MediaClip]],
     duration_seconds: int,
     audio_path: Optional[Path] = None,
     voice: Optional[str] = None,
     rate: Optional[str] = None,
+    subtitle_segments: Optional[list[dict[str, Any]]] = None,
+    subtitle_size: int = 18,
+    subtitle_margin_v: int = 70,
+    subtitle_position: str = 'bottom_safe',
 ) -> VideoResult:
     warnings: List[str] = []
 
@@ -266,8 +342,11 @@ async def compose_video(
     else:
         audio_duration = probe_duration(audio_path)
 
-    duration_cap = float(_env_int("COMPOSE_MAX_SECONDS", 75, 5, 180))
-    duration = max(float(duration_seconds), audio_duration or 0, 5.0)
+    duration_cap = float(_env_int("COMPOSE_MAX_SECONDS", 90, 5, 180))
+    # 视频时长优先跟音频走，避免“素材时长输入”和口播时长不一致导致字幕/语音错位。
+    duration = max(audio_duration or 0, 5.0)
+    if not audio_duration:
+        duration = max(float(duration_seconds), 5.0)
     if duration > duration_cap:
         warnings.append(f"为避免 Render 免费实例合成超时/爆内存，本次视频时长从 {duration:.1f}s 限制为 {duration_cap:.1f}s。")
         duration = duration_cap
@@ -277,10 +356,19 @@ async def compose_video(
     subtitle_path = settings.outputs_dir / f"sub_{task_id}.srt"
     output_video = settings.outputs_dir / f"video_{task_id}.mp4"
 
-    create_srt(script, duration, subtitle_path)
+    create_srt(script, duration, subtitle_path, subtitle_segments=subtitle_segments)
     base_video, base_warnings = build_video_base(list(asset_paths), duration, base_video)
     warnings.extend(base_warnings)
-    warnings.extend(burn_subtitles_and_audio(base_video, subtitle_path, audio_path, output_video, duration))
+    warnings.extend(burn_subtitles_and_audio(
+        base_video,
+        subtitle_path,
+        audio_path,
+        output_video,
+        duration,
+        subtitle_size=subtitle_size,
+        subtitle_margin_v=subtitle_margin_v,
+        subtitle_position=subtitle_position,
+    ))
 
     try:
         base_video.unlink(missing_ok=True)

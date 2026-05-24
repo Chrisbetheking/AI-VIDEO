@@ -54,11 +54,20 @@ class TTSRequest(BaseModel):
     rate: Optional[str] = None
 
 
+class AudioSegmentTiming(BaseModel):
+    index: int
+    text: str
+    start: float
+    end: float
+    duration: float
+
+
 class TTSResponse(BaseModel):
     file_url: str
     file_name: str
     duration_seconds: float
     warning: Optional[str] = None
+    segments: List[AudioSegmentTiming] = Field(default_factory=list)
 
 
 
@@ -104,14 +113,28 @@ class AssetItem(BaseModel):
     created_at: str
 
 
+class ComposeAssetClip(BaseModel):
+    asset_id: str = Field(..., min_length=1, max_length=200)
+    order: int = Field(default=0, ge=0, le=999)
+    kind: str = Field(default='', max_length=20)
+    image_seconds: float = Field(default=2.8, ge=0.5, le=20)
+    video_start: float = Field(default=0.0, ge=0, le=7200)
+    video_end: float = Field(default=0.0, ge=0, le=7200)
+
+
 class ComposeRequest(BaseModel):
     title: str = Field(default='', max_length=200)
     script: str = Field(..., min_length=1, max_length=5000)
     asset_ids: List[str] = Field(default_factory=list)
+    asset_plan: List[ComposeAssetClip] = Field(default_factory=list)
     audio_file_name: Optional[str] = None
     duration_seconds: int = Field(default=35, ge=5, le=180)
     voice: Optional[str] = None
     rate: Optional[str] = None
+    subtitle_size: int = Field(default=18, ge=12, le=36)
+    subtitle_margin_v: int = Field(default=70, ge=20, le=320)
+    subtitle_position: str = Field(default='bottom_safe', max_length=40)
+    subtitle_segments: List[AudioSegmentTiming] = Field(default_factory=list)
 
 
 class ComposeResponse(BaseModel):

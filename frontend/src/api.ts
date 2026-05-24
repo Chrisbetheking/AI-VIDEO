@@ -87,7 +87,8 @@ export interface GeneratedCopy {
 }
 
 export interface TTSVoice { id: string; name: string; provider: string; language: string; note?: string }
-export interface TTSResponse { file_url: string; file_name: string; duration_seconds: number; warning?: string }
+export interface AudioSegmentTiming { index: number; text: string; start: number; end: number; duration: number }
+export interface TTSResponse { file_url: string; file_name: string; duration_seconds: number; warning?: string; segments?: AudioSegmentTiming[] }
 export interface AssetItem { id: string; filename: string; original_name: string; kind: 'image' | 'video'; url: string; size_bytes: number; created_at: string }
 
 
