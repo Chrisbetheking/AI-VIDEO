@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { Component, useEffect, useMemo, useState, type ErrorInfo, type ReactNode } from 'react'
 import './styles.css'
 import {
   AdAnalysisResponse,
@@ -54,6 +54,52 @@ function Pill({ children, tone = 'blue' }: { children: ReactNode; tone?: 'blue' 
 }
 
 function Empty({ children }: { children: ReactNode }) { return <div className="empty">{children}</div> }
+
+
+class AppErrorBoundary extends Component<{ children: ReactNode }, { error: string }> {
+  state = { error: '' }
+  static getDerivedStateFromError(error: unknown) {
+    return { error: error instanceof Error ? error.message : String(error) }
+  }
+  componentDidCatch(error: unknown, info: ErrorInfo) {
+    console.error('[AI-VIDEO] 前端渲染异常', error, info)
+  }
+  render() {
+    if (!this.state.error) return this.props.children
+    return <div className="fatalFallback">
+      <h1>页面渲染异常，已拦截白屏</h1>
+      <p>这通常是旧素材字段缺失或浏览器缓存了旧版本导致。先点下面按钮清理本地临时状态，然后刷新。</p>
+      <pre>{this.state.error}</pre>
+      <div className="buttonRow">
+        <button className="btn primary" onClick={() => window.location.reload()}>刷新页面</button>
+        <button className="btn soft" onClick={() => { window.localStorage.removeItem('ai_video_current_digital_human_task_v1'); window.location.href = '/' }}>清理当前任务并回首页</button>
+      </div>
+    </div>
+  }
+}
+
+function safeText(value: unknown, fallback = '') {
+  if (value === null || value === undefined) return fallback
+  const text = String(value).trim()
+  return text || fallback
+}
+
+function normalizeAsset(raw: any, index = 0): AssetItem {
+  const filename = safeText(raw?.filename, safeText(raw?.file_name, safeText(raw?.name, safeText(raw?.original_name, `asset_${index}`))))
+  const originalName = safeText(raw?.original_name, filename)
+  const url = safeText(raw?.url, safeText(raw?.file_url, safeText(raw?.public_url, '')))
+  const lower = `${filename} ${url}`.toLowerCase()
+  const kind = raw?.kind === 'video' || /\.(mp4|mov|webm|m4v)(\?|$)/i.test(lower) ? 'video' : 'image'
+  return {
+    id: safeText(raw?.id, filename || `asset_${index}`),
+    filename,
+    original_name: originalName,
+    kind,
+    url,
+    size_bytes: Number(raw?.size_bytes || raw?.size || 0) || 0,
+    created_at: safeText(raw?.created_at, new Date().toISOString())
+  }
+}
 
 const emptyCopy: GeneratedCopy = { title: '', hook: '', script: '', description: '', tags: [], shots: [], kb_refs: [] }
 const DIGITAL_HUMAN_TASK_KEY = 'ai_video_current_digital_human_task_v1'
@@ -141,7 +187,7 @@ function formatBytes(size: number) {
   return `${(size / 1024 / 1024).toFixed(1)}MB`
 }
 
-export default function App() {
+function AppInner() {
   const [active, setActive] = useState<ModuleKey>('dashboard')
   const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
@@ -247,8 +293,8 @@ export default function App() {
   const [leadChannels, setLeadChannels] = useState<string[]>(['抖音截留获客', '博主联动流量', '采集目标客户', '自动监听', '自动回复', '目标用户导流私域'])
   const [leadFixedOptions, setLeadFixedOptions] = useState('子女教育家庭、企业主资产配置、养老度假、海外第二居所、华人家庭、目标国家/城市、预算区间')
 
-  const materialAssets = useMemo(() => assets.filter(a => !a.filename.startsWith('collected_')), [assets])
-  const collectedVideos = useMemo(() => assets.filter(a => a.kind === 'video' && a.filename.startsWith('collected_')), [assets])
+  const materialAssets = useMemo(() => assets.map((a, i) => normalizeAsset(a, i)).filter(a => !safeText(a.filename).startsWith('collected_')), [assets])
+  const collectedVideos = useMemo(() => assets.map((a, i) => normalizeAsset(a, i)).filter(a => a.kind === 'video' && safeText(a.filename).startsWith('collected_')), [assets])
   const filteredMaterialAssets = useMemo(() => {
     const now = Date.now()
     const maxAge = assetTimeFilter === 'today' ? 24 * 3600 * 1000 : assetTimeFilter === '7d' ? 7 * 24 * 3600 * 1000 : assetTimeFilter === '30d' ? 30 * 24 * 3600 * 1000 : 0
@@ -264,9 +310,9 @@ export default function App() {
     })
     return [...list].sort((a, b) => {
       if (assetSort === 'old') return new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
-      if (assetSort === 'size_desc') return b.size_bytes - a.size_bytes
-      if (assetSort === 'size_asc') return a.size_bytes - b.size_bytes
-      if (assetSort === 'name') return (a.original_name || a.filename).localeCompare(b.original_name || b.filename, 'zh-Hans-CN')
+      if (assetSort === 'size_desc') return (b.size_bytes || 0) - (a.size_bytes || 0)
+      if (assetSort === 'size_asc') return (a.size_bytes || 0) - (b.size_bytes || 0)
+      if (assetSort === 'name') return safeText(a.original_name, a.filename).localeCompare(safeText(b.original_name, b.filename), 'zh-Hans-CN')
       return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
     })
   }, [materialAssets, assetKindFilter, assetSearch, assetSort, assetTimeFilter])
@@ -485,7 +531,7 @@ export default function App() {
 
   async function reloadAssets() {
     const list = await apiGet<AssetItem[]>('/api/assets')
-    setAssets(Array.isArray(list) ? list : [])
+    setAssets(Array.isArray(list) ? list.map((item, index) => normalizeAsset(item, index)).filter(item => item.id && item.url) : [])
   }
 
   async function reloadCollectorStatus() {
@@ -1423,4 +1469,8 @@ https://www.douyin.com/user/..." /></Field>
       </section>}
     </main>
   </div>
+}
+
+export default function App() {
+  return <AppErrorBoundary><AppInner /></AppErrorBoundary>
 }
