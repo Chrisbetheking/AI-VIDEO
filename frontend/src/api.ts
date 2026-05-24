@@ -344,3 +344,48 @@ export interface AutoCollectorRunResponse {
   learning: any
   warnings: string[]
 }
+
+export interface OneClickGenerateRequest {
+  industry: string
+  audience: string
+  selling_points: string
+  style: string
+  duration_seconds: number
+  goal: string
+  output_type: string
+  material_mode: string
+  selected_asset_names: string[]
+  reference_text: string
+  instruction: string
+}
+
+export interface OneClickGenerateResponse {
+  project_title: string
+  summary: string
+  copy: GeneratedCopy
+  voice_director: VoiceDirectorResponse
+  shooting_plan: ShootingPlanResponse
+  edit_plan: EditPlanResponse
+  subtitle: SubtitleEmphasisResponse
+  image_prompts: string[]
+  publish_title: string
+  publish_description: string
+  next_actions: string[]
+  warnings: string[]
+  raw?: Record<string, any>
+}
+
+export interface ModelStatusResponse {
+  ai_provider: string
+  ai_text_model: string
+  ai_backup_provider: string
+  ai_backup_model: string
+  qwen_configured: boolean
+  gemini_configured: boolean
+  deepseek_configured: boolean
+  asr_provider: string
+  asr_model: string
+  image_provider: string
+  image_model: string
+  image_edit_model: string
+}

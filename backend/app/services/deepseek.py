@@ -4,9 +4,8 @@ import json
 import re
 from typing import Any, Dict, List, Optional
 
-import httpx
-
 from app.config import Settings
+from app.services.llm import LLMError, chat_json, test_llm
 from app.schemas import CopyRequest, EditPlanRequest, EditPlanResponse, GeneratedCopy, RewriteFromInspirationRequest, VoiceDirectorRequest, VoiceDirectorResponse, LeadAcquisitionRequest, LeadAcquisitionPlanResponse, LeadChannelPlaybook
 
 
@@ -80,54 +79,17 @@ def _friendly_error(status_code: int, text: str, url: str, model: str) -> str:
 
 
 async def _chat_json(settings: Settings, system: str, user: str, temperature: float = 0.7, timeout: int = 90) -> Dict[str, Any]:
-    api_key = settings.deepseek_api_key.strip()
-    if not api_key:
-        raise DeepSeekError('缺少 DeepSeek API Key。请设置 DEEPSEEK_API_KEY。')
-    url = settings.deepseek_base_url.rstrip('/') + '/chat/completions'
-    headers = {'Authorization': f'Bearer {api_key}', 'Content-Type': 'application/json'}
-    last_error = ''
-    async with httpx.AsyncClient(timeout=timeout) as client:
-        for model in _candidate_models(settings.deepseek_model):
-            body: Dict[str, Any] = {
-                'model': model,
-                'messages': [{'role': 'system', 'content': system}, {'role': 'user', 'content': user}],
-                'temperature': temperature,
-                'stream': False,
-                'response_format': {'type': 'json_object'},
-            }
-            try:
-                resp = await client.post(url, headers=headers, json=body)
-            except httpx.HTTPError as exc:
-                raise DeepSeekError(f'DeepSeek 请求失败：{exc}') from exc
-            if resp.status_code >= 400:
-                last_error = _friendly_error(resp.status_code, resp.text, url, model)
-                continue
-            data = resp.json()
-            try:
-                content = data['choices'][0]['message']['content']
-                return _safe_json_loads(content)
-            except Exception as exc:
-                raise DeepSeekError(f'DeepSeek 输出解析失败：{data}') from exc
-    raise DeepSeekError(last_error or 'DeepSeek 调用失败。')
+    try:
+        return await chat_json(settings, system, user, temperature=temperature, timeout=timeout)
+    except LLMError as exc:
+        raise DeepSeekError(str(exc)) from exc
 
 
 async def test_deepseek(settings: Settings, api_key_override: Optional[str] = None) -> Dict[str, Any]:
-    api_key = (api_key_override or settings.deepseek_api_key or '').strip()
-    if not api_key:
-        raise DeepSeekError('缺少 DeepSeek API Key。请设置 DEEPSEEK_API_KEY。')
-    url = settings.deepseek_base_url.rstrip('/') + '/chat/completions'
-    headers = {'Authorization': f'Bearer {api_key}', 'Content-Type': 'application/json'}
-    async with httpx.AsyncClient(timeout=30) as client:
-        resp = await client.post(url, headers=headers, json={
-            'model': settings.deepseek_model,
-            'messages': [{'role': 'user', 'content': '只回复两个字：成功'}],
-            'temperature': 0,
-            'stream': False,
-        })
-    if resp.status_code >= 400:
-        raise DeepSeekError(_friendly_error(resp.status_code, resp.text, url, settings.deepseek_model))
-    data = resp.json()
-    return {'ok': True, 'url': url, 'model': settings.deepseek_model, 'reply': data.get('choices', [{}])[0].get('message', {}).get('content', '')}
+    try:
+        return await test_llm(settings, api_key_override=api_key_override)
+    except LLMError as exc:
+        raise DeepSeekError(str(exc)) from exc
 
 
 async def generate_copy(settings: Settings, req: CopyRequest, knowledge_texts: List[str]) -> GeneratedCopy:

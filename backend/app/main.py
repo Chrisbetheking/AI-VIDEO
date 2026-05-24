@@ -67,6 +67,10 @@ from app.schemas import (
     AutoCollectorRunRequest,
     AutoCollectorRunResponse,
     AutoCollectorStatusResponse,
+    OneClickGenerateRequest,
+    OneClickGenerateResponse,
+    OneClickChatRequest,
+    ModelStatusResponse,
 )
 from app.services.ad_analysis import analyze_ad
 from app.services.cover import create_cover
@@ -83,6 +87,7 @@ from app.services.assets_store import read_manifest, upsert_asset, remove_asset,
 from app.services.video import IMAGE_EXTS, VIDEO_EXTS, compose_video
 from app.services.video_edit import apply_video_edit
 from app.services.auto_collector import run_auto_collection
+from app.services.one_click import generate_one_click, revise_one_click
 
 app = FastAPI(title='AI-VIDEO 正式版 API', version='1.0.0')
 settings = get_settings()
@@ -327,6 +332,14 @@ def health(settings: Settings = Depends(get_settings)) -> dict:
     return {
         'ok': True,
         'deepseek_model': settings.deepseek_model,
+        'ai_provider': settings.ai_provider,
+        'ai_text_model': settings.ai_text_model,
+        'ai_backup_provider': settings.ai_backup_provider,
+        'ai_backup_model': settings.ai_backup_model,
+        'asr_provider': settings.asr_provider,
+        'asr_model': settings.asr_model,
+        'image_provider': settings.image_provider,
+        'image_model': settings.image_model,
         'ark_video_model': settings.ark_video_model,
         'tts_provider': settings.tts_provider,
         'r2_enabled': settings.r2_enabled,
@@ -358,6 +371,43 @@ async def api_ai_test(payload: dict | None = None, settings: Settings = Depends(
         return await test_deepseek(settings, api_key_override=str((payload or {}).get('api_key') or ''))
     except DeepSeekError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+
+@app.get('/api/model/status', response_model=ModelStatusResponse)
+def api_model_status(settings: Settings = Depends(get_settings)) -> ModelStatusResponse:
+    return ModelStatusResponse(
+        ai_provider=settings.ai_provider,
+        ai_text_model=settings.ai_text_model,
+        ai_backup_provider=settings.ai_backup_provider,
+        ai_backup_model=settings.ai_backup_model,
+        qwen_configured=bool(settings.dashscope_api_key.strip()),
+        gemini_configured=bool(settings.gemini_api_key.strip()),
+        deepseek_configured=bool(settings.deepseek_api_key.strip()),
+        asr_provider=settings.asr_provider,
+        asr_model=settings.asr_model,
+        image_provider=settings.image_provider,
+        image_model=settings.image_model,
+        image_edit_model=settings.image_edit_model,
+    )
+
+
+@app.post('/api/one-click/generate', response_model=OneClickGenerateResponse)
+async def api_one_click_generate(req: OneClickGenerateRequest, settings: Settings = Depends(get_settings), memory: MemoryStore = Depends(get_memory)) -> OneClickGenerateResponse:
+    ctx = memory.context()
+    if ctx.get('learning_summary') and 'AI 记忆库上下文' not in req.reference_text:
+        req.reference_text = (req.reference_text + '\n\nAI 记忆库上下文：\n' + ctx['learning_summary'][:5000]).strip()
+    result = await generate_one_click(settings, req)
+    memory.save_script_version({**result.copy.model_dump(), 'source': 'one_click_generate', 'raw': {'request': req.model_dump(), 'response': result.model_dump()}})
+    memory.save_learning_event({'event_type': 'one_click_project', 'title': result.project_title, 'payload': result.model_dump()})
+    return result
+
+
+@app.post('/api/one-click/chat', response_model=OneClickGenerateResponse)
+async def api_one_click_chat(req: OneClickChatRequest, settings: Settings = Depends(get_settings), memory: MemoryStore = Depends(get_memory)) -> OneClickGenerateResponse:
+    result = await revise_one_click(settings, req.current, req.instruction, industry=req.industry, audience=req.audience, selling_points=req.selling_points)
+    memory.save_script_version({**result.copy.model_dump(), 'source': 'one_click_chat', 'raw': {'instruction': req.instruction, 'response': result.model_dump()}})
+    return result
 
 
 @app.get('/api/memory/context', response_model=MemoryContextResponse)

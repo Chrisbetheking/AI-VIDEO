@@ -543,3 +543,56 @@ class AutoCollectorRunResponse(BaseModel):
     saved_event_id: Optional[str] = None
     learning: dict = Field(default_factory=dict)
     warnings: List[str] = Field(default_factory=list)
+
+
+class OneClickGenerateRequest(BaseModel):
+    industry: str = Field(default='', max_length=160)
+    audience: str = Field(default='', max_length=300)
+    selling_points: str = Field(default='', max_length=1500)
+    style: str = Field(default='老板口播、真实可信、抖音强钩子', max_length=300)
+    duration_seconds: int = Field(default=35, ge=10, le=180)
+    goal: str = Field(default='私信咨询 / 加微信 / 留资', max_length=200)
+    output_type: str = Field(default='digital_human', max_length=80)
+    material_mode: str = Field(default='selected_assets', max_length=80)
+    selected_asset_names: List[str] = Field(default_factory=list, max_length=50)
+    reference_text: str = Field(default='', max_length=12000)
+    instruction: str = Field(default='', max_length=3000)
+
+
+class OneClickGenerateResponse(BaseModel):
+    project_title: str
+    summary: str
+    copy: GeneratedCopy
+    voice_director: VoiceDirectorResponse
+    shooting_plan: ShootingPlanResponse
+    edit_plan: EditPlanResponse
+    subtitle: SubtitleEmphasisResponse
+    image_prompts: List[str] = Field(default_factory=list)
+    publish_title: str = ''
+    publish_description: str = ''
+    next_actions: List[str] = Field(default_factory=list)
+    warnings: List[str] = Field(default_factory=list)
+    raw: dict = Field(default_factory=dict)
+
+
+class OneClickChatRequest(BaseModel):
+    instruction: str = Field(..., min_length=1, max_length=3000)
+    current: OneClickGenerateResponse
+    industry: str = Field(default='', max_length=160)
+    audience: str = Field(default='', max_length=300)
+    selling_points: str = Field(default='', max_length=1500)
+
+
+class ModelStatusResponse(BaseModel):
+    ai_provider: str
+    ai_text_model: str
+    ai_backup_provider: str
+    ai_backup_model: str
+    qwen_configured: bool
+    gemini_configured: bool
+    deepseek_configured: bool
+    asr_provider: str
+    asr_model: str
+    image_provider: str
+    image_model: str
+    image_edit_model: str

@@ -21,6 +21,8 @@ import {
   DigitalHumanCreateResponse,
   AutoCollectorStatusResponse,
   AutoCollectorRunResponse,
+  OneClickGenerateResponse,
+  ModelStatusResponse,
   TTSResponse,
   TTSVoice,
   VideoEditChatResponse,
@@ -34,7 +36,7 @@ import {
   deleteAsset
 } from './api'
 
-type ModuleKey = 'dashboard' | 'monitor' | 'lead' | 'collector' | 'copy' | 'voice' | 'digitalHuman' | 'assets' | 'video' | 'subtitleCover' | 'publish' | 'strategy' | 'competitor' | 'trend' | 'shooting' | 'growth'
+type ModuleKey = 'dashboard' | 'monitor' | 'lead' | 'oneClick' | 'collector' | 'copy' | 'voice' | 'digitalHuman' | 'assets' | 'video' | 'subtitleCover' | 'publish' | 'strategy' | 'competitor' | 'trend' | 'shooting' | 'growth'
 
 function Field({ label, children, hint }: { label: string; children: ReactNode; hint?: string }) {
   return <label className="field"><span>{label}</span>{children}{hint && <em>{hint}</em>}</label>
@@ -73,6 +75,7 @@ const modules: { key: ModuleKey; icon: string; title: string; desc: string; tag:
   { key: 'dashboard', icon: '总', title: '流程总览', desc: '一条视频从采集到发布的主流程', tag: '总览' },
   { key: 'monitor', icon: '控', title: '运营中控台', desc: '总览进度、数据库、插件和待办', tag: '监控' },
   { key: 'lead', icon: '获', title: '获客自动化', desc: '截留、联动、监听、回复、私域承接', tag: '获客' },
+  { key: 'oneClick', icon: '生', title: '一键生成中心', desc: '在一个窗口完成文案、配音分段、字幕、图文和发布草稿', tag: '一键' },
   { key: 'collector', icon: '采', title: '1. 同行采集', desc: '采集同行视频、口令和钩子结构', tag: '采集' },
   { key: 'copy', icon: '文', title: '2. 文案生产', desc: '仿写改写、细改、入知识库', tag: '文案' },
   { key: 'voice', icon: '声', title: '3. 配音导演', desc: '克隆音色、分段情绪、语速停顿', tag: '配音' },
@@ -89,6 +92,7 @@ const modules: { key: ModuleKey; icon: string; title: string; desc: string; tag:
 ]
 
 const workflowSteps: { key: ModuleKey; step: string; title: string; desc: string; action: string }[] = [
+  { key: 'oneClick', step: '00', title: '一键生成中心', desc: '把行业、客户、目标和素材一次性生成成项目方案，并同步到具体步骤。', action: '一键生成' },
   { key: 'collector', step: '01', title: '采集同行视频', desc: '上传参考视频，或粘贴抖音分享口令；先学习钩子、结构、话题和人群。', action: '去采集' },
   { key: 'copy', step: '02', title: '仿写改写', desc: '基于同行结构做原创改写，保留打法，不照抄原文。', action: '去仿写' },
   { key: 'copy', step: '03', title: '文案细改', desc: '细调黄金三秒、标题、口播稿、违禁词和发布简介。', action: '改文案' },
@@ -113,7 +117,7 @@ const pluginMatrix = [
 ]
 
 function nextStepOf(active: ModuleKey): ModuleKey {
-  const order: ModuleKey[] = ['collector','copy','voice','digitalHuman','assets','video','subtitleCover','publish']
+  const order: ModuleKey[] = ['oneClick','copy','voice','digitalHuman','assets','video','subtitleCover','publish']
   const idx = order.indexOf(active)
   return idx >= 0 && idx < order.length - 1 ? order[idx + 1] : active
 }
@@ -139,6 +143,8 @@ export default function App() {
   const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
   const [health, setHealth] = useState<any>(null)
+  const [modelStatus, setModelStatus] = useState<ModelStatusResponse | null>(null)
+  const [contentNavOpen, setContentNavOpen] = useState(true)
 
   const [industry, setIndustry] = useState('海外房产置业 · 第二家园')
   const [audience, setAudience] = useState('有海外置业、第二家园、子女教育、养老度假和资产配置需求的华人家庭与企业主')
@@ -178,6 +184,11 @@ export default function App() {
   const [agentLearnGoal, setAgentLearnGoal] = useState('学习这个博主的视频办法：钩子公式、情绪推进、镜头节奏、转化逻辑。只迁移方法，不模仿具体文案、不搬运素材。')
 
   const [copy, setCopy] = useState<GeneratedCopy>(emptyCopy)
+  const [oneClick, setOneClick] = useState<OneClickGenerateResponse | null>(null)
+  const [oneClickInstruction, setOneClickInstruction] = useState('生成一条适合老板数字人口播的获客短视频，开头要强，字幕要有抖音口播感，结尾引导私信。')
+  const [oneClickChatInput, setOneClickChatInput] = useState('把开头改得更像老板提醒客户，减少书面词，字幕重点更强。')
+  const [oneClickOutputType, setOneClickOutputType] = useState('digital_human')
+  const [oneClickMaterialMode, setOneClickMaterialMode] = useState('selected_assets')
   const [refineInstruction, setRefineInstruction] = useState('把开头改得更有压迫感，语气更像老板提醒客户；减少书面词，保留短视频口语感。')
   const [editPlan, setEditPlan] = useState<EditPlanResponse | null>(null)
 
@@ -319,6 +330,54 @@ export default function App() {
     try { return await fn() } catch (e: any) { setError(e.message || String(e)); throw e } finally { setBusy('') }
   }
 
+
+  function applyOneClickResult(result: OneClickGenerateResponse) {
+    setOneClick(result)
+    setCopy(result.copy || emptyCopy)
+    setVoiceSegments(result.voice_director?.segments || [])
+    setVoiceNotes(result.voice_director?.director_notes || [])
+    setEditPlan(result.edit_plan || null)
+    setShootingPlan(result.shooting_plan || null)
+    setSubtitleAI(result.subtitle || null)
+    const firstCover = result.subtitle?.cover_text_options?.[0] || result.project_title || result.copy?.title || coverStyle
+    setCoverStyle(firstCover)
+    const keywords = result.subtitle?.keywords?.map(k => k.word).filter(Boolean).join(',')
+    if (keywords) setSubtitleHighlight(keywords)
+    setLastHandoff('一键生成方案已同步到文案、配音、拍摄、剪辑、字幕和发布草稿。你可以在这个窗口继续让 AI 修改，也可以进入单独步骤精修。')
+  }
+
+  async function runOneClickGenerate() {
+    const selectedNames = selectedMaterialAssets.map(a => a.original_name || a.filename)
+    const res = await run('一键生成完整方案', () => apiPost<OneClickGenerateResponse>('/api/one-click/generate', {
+      industry,
+      audience,
+      selling_points: sellingPoints,
+      style,
+      duration_seconds: duration,
+      goal: conversionGoal,
+      output_type: oneClickOutputType,
+      material_mode: oneClickMaterialMode,
+      selected_asset_names: selectedNames,
+      reference_text: referenceText,
+      instruction: oneClickInstruction,
+    }))
+    applyOneClickResult(res!)
+    setActive('oneClick')
+  }
+
+  async function runOneClickChat() {
+    if (!oneClick) { setError('请先生成一键方案，再让 AI 修改。'); return }
+    const res = await run('AI 修改一键方案', () => apiPost<OneClickGenerateResponse>('/api/one-click/chat', {
+      instruction: oneClickChatInput,
+      current: oneClick,
+      industry,
+      audience,
+      selling_points: sellingPoints,
+    }))
+    applyOneClickResult(res!)
+    setActive('oneClick')
+  }
+
   async function reloadMemoryContext(applyProfile = false) {
     const ctx = await apiGet<MemoryContextResponse>('/api/memory/context')
     setMemoryContext(ctx)
@@ -424,6 +483,7 @@ export default function App() {
 
   useEffect(() => {
     apiGet('/api/health').then(setHealth).catch((e) => setError(e.message || 'API 未连接'))
+    apiGet<ModelStatusResponse>('/api/model/status').then(setModelStatus).catch(() => null)
     apiGet<TTSVoice[]>('/api/tts/voices').then(v => { const list = Array.isArray(v) ? v : []; setVoices(list); setVoice(list[0]?.id || '') }).catch(() => null)
     reloadAssets().catch(() => null)
     reloadCollectorStatus().catch(() => null)
@@ -855,7 +915,16 @@ ${manualText || ''}`.trim()
       </div>
       <button className="startButton" onClick={() => setActive('dashboard')}>开始使用</button>
       <nav>
-        {modules.map(item => <button key={item.key} className={active === item.key ? 'active' : ''} onClick={() => setActive(item.key)}>
+        {modules.filter(item => ['dashboard','monitor','lead'].includes(item.key)).map(item => <button key={item.key} className={active === item.key ? 'active' : ''} onClick={() => setActive(item.key)}>
+          <span>{item.icon}</span><b>{item.title}</b><em>{item.tag}</em>
+        </button>)}
+        <button className={contentNavOpen ? 'groupHeader open' : 'groupHeader'} onClick={() => setContentNavOpen(!contentNavOpen)}>
+          <span>生</span><b>内容生产</b><em>{contentNavOpen ? '收起' : '展开'}</em>
+        </button>
+        {contentNavOpen && modules.filter(item => ['oneClick','collector','copy','voice','digitalHuman','assets','video','subtitleCover','publish'].includes(item.key)).map(item => <button key={item.key} className={`subNav ${active === item.key ? 'active' : ''}`} onClick={() => setActive(item.key)}>
+          <span>{item.icon}</span><b>{item.title}</b><em>{item.tag}</em>
+        </button>)}
+        {modules.filter(item => ['strategy','competitor','trend','shooting','growth'].includes(item.key)).map(item => <button key={item.key} className={active === item.key ? 'active' : ''} onClick={() => setActive(item.key)}>
           <span>{item.icon}</span><b>{item.title}</b><em>{item.tag}</em>
         </button>)}
       </nav>
@@ -895,6 +964,39 @@ ${manualText || ''}`.trim()
           <span>{idx + 1}</span><strong>{s.label}</strong><em>{s.value}</em>
         </div>)}
       </section>
+
+      {active === 'oneClick' && <section className="card modulePanel oneClickPanel">
+        <div className="sectionHeader"><div><h2>一键生成中心</h2><p>不跳步骤，也能在一个窗口里生成和修改完整项目；同步后仍可去文案、配音、数字人、素材、剪辑等单独步骤精修。</p></div><Button busy={busy === '一键生成完整方案' ? busy : ''} label="一键生成方案" onClick={runOneClickGenerate} /></div>
+        <div className="grid4">
+          <Field label="输出类型"><select value={oneClickOutputType} onChange={e => setOneClickOutputType(e.target.value)}><option value="digital_human">数字人口播</option><option value="mixed_video">素材混剪</option><option value="image_text">图文海报</option><option value="all">视频 + 图文都要</option></select></Field>
+          <Field label="素材方式"><select value={oneClickMaterialMode} onChange={e => setOneClickMaterialMode(e.target.value)}><option value="selected_assets">使用已选素材</option><option value="digital_human_only">只做数字人</option><option value="ai_image">AI 生成图文素材</option><option value="manual_later">先出方案，素材后补</option></select></Field>
+          <Field label="目标时长"><input type="number" min="10" max="180" value={duration} onChange={e => setDuration(Number(e.target.value || 35))} /></Field>
+          <Field label="转化目标"><input value={conversionGoal} onChange={e => setConversionGoal(e.target.value)} /></Field>
+        </div>
+        <div className="grid2">
+          <Field label="行业/产品"><input value={industry} onChange={e => setIndustry(e.target.value)} /></Field>
+          <Field label="目标客户"><input value={audience} onChange={e => setAudience(e.target.value)} /></Field>
+          <Field label="核心卖点"><textarea value={sellingPoints} onChange={e => setSellingPoints(e.target.value)} /></Field>
+          <Field label="风格要求"><textarea value={style} onChange={e => setStyle(e.target.value)} /></Field>
+        </div>
+        <Field label="一键生成要求"><textarea value={oneClickInstruction} onChange={e => setOneClickInstruction(e.target.value)} /></Field>
+        <div className="infoGrid">
+          <div><strong>模型框架</strong><p>主模型：{modelStatus?.ai_provider || health?.ai_provider || 'qwen'} / {modelStatus?.ai_text_model || health?.ai_text_model || '-'}<br />备用：{modelStatus?.ai_backup_provider || health?.ai_backup_provider || 'gemini'} / {modelStatus?.ai_backup_model || health?.ai_backup_model || '-'}</p></div>
+          <div><strong>字幕/图文</strong><p>ASR：{modelStatus?.asr_provider || health?.asr_provider || '-'} / {modelStatus?.asr_model || health?.asr_model || '-'}<br />图片：{modelStatus?.image_provider || health?.image_provider || '-'} / {modelStatus?.image_model || health?.image_model || '-'}</p></div>
+          <div><strong>已选素材</strong><p>{selectedMaterialAssets.length ? selectedMaterialAssets.map(a => a.original_name || a.filename).join('、') : '暂无。可以先生成方案，后面再去素材库选择。'}</p></div>
+        </div>
+        {oneClick && <div className="oneClickResult">
+          <div className="resultBox"><h3>{oneClick.project_title}</h3><p>{oneClick.summary}</p><div className="buttonRow"><button className="btn soft" onClick={() => applyOneClickResult(oneClick)}>重新同步到步骤</button><button className="btn ghost" onClick={() => setActive('copy')}>去文案细改</button><button className="btn ghost" onClick={() => setActive('voice')}>去配音</button><button className="btn ghost" onClick={() => setActive(oneClickOutputType === 'mixed_video' ? 'assets' : 'digitalHuman')}>{oneClickOutputType === 'mixed_video' ? '去素材混剪' : '去数字人'}</button></div>{oneClick.warnings?.map(w => <div className="warn" key={w}>{w}</div>)}</div>
+          <div className="grid2">
+            <div className="miniResult"><h3>文案</h3><strong>{oneClick.copy.title}</strong><p>{oneClick.copy.hook}</p><pre>{oneClick.copy.script}</pre><div className="chips">{oneClick.copy.tags?.map(x => <Pill key={x}>{x}</Pill>)}</div></div>
+            <div className="miniResult"><h3>配音分段</h3>{oneClick.voice_director?.segments?.map((seg, i) => <p key={`${seg.text}-${i}`}>第{i + 1}段：{seg.emotion} · {seg.text}</p>)}</div>
+            <div className="miniResult"><h3>剪辑/拍摄</h3><p>{oneClick.edit_plan?.rhythm}</p>{oneClick.edit_plan?.timeline?.map(x => <p key={x}>· {x}</p>)}<h4>B-roll</h4>{oneClick.shooting_plan?.broll_list?.map(x => <Pill key={x} tone="purple">{x}</Pill>)}</div>
+            <div className="miniResult"><h3>字幕/图文/发布</h3><p>{oneClick.subtitle?.template}</p><div className="chips">{oneClick.subtitle?.keywords?.map(k => <Pill key={k.word} tone="orange">{k.word} · {k.effect}</Pill>)}</div><h4>图文提示词</h4>{oneClick.image_prompts?.map(x => <p key={x}>· {x}</p>)}<h4>发布文案</h4><p>{oneClick.publish_description}</p></div>
+          </div>
+          <div className="editChatBox"><Field label="继续让 AI 修改当前完整方案"><textarea value={oneClickChatInput} onChange={e => setOneClickChatInput(e.target.value)} placeholder="例如：开头再狠一点；改成小红书图文；字幕关键词更强；结尾改成评论区留1。" /></Field><Button busy={busy === 'AI 修改一键方案' ? busy : ''} label="AI 修改并自动同步" onClick={runOneClickChat} kind="soft" /></div>
+        </div>}
+        {!oneClick && <Empty>填写行业、客户和目标后，点“一键生成方案”。生成后可在这里继续对话修改，也会自动同步到后续步骤。</Empty>}
+      </section>}
 
       {active === 'dashboard' && <section className="dashboardStack">
         <div className="workflowBoard">

@@ -11,6 +11,27 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file='.env', env_file_encoding='utf-8', extra='ignore')
 
+    # AI 大脑：主模型用阿里百炼/Qwen，备用可用 Gemini，DeepSeek 保留兼容
+    ai_provider: str = 'qwen'
+    ai_text_model: str = 'qwen-max'
+    ai_backup_provider: str = 'gemini'
+    ai_backup_model: str = 'gemini-2.5-pro'
+
+    # 阿里云百炼 / DashScope：Qwen 文案、分镜、AI 修改、Qwen-Image、ASR
+    dashscope_api_key: str = ''
+    dashscope_base_url: str = 'https://dashscope.aliyuncs.com/compatible-mode/v1'
+    qwen_model: str = 'qwen-max'
+    asr_provider: str = 'volcengine'
+    asr_model: str = 'doubao-record-file-recognition-2.0'
+    image_provider: str = 'dashscope'
+    image_model: str = 'qwen-image'
+    image_edit_model: str = 'qwen-image-edit'
+
+    # Google Gemini：复杂分析/素材理解/备用强模型
+    gemini_api_key: str = ''
+    gemini_base_url: str = 'https://generativelanguage.googleapis.com/v1beta'
+    gemini_model: str = 'gemini-2.5-pro'
+
     # DeepSeek：文案改写 / 标题 / 钩子 / 剪辑方案
     deepseek_api_key: str = ''
     deepseek_base_url: str = 'https://api.deepseek.com'

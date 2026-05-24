@@ -321,3 +321,38 @@ input:focus,textarea:focus,select:focus{
 .btn.ghost.danger:hover {
   background: #fee2e2;
 }
+
+/* One-click generation + collapsible content nav */
+.studioNav nav button.groupHeader {
+  margin-top: 10px;
+  background: linear-gradient(135deg, rgba(37, 99, 235, .12), rgba(124, 58, 237, .10));
+  border-color: rgba(37, 99, 235, .18);
+}
+.studioNav nav button.groupHeader em { color: #2563eb; }
+.studioNav nav button.subNav {
+  margin-left: 14px;
+  width: calc(100% - 14px);
+  background: rgba(255,255,255,.70);
+}
+.studioNav nav button.subNav span { transform: scale(.92); }
+.oneClickPanel .field textarea { min-height: 96px; }
+.oneClickResult { display: grid; gap: 16px; margin-top: 18px; }
+.oneClickResult pre {
+  margin: 10px 0 0;
+  max-height: 360px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: #334155;
+  background: #f8fafc;
+  border: 1px solid rgba(148, 163, 184, .22);
+  border-radius: 14px;
+  padding: 12px;
+  font-family: inherit;
+  line-height: 1.75;
+}
+.oneClickPanel .miniResult h4 { margin: 14px 0 6px; }
+.oneClickPanel .buttonRow { flex-wrap: wrap; }
+@media (max-width: 920px) {
+  .studioNav nav button.subNav { margin-left: 0; width: 100%; }
+}
