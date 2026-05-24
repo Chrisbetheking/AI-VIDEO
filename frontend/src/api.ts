@@ -50,7 +50,7 @@ async function parseResponse<T>(res: Response, url: string): Promise<T> {
   throw new Error(`后端没有返回 JSON，请检查 Cloudflare 的 VITE_API_BASE 是否指向 Render 后端。\n请求地址：${url}\n返回：${text.slice(0, 220)}`)
 }
 
-async function safeFetch<T>(url: string, init?: RequestInit, timeoutMs = 90000): Promise<T> {
+async function safeFetch<T>(url: string, init?: RequestInit, timeoutMs = 240000): Promise<T> {
   const { controller, timer } = withTimeout(timeoutMs)
   try {
     const res = await fetch(url, { ...init, signal: controller.signal })
@@ -76,11 +76,12 @@ export async function apiGet<T>(path: string): Promise<T> {
 
 export async function apiPost<T>(path: string, body: unknown): Promise<T> {
   const url = `${API_BASE}${path}`
+  const timeoutMs = path.includes('compose-video') ? 300000 : 240000
   return safeFetch<T>(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body)
-  })
+  }, timeoutMs)
 }
 
 export async function uploadAssets(files: FileList): Promise<AssetItem[]> {

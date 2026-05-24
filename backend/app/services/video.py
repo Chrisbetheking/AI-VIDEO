@@ -45,8 +45,8 @@ def _env_int(name: str, default: int, low: int, high: int) -> int:
 
 def target_size() -> tuple[int, int]:
     # Render free instance只有 512MB。默认 720x1280，避免 1080x1920 合成时 OOM。
-    width = _env_int("COMPOSE_VIDEO_WIDTH", 720, 360, 1080)
-    height = _env_int("COMPOSE_VIDEO_HEIGHT", 1280, 640, 1920)
+    width = _env_int("COMPOSE_VIDEO_WIDTH", 540, 360, 1080)
+    height = _env_int("COMPOSE_VIDEO_HEIGHT", 960, 640, 1920)
     width = width if width % 2 == 0 else width - 1
     height = height if height % 2 == 0 else height - 1
     return width, height
@@ -193,58 +193,120 @@ def _clip_duration(clip: MediaClip, fallback: float) -> float:
     return max(1.0, min(12.0, fallback))
 
 
+def _concat_escape(path: Path) -> str:
+    return str(path.resolve()).replace("'", "'\\''")
+
+
+def _render_clip_to_temp(clip: MediaClip, duration: float, output_path: Path, w: int, h: int, fps: int) -> tuple[Optional[Path], Optional[str]]:
+    """Render one material into a small normalized mp4.
+
+    A single FFmpeg filter graph with many inputs can kill the Render free instance.
+    Rendering clips one by one uses much less memory and avoids browser `Failed to fetch`.
+    """
+    duration = max(0.6, min(30.0, float(duration or 1.0)))
+    vf = (
+        f"scale={w}:{h}:force_original_aspect_ratio=increase,"
+        f"crop={w}:{h},setsar=1,fps={fps},format=yuv420p"
+    )
+    if is_image(clip.path):
+        cmd = [
+            "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+            "-loop", "1", "-t", f"{duration:.2f}", "-i", str(clip.path),
+            "-vf", vf,
+            "-an",
+            *_video_codec_args(),
+            str(output_path),
+        ]
+    else:
+        cmd = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y"]
+        start = max(0.0, float(clip.video_start or 0.0))
+        if start > 0:
+            cmd += ["-ss", f"{start:.2f}"]
+        cmd += [
+            "-t", f"{duration:.2f}", "-i", str(clip.path),
+            "-vf", vf,
+            "-an",
+            *_video_codec_args(),
+            str(output_path),
+        ]
+    proc = run_cmd(cmd, timeout=max(120, int(duration * 12)))
+    if proc.returncode != 0 or not output_path.exists() or output_path.stat().st_size < 2048:
+        return None, proc.stderr[-800:] or 'unknown ffmpeg error'
+    return output_path, None
+
+
 def build_video_base(asset_paths: Iterable[Union[Path, MediaClip]], duration: float, output_path: Path) -> Tuple[Path, List[str]]:
     warnings: List[str] = []
-    duration = max(3.0, min(float(duration), float(_env_int("COMPOSE_MAX_SECONDS", 90, 5, 180))))
-    max_assets = _env_int("COMPOSE_MAX_ASSETS", 6, 1, 12)
+    duration = max(3.0, min(float(duration), float(_env_int("COMPOSE_MAX_SECONDS", 60, 5, 180))))
+    max_assets = _env_int("COMPOSE_MAX_ASSETS", 5, 1, 10)
     clips = [_coerce_clip(item, idx) for idx, item in enumerate(asset_paths)]
     valid_clips = [c for c in clips if c is not None and c.path.exists() and (is_image(c.path) or is_video(c.path))]
     valid_clips.sort(key=lambda c: c.order)
+    original_count = len(valid_clips)
     valid_clips = valid_clips[:max_assets]
     if not valid_clips:
         return build_default_base(duration, output_path)
 
     w, h = target_size()
-    fps = _env_int("COMPOSE_FPS", 24, 12, 30)
-    fallback_per_duration = max(1.5, duration / len(valid_clips))
-    cmd: List[str] = ["ffmpeg", "-hide_banner", "-loglevel", "warning", "-y"]
-    input_durations: list[float] = []
+    fps = _env_int("COMPOSE_FPS", 18, 12, 30)
+    fallback_per_duration = max(1.5, duration / max(1, len(valid_clips)))
+    task = uuid.uuid4().hex[:10]
+    tmp_dir = output_path.parent.parent / "tmp" if output_path.parent.name == "outputs" else output_path.parent
+    tmp_dir.mkdir(parents=True, exist_ok=True)
 
-    for clip in valid_clips:
-        dur = _clip_duration(clip, fallback_per_duration)
-        input_durations.append(dur)
-        if is_image(clip.path):
-            cmd += ["-loop", "1", "-t", f"{dur:.2f}", "-i", str(clip.path)]
+    normalized_paths: list[Path] = []
+    used_duration = 0.0
+    for idx, clip in enumerate(valid_clips):
+        remaining = max(0.8, duration - used_duration)
+        if remaining <= 0.8:
+            break
+        clip_duration = min(_clip_duration(clip, fallback_per_duration), remaining)
+        rendered = tmp_dir / f"clip_{task}_{idx:02d}.mp4"
+        rendered_path, err = _render_clip_to_temp(clip, clip_duration, rendered, w, h, fps)
+        if rendered_path:
+            normalized_paths.append(rendered_path)
+            used_duration += clip_duration
         else:
-            start = max(0.0, float(clip.video_start or 0.0))
-            if start > 0:
-                cmd += ["-ss", f"{start:.2f}"]
-            cmd += ["-t", f"{dur:.2f}", "-i", str(clip.path)]
+            warnings.append(f"素材 {idx + 1} 预处理失败，已跳过：{err}")
 
-    filter_parts: List[str] = []
-    video_labels: List[str] = []
-    for i, _clip in enumerate(valid_clips):
-        label = f"v{i}"
-        filter_parts.append(
-            f"[{i}:v]scale={w}:{h}:force_original_aspect_ratio=increase,"
-            f"crop={w}:{h},setsar=1,fps={fps},format=yuv420p[{label}]"
-        )
-        video_labels.append(f"[{label}]")
-    filter_parts.append("".join(video_labels) + f"concat=n={len(valid_clips)}:v=1:a=0[outv]")
+    if original_count > len(valid_clips):
+        warnings.append(f"为保证 Render 稳定，本次最多使用前 {len(valid_clips)} 个素材；更多素材请升级后端或降低时长。")
 
-    target_duration = min(duration, max(3.0, sum(input_durations)))
-    cmd += [
-        "-filter_complex", ";".join(filter_parts),
-        "-map", "[outv]",
+    if not normalized_paths:
+        warnings.append("所有素材预处理失败，已降级默认背景，避免服务崩溃。")
+        return build_default_base(duration, output_path)
+
+    concat_file = tmp_dir / f"concat_{task}.txt"
+    concat_file.write_text("".join(f"file '{_concat_escape(p)}'\n" for p in normalized_paths), encoding="utf-8")
+    target_duration = max(3.0, min(duration, used_duration or duration))
+
+    # First try stream-copy concat because all temporary clips have the same codec/size/fps.
+    cmd = [
+        "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+        "-f", "concat", "-safe", "0", "-i", str(concat_file),
         "-t", f"{target_duration:.2f}",
-        *_video_codec_args(),
+        "-c", "copy",
         str(output_path),
     ]
-    proc = run_cmd(cmd, timeout=max(240, int(target_duration * 14)))
-    if proc.returncode == 0:
-        original_count = len([c for c in clips if c is not None])
-        if original_count > len(valid_clips):
-            warnings.append(f"为保证 Render 稳定，本次只使用前 {len(valid_clips)} 个可用素材；需要更多素材请升级后端或降低视频时长。")
+    proc = run_cmd(cmd, timeout=max(180, int(target_duration * 8)))
+    if proc.returncode != 0 or not output_path.exists() or output_path.stat().st_size < 4096:
+        cmd = [
+            "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+            "-f", "concat", "-safe", "0", "-i", str(concat_file),
+            "-t", f"{target_duration:.2f}",
+            *_video_codec_args(),
+            str(output_path),
+        ]
+        proc = run_cmd(cmd, timeout=max(240, int(target_duration * 12)))
+
+    try:
+        concat_file.unlink(missing_ok=True)
+        for item in normalized_paths:
+            item.unlink(missing_ok=True)
+    except Exception:
+        pass
+
+    if proc.returncode == 0 and output_path.exists() and output_path.stat().st_size >= 4096:
         return output_path, warnings
 
     warnings.append(f"素材合成失败，已降级默认背景：{proc.stderr[-1000:]}")
@@ -342,7 +404,7 @@ async def compose_video(
     else:
         audio_duration = probe_duration(audio_path)
 
-    duration_cap = float(_env_int("COMPOSE_MAX_SECONDS", 90, 5, 180))
+    duration_cap = float(_env_int("COMPOSE_MAX_SECONDS", 60, 5, 180))
     # 视频时长优先跟音频走，避免“素材时长输入”和口播时长不一致导致字幕/语音错位。
     duration = max(audio_duration or 0, 5.0)
     if not audio_duration:
