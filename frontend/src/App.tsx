@@ -720,6 +720,7 @@ function AppInner() {
 
   function onAssetDragLeave(e: React.DragEvent<HTMLDivElement>) {
     e.preventDefault()
+    if (e.currentTarget.contains(e.relatedTarget as Node | null)) return
     setIsDraggingAssets(false)
   }
 
@@ -1401,8 +1402,17 @@ https://www.douyin.com/user/..." /></Field>
 
       {active === 'assets' && <section className="card modulePanel">
         <div className="sectionHeader"><div><h2>第一步：素材选择与截取</h2><p>先选素材，再生成文案。图片可设置停留秒数，视频可预览并截取开始/结束时间；素材顺序会直接同步到剪辑。</p></div></div>
-        <div className={`uploadDrop ${isDraggingAssets ? 'dragging' : ''}`} onDragOver={onAssetDragOver} onDragLeave={onAssetDragLeave} onDrop={onAssetDrop}>
-          <strong>拖拽上传图片 / 视频素材</strong><span>支持 jpg、png、webp、mp4、mov；上传后自动进入 R2，Render 重启也能找回。</span><input type="file" multiple accept="image/*,video/*" onChange={e => handleUpload(e.target.files)} />
+        <div className={`uploadDrop ${isDraggingAssets ? 'dragging' : ''} ${busy === '上传素材' ? 'uploading' : ''}`} onDragOver={onAssetDragOver} onDragLeave={onAssetDragLeave} onDrop={onAssetDrop} aria-busy={busy === '上传素材'}>
+          <div className="uploadIcon">↑</div>
+          <div className="uploadCopy">
+            <strong>{busy === '上传素材' ? '正在上传到素材库…' : '拖入图片 / 视频，或点击选择文件'}</strong>
+            <span>支持 JPG、PNG、WEBP、MP4、MOV，多选上传后会自动进入 R2，并默认加入本次素材顺序。</span>
+            <div className="uploadHints"><em>图片：可设置停留秒数</em><em>视频：可预览并截取片段</em><em>顺序：下方可拖前/上移下移</em></div>
+          </div>
+          <label className={`uploadPick ${busy === '上传素材' ? 'disabled' : ''}`}>
+            选择文件
+            <input type="file" multiple accept="image/*,video/*" onChange={e => { handleUpload(e.target.files); e.currentTarget.value = '' }} disabled={busy === '上传素材'} />
+          </label>
         </div>
         <div className="assetToolbar">
           <input placeholder="搜索文件名" value={assetSearch} onChange={e => setAssetSearch(e.target.value)} />
