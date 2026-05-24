@@ -1011,7 +1011,7 @@ ${manualText || ''}`.trim()
         asset_id: String(asset.id),
         order: index,
         kind: asset.kind === 'video' ? 'video' : 'image',
-        image_seconds: asset.kind === 'image' ? Math.min(20, Math.max(0.8, imageSeconds)) : 0,
+        image_seconds: Math.min(20, Math.max(0.8, imageSeconds)),
         video_start: asset.kind === 'video' ? start : 0,
         video_end: asset.kind === 'video' && rawEnd > start ? rawEnd : 0,
       }

@@ -117,7 +117,7 @@ class ComposeAssetClip(BaseModel):
     asset_id: str = Field(..., min_length=1, max_length=200)
     order: int = Field(default=0, ge=0, le=999)
     kind: str = Field(default='', max_length=20)
-    image_seconds: float = Field(default=2.8, ge=0.5, le=20)
+    image_seconds: float = Field(default=2.8, ge=0.0, le=20)
     video_start: float = Field(default=0.0, ge=0, le=7200)
     video_end: float = Field(default=0.0, ge=0, le=7200)
 
