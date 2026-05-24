@@ -279,6 +279,31 @@ export default function App() {
   const currentVideoName = video?.video_name || extract?.collected_video_name || ''
   const selectedVoiceName = voices.find(v => v.id === voice)?.name || voice || '未选择音色'
   const matchedBadWords = useMemo(() => badWords.filter(w => `${copy.title}${copy.hook}${copy.script}${copy.description}`.includes(w)), [copy])
+
+  const selectedAssetEstimatedSeconds = useMemo(() => {
+    if (!selectedMaterialAssets.length) return 0
+    return Math.round(selectedMaterialAssets.reduce((total, asset, index) => {
+      const cfg = getClipSetting(asset, index)
+      if (asset.kind === 'image') return total + Math.max(0.8, cfg.image_seconds || 2.8)
+      const maxDur = Math.max(1, assetDurations[asset.id] || 60)
+      const start = Math.max(0, Math.min(cfg.video_start || 0, maxDur - 0.3))
+      const end = cfg.video_end && cfg.video_end > start ? Math.min(cfg.video_end, maxDur) : Math.min(maxDur, start + 3.2)
+      return total + Math.max(0.6, end - start)
+    }, 0) * 10) / 10
+  }, [selectedMaterialAssets, assetClipSettings, assetDurations])
+  const voiceEstimatedSeconds = useMemo(() => {
+    if (!voiceSegments.length) return 0
+    return Math.round(voiceSegments.reduce((total, seg, index) => {
+      const measured = audio?.segments?.[index]?.duration || segmentSeconds[index]
+      const spoken = measured || estimateSeconds(seg.text, seg.speed_ratio)
+      return total + spoken + Math.max(0, seg.pause_after_ms || 0) / 1000
+    }, 0) * 10) / 10
+  }, [voiceSegments, audio?.segments, segmentSeconds])
+  const autoProjectSeconds = useMemo(() => {
+    const base = audio?.duration_seconds || voiceEstimatedSeconds || selectedAssetEstimatedSeconds || duration
+    return Math.round(Math.min(180, Math.max(10, base)))
+  }, [audio?.duration_seconds, voiceEstimatedSeconds, selectedAssetEstimatedSeconds, duration])
+
   const leadScore = useMemo(() => {
     let score = 35
     if (extract?.hooks?.length) score += 15
@@ -370,7 +395,7 @@ export default function App() {
       audience,
       selling_points: sellingPoints,
       style,
-      duration_seconds: duration,
+      duration_seconds: autoProjectSeconds,
       goal: conversionGoal,
       output_type: oneClickOutputType,
       material_mode: oneClickMaterialMode,
@@ -908,7 +933,7 @@ ${manualText || ''}`.trim()
       asset_ids: chosen.map(a => a.id),
       asset_plan: assetPlan,
       audio_file_name: audio?.file_name,
-      duration_seconds: Math.round(audio?.duration_seconds || duration),
+      duration_seconds: Math.round(audio?.duration_seconds || selectedAssetEstimatedSeconds || autoProjectSeconds),
       voice,
       rate: '+0%',
       subtitle_size: subtitleSize,
@@ -932,7 +957,7 @@ ${manualText || ''}`.trim()
     }))
     setEditChat(prev => [res!, ...prev])
     if (res?.new_video_url && res?.new_video_name) {
-      setVideo(prev => prev ? { ...prev, video_url: res.new_video_url!, video_name: res.new_video_name! } : { video_url: res.new_video_url!, video_name: res.new_video_name!, duration_seconds: duration, warnings: res.warnings || [] })
+      setVideo(prev => prev ? { ...prev, video_url: res.new_video_url!, video_name: res.new_video_name! } : { video_url: res.new_video_url!, video_name: res.new_video_name!, duration_seconds: autoProjectSeconds, warnings: res.warnings || [] })
     }
     setActive('video')
   }
@@ -1093,23 +1118,29 @@ ${manualText || ''}`.trim()
 
       {active === 'oneClick' && <section className="card modulePanel oneClickPanel">
         <div className="sectionHeader"><div><h2>一键生成中心</h2><p>不跳步骤，也能在一个窗口里生成和修改完整项目；同步后仍可去文案、配音、数字人、素材、剪辑等单独步骤精修。</p></div><Button busy={busy === '一键生成完整方案' ? busy : ''} label="一键生成方案" onClick={runOneClickGenerate} /></div>
-        <div className="grid4">
-          <Field label="输出类型"><select value={oneClickOutputType} onChange={e => setOneClickOutputType(e.target.value)}><option value="digital_human">数字人口播</option><option value="mixed_video">素材混剪</option><option value="image_text">图文海报</option><option value="all">视频 + 图文都要</option></select></Field>
-          <Field label="素材方式"><select value={oneClickMaterialMode} onChange={e => setOneClickMaterialMode(e.target.value)}><option value="selected_assets">使用已选素材</option><option value="digital_human_only">只做数字人</option><option value="ai_image">AI 生成图文素材</option><option value="manual_later">先出方案，素材后补</option></select></Field>
-          <Field label="目标时长"><input type="number" min="10" max="180" value={duration} onChange={e => setDuration(Number(e.target.value || 35))} /></Field>
-          <Field label="转化目标"><input value={conversionGoal} onChange={e => setConversionGoal(e.target.value)} /></Field>
+        <div className="oneClickIntro">
+          <strong>推荐顺序</strong>
+          <span>先定行业和转化目标 → 选择输出类型和素材方式 → 写清风格要求 → 一键生成并同步到各步骤。</span>
         </div>
         <div className="grid2">
           <Field label="行业/产品"><input value={industry} onChange={e => setIndustry(e.target.value)} /></Field>
+          <Field label="转化目标"><input value={conversionGoal} onChange={e => setConversionGoal(e.target.value)} /></Field>
           <Field label="目标客户"><input value={audience} onChange={e => setAudience(e.target.value)} /></Field>
           <Field label="核心卖点"><textarea value={sellingPoints} onChange={e => setSellingPoints(e.target.value)} /></Field>
-          <Field label="风格要求"><textarea value={style} onChange={e => setStyle(e.target.value)} /></Field>
         </div>
-        <Field label="一键生成要求"><textarea value={oneClickInstruction} onChange={e => setOneClickInstruction(e.target.value)} /></Field>
+        <div className="grid3">
+          <Field label="输出类型"><select value={oneClickOutputType} onChange={e => setOneClickOutputType(e.target.value)}><option value="digital_human">数字人口播</option><option value="mixed_video">素材混剪</option><option value="image_text">图文引流包</option><option value="all">视频 + 图文都要</option></select></Field>
+          <Field label="素材方式"><select value={oneClickMaterialMode} onChange={e => setOneClickMaterialMode(e.target.value)}><option value="selected_assets">使用已选素材</option><option value="digital_human_only">只做数字人</option><option value="ai_image">AI 生成图文素材</option><option value="manual_later">先出方案，素材后补</option></select></Field>
+          <div className="autoDurationCard"><span>自动估算时长</span><strong>{autoProjectSeconds} 秒</strong><em>{selectedMaterialAssets.length ? `按 ${selectedMaterialAssets.length} 个素材顺序和截取区间估算` : voiceSegments.length ? '按配音分段估算' : '生成后按配音真实时长校准'}</em></div>
+        </div>
+        <div className="grid2">
+          <Field label="风格要求"><textarea value={style} onChange={e => setStyle(e.target.value)} /></Field>
+          <Field label="一键生成要求"><textarea value={oneClickInstruction} onChange={e => setOneClickInstruction(e.target.value)} /></Field>
+        </div>
         <div className="infoGrid">
+          <div><strong>素材状态</strong><p>{selectedMaterialAssets.length ? selectedMaterialAssets.map((a, i) => `${i + 1}.${a.original_name || a.filename}`).join('、') : '暂无。可以先出方案；若要素材混剪，建议先去素材选择页排好顺序。'}<br />素材估算：{selectedAssetEstimatedSeconds || 0} 秒</p></div>
           <div><strong>模型框架</strong><p>主模型：{modelStatus?.ai_provider || health?.ai_provider || 'qwen'} / {modelStatus?.ai_text_model || health?.ai_text_model || '-'}<br />备用：{modelStatus?.ai_backup_provider || health?.ai_backup_provider || 'gemini'} / {modelStatus?.ai_backup_model || health?.ai_backup_model || '-'}</p></div>
           <div><strong>字幕/图文</strong><p>ASR：{modelStatus?.asr_provider || health?.asr_provider || '-'} / {modelStatus?.asr_model || health?.asr_model || '-'}<br />图片：{modelStatus?.image_provider || health?.image_provider || '-'} / {modelStatus?.image_model || health?.image_model || '-'}</p></div>
-          <div><strong>已选素材</strong><p>{selectedMaterialAssets.length ? selectedMaterialAssets.map(a => a.original_name || a.filename).join('、') : '暂无。可以先生成方案，后面再去素材库选择。'}</p></div>
         </div>
         {oneClick && <div className="oneClickResult">
           <div className="resultBox"><h3>{oneClick.project_title}</h3><p>{oneClick.summary}</p><div className="buttonRow"><button className="btn soft" onClick={() => applyOneClickResult(oneClick)}>重新同步到步骤</button><button className="btn ghost" onClick={() => setActive('copy')}>去文案细改</button><button className="btn ghost" onClick={() => setActive('voice')}>去配音</button><button className="btn ghost" onClick={() => setActive(oneClickOutputType === 'mixed_video' ? 'assets' : 'digitalHuman')}>{oneClickOutputType === 'mixed_video' ? '去素材混剪' : '去数字人'}</button></div>{oneClick.warnings?.map(w => <div className="warn" key={w}>{w}</div>)}</div>
