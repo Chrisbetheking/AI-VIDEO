@@ -76,6 +76,8 @@ from app.schemas import (
     GraphicPostRequest,
     GraphicPostResponse,
     GraphicPostImage,
+    LeadAcquisitionRequest,
+    LeadAcquisitionPlanResponse,
 )
 from app.services.ad_analysis import analyze_ad
 from app.services.cover import create_cover
