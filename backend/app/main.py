@@ -1,17 +1,20 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import mimetypes
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional
+from urllib.parse import urlparse
 
 from fastapi import BackgroundTasks, Depends, FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
+import httpx
 
 from app.config import Settings, get_settings
 from app.schemas import (
@@ -177,6 +180,105 @@ def file_url(request: Request, name: str, public_url: Optional[str] = None) -> s
 
 def upload_url(request: Request, name: str, public_url: Optional[str] = None) -> str:
     return public_url or str(request.url_for('get_upload_file', name=name))
+
+
+def _looks_like_public_http_url(value: str) -> bool:
+    return value.startswith('http://') or value.startswith('https://')
+
+
+def _safe_suffix_from_url(url: str, default: str = '.mp4') -> str:
+    try:
+        suffix = Path(urlparse(url).path).suffix.lower()
+    except Exception:
+        suffix = ''
+    if suffix in {'.mp4', '.mov', '.webm', '.m4v'}:
+        return suffix
+    return default
+
+
+async def cache_remote_video_to_own_storage(
+    settings: Settings,
+    request: Request,
+    source_url: str,
+    *,
+    job_id: str = '',
+    prefix: str = 'digital-human/final',
+) -> tuple[str, str, list[str]]:
+    """Download a third-party generated video and return our own stable URL.
+
+    Jimeng/OmniHuman can return temporary signed URLs or URLs that the browser
+    cannot play directly because of CORS / anti-hotlinking. The backend usually
+    can read the URL, so we cache it into Render's output directory and, when R2
+    is configured, upload it to R2. The frontend then plays/downloads our URL.
+    """
+    warnings: list[str] = []
+    if not source_url or not _looks_like_public_http_url(source_url):
+        return source_url, '', warnings
+
+    # If it is already our configured public R2 URL, do not download again.
+    r2_base = settings.r2_public_base_url.strip().rstrip('/')
+    if r2_base and source_url.startswith(r2_base + '/'):
+        return source_url, Path(urlparse(source_url).path).name, warnings
+
+    suffix = _safe_suffix_from_url(source_url)
+    stable_id = ''.join(ch for ch in (job_id or '') if ch.isalnum() or ch in {'_', '-'})[:80]
+    if not stable_id:
+        stable_id = hashlib.sha256(source_url.encode('utf-8')).hexdigest()[:24]
+    dest = settings.outputs_dir / f'digital_human_{stable_id}{suffix}'
+
+    if not dest.exists() or dest.stat().st_size < 1024:
+        tmp = settings.tmp_dir / f'{dest.name}.download'
+        tmp.unlink(missing_ok=True)
+        max_bytes = max(50, settings.max_upload_mb) * 1024 * 1024
+        downloaded = 0
+        try:
+            timeout = httpx.Timeout(connect=12.0, read=180.0, write=30.0, pool=30.0)
+            headers = {
+                'User-Agent': settings.collector_user_agent,
+                'Accept': 'video/mp4,video/*,*/*;q=0.8',
+            }
+            async with httpx.AsyncClient(timeout=timeout, follow_redirects=True, headers=headers) as client:
+                async with client.stream('GET', source_url) as resp:
+                    resp.raise_for_status()
+                    with tmp.open('wb') as f:
+                        async for chunk in resp.aiter_bytes(1024 * 1024):
+                            if not chunk:
+                                continue
+                            downloaded += len(chunk)
+                            if downloaded > max_bytes:
+                                raise RuntimeError(f'数字人视频超过 {settings.max_upload_mb}MB，已停止缓存。')
+                            f.write(chunk)
+            if downloaded < 1024:
+                raise RuntimeError('下载到的视频文件过小，可能是火山临时 URL 已失效或返回了错误页。')
+            tmp.replace(dest)
+        except Exception as exc:
+            tmp.unlink(missing_ok=True)
+            warnings.append(f'后端转存火山视频失败，暂时保留火山原始链接：{type(exc).__name__}: {str(exc)[:500]}')
+            return source_url, '', warnings
+
+    public_url = maybe_upload_to_r2(settings, dest, prefix=prefix)
+    stable_url = file_url(request, dest.name, public_url)
+    if public_url:
+        warnings.append('已把火山数字人视频转存到 R2，播放和下载使用稳定地址。')
+    else:
+        warnings.append('已把火山数字人视频缓存到 Render 本地输出目录；如需长期稳定访问，请确认 R2 已接通。')
+    return stable_url, dest.name, warnings
+
+
+async def finalize_digital_human_video_url(
+    settings: Settings,
+    request: Request,
+    result,
+) -> tuple[str, str, list[str]]:
+    """Return stable video_url/video_name/warnings for a DigitalHumanResult."""
+    if not getattr(result, 'video_url', ''):
+        return '', '', []
+    return await cache_remote_video_to_own_storage(
+        settings,
+        request,
+        result.video_url,
+        job_id=getattr(result, 'job_id', '') or '',
+    )
 
 
 def safe_output_path(settings: Settings, name: str) -> Path:
@@ -896,19 +998,30 @@ async def api_digital_human_create(
                 title=req.title,
                 model=req.jimeng_model or 'omnihuman15',
             )
+            stable_video_url, stable_video_name, cache_warnings = await finalize_digital_human_video_url(settings, request, result)
             memory.save_learning_event({
                 'event_type': 'digital_human_jimeng',
                 'title': req.title or '火山即梦数字人任务',
-                'payload': {'engine': result.engine, 'status': result.status, 'video_url': result.video_url, 'job_id': result.job_id},
+                'payload': {
+                    'engine': result.engine,
+                    'status': result.status,
+                    'video_url': stable_video_url or result.video_url,
+                    'source_video_url': result.video_url,
+                    'job_id': result.job_id,
+                },
             })
+            raw = result.raw or {}
+            if stable_video_url and stable_video_url != result.video_url:
+                raw = {**raw, '_cached_video_url': stable_video_url, '_source_video_url': result.video_url}
             return DigitalHumanCreateResponse(
                 status=result.status,
                 engine=result.engine,
                 message=result.message,
-                video_url=result.video_url,
+                video_url=stable_video_url or result.video_url,
+                video_name=stable_video_name or None,
                 job_id=result.job_id,
-                warnings=result.warnings or [],
-                raw=result.raw or {},
+                warnings=[*(result.warnings or []), *cache_warnings],
+                raw=raw,
             )
 
         if engine in {'webhook', 'sadtalker', 'wav2lip', 'musetalk', 'liveportrait'} and settings.digital_human_webhook_url:
@@ -921,19 +1034,30 @@ async def api_digital_human_create(
                 title=req.title,
                 engine=engine,
             )
+            stable_video_url, stable_video_name, cache_warnings = await finalize_digital_human_video_url(settings, request, result)
             memory.save_learning_event({
                 'event_type': 'digital_human',
                 'title': req.title or '数字人任务',
-                'payload': {'engine': result.engine, 'status': result.status, 'video_url': result.video_url, 'job_id': result.job_id},
+                'payload': {
+                    'engine': result.engine,
+                    'status': result.status,
+                    'video_url': stable_video_url or result.video_url,
+                    'source_video_url': result.video_url,
+                    'job_id': result.job_id,
+                },
             })
+            raw = result.raw or {}
+            if stable_video_url and stable_video_url != result.video_url:
+                raw = {**raw, '_cached_video_url': stable_video_url, '_source_video_url': result.video_url}
             return DigitalHumanCreateResponse(
                 status=result.status,
                 engine=result.engine,
                 message=result.message,
-                video_url=result.video_url,
+                video_url=stable_video_url or result.video_url,
+                video_name=stable_video_name or None,
                 job_id=result.job_id,
-                warnings=result.warnings or [],
-                raw=result.raw or {},
+                warnings=[*(result.warnings or []), *cache_warnings],
+                raw=raw,
             )
 
         preview = create_static_avatar_preview(settings, avatar_path, audio_path, title=req.title)
@@ -960,6 +1084,7 @@ async def api_digital_human_create(
 @app.get('/api/digital-human/status/{job_id}', response_model=DigitalHumanCreateResponse)
 async def api_digital_human_status(
     job_id: str,
+    request: Request,
     model: str = 'omnihuman15',
     settings: Settings = Depends(get_settings),
 ) -> DigitalHumanCreateResponse:
@@ -967,14 +1092,19 @@ async def api_digital_human_status(
         raise HTTPException(status_code=400, detail='数字人功能未启用。')
     try:
         result = await query_jimeng_digital_human(settings, task_id=job_id, model=model or 'omnihuman15')
+        stable_video_url, stable_video_name, cache_warnings = await finalize_digital_human_video_url(settings, request, result)
+        raw = result.raw or {}
+        if stable_video_url and stable_video_url != result.video_url:
+            raw = {**raw, '_cached_video_url': stable_video_url, '_source_video_url': result.video_url}
         return DigitalHumanCreateResponse(
             status=result.status,
             engine=result.engine,
             message=result.message,
-            video_url=result.video_url,
+            video_url=stable_video_url or result.video_url,
+            video_name=stable_video_name or None,
             job_id=result.job_id,
-            warnings=result.warnings or [],
-            raw=result.raw or {},
+            warnings=[*(result.warnings or []), *cache_warnings],
+            raw=raw,
         )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
