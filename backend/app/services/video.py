@@ -167,31 +167,139 @@ def _append_srt_line(lines: list[str], index: int, start: float, end: float, tex
     return index
 
 
+
+
+def _env_float(name: str, default: float, low: float, high: float) -> float:
+    try:
+        value = float(os.getenv(name, str(default)))
+    except Exception:
+        value = default
+    return max(low, min(high, value))
+
+
+def _safe_float(value: Any, default: float = 0.0) -> float:
+    try:
+        return float(value)
+    except Exception:
+        return default
+
+
+def _weighted_text_segments(script: str, duration: float) -> list[dict[str, Any]]:
+    chunks = subtitle_chunks(script) or split_script(script)
+    if not chunks:
+        return []
+    duration = max(float(duration or 0), len(chunks) * 0.9, 1.0)
+    weights = [max(3, len(re.sub(r'[，,、；;：:！？!?。．\.\s]', '', chunk))) for chunk in chunks]
+    total_weight = max(1, sum(weights))
+    cursor = 0.0
+    out: list[dict[str, Any]] = []
+    for chunk, weight in zip(chunks, weights):
+        span = max(0.75, duration * weight / total_weight)
+        start = cursor
+        end = min(duration, cursor + span)
+        cursor = end
+        out.append({'text': chunk, 'start': start, 'end': end})
+    return out
+
+
+def _normalize_subtitle_segments(script: str, duration: float, subtitle_segments: Optional[list[dict[str, Any]]] = None) -> list[dict[str, Any]]:
+    """Build stable subtitle timings and compensate late drift.
+
+    The front-end/TTS segment durations are sometimes estimated per line. In a long
+   口播, small errors accumulate and the later subtitles become slow. This function:
+    1. rescales segment time to the real final audio duration;
+    2. applies a small progressive lead, so later subtitles appear earlier;
+    3. removes isolated punctuation and fixes overlaps.
+
+    Environment knobs:
+    - SUBTITLE_GLOBAL_LEAD_MS, default 120
+    - SUBTITLE_PROGRESSIVE_LEAD_MS, default 650
+    - SUBTITLE_TIMING_SCALE, default auto
+    """
+    duration = max(float(duration or 0), 1.0)
+    raw_segments = subtitle_segments or []
+    segments: list[dict[str, Any]] = []
+
+    for seg in raw_segments:
+        if not isinstance(seg, dict):
+            continue
+        text = clean_subtitle_text(str(seg.get('text') or ''))
+        if not text:
+            continue
+        start = max(0.0, _safe_float(seg.get('start'), 0.0))
+        end = max(0.0, _safe_float(seg.get('end'), 0.0))
+        if end <= start:
+            dur = max(0.55, _safe_float(seg.get('duration'), 0.0))
+            end = start + dur
+        # Ignore obviously broken segment timings that are far outside the audio.
+        if start > duration * 1.8:
+            continue
+        segments.append({'text': text, 'start': start, 'end': end})
+
+    # If no reliable timing came from TTS/front-end, estimate from the final audio length.
+    if len(segments) < 1:
+        segments = _weighted_text_segments(script, duration)
+
+    if not segments:
+        return []
+
+    segments.sort(key=lambda x: (x['start'], x['end']))
+
+    last_end = max((_safe_float(x.get('end'), 0.0) for x in segments), default=duration)
+    if last_end <= 0:
+        last_end = duration
+    auto_scale = duration / last_end if last_end else 1.0
+    scale_env = os.getenv('SUBTITLE_TIMING_SCALE', '').strip().lower()
+    if scale_env and scale_env not in {'auto', '0'}:
+        try:
+            scale = float(scale_env)
+        except Exception:
+            scale = auto_scale
+    else:
+        # Scale only when the estimated subtitle timeline is clearly off.
+        scale = auto_scale if 0.55 <= auto_scale <= 1.65 and abs(last_end - duration) > 0.45 else 1.0
+
+    global_lead = _env_float('SUBTITLE_GLOBAL_LEAD_MS', 120.0, 0.0, 1000.0) / 1000.0
+    progressive_lead = _env_float('SUBTITLE_PROGRESSIVE_LEAD_MS', 650.0, 0.0, 2000.0) / 1000.0
+
+    shifted: list[dict[str, Any]] = []
+    for seg in segments:
+        start = _safe_float(seg.get('start'), 0.0) * scale
+        end = _safe_float(seg.get('end'), start + 0.8) * scale
+        if end <= start:
+            end = start + 0.8
+        progress = min(1.0, max(0.0, start / max(duration, 0.1)))
+        lead = global_lead + progressive_lead * progress
+        # Shift later subtitles earlier more aggressively to counter cumulative TTS pauses.
+        start = max(0.0, start - lead)
+        end = max(start + 0.45, end - lead)
+        if start >= duration:
+            continue
+        end = min(duration, end)
+        shifted.append({'text': clean_subtitle_text(seg.get('text', '')), 'start': start, 'end': end})
+
+    shifted = [x for x in shifted if x['text']]
+    if not shifted:
+        return []
+
+    # Resolve overlaps by shortening the previous caption, not by delaying the next caption.
+    for i in range(len(shifted) - 1):
+        cur = shifted[i]
+        nxt = shifted[i + 1]
+        if cur['end'] > nxt['start'] - 0.04:
+            cur['end'] = max(cur['start'] + 0.35, nxt['start'] - 0.04)
+    for item in shifted:
+        if item['end'] <= item['start'] + 0.25:
+            item['end'] = min(duration, item['start'] + 0.55)
+    return shifted
 def create_srt(script: str, duration: float, output_path: Path, subtitle_segments: Optional[list[dict[str, Any]]] = None) -> None:
     lines: List[str] = []
     index = 1
-    if subtitle_segments:
-        for seg in subtitle_segments:
-            try:
-                text = str(seg.get('text') or '').strip()
-                start = float(seg.get('start') or 0)
-                end = float(seg.get('end') or 0)
-            except Exception:
-                continue
-            if text:
-                index = _append_srt_line(lines, index, start, min(end, duration), text)
+    normalized_segments = _normalize_subtitle_segments(script, duration, subtitle_segments=subtitle_segments)
+    for seg in normalized_segments:
+        index = _append_srt_line(lines, index, float(seg['start']), float(seg['end']), str(seg['text']))
     if not lines:
-        chunks = subtitle_chunks(script) or split_script(script)
-        duration = max(duration, len(chunks) * 1.2)
-        weights = [max(4, len(chunk)) for chunk in chunks]
-        total_weight = sum(weights)
-        cursor = 0.0
-        for chunk, weight in zip(chunks, weights):
-            seg = max(1.0, duration * weight / total_weight)
-            start = cursor
-            end = min(duration, cursor + seg)
-            cursor = end
-            index = _append_srt_line(lines, index, start, end, chunk)
+        index = _append_srt_line(lines, index, 0.0, max(1.0, duration), script[:24] or ' ')
     output_path.write_text("\n".join(lines), encoding="utf-8")
 
 
@@ -473,6 +581,8 @@ async def compose_video(
     output_video = settings.outputs_dir / f"video_{task_id}.mp4"
 
     create_srt(script, duration, subtitle_path, subtitle_segments=subtitle_segments)
+    if subtitle_segments:
+        warnings.append('字幕已按最终音频时长重新缩放，并对后半段自动提前，减少越往后越慢的问题。')
     base_video, base_warnings = build_video_base(list(asset_paths), duration, base_video)
     warnings.extend(base_warnings)
     warnings.extend(burn_subtitles_and_audio(

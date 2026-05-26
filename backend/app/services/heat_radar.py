@@ -189,15 +189,32 @@ def _douyin_headers(settings: Settings, url: str = 'https://www.douyin.com/') ->
 
 
 def _douyin_cookie_file_from_env() -> str:
-    """Create a temporary Netscape cookie file from DOUYIN_WEB_COOKIE for yt-dlp.
+    """Return a Netscape cookie file path for Douyin collectors.
 
-    yt-dlp works much better with a cookie file than with only raw Cookie headers.
-    The file is best-effort and safe to omit when no cookie is configured.
+    Priority:
+    1) DOUYIN_COOKIE_FILE / DOUYIN_WEB_COOKIE_FILE / HEAT_RADAR_DOUYIN_COOKIE_FILE / COLLECTOR_COOKIE_FILE
+       pointing to a Netscape cookies.txt file.
+    2) DOUYIN_WEB_COOKIE / HEAT_RADAR_DOUYIN_COOKIE raw browser Cookie header.
+
+    Without a valid logged-in cookie Douyin often returns a login/verification page,
+    so a profile URL may only resolve to the homepage and not its recent videos.
     """
+    for name in ['DOUYIN_COOKIE_FILE', 'DOUYIN_WEB_COOKIE_FILE', 'HEAT_RADAR_DOUYIN_COOKIE_FILE', 'COLLECTOR_COOKIE_FILE']:
+        fp = os.getenv(name, '').strip()
+        if fp and os.path.exists(fp):
+            return fp
+
     raw = os.getenv('DOUYIN_WEB_COOKIE', '').strip() or os.getenv('HEAT_RADAR_DOUYIN_COOKIE', '').strip()
     if not raw:
         return ''
     try:
+        # Allow users to paste a small Netscape cookie file directly as an env var.
+        if '\t' in raw and '.douyin.com' in raw:
+            path = os.path.join(tempfile.gettempdir(), 'douyin_web_cookie_netscape.txt')
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write(raw if raw.endswith('\n') else raw + '\n')
+            return path
+
         lines = ['# Netscape HTTP Cookie File']
         for part in raw.split(';'):
             if '=' not in part:
@@ -210,6 +227,7 @@ def _douyin_cookie_file_from_env() -> str:
             # domain, include_subdomains, path, secure, expiry, name, value
             lines.append(f'.douyin.com\tTRUE\t/\tFALSE\t2147483647\t{name}\t{value}')
             lines.append(f'www.douyin.com\tFALSE\t/\tFALSE\t2147483647\t{name}\t{value}')
+            lines.append(f'.iesdouyin.com\tTRUE\t/\tFALSE\t2147483647\t{name}\t{value}')
         if len(lines) <= 1:
             return ''
         path = os.path.join(tempfile.gettempdir(), 'douyin_web_cookie.txt')
@@ -219,6 +237,16 @@ def _douyin_cookie_file_from_env() -> str:
     except Exception:
         return ''
 
+
+def _has_douyin_cookie() -> bool:
+    return bool(_douyin_cookie_file_from_env())
+
+
+def _douyin_blocked_hint(text: str) -> str:
+    blob = (text or '').lower()
+    if any(x in blob for x in ['captcha', 'verify', '验证', '登录', 'login', 'fresh cookies', 'cookies', '安全验证']):
+        return '抖音返回登录/验证页，主页最近视频需要配置 DOUYIN_WEB_COOKIE 或 DOUYIN_COOKIE_FILE。'
+    return ''
 
 def _flatten_ytdlp_entries(info: Any, limit: int) -> List[Dict[str, Any]]:
     entries: List[Dict[str, Any]] = []
@@ -237,24 +265,22 @@ def _flatten_ytdlp_entries(info: Any, limit: int) -> List[Dict[str, Any]]:
 
 
 def _ytdlp_extract_sync(url: str, limit: int, headers: Dict[str, str]) -> Dict[str, Any]:
-    """Run yt-dlp in-process.
+    """Run yt-dlp in-process, profile-first.
 
-    This is the strongest no-enterprise fallback for Douyin profile pages because
-    yt-dlp keeps up with many public web changes better than our hand-written
-    HTML/API parser. It still obeys public-page limits: no login bypass, no
-    CAPTCHA bypass, no auto-comment/private-message behavior.
+    For Douyin homepages, flat extraction can sometimes return only the profile
+    itself. We therefore run a playlist/full metadata pass first with cookies
+    when available, capped to 3-6 entries and skip_download=True.
     """
     from yt_dlp import YoutubeDL  # type: ignore
 
     cookiefile = _douyin_cookie_file_from_env()
-    opts: Dict[str, Any] = {
+    base_opts: Dict[str, Any] = {
         'quiet': True,
         'no_warnings': True,
         'skip_download': True,
         'ignoreerrors': True,
         'noplaylist': False,
-        'playlistend': max(3, min(int(limit or 3), 12)),
-        'extract_flat': 'in_playlist',
+        'playlistend': max(3, min(int(limit or 3), 6)),
         'socket_timeout': int(os.getenv('HEAT_RADAR_YTDLP_SOCKET_TIMEOUT', '12')),
         'retries': 1,
         'fragment_retries': 0,
@@ -262,10 +288,25 @@ def _ytdlp_extract_sync(url: str, limit: int, headers: Dict[str, str]) -> Dict[s
         'http_headers': {k: v for k, v in headers.items() if v},
     }
     if cookiefile:
-        opts['cookiefile'] = cookiefile
-    with YoutubeDL(opts) as ydl:
-        return ydl.extract_info(url, download=False) or {}
+        base_opts['cookiefile'] = cookiefile
 
+    attempts = []
+    full_opts = dict(base_opts)
+    full_opts['extract_flat'] = False
+    attempts.append(full_opts)
+    flat_opts = dict(base_opts)
+    flat_opts['extract_flat'] = 'in_playlist'
+    attempts.append(flat_opts)
+
+    last: Dict[str, Any] = {}
+    for opts in attempts:
+        with YoutubeDL(opts) as ydl:
+            info = ydl.extract_info(url, download=False) or {}
+        last = info
+        entries = _flatten_ytdlp_entries(info, max(3, limit))
+        if any(_extract_video_id(str(e.get('webpage_url') or e.get('url') or e.get('id') or '')) for e in entries if isinstance(e, dict)):
+            return info
+    return last
 
 def _normalize_ytdlp_entry(account: Dict[str, Any], entry: Dict[str, Any], source_url: str, source_mode: str) -> Dict[str, Any] | None:
     if not isinstance(entry, dict):
@@ -290,6 +331,10 @@ def _normalize_ytdlp_entry(account: Dict[str, Any], entry: Dict[str, Any], sourc
     vid = _extract_video_id(raw_url) or str(entry.get('id') or '')
     if vid and re.fullmatch(r'\d{8,}', vid):
         raw_url = f'https://www.douyin.com/video/{vid}'
+    # When collecting a homepage, yt-dlp may return the profile page itself as a
+    # single entry. That is not a video; do not show it as Top 3 content.
+    if 'profile_recent3' in source_mode and not _extract_video_id(raw_url):
+        return None
     published_at = ''
     if entry.get('timestamp'):
         published_at = _published_from_ts(entry.get('timestamp'))
@@ -338,7 +383,11 @@ async def _collect_douyin_with_ytdlp(settings: Settings, account: Dict[str, Any]
             return items
         warnings.append('yt-dlp 没有返回视频条目，继续使用网页/API兜底。')
     except Exception as exc:
-        warnings.append(f'yt-dlp 抖音采集失败，继续使用网页/API兜底：{str(exc)[:220]}')
+        msg = str(exc)[:260]
+        hint = _douyin_blocked_hint(msg)
+        if hint:
+            warnings.append(hint)
+        warnings.append(f'yt-dlp 抖音采集失败，继续使用网页/API兜底：{msg}')
     return []
 
 
@@ -567,6 +616,9 @@ async def _fetch_html(settings: Settings, url: str, warnings: List[str]) -> tupl
             if res.status_code >= 400:
                 warnings.append(f'{url}: 页面读取失败 HTTP {res.status_code}')
                 return final, ''
+            hint = _douyin_blocked_hint(res.text or '')
+            if hint:
+                warnings.append(hint)
             return final, res.text or ''
     except Exception as exc:
         warnings.append(f'{url}: 页面读取失败：{str(exc)[:160]}')
@@ -647,10 +699,10 @@ async def _collect_douyin_url(settings: Settings, account: Dict[str, Any], input
             title=(title or str(account.get('name') or '抖音账号主页已转换')),
             url=final_url,
             description='主页短链已转换，并识别到 sec_uid；但公开接口没有返回最近三条。建议在 Render 环境变量添加 DOUYIN_WEB_COOKIE，或粘贴具体视频链接。',
-            source_mode='douyin_profile_resolved_no_posts',
-            raw={'sec_uid': sec_uid, 'final_url': final_url},
+            source_mode='douyin_profile_observation',
+            raw={'sec_uid': sec_uid, 'final_url': final_url, 'cookie_configured': _has_douyin_cookie()},
         )
-        placeholder['warnings'] = ['主页已转换，但未拿到最近视频列表。']
+        placeholder['warnings'] = ['主页已转换，但未拿到最近视频列表；抖音大概率返回登录/验证页。请配置 DOUYIN_WEB_COOKIE 或 DOUYIN_COOKIE_FILE 后重试。']
         return [placeholder]
     title, desc = _title_from_html(html_text)
     return [_make_item(
@@ -658,8 +710,8 @@ async def _collect_douyin_url(settings: Settings, account: Dict[str, Any], input
         title=title or str(account.get('name') or '抖音公开链接已留存'),
         url=final_url,
         description=desc or '公开链接已留存，但没有识别到视频 ID 或 sec_uid。请确认链接不是过期短链。',
-        source_mode='douyin_public_url_unresolved',
-        raw={'final_url': final_url},
+        source_mode='douyin_public_url_observation',
+        raw={'final_url': final_url, 'cookie_configured': _has_douyin_cookie()},
     )]
 
 
@@ -785,7 +837,7 @@ def _recent3(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
 def _pick_top_items(collected: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], str, bool]:
     today = today_key()
-    real_posts = [x for x in collected if not str(x.get('source_mode') or '').endswith('_observation')]
+    real_posts = [x for x in collected if 'observation' not in str(x.get('source_mode') or '').lower()]
     today_items = [x for x in real_posts if _item_date_cn(x) == today]
     if today_items:
         return _rank_top3(today_items), 'today_top3', False
@@ -976,4 +1028,5 @@ async def run_public_heat_radar(settings: Settings, memory: MemoryStore, req: An
         'next_actions': analysis.get('next_actions') or _fallback_analysis(top_items).get('next_actions'),
         'top_mode': top_mode,
         'fallback_used': fallback_used,
+        'douyin_cookie_configured': _has_douyin_cookie(),
     }
