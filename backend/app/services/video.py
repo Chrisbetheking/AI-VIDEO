@@ -218,6 +218,10 @@ def _normalize_subtitle_segments(script: str, duration: float, subtitle_segments
     """
     duration = max(float(duration or 0), 1.0)
     raw_segments = subtitle_segments or []
+    # 如果字幕仍然偏慢，可在 Render 设置 SUBTITLE_FORCE_WEIGHTED_TIMELINE=true，
+    # 直接按最终音频长度和文案字数重建时间轴，绕开前端旧时间轴累计误差。
+    if os.getenv('SUBTITLE_FORCE_WEIGHTED_TIMELINE', '').strip().lower() in {'1', 'true', 'yes', 'on'}:
+        return _weighted_text_segments(script, duration)
     segments: list[dict[str, Any]] = []
 
     for seg in raw_segments:
@@ -256,11 +260,12 @@ def _normalize_subtitle_segments(script: str, duration: float, subtitle_segments
         except Exception:
             scale = auto_scale
     else:
-        # Scale only when the estimated subtitle timeline is clearly off.
-        scale = auto_scale if 0.55 <= auto_scale <= 1.65 and abs(last_end - duration) > 0.45 else 1.0
+        # 终极修复：只要前端/TTS 给了时间轴，就统一按最终音频真实时长缩放。
+        # 以前只有偏差 >0.45s 才缩放，长视频会出现“前面还行、后面越来越慢”。
+        scale = auto_scale if 0.45 <= auto_scale <= 1.95 else 1.0
 
-    global_lead = _env_float('SUBTITLE_GLOBAL_LEAD_MS', 120.0, 0.0, 1000.0) / 1000.0
-    progressive_lead = _env_float('SUBTITLE_PROGRESSIVE_LEAD_MS', 650.0, 0.0, 2000.0) / 1000.0
+    global_lead = _env_float('SUBTITLE_GLOBAL_LEAD_MS', 160.0, 0.0, 1000.0) / 1000.0
+    progressive_lead = _env_float('SUBTITLE_PROGRESSIVE_LEAD_MS', 950.0, 0.0, 2500.0) / 1000.0
 
     shifted: list[dict[str, Any]] = []
     for seg in segments:

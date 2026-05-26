@@ -308,6 +308,11 @@ def _ytdlp_extract_sync(url: str, limit: int, headers: Dict[str, str]) -> Dict[s
             return info
     return last
 
+def _is_douyin_profile_url(url: str) -> bool:
+    value = (url or '').lower()
+    return '/user/' in value or 'douyin.com/user' in value or 'profile' in value
+
+
 def _normalize_ytdlp_entry(account: Dict[str, Any], entry: Dict[str, Any], source_url: str, source_mode: str) -> Dict[str, Any] | None:
     if not isinstance(entry, dict):
         return None
@@ -331,8 +336,12 @@ def _normalize_ytdlp_entry(account: Dict[str, Any], entry: Dict[str, Any], sourc
     vid = _extract_video_id(raw_url) or str(entry.get('id') or '')
     if vid and re.fullmatch(r'\d{8,}', vid):
         raw_url = f'https://www.douyin.com/video/{vid}'
-    # When collecting a homepage, yt-dlp may return the profile page itself as a
-    # single entry. That is not a video; do not show it as Top 3 content.
+
+    # 关键修复：yt-dlp 在未登录/触发验证时，经常把“主页本身”当成 1 条结果返回。
+    # 这种结果没有 /video/{aweme_id}，不能冒充最近视频，否则页面就会一直显示账号卡片。
+    if 'douyin' in (raw_url + source_url).lower() and not _extract_video_id(raw_url):
+        if _is_douyin_profile_url(raw_url) or _is_douyin_profile_url(source_url) or 'user' in str(entry.get('extractor_key') or '').lower():
+            return None
     if 'profile_recent3' in source_mode and not _extract_video_id(raw_url):
         return None
     published_at = ''
@@ -650,13 +659,14 @@ def _items_from_render_data(account: Dict[str, Any], payloads: List[Any], limit:
 
 
 async def _collect_douyin_url(settings: Settings, account: Dict[str, Any], input_url: str, warnings: List[str], limit: int) -> List[Dict[str, Any]]:
-    # Strongest public fallback first: yt-dlp can often read a Douyin profile's
-    # latest playlist entries even when the web API needs dynamic params.
-    ytdlp_items = await _collect_douyin_with_ytdlp(settings, account, input_url, warnings, max(3, limit))
+    # 先把 v.douyin.com 短链转成真实地址。直接拿短链给 yt-dlp，有时只会得到分享页/主页。
+    final_url = await _resolve_url(settings, input_url, warnings)
+    # Strongest public fallback: yt-dlp. 但如果没配置 Cookie，抖音主页常返回验证页，
+    # 这时 _normalize_ytdlp_entry 会过滤掉主页本身，不再把主页冒充最近视频。
+    ytdlp_items = await _collect_douyin_with_ytdlp(settings, account, final_url or input_url, warnings, max(3, limit))
     if ytdlp_items:
         return ytdlp_items[:limit]
 
-    final_url = await _resolve_url(settings, input_url, warnings)
     if final_url != input_url:
         warnings.append(f'短链已转换：{input_url} → {final_url}')
     video_id = _extract_video_id(final_url)
@@ -702,9 +712,15 @@ async def _collect_douyin_url(settings: Settings, account: Dict[str, Any], input
             source_mode='douyin_profile_observation',
             raw={'sec_uid': sec_uid, 'final_url': final_url, 'cookie_configured': _has_douyin_cookie()},
         )
-        placeholder['warnings'] = ['主页已转换，但未拿到最近视频列表；抖音大概率返回登录/验证页。请配置 DOUYIN_WEB_COOKIE 或 DOUYIN_COOKIE_FILE 后重试。']
-        return [placeholder]
+        cookie_tip = '已配置 Cookie，但仍未拿到最近三条：Cookie 可能过期、账号未登录抖音网页版，或该主页触发验证。' if _has_douyin_cookie() else '未配置 DOUYIN_WEB_COOKIE / DOUYIN_COOKIE_FILE；抖音主页最近三条大概率必须登录 Cookie 才返回。'
+        placeholder['warnings'] = [f'主页已转换，但未拿到最近视频列表。{cookie_tip}']
+        # 不把主页占位卡当成 Top3 视频；只通过 warnings 告诉前端原因。
+        warnings.append(placeholder['warnings'][0])
+        return []
     title, desc = _title_from_html(html_text)
+    if _is_douyin_profile_url(final_url or input_url):
+        warnings.append(('已识别为抖音主页，但未拿到最近三条。' + ('Cookie 已配置但可能过期/触发验证。' if _has_douyin_cookie() else '请在 Render 配置 DOUYIN_WEB_COOKIE 后重试。')))
+        return []
     return [_make_item(
         account,
         title=title or str(account.get('name') or '抖音公开链接已留存'),
@@ -757,10 +773,15 @@ def _parse_account_notes(account: Dict[str, Any], warnings: List[str], limit: in
     if len(items) < limit and url.startswith('http'):
         already = {str(x.get('url') or '') for x in items}
         if url not in already:
-            mode = 'account_content_url' if any(x in url.lower() for x in ['/video/', '/note/', 'v.douyin.com', 'xhslink.com']) else 'account_homepage_observation'
-            title = fallback_title if mode == 'account_content_url' else f'{fallback_title}｜账号主页已留存'
-            desc = '公开链接已留存；如果平台不开放最近视频列表，需要补具体视频/笔记链接、Cookie、第三方数据或官方 API。'
-            items.append(_make_item(account, title=title, url=url, description=desc, source_mode=mode, line=desc))
+            lower_url = url.lower()
+            # 抖音主页不再生成“账号主页已留存”卡片，避免冒充最近三条。
+            # 只有具体视频/笔记链接才作为真实内容进入热度池。
+            is_douyin_home = ('douyin.com' in lower_url and '/user/' in lower_url) or ('v.douyin.com' in lower_url and '/video/' not in lower_url)
+            if not is_douyin_home:
+                mode = 'account_content_url' if any(x in lower_url for x in ['/video/', '/note/', 'v.douyin.com', 'xhslink.com']) else 'account_homepage_observation'
+                title = fallback_title if mode == 'account_content_url' else f'{fallback_title}｜账号主页已留存'
+                desc = '公开链接已留存；如果平台不开放最近视频列表，需要补具体视频/笔记链接、Cookie、第三方数据或官方 API。'
+                items.append(_make_item(account, title=title, url=url, description=desc, source_mode=mode, line=desc))
 
     if not items:
         warnings.append(f'{fallback_title}: 没有具体视频/笔记链接，也没有点赞/评论/收藏等真实指标。')
@@ -1029,4 +1050,5 @@ async def run_public_heat_radar(settings: Settings, memory: MemoryStore, req: An
         'top_mode': top_mode,
         'fallback_used': fallback_used,
         'douyin_cookie_configured': _has_douyin_cookie(),
+        'requires_cookie': any('DOUYIN_WEB_COOKIE' in w or '登录 Cookie' in w or '验证' in w for w in warnings),
     }
