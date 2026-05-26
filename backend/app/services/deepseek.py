@@ -148,6 +148,12 @@ async def generate_lead_acquisition_plan(settings: Settings, req: LeadAcquisitio
 内容风格：{req.style or '专业可信、真实案例、顾问式成交'}
 获客地域/人群：{req.lead_region or '华人家庭、企业主、高净值人群、海外生活规划人群'}
 转化目标：{req.conversion_goal or '私信咨询 / 表单留资 / 进入微信私域'}
+业务定位：{req.business_positioning or req.industry or '中国人在海外房产置业'}
+客户分层：{req.customer_segments or req.fixed_options or '教育规划家庭、资产配置家庭、养老度假家庭、第二居所家庭'}
+私域承接物：{req.private_domain_assets or '避坑报告、预算测算表、置业流程图、国际学校清单'}
+内容栏目：{req.content_pillars or '避坑、流程、预算、教育、身份、案例、说明会'}
+拍摄/提示词要求：{req.shooting_brief or '给出可拍镜头、口播提词、B-roll 和封面标题'}
+报告/微信承接方式：{req.report_delivery or '评论关键词或私信领取资料，再进入微信做需求筛选'}
 可选固定人群/场景：{req.fixed_options or '无'}
 重点渠道：{', '.join(channels)}
 同行/内容沉淀：
@@ -166,7 +172,10 @@ async def generate_lead_acquisition_plan(settings: Settings, req: LeadAcquisitio
   "reply_templates": ["评论/私信自动回复模板"],
   "private_domain_sop": ["私域承接步骤"],
   "daily_automation_tasks": ["每天后台自动执行任务"],
-  "next_actions": ["下一步人工确认事项"]
+  "next_actions": ["下一步人工确认事项"],
+  "content_matrix": ["可直接生成的选题/栏目"],
+  "lead_magnets": ["可领取的报告/清单/测算表"],
+  "shooting_prompts": ["拍摄方案和提示词"]
 }}
 
 要求：
@@ -200,6 +209,9 @@ async def generate_lead_acquisition_plan(settings: Settings, req: LeadAcquisitio
             private_domain_sop=_as_list(payload, 'private_domain_sop') or ['评论区识别意向', '私信发送筛选问题', '进入微信后做需求表', '按预算和国家生成方案'],
             daily_automation_tasks=_as_list(payload, 'daily_automation_tasks') or ['采集同行新视频', '汇总评论区高频问题', '生成今日选题', '更新自动回复模板'],
             next_actions=_as_list(payload, 'next_actions') or ['补充竞品账号', '确认目标国家和项目类型', '录入客户常见问题'],
+            content_matrix=_as_list(payload, 'content_matrix') or ['避坑类：海外置业最容易踩的 3 个坑', '教育类：国际学校和第二家园怎么一起规划', '预算类：几百万预算如何配置海外资产', '流程类：中国人买房从咨询到交付完整流程'],
+            lead_magnets=_as_list(payload, 'lead_magnets') or ['《海外置业避坑报告》', '《第二家园身份规划清单》', '《预算测算表》', '《国际学校择校清单》'],
+            shooting_prompts=_as_list(payload, 'shooting_prompts') or ['顾问正面口播 + 海外社区/泳池/学校 B-roll', '用地图、预算表和清单做视觉辅助', '结尾用私信关键词引导领取报告'],
         )
     except Exception:
         return LeadAcquisitionPlanResponse(
@@ -218,6 +230,9 @@ async def generate_lead_acquisition_plan(settings: Settings, req: LeadAcquisitio
             private_domain_sop=['评论区用问题筛选意向', '私信发送 4 个需求问题', '加微信后打标签：教育/养老/投资/自住', '发送匹配资料包', '安排顾问沟通或项目说明'],
             daily_automation_tasks=['采集同行账号新视频', '提炼今日钩子公式', '整理评论区高频问题', '生成 3 个海外第二家园选题', '更新自动回复模板'],
             next_actions=['录入 5 个同领域博主账号', '确认主推国家/城市', '整理常见客户问题', '准备 3 个真实案例素材'],
+            content_matrix=['避坑类：海外买房别只看价格', '教育类：国际学校和第二家园怎么一起规划', '预算类：几百万预算怎么配置海外资产', '身份类：第二家园适合哪些家庭', '案例类：真实客户从咨询到落地的过程'],
+            lead_magnets=['《马来西亚第二家园避坑报告》', '《海外置业预算测算表》', '《马来西亚国际学校择校清单》', '《置业流程图》', '《线下说明会名额》'],
+            shooting_prompts=['顾问正面口播，旁边放报告/预算表，结尾引导私信关键词', 'B-roll 使用住宅外景、泳池、国际学校、家庭咨询、地图和清单', '封面大字突出“避坑/预算/第二家园/国际学校”，不要堆太多小字'],
         )
 
 

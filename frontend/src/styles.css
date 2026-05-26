@@ -490,3 +490,78 @@ input:focus,textarea:focus,select:focus{
 .uploadSide{display:grid;gap:10px;min-width:180px}.uploadSide select{width:100%;min-height:44px;border-radius:14px;border:1px solid rgba(148,163,184,.45);background:#fff;padding:0 12px;font-weight:850;color:#0f172a;box-shadow:0 10px 24px rgba(15,23,42,.05)}
 .assetCard .assetMeta span{line-height:1.45}.assetFolderTabs{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0}.assetFolderTabs button{border:1px solid rgba(37,99,235,.18);background:#eff6ff;border-radius:999px;padding:8px 12px;font-weight:900;color:#1d4ed8}.assetFolderTabs button.active{background:#2563eb;color:#fff;box-shadow:0 10px 22px rgba(37,99,235,.18)}
 @media(max-width:760px){.uploadSide{width:100%}.uploadSide select{width:100%}}
+
+/* Industry profile / lead acquisition dossier */
+.industryProfilePanel .field textarea { min-height: 118px; }
+.profileHero,
+.leadProfileStrip {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  margin: 14px 0 18px;
+}
+.profileHero > div,
+.leadProfileStrip > div {
+  border: 1px solid rgba(37, 99, 235, .16);
+  border-radius: 22px;
+  padding: 18px;
+  background: linear-gradient(135deg, #f8fbff, #fff 58%, #f6f3ff);
+  box-shadow: 0 16px 36px rgba(15, 23, 42, .055);
+}
+.profileHero span,
+.leadProfileStrip b {
+  display: block;
+  color: #2563eb;
+  font-size: 13px;
+  font-weight: 950;
+  margin-bottom: 7px;
+}
+.profileHero strong {
+  display: block;
+  font-size: 20px;
+  line-height: 1.35;
+  color: #0f172a;
+}
+.profileHero p,
+.leadProfileStrip span {
+  margin: 8px 0 0;
+  color: #475569;
+  line-height: 1.55;
+  font-weight: 750;
+}
+.profileGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+.profileSection {
+  margin-top: 18px;
+  border: 1px solid rgba(148, 163, 184, .20);
+  border-radius: 24px;
+  padding: 18px;
+  background: rgba(255, 255, 255, .78);
+}
+.profileSection h3 { margin: 0 0 14px; font-size: 20px; color: #0f172a; }
+.profileQuickActions {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin: 18px 0;
+}
+.profileQuickActions button {
+  border: 1px solid rgba(37, 99, 235, .22);
+  background: linear-gradient(135deg, #eff6ff, #ffffff);
+  color: #1d4ed8;
+  border-radius: 16px;
+  min-height: 48px;
+  font-weight: 950;
+  cursor: pointer;
+  box-shadow: 0 10px 22px rgba(37, 99, 235, .08);
+}
+.profileQuickActions button:hover { transform: translateY(-1px); box-shadow: 0 14px 30px rgba(37, 99, 235, .13); }
+.leadProfileStrip { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.leadProfileStrip > div { padding: 14px 16px; }
+.leadProfileStrip span { font-size: 13px; }
+@media (max-width: 920px) {
+  .profileHero, .leadProfileStrip, .profileGrid, .profileQuickActions { grid-template-columns: 1fr; }
+}

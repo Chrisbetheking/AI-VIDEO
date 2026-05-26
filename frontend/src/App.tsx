@@ -143,6 +143,35 @@ function normalizeAsset(raw: any, index = 0): AssetItem {
 }
 
 const emptyCopy: GeneratedCopy = { title: '', hook: '', script: '', description: '', tags: [], shots: [], kb_refs: [] }
+
+const malaysiaProfilePreset = {
+  industry: '马来西亚房产置业 · 第二家园 · 国际学校',
+  businessPositioning: '中国人在马来西亚房产置业，重点围绕第二家园身份、海外资产配置、国际学校和长期生活规划。',
+  audience: '有海外置业、第二家园身份、子女教育、养老度假和资产配置需求的华人家庭与企业主',
+  leadRegion: '中国各城市华人高净值家庭、企业主、留学家庭、养老度假人群、海外生活规划人群',
+  conversionGoal: '评论关键词 / 私信咨询 / 加微信领取报告 / 需求筛选 / 预约顾问沟通',
+  sellingPoints: '马来西亚第二家园规划、国家/城市筛选、项目匹配、置业流程、国际学校选择、生活配套、长期服务和顾问式咨询',
+  style: '专业可信、顾问式成交、真实案例、强钩子、适合抖音/小红书图文引流',
+  trendKeywords: '马来西亚海外置业,马来西亚房产,马来西亚第二家园,马来西亚国际学校,马来西亚 A-Level,马来西亚 IB,海外房产置业,海外资产配置,马来西亚线下说明会,置业推荐会',
+  customerSegments: `1. 有海外资产配置需求的高净值家庭
+2. 想给孩子规划国际学校/A-Level/IB 的家庭
+3. 想办理马来西亚第二家园身份的人群
+4. 想养老、度假或长期居住的家庭
+5. 对国内资产压力、教育焦虑、身份规划敏感的人群`,
+  privateDomainAssets: `《马来西亚第二家园避坑报告》
+《马来西亚国际学校择校清单》
+《海外置业预算测算表》
+《马来西亚买房完整流程图》
+《线下说明会/置业推荐会名额》`,
+  contentPillars: `避坑类：海外买房最容易踩的 3 个坑
+教育类：马来西亚国际学校到底适合什么家庭
+身份类：第二家园身份适合哪些人
+预算类：几百万预算怎么配置马来西亚房产
+流程类：中国人买马来西亚房产完整流程
+信任类：线下说明会、客户案例、顾问答疑`,
+  shootingBrief: '提供拍摄方案和提示词：顾问正面口播、项目/泳池/社区 B-roll、国际学校画面、地图/预算表/报告截图、结尾引导私信领取资料。封面大字优先突出“避坑、预算、第二家园、国际学校”。',
+  reportDelivery: '报告放微信：评论区留关键词或私信“报告/预算/身份/学校”，自动回复筛选问题后引导加微信领取。'
+}
 const DIGITAL_HUMAN_TASK_KEY = 'ai_video_current_digital_human_task_v1'
 const emotionOptions = ['自然可信', '提醒警示', '紧张急迫', '坚定有力', '朋友聊天', '专业冷静', '惊讶反问', '收尾号召']
 
@@ -165,7 +194,7 @@ const defaultSegment: VoiceSegment = {
 const modules: { key: ModuleKey; icon: string; title: string; desc: string; tag: string }[] = [
   { key: 'dashboard', icon: '总', title: '流程总览', desc: '一条视频从采集到发布的主流程', tag: '总览' },
   { key: 'monitor', icon: '控', title: '运营中控台', desc: '总览进度、数据库、插件和待办', tag: '监控' },
-  { key: 'lead', icon: '获', title: '获客自动化', desc: '截留、联动、监听、回复、私域承接', tag: '获客' },
+  { key: 'lead', icon: '获', title: '获客自动化', desc: '监听、内容、私域承接和自动回复', tag: '获客' },
   { key: 'oneClick', icon: '生', title: '一键生成中心', desc: '在一个窗口完成文案、配音分段、字幕、图文和发布草稿', tag: '一键' },
   { key: 'assets', icon: '素', title: '1. 素材选择', desc: '先选/上传素材，确定图片停留和视频截取区间', tag: '素材' },
   { key: 'copy', icon: '文', title: '2. 文案生产', desc: '根据素材和客户目标生成口播文案', tag: '文案' },
@@ -175,7 +204,7 @@ const modules: { key: ModuleKey; icon: string; title: string; desc: string; tag:
   { key: 'collector', icon: '采', title: '同行采集', desc: '可选：采集同行视频、口令和钩子结构', tag: '采集' },
   { key: 'subtitleCover', icon: '视', title: '6. 字幕 / 封面 / 图文', desc: '抖音风字幕、素材截图封面、AI 图文素材', tag: '视觉' },
   { key: 'publish', icon: '发', title: '7. 平台发布', desc: '发布草稿、平台适配、开放接口预留', tag: '发布' },
-  { key: 'strategy', icon: '客', title: '客户定位', desc: '行业、目标客户、成交路径、老板人设', tag: '定位' },
+  { key: 'strategy', icon: '档', title: '行业获客档案', desc: '业务定位、关键词、客群、资料包和拍摄提示词', tag: '档案' },
   { key: 'competitor', icon: '竞', title: '竞品账号库', desc: '长期沉淀同行账号和爆款特征', tag: '账号' },
   { key: 'trend', icon: '雷', title: '行业爆点', desc: '选题雷达、热点关键词、拍摄方向', tag: '雷达' },
   { key: 'shooting', icon: '拍', title: '运营拍摄', desc: '拍摄任务单、提词器、B-roll 清单', tag: '拍摄' },
@@ -242,13 +271,19 @@ function AppInner() {
   const [modelStatus, setModelStatus] = useState<ModelStatusResponse | null>(null)
   const [contentNavOpen, setContentNavOpen] = useState(true)
 
-  const [industry, setIndustry] = useState('海外房产置业 · 第二家园')
-  const [audience, setAudience] = useState('有海外置业、第二家园、子女教育、养老度假和资产配置需求的华人家庭与企业主')
-  const [sellingPoints, setSellingPoints] = useState('海外第二家园规划、国家/城市筛选、项目匹配、置业流程、生活配套、长期服务和顾问式咨询')
-  const [style, setStyle] = useState('专业可信、顾问式成交、真实案例、短视频强钩子')
-  const [leadRegion, setLeadRegion] = useState('华人高净值家庭、企业主、留学家庭、养老度假人群、海外生活规划人群')
-  const [conversionGoal, setConversionGoal] = useState('私信咨询 / 需求筛选 / 加微信进入私域 / 预约顾问沟通')
-  const [trendKeywords, setTrendKeywords] = useState('海外房产,第二家园,海外置业,子女教育,养老度假,资产配置,海外生活')
+  const [industry, setIndustry] = useState(malaysiaProfilePreset.industry)
+  const [audience, setAudience] = useState(malaysiaProfilePreset.audience)
+  const [sellingPoints, setSellingPoints] = useState(malaysiaProfilePreset.sellingPoints)
+  const [style, setStyle] = useState(malaysiaProfilePreset.style)
+  const [leadRegion, setLeadRegion] = useState(malaysiaProfilePreset.leadRegion)
+  const [conversionGoal, setConversionGoal] = useState(malaysiaProfilePreset.conversionGoal)
+  const [trendKeywords, setTrendKeywords] = useState(malaysiaProfilePreset.trendKeywords)
+  const [businessPositioning, setBusinessPositioning] = useState(malaysiaProfilePreset.businessPositioning)
+  const [customerSegments, setCustomerSegments] = useState(malaysiaProfilePreset.customerSegments)
+  const [privateDomainAssets, setPrivateDomainAssets] = useState(malaysiaProfilePreset.privateDomainAssets)
+  const [contentPillars, setContentPillars] = useState(malaysiaProfilePreset.contentPillars)
+  const [shootingBrief, setShootingBrief] = useState(malaysiaProfilePreset.shootingBrief)
+  const [reportDelivery, setReportDelivery] = useState(malaysiaProfilePreset.reportDelivery)
   const [trendRadar, setTrendRadar] = useState<TrendRadarResponse | null>(null)
   const [competitors, setCompetitors] = useState<CompetitorAccount[]>([])
   const [competitorDraft, setCompetitorDraft] = useState<CompetitorAccount>({ name: '', platform: 'douyin', url: '', positioning: '', notes: '' })
@@ -339,7 +374,7 @@ function AppInner() {
 
   const [leadPlan, setLeadPlan] = useState<LeadAcquisitionPlanResponse | null>(null)
   const [leadChannels, setLeadChannels] = useState<string[]>(['抖音截留获客', '博主联动流量', '采集目标客户', '自动监听', '自动回复', '目标用户导流私域'])
-  const [leadFixedOptions, setLeadFixedOptions] = useState('子女教育家庭、企业主资产配置、养老度假、海外第二居所、华人家庭、目标国家/城市、预算区间')
+  const [leadFixedOptions, setLeadFixedOptions] = useState('子女教育家庭、企业主资产配置、养老度假、海外第二居所、华人家庭、马来西亚城市、预算区间、国际学校、第二家园身份')
 
   const materialAssets = useMemo(() => assets.map((a, i) => normalizeAsset(a, i)).filter(a => Boolean(a.id && a.url) && !safeText(a.filename).startsWith('collected_')), [assets])
   const collectedVideos = useMemo(() => assets.map((a, i) => normalizeAsset(a, i)).filter(a => Boolean(a.id && a.url) && a.kind === 'video' && safeText(a.filename).startsWith('collected_')), [assets])
@@ -371,6 +406,16 @@ function AppInner() {
     .map((a, i) => normalizeAsset(a, i)), [materialAssets, selectedMaterialIds])
   const referenceText = useMemo(() => extract?.transcript || manualText || sourceUrl, [extract, manualText, sourceUrl])
   const competitorNotes = useMemo(() => competitors.map(c => `${c.platform}｜${c.name}｜${c.positioning}｜${c.notes}`).join('\n'), [competitors])
+  const profileContext = useMemo(() => [
+    `业务定位：${businessPositioning || industry}`,
+    `客户分层：${customerSegments}`,
+    `监听关键词：${trendKeywords}`,
+    `私域承接物：${privateDomainAssets}`,
+    `内容栏目：${contentPillars}`,
+    `拍摄提示：${shootingBrief}`,
+    `承接方式：${reportDelivery}`,
+  ].filter(Boolean).join('\n'), [businessPositioning, industry, customerSegments, trendKeywords, privateDomainAssets, contentPillars, shootingBrief, reportDelivery])
+  const sellingPointsWithProfile = useMemo(() => `${sellingPoints}\n\n【行业获客档案】\n${profileContext}`.trim(), [sellingPoints, profileContext])
   const learningSummary = memoryContext?.learning_summary || '保存客户定位、竞品账号和采集结果后，AI 会在文案、雷达、投流建议里自动读取。'
   const currentScript = copy.script || ''
   const currentVideoName = video?.video_name || extract?.collected_video_name || ''
@@ -490,7 +535,7 @@ function AppInner() {
     const res = await run('一键生成完整方案', () => apiPost<OneClickGenerateResponse>('/api/one-click/generate', {
       industry,
       audience,
-      selling_points: sellingPoints,
+      selling_points: sellingPointsWithProfile,
       style,
       duration_seconds: autoProjectSeconds,
       goal: conversionGoal,
@@ -498,7 +543,7 @@ function AppInner() {
       material_mode: oneClickMaterialMode,
       selected_asset_names: selectedNames,
       reference_text: referenceText,
-      instruction: oneClickInstruction,
+      instruction: `${oneClickInstruction}\n\n请严格读取行业获客档案：\n${profileContext}`,
     }))
     applyOneClickResult(res!)
     setActive('oneClick')
@@ -511,10 +556,28 @@ function AppInner() {
       current: oneClick,
       industry,
       audience,
-      selling_points: sellingPoints,
+      selling_points: sellingPointsWithProfile,
     }))
     applyOneClickResult(res!)
     setActive('oneClick')
+  }
+
+  function applyMalaysiaPreset() {
+    setIndustry(malaysiaProfilePreset.industry)
+    setBusinessPositioning(malaysiaProfilePreset.businessPositioning)
+    setAudience(malaysiaProfilePreset.audience)
+    setLeadRegion(malaysiaProfilePreset.leadRegion)
+    setConversionGoal(malaysiaProfilePreset.conversionGoal)
+    setSellingPoints(malaysiaProfilePreset.sellingPoints)
+    setStyle(malaysiaProfilePreset.style)
+    setTrendKeywords(malaysiaProfilePreset.trendKeywords)
+    setCustomerSegments(malaysiaProfilePreset.customerSegments)
+    setPrivateDomainAssets(malaysiaProfilePreset.privateDomainAssets)
+    setContentPillars(malaysiaProfilePreset.contentPillars)
+    setShootingBrief(malaysiaProfilePreset.shootingBrief)
+    setReportDelivery(malaysiaProfilePreset.reportDelivery)
+    setLeadFixedOptions('子女教育家庭、企业主资产配置、养老度假、海外第二居所、华人家庭、马来西亚城市、预算区间、国际学校、第二家园身份')
+    setLastHandoff('已套用“马来西亚房产 / 第二家园”行业获客档案。后续一键生成、文案、图文、拍摄和私域回复都会读取这套档案。')
   }
 
   async function reloadMemoryContext(applyProfile = false) {
@@ -530,6 +593,13 @@ function AppInner() {
       if (profile.lead_region) setLeadRegion(profile.lead_region)
       if (profile.conversion_goal) setConversionGoal(profile.conversion_goal)
       if (profile.trend_keywords) setTrendKeywords(profile.trend_keywords)
+      if (profile.business_positioning) setBusinessPositioning(profile.business_positioning)
+      if (profile.customer_segments) setCustomerSegments(profile.customer_segments)
+      if (profile.private_domain_assets) setPrivateDomainAssets(profile.private_domain_assets)
+      if (profile.content_pillars) setContentPillars(profile.content_pillars)
+      if (profile.shooting_brief) setShootingBrief(profile.shooting_brief)
+      if (profile.report_delivery) setReportDelivery(profile.report_delivery)
+      if (profile.listening_keywords && !profile.trend_keywords) setTrendKeywords(profile.listening_keywords)
     }
     if (Array.isArray(ctx.competitors)) {
       setCompetitors(ctx.competitors.map((x: any) => ({
@@ -551,7 +621,14 @@ function AppInner() {
       style,
       lead_region: leadRegion,
       conversion_goal: conversionGoal,
-      trend_keywords: trendKeywords
+      trend_keywords: trendKeywords,
+      business_positioning: businessPositioning,
+      listening_keywords: trendKeywords,
+      customer_segments: customerSegments,
+      private_domain_assets: privateDomainAssets,
+      content_pillars: contentPillars,
+      shooting_brief: shootingBrief,
+      report_delivery: reportDelivery
     }))
     await reloadMemoryContext(true)
   }
@@ -565,7 +642,7 @@ function AppInner() {
     const res = await run('生成获客自动化作战图', () => apiPost<LeadAcquisitionPlanResponse>('/api/lead-acquisition/plan', {
       industry,
       audience,
-      selling_points: sellingPoints,
+      selling_points: sellingPointsWithProfile,
       style,
       lead_region: leadRegion,
       conversion_goal: conversionGoal,
@@ -573,7 +650,14 @@ function AppInner() {
       fixed_options: leadFixedOptions,
       competitor_notes: competitorNotes,
       trend_keywords: trendKeywords,
-      existing_context: memoryContext?.learning_summary || ''
+      business_positioning: businessPositioning,
+      listening_keywords: trendKeywords,
+      customer_segments: customerSegments,
+      private_domain_assets: privateDomainAssets,
+      content_pillars: contentPillars,
+      shooting_brief: shootingBrief,
+      report_delivery: reportDelivery,
+      existing_context: `${memoryContext?.learning_summary || ''}\n\n${profileContext}`.trim()
     }))
     setLeadPlan(res!)
     setLastHandoff('获客自动化作战图已生成。同行采集、文案生产、自动监听和私域承接会读取这套策略。')
@@ -819,7 +903,7 @@ ${manualText || ''}`.trim()
       script: currentScript,
       industry,
       audience,
-      selling_points: sellingPoints,
+      selling_points: sellingPointsWithProfile,
       available_assets: [...materialAssets, ...collectedVideos].map(a => `${a.kind}:${a.original_name}`).join('；'),
       duration_seconds: autoProjectSeconds
     }))
@@ -855,7 +939,7 @@ ${manualText || ''}`.trim()
       topic: sellingPoints,
       industry,
       audience,
-      selling_points: `${sellingPoints}\n获客地域/人群：${leadRegion}\n转化目标：${conversionGoal}`,
+      selling_points: `${sellingPointsWithProfile}\n获客地域/人群：${leadRegion}\n转化目标：${conversionGoal}`,
       style,
       duration_seconds: autoProjectSeconds,
       knowledge_examples: manualText ? [manualText] : []
@@ -871,7 +955,7 @@ ${manualText || ''}`.trim()
       reference_text: referenceText || '请根据业务信息生成原创老板口播文案。',
       industry,
       audience,
-      selling_points: `${sellingPoints}\n获客地域/人群：${leadRegion}\n转化目标：${conversionGoal}`,
+      selling_points: `${sellingPointsWithProfile}\n获客地域/人群：${leadRegion}\n转化目标：${conversionGoal}`,
       style,
       duration_seconds: autoProjectSeconds
     }))
@@ -887,7 +971,7 @@ ${manualText || ''}`.trim()
       instruction: `${refineInstruction}\n重点规避这些词：${matchedBadWords.join('、') || '暂无'}`,
       industry,
       audience,
-      selling_points: sellingPoints
+      selling_points: sellingPointsWithProfile
     }))
     setCopy(res!)
     openKnowledgeSave('文案细改版本', res!)
@@ -913,7 +997,7 @@ ${manualText || ''}`.trim()
       intensity: voiceIntensity,
       target_seconds: autoProjectSeconds,
       audience,
-      selling_points: sellingPoints
+      selling_points: sellingPointsWithProfile
     }))
     const segments = Array.isArray(res!.segments) ? res!.segments : []
     setVoiceSegments(segments)
@@ -1110,10 +1194,10 @@ ${manualText || ''}`.trim()
     const payload: any = {
       title: copy.title || industry || '图文引流包',
       hook: copy.hook || '先收藏，这几件事一定要弄懂。',
-      script: currentScript || copy.description || sellingPoints,
+      script: currentScript || copy.description || sellingPointsWithProfile,
       industry,
       audience,
-      selling_points: sellingPoints,
+      selling_points: sellingPointsWithProfile,
       style: `${style}；图文引流，不是封面；要像小红书/抖音收藏图文，精美、真实、强转化`,
       platform: graphicPlatform,
       slide_count: graphicSlideCount,
@@ -1328,8 +1412,13 @@ ${manualText || ''}`.trim()
       {active === 'lead' && <section className="card modulePanel leadPanel">
         <div className="sectionHeader"><div><h2>获客自动化</h2><p>围绕海外房产置业和第二家园，把同行流量打法转成可执行的截留、监听、回复和私域承接流程。</p></div><div className="headerActions"><Button busy={busy === '生成获客自动化作战图' ? busy : ''} label="生成获客作战图" onClick={makeLeadPlan} kind="soft" /><Button label="保存行业档案" onClick={saveCustomerProfile} kind="ghost" /></div></div>
         <div className="leadHero">
-          <div><span>当前业务</span><strong>{industry}</strong><p>{audience}</p></div>
+          <div><span>当前业务</span><strong>{businessPositioning || industry}</strong><p>{audience}</p></div>
           <div><span>转化目标</span><strong>{conversionGoal}</strong><p>{leadRegion}</p></div>
+        </div>
+        <div className="leadProfileStrip">
+          <div><b>资料包</b><span>{privateDomainAssets.split(/\n+/)[0] || '未配置'}</span></div>
+          <div><b>关键词</b><span>{trendKeywords.split(/[,，\n]+/).slice(0, 5).join(' / ')}</span></div>
+          <div><b>拍摄</b><span>{shortText(shootingBrief, 42)}</span></div>
         </div>
         <div className="leadChannelSelect">
           {['抖音截留获客','博主联动流量','采集目标客户','自动监听','自动回复','目标用户导流私域'].map(item => <button key={item} className={leadChannels.includes(item) ? 'selected' : ''} onClick={() => toggleLeadChannel(item)}>{item}</button>)}
@@ -1349,19 +1438,33 @@ ${manualText || ''}`.trim()
           <div className="leadPlaybookGrid">{leadPlan.channel_playbook?.map(item => <div className="leadPlaybook" key={item.channel}><strong>{item.channel}</strong><p>{item.goal}</p><h4>动作</h4>{item.actions?.map(x => <small key={x}>· {x}</small>)}<h4>自动化</h4>{item.automation?.map(x => <small key={x}>· {x}</small>)}<em>{item.success_metric}</em></div>)}</div>
           <div className="splitGrid"><div><h4>监听词</h4>{leadPlan.listening_keywords?.map(x => <p key={x}>· {x}</p>)}</div><div><h4>触发内容</h4>{leadPlan.content_triggers?.map(x => <p key={x}>· {x}</p>)}</div><div><h4>每日自动任务</h4>{leadPlan.daily_automation_tasks?.map(x => <p key={x}>· {x}</p>)}</div></div>
           <div className="splitGrid"><div><h4>自动回复</h4>{leadPlan.reply_templates?.map(x => <p key={x}>· {x}</p>)}</div><div><h4>私域承接</h4>{leadPlan.private_domain_sop?.map(x => <p key={x}>· {x}</p>)}</div><div><h4>下一步</h4>{leadPlan.next_actions?.map(x => <p key={x}>· {x}</p>)}</div></div>
+          <div className="splitGrid"><div><h4>内容矩阵</h4>{leadPlan.content_matrix?.map(x => <p key={x}>· {x}</p>)}</div><div><h4>资料钩子</h4>{leadPlan.lead_magnets?.map(x => <p key={x}>· {x}</p>)}</div><div><h4>拍摄提示词</h4>{leadPlan.shooting_prompts?.map(x => <p key={x}>· {x}</p>)}</div></div>
         </div>}
       </section>}
 
-      {active === 'strategy' && <section className="card modulePanel">
-        <div className="sectionHeader"><div><h2>客户定位</h2><p>先把海外置业客户、第二家园需求和私域承接路径保存好，后续采集、文案、监听和投流都会自动读取。</p></div><div className="headerActions"><Button busy={busy === '保存行业档案' ? busy : ''} label="保存行业档案" onClick={saveCustomerProfile} kind="soft" /><Button busy={busy === '生成获客自动化作战图' ? busy : ''} label="生成获客作战图" onClick={makeLeadPlan} kind="ghost" /></div></div>
-        <div className="grid2">
-          <Field label="行业"><input value={industry} onChange={e => setIndustry(e.target.value)} /></Field>
-          <Field label="目标客户"><input value={audience} onChange={e => setAudience(e.target.value)} /></Field>
-          <Field label="获客地域 / 人群"><input value={leadRegion} onChange={e => setLeadRegion(e.target.value)} /></Field>
-          <Field label="转化目标"><input value={conversionGoal} onChange={e => setConversionGoal(e.target.value)} /></Field>
+      {active === 'strategy' && <section className="card modulePanel industryProfilePanel">
+        <div className="sectionHeader"><div><h2>行业获客档案</h2><p>把业务定位、监听词、目标客群、资料包和拍摄提示词沉淀成长期档案。后面文案、图文、剪辑、私信回复都会自动读取。</p></div><div className="headerActions"><Button label="套用马来西亚房产模板" onClick={applyMalaysiaPreset} kind="ghost" /><Button busy={busy === '保存行业档案' ? busy : ''} label="保存行业档案" onClick={saveCustomerProfile} kind="soft" /><Button busy={busy === '生成获客自动化作战图' ? busy : ''} label="生成获客作战图" onClick={makeLeadPlan} kind="primary" /></div></div>
+        <div className="profileHero">
+          <div><span>业务定位</span><strong>{businessPositioning || industry}</strong><p>{conversionGoal}</p></div>
+          <div><span>私域承接</span><strong>{reportDelivery}</strong><p>{privateDomainAssets.split(/\n+/)[0] || '资料包/报告/清单'}</p></div>
         </div>
-        <Field label="核心卖点"><textarea value={sellingPoints} onChange={e => setSellingPoints(e.target.value)} /></Field>
-        <Field label="视频风格"><input value={style} onChange={e => setStyle(e.target.value)} /></Field>
+        <div className="profileGrid">
+          <Field label="行业/赛道"><input value={industry} onChange={e => setIndustry(e.target.value)} /></Field>
+          <Field label="业务定位"><input value={businessPositioning} onChange={e => setBusinessPositioning(e.target.value)} placeholder="例如：中国人在马来西亚房产置业" /></Field>
+          <Field label="目标客户"><textarea value={audience} onChange={e => setAudience(e.target.value)} /></Field>
+          <Field label="获客地域 / 人群"><textarea value={leadRegion} onChange={e => setLeadRegion(e.target.value)} /></Field>
+          <Field label="转化目标"><input value={conversionGoal} onChange={e => setConversionGoal(e.target.value)} /></Field>
+          <Field label="内容风格"><input value={style} onChange={e => setStyle(e.target.value)} /></Field>
+        </div>
+        <div className="profileSection"><h3>监听词与客户分层</h3><div className="grid2"><Field label="监听关键词库" hint="用逗号或换行分隔，同行采集、雷达和选题会读取。"><textarea value={trendKeywords} onChange={e => setTrendKeywords(e.target.value)} /></Field><Field label="目标客户分层" hint="把不同人群拆开，生成内容时会按人群出不同钩子。"><textarea value={customerSegments} onChange={e => setCustomerSegments(e.target.value)} /></Field></div></div>
+        <div className="profileSection"><h3>私域承接与内容栏目</h3><div className="grid2"><Field label="私域承接物 / 报告清单"><textarea value={privateDomainAssets} onChange={e => setPrivateDomainAssets(e.target.value)} /></Field><Field label="内容栏目 / 选题方向"><textarea value={contentPillars} onChange={e => setContentPillars(e.target.value)} /></Field></div></div>
+        <div className="profileSection"><h3>拍摄方案和 AI 提示词</h3><Field label="拍摄方案 / 提示词要求"><textarea value={shootingBrief} onChange={e => setShootingBrief(e.target.value)} /></Field><Field label="报告/微信承接方式"><input value={reportDelivery} onChange={e => setReportDelivery(e.target.value)} /></Field></div>
+        <div className="profileQuickActions">
+          <button onClick={() => setActive('oneClick')}>用档案生成完整视频方案</button>
+          <button onClick={generateDirectCopy}>生成短视频文案</button>
+          <button onClick={makeGraphicPost}>生成图文引流包</button>
+          <button onClick={makeShootingPlan}>生成拍摄方案</button>
+        </div>
         <div className="memoryBox"><strong>AI 学习状态：{memoryStatus}</strong><p>{learningSummary}</p><button onClick={() => reloadMemoryContext(true)}>刷新数据库记忆</button></div>
         {ad && <div className="resultBox"><h3>{ad.decision}</h3><p>建议预算：{ad.suggested_budget} · 置信度：{Math.round(ad.confidence * 100)}%</p><div className="chips">{ad.target_audience?.map(x => <Pill key={x}>{x}</Pill>)}</div>{ad.optimization_tips?.map(x => <p key={x}>· {x}</p>)}</div>}
       </section>}

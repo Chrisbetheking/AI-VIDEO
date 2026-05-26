@@ -454,6 +454,14 @@ class CustomerProfileSave(BaseModel):
     lead_region: str = Field(default='', max_length=200)
     conversion_goal: str = Field(default='', max_length=200)
     trend_keywords: str = Field(default='', max_length=1000)
+    # 行业获客档案扩展字段：用于长期复用到文案、图文、拍摄和私域承接。
+    business_positioning: str = Field(default='', max_length=500)
+    listening_keywords: str = Field(default='', max_length=3000)
+    customer_segments: str = Field(default='', max_length=3000)
+    private_domain_assets: str = Field(default='', max_length=3000)
+    content_pillars: str = Field(default='', max_length=3000)
+    shooting_brief: str = Field(default='', max_length=3000)
+    report_delivery: str = Field(default='', max_length=1000)
 
 
 class MemoryEventInput(BaseModel):
@@ -514,6 +522,13 @@ class LeadAcquisitionRequest(BaseModel):
     competitor_notes: str = Field(default='', max_length=6000)
     trend_keywords: str = Field(default='', max_length=2000)
     existing_context: str = Field(default='', max_length=8000)
+    business_positioning: str = Field(default='', max_length=500)
+    listening_keywords: str = Field(default='', max_length=3000)
+    customer_segments: str = Field(default='', max_length=3000)
+    private_domain_assets: str = Field(default='', max_length=3000)
+    content_pillars: str = Field(default='', max_length=3000)
+    shooting_brief: str = Field(default='', max_length=3000)
+    report_delivery: str = Field(default='', max_length=1000)
 
 
 class LeadChannelPlaybook(BaseModel):
@@ -535,6 +550,9 @@ class LeadAcquisitionPlanResponse(BaseModel):
     private_domain_sop: List[str] = Field(default_factory=list)
     daily_automation_tasks: List[str] = Field(default_factory=list)
     next_actions: List[str] = Field(default_factory=list)
+    content_matrix: List[str] = Field(default_factory=list)
+    lead_magnets: List[str] = Field(default_factory=list)
+    shooting_prompts: List[str] = Field(default_factory=list)
 
 
 class DigitalHumanCreateRequest(BaseModel):

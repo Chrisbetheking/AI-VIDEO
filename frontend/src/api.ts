@@ -310,6 +310,13 @@ export interface CustomerProfileSave {
   lead_region: string
   conversion_goal: string
   trend_keywords: string
+  business_positioning?: string
+  listening_keywords?: string
+  customer_segments?: string
+  private_domain_assets?: string
+  content_pillars?: string
+  shooting_brief?: string
+  report_delivery?: string
 }
 
 
@@ -332,6 +339,9 @@ export interface LeadAcquisitionPlanResponse {
   private_domain_sop: string[]
   daily_automation_tasks: string[]
   next_actions: string[]
+  content_matrix?: string[]
+  lead_magnets?: string[]
+  shooting_prompts?: string[]
 }
 
 export interface DigitalHumanCreateRequest {
