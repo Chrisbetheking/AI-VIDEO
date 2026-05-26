@@ -1,14 +1,11 @@
 from __future__ import annotations
 
-import asyncio
 import html
-import json
 import os
 import re
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Tuple
-from urllib.parse import urlparse
 
 import httpx
 
@@ -84,7 +81,7 @@ def heat_score(item: Dict[str, Any]) -> int:
 
 
 def _platform_from_url(url: str, fallback: str = '') -> str:
-    u = url.lower()
+    u = str(url or '').lower()
     if 'douyin' in u or 'iesdouyin' in u:
         return '抖音'
     if 'xiaohongshu' in u or 'xhslink' in u:
@@ -117,27 +114,29 @@ def _is_real_url(value: Any) -> bool:
 
 
 async def _fetch_html_meta(settings: Settings, url: str, account: Dict[str, Any], warnings: List[str]) -> Dict[str, Any] | None:
-    """轻量公开采集：只读公开页面 HTML 的标题/描述，不调用重型解析器，避免 Render 免费实例被打崩。"""
+    """极轻量公开采集。默认关闭，只有 HEAT_RADAR_PUBLIC_FETCH=true 时才会调用。"""
+    try:
+        timeout_raw = _setting(settings, 'collector_timeout_seconds', 6) or 6
+        timeout = min(max(int(timeout_raw), 3), 8)
+    except Exception:
+        timeout = 6
     headers = {
         'User-Agent': _setting(settings, 'collector_user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122 Safari/537.36'),
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        'Referer': 'https://www.douyin.com/',
     }
-    timeout = min(max(int(_setting(settings, 'collector_timeout_seconds', 8) or 8), 4), 12)
     try:
         async with httpx.AsyncClient(timeout=timeout, follow_redirects=True, headers=headers) as client:
             res = await client.get(url)
             if res.status_code >= 400:
                 warnings.append(f'{url}: 公开页面读取失败 HTTP {res.status_code}')
                 return None
-            # 避免大页面占内存，只解析前 300KB。
-            text = res.text[:300_000]
+            text = (res.text or '')[:200_000]
             title, desc = _title_from_html(text)
-    except Exception as exc:
+    except BaseException as exc:
         warnings.append(f'{url}: 公开页面读取失败：{str(exc)[:160]}')
         return None
     if not title and not desc:
-        warnings.append(f'{url}: 未读取到标题/描述，平台可能需要登录、客户端渲染或限制公开访问。')
+        warnings.append(f'{url}: 没读到标题/描述，平台可能需要登录、客户端渲染或限制公开访问。')
         return None
     item = {
         'id': str(uuid.uuid4()),
@@ -160,7 +159,7 @@ async def _fetch_html_meta(settings: Settings, url: str, account: Dict[str, Any]
         'tags': _split_keywords(account.get('tags'), 8),
         'thumbnail_url': '',
         'source_mode': 'public_html_safe',
-        'raw': {'description': desc, 'note': '轻量公开采集只能拿公开标题/描述，点赞评论等热度字段需官方 API 或第三方数据源。'},
+        'raw': {'description': desc, 'note': '轻量公开采集只能拿公开标题/描述；点赞评论收藏需官方 API、第三方数据平台或备注/CSV 导入。'},
         'warnings': [],
     }
     item['heat_score'] = heat_score(item) or 1
@@ -176,22 +175,19 @@ def _extract_number_from_text(patterns: List[str], text: str) -> int:
 
 
 def _manual_line_to_item(line: str, account: Dict[str, Any], keywords: List[str]) -> Dict[str, Any] | None:
-    """把运营粘贴的真实标题/链接/数据转成 item。用于没有企业认证时的真实数据兜底。"""
-    raw = _clean_text(line, 800)
+    raw = _clean_text(line, 1000)
     if not raw:
         return None
     urls = URL_RE.findall(raw)
     url = urls[0] if urls else str(account.get('url') or '')
-    title = raw
-    if url:
-        title = title.replace(url, '').strip(' -｜|') or url
+    title = raw.replace(url, '').strip(' -｜|') if url else raw
     item = {
         'id': str(uuid.uuid4()),
         'date': today_key(),
-        'platform': _platform_from_url(url, str(account.get('platform') or '手动真实数据')),
+        'platform': _platform_from_url(url, str(account.get('platform') or '真实数据导入')),
         'account_id': str(account.get('id') or ''),
-        'account_name': str(account.get('name') or '手动导入'),
-        'title': title[:180],
+        'account_name': str(account.get('name') or '真实数据导入'),
+        'title': title[:180] or url or '真实热度内容',
         'description': raw,
         'url': url,
         'published_at': '',
@@ -205,21 +201,12 @@ def _manual_line_to_item(line: str, account: Dict[str, Any], keywords: List[str]
         'keyword': ','.join([k for k in keywords if k and k in raw][:6]),
         'tags': [k for k in keywords if k and k in raw][:8],
         'thumbnail_url': '',
-        'source_mode': 'manual_real_data_line',
+        'source_mode': 'manual_or_csv_real_data_line',
         'raw': {'line': raw},
         'warnings': [],
     }
     item['heat_score'] = heat_score(item) or 1
     return item
-
-
-async def _collect_account(settings: Settings, account: Dict[str, Any], warnings: List[str]) -> List[Dict[str, Any]]:
-    url = str(account.get('url') or '').strip()
-    if not _is_real_url(url):
-        warnings.append(f"{account.get('name') or '未命名账号'}: 没有有效公开链接，跳过自动采集。")
-        return []
-    item = await _fetch_html_meta(settings, url, account, warnings)
-    return [item] if item else []
 
 
 def _dedupe_items(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -241,20 +228,22 @@ def _rank_top3(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 def _fallback_analysis(top_items: List[Dict[str, Any]]) -> Dict[str, Any]:
     topics = [str(x.get('title') or '')[:60] for x in top_items if x.get('title')]
     if not topics:
-        topics = ['马来西亚房产', '第二家园/MM2H', '吉隆坡/新山房产']
+        topics = ['暂无真实热度内容']
     return {
-        'summary': '热度雷达已稳定运行。当前未接官方/第三方数据源时，只展示系统实际读取到的公开标题/导入数据，不编造点赞评论。',
-        'content_angles': [f'围绕「{t}」做原创反打/解释内容' for t in topics[:5]],
+        'summary': '热度雷达已进入安全模式：不再让 Render 因公开网页采集而 500。当前只分析已保存账号、备注/CSV 里的真实数据，以及可选轻量公开标题。',
+        'content_angles': [f'围绕「{t}」做原创反打/解释内容' for t in topics[:5] if t != '暂无真实热度内容'],
         'customer_intents': ['税费/流程判断', '城市比较', '第二家园/身份规划', '教育家庭选盘'],
         'lead_magnets': ['马来西亚买房税费测算表', 'MM2H 与购房要求对照表', '吉隆坡 vs 新山选盘表'],
         'reply_hooks': ['这个问题很多家庭都会先卡在资格、预算和城市选择上。', '如果你是为了教育/身份/养老，选盘逻辑完全不同。'],
-        'next_actions': ['补充具体公开视频/笔记链接可提升采集成功率。', '要看到真实点赞/评论/收藏，建议后续接飞瓜/蝉妈妈/千瓜导出或官方 API。'],
+        'next_actions': ['先把竞品账号库固定下来。', '没有企业认证前，真实点赞/评论/收藏建议通过备注、CSV、飞瓜/蝉妈妈/千瓜导出接入。', '若要测试公开标题采集，在 Render 环境变量加 HEAT_RADAR_PUBLIC_FETCH=true。'],
     }
 
 
 async def analyze_heat_items(settings: Settings, top_items: List[Dict[str, Any]], keywords: List[str]) -> Dict[str, Any]:
     if not top_items:
         return _fallback_analysis([])
+    if str(os.getenv('HEAT_RADAR_AI_ANALYSIS', 'false')).lower() not in {'1', 'true', 'yes', 'on'}:
+        return _fallback_analysis(top_items)
     lines = []
     for i, item in enumerate(top_items[:12], start=1):
         lines.append(
@@ -278,7 +267,7 @@ async def analyze_heat_items(settings: Settings, top_items: List[Dict[str, Any]]
 }}
 """.strip()
     try:
-        payload = await _chat_json(settings, system, user, temperature=0.25, timeout=45)
+        payload = await _chat_json(settings, system, user, temperature=0.25, timeout=25)
         for key in ['content_angles', 'customer_intents', 'lead_magnets', 'reply_hooks', 'next_actions']:
             value = payload.get(key)
             if isinstance(value, str):
@@ -287,7 +276,7 @@ async def analyze_heat_items(settings: Settings, top_items: List[Dict[str, Any]]
                 payload[key] = []
         payload.setdefault('summary', '今日热度分析已完成。')
         return payload
-    except (DeepSeekError, Exception) as exc:
+    except (DeepSeekError, BaseException) as exc:
         analysis = _fallback_analysis(top_items)
         analysis['warnings'] = [f'AI 分析失败，已降级规则分析：{str(exc)[:200]}']
         return analysis
@@ -297,122 +286,138 @@ def _safe_memory_insert(memory: MemoryStore, collection: str, item: Dict[str, An
     try:
         memory.insert(collection, item)
         return True
-    except Exception as exc:
+    except BaseException as exc:
         warnings.append(f'{collection} 保存失败，已跳过：{str(exc)[:160]}')
         return False
 
 
 async def run_public_heat_radar(settings: Settings, memory: MemoryStore, req: Any) -> Dict[str, Any]:
-    """Render 安全版热度雷达：不会因为公开采集失败导致后端重启/前端断连。"""
+    """永不打挂 Render 的热度雷达安全入口。"""
     warnings: List[str] = []
     keywords = _split_keywords(getattr(req, 'keywords', []), 60)
     accounts: List[Dict[str, Any]] = []
 
-    if bool(getattr(req, 'include_saved_accounts', True)):
-        try:
-            saved = memory.list('heat_radar_accounts', limit=60)
-            if saved:
-                accounts.extend(saved)
-            else:
-                for comp in memory.list('competitor_accounts', limit=30):
-                    accounts.append({
-                        'id': comp.get('id'),
-                        'name': comp.get('name'),
-                        'platform': comp.get('platform'),
-                        'url': comp.get('url'),
-                        'tags': comp.get('positioning') or comp.get('notes') or '',
-                        'notes': comp.get('notes') or '',
-                    })
-        except Exception as exc:
-            warnings.append(f'读取账号库失败：{str(exc)[:160]}')
+    try:
+        if bool(getattr(req, 'include_saved_accounts', True)):
+            try:
+                saved = memory.list('heat_radar_accounts', limit=80)
+                if saved:
+                    accounts.extend(saved)
+                else:
+                    for comp in memory.list('competitor_accounts', limit=30):
+                        accounts.append({
+                            'id': comp.get('id'),
+                            'name': comp.get('name'),
+                            'platform': comp.get('platform'),
+                            'url': comp.get('url'),
+                            'tags': comp.get('positioning') or comp.get('notes') or '',
+                            'notes': comp.get('notes') or '',
+                        })
+            except BaseException as exc:
+                warnings.append(f'读取账号库失败：{str(exc)[:160]}')
 
-    for acc in getattr(req, 'accounts', []) or []:
-        try:
-            payload = acc.model_dump() if hasattr(acc, 'model_dump') else dict(acc)
-            accounts.append(payload)
-        except Exception:
-            continue
+        for acc in getattr(req, 'accounts', []) or []:
+            try:
+                payload = acc.model_dump() if hasattr(acc, 'model_dump') else dict(acc)
+                accounts.append(payload)
+            except BaseException:
+                continue
 
-    # 从 notes/tags 支持粘贴真实数据行：标题 链接 赞/评论/收藏。
-    manual_lines: List[str] = []
-    for acc in accounts:
-        text = str(acc.get('notes') or '')
-        for line in re.split(r'[\n]+', text):
-            if len(line.strip()) > 10 and (URL_RE.search(line) or any(k in line for k in ['赞', '评论', '收藏', '播放'])):
-                manual_lines.append(line.strip())
+        manual_lines: List[tuple[str, Dict[str, Any]]] = []
+        for acc in accounts:
+            text = str(acc.get('notes') or '')
+            for line in re.split(r'[\n]+', text):
+                line = line.strip()
+                if len(line) > 10 and (URL_RE.search(line) or any(k in line for k in ['赞', '评论', '收藏', '播放', '分享'])):
+                    manual_lines.append((line, acc))
 
-    # 去重账号，Render 免费实例先最多处理 5 个公开链接，避免前端断连。
-    deduped: List[Dict[str, Any]] = []
-    seen: set[str] = set()
-    for acc in accounts:
-        key = str(acc.get('url') or acc.get('name') or '').strip()
-        if not key or key in seen:
-            continue
-        seen.add(key)
-        deduped.append(acc)
+        deduped: List[Dict[str, Any]] = []
+        seen: set[str] = set()
+        for acc in accounts:
+            key = str(acc.get('url') or acc.get('name') or '').strip()
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            deduped.append(acc)
 
-    if not deduped and not manual_lines:
-        warnings.append('没有可采集的账号/链接。请先添加竞品账号主页、公开视频链接，或在备注里粘贴真实内容数据。')
+        collected: List[Dict[str, Any]] = []
+        for line, acc in manual_lines[:80]:
+            item = _manual_line_to_item(line, acc, keywords)
+            if item:
+                collected.append(item)
 
-    collected: List[Dict[str, Any]] = []
+        public_fetch_enabled = str(os.getenv('HEAT_RADAR_PUBLIC_FETCH', 'false')).lower() in {'1', 'true', 'yes', 'on'}
+        if public_fetch_enabled:
+            max_accounts = int(os.getenv('HEAT_RADAR_MAX_PUBLIC_ACCOUNTS', '2') or '2')
+            max_accounts = max(1, min(max_accounts, 3))
+            for acc in deduped[:max_accounts]:
+                url = str(acc.get('url') or '').strip()
+                if not _is_real_url(url):
+                    continue
+                item = await _fetch_html_meta(settings, url, acc, warnings)
+                if item:
+                    collected.append(item)
+        else:
+            if deduped:
+                warnings.append('安全模式已关闭公开网页抓取，避免 Render 免费实例 500。需要测试公开标题采集时设置 HEAT_RADAR_PUBLIC_FETCH=true。')
 
-    # 先把备注里的真实数据行转成 item，保证没有官方 API 时也能展示真实人工采集数据。
-    for line in manual_lines[:60]:
-        item = _manual_line_to_item(line, {'name': '备注导入', 'platform': '真实数据导入'}, keywords)
-        if item:
-            collected.append(item)
+        if not deduped and not manual_lines:
+            warnings.append('没有可采集的账号/链接。请先添加竞品账号主页、公开视频链接，或在备注里粘贴真实数据行。')
 
-    max_accounts = int(os.getenv('HEAT_RADAR_MAX_PUBLIC_ACCOUNTS', '5') or '5')
-    max_accounts = max(1, min(max_accounts, 8))
-    for acc in deduped[:max_accounts]:
-        try:
-            items = await _collect_account(settings, acc, warnings)
-            collected.extend(items)
-        except Exception as exc:
-            warnings.append(f"{acc.get('name') or acc.get('url')}: 采集失败：{str(exc)[:180]}")
+        collected = _dedupe_items(collected)
+        for item in collected:
+            item['heat_score'] = heat_score(item) or int(item.get('heat_score') or 1)
+            title_blob = ' '.join([str(item.get('title') or ''), str(item.get('description') or ''), str(item.get('keyword') or '')])
+            matched = [k for k in keywords if k and k in title_blob]
+            if matched:
+                item['matched_keywords'] = matched[:6]
 
-    collected = _dedupe_items(collected)
-    for item in collected:
-        item['heat_score'] = heat_score(item) or int(item.get('heat_score') or 1)
-        title_blob = ' '.join([str(item.get('title') or ''), str(item.get('description') or ''), str(item.get('keyword') or '')])
-        matched = [k for k in keywords if k and k in title_blob]
-        if matched:
-            item['matched_keywords'] = matched[:6]
+        top_items = _rank_top3(collected)
+        analysis = await analyze_heat_items(settings, top_items, keywords)
 
-    top_items = _rank_top3(collected)
-    analysis = await analyze_heat_items(settings, top_items, keywords)
+        saved_count = 0
+        if bool(getattr(req, 'save_to_memory', True)):
+            for item in collected[:120]:
+                if _safe_memory_insert(memory, 'heat_radar_items', item, warnings):
+                    saved_count += 1
+            _safe_memory_insert(memory, 'heat_daily_top3', {
+                'date': today_key(),
+                'summary': analysis.get('summary', ''),
+                'top_items': top_items,
+                'analysis': analysis,
+                'keywords': keywords,
+                'accounts_count': len(deduped),
+                'raw': {'warnings': warnings[:80]},
+            }, warnings)
+            try:
+                memory.save_learning_event({
+                    'event_type': 'heat_radar_public_crawl_safe_mode',
+                    'title': f'{today_key()} 热度雷达安全采集',
+                    'payload': {'top_items': top_items, 'analysis': analysis, 'warnings': warnings[:80]},
+                })
+            except BaseException as exc:
+                warnings.append(f'学习事件保存失败：{str(exc)[:160]}')
 
-    saved_count = 0
-    if bool(getattr(req, 'save_to_memory', True)):
-        for item in collected[:120]:
-            if _safe_memory_insert(memory, 'heat_radar_items', item, warnings):
-                saved_count += 1
-        _safe_memory_insert(memory, 'heat_daily_top3', {
-            'date': today_key(),
-            'summary': analysis.get('summary', ''),
+        return {
+            'ok': True,
+            'source_mode': 'heat_radar_safe_mode_no_crash',
+            'accounts_count': len(deduped),
+            'collected_count': len(collected),
+            'saved_count': saved_count,
             'top_items': top_items,
             'analysis': analysis,
-            'keywords': keywords,
-            'accounts_count': len(deduped),
-            'raw': {'warnings': warnings[:80]},
-        }, warnings)
-        try:
-            memory.save_learning_event({
-                'event_type': 'heat_radar_public_crawl',
-                'title': f'{today_key()} 自动热度雷达',
-                'payload': {'top_items': top_items, 'analysis': analysis, 'warnings': warnings[:80]},
-            })
-        except Exception as exc:
-            warnings.append(f'学习事件保存失败：{str(exc)[:160]}')
-
-    return {
-        'ok': True,
-        'source_mode': 'public_crawler_safe_no_enterprise_api',
-        'accounts_count': len(deduped),
-        'collected_count': len(collected),
-        'saved_count': saved_count,
-        'top_items': top_items,
-        'analysis': analysis,
-        'warnings': warnings[:80],
-        'next_actions': analysis.get('next_actions') or _fallback_analysis(top_items).get('next_actions'),
-    }
+            'warnings': warnings[:80],
+            'next_actions': analysis.get('next_actions') or _fallback_analysis(top_items).get('next_actions'),
+        }
+    except BaseException as exc:
+        return {
+            'ok': False,
+            'source_mode': 'heat_radar_hard_guard',
+            'accounts_count': 0,
+            'collected_count': 0,
+            'saved_count': 0,
+            'top_items': [],
+            'analysis': _fallback_analysis([]),
+            'warnings': [f'热度雷达异常已兜底：{str(exc)[:240]}'],
+            'next_actions': ['后端已兜底，不会再打挂 Render。', '先添加具体链接或在备注里粘真实数据行。', '后续接官方/第三方数据源后再打开自动采集。'],
+        }

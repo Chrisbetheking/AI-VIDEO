@@ -803,14 +803,14 @@ def api_heat_radar_daily_top3(memory: MemoryStore = Depends(get_memory)) -> list
     return memory.list('heat_daily_top3', limit=30)
 
 
-@app.post('/api/heat-radar/run-public-crawl', response_model=HeatRadarRunResponse)
+@app.post('/api/heat-radar/run-public-crawl')
 async def api_heat_radar_run_public_crawl(req: HeatRadarRunRequest, settings: Settings = Depends(get_settings), memory: MemoryStore = Depends(get_memory)) -> dict:
     cron_token = os.getenv('HEAT_RADAR_CRON_TOKEN', '').strip()
     if cron_token and req.token != cron_token:
         raise HTTPException(status_code=403, detail='HEAT_RADAR_CRON_TOKEN 不匹配。')
     try:
         return await run_public_heat_radar(settings, memory, req)
-    except Exception as exc:
+    except BaseException as exc:
         # 热度采集不能把整个后端打挂。即使公开平台限制/网络失败，也返回可展示结果。
         return {
             'ok': False,
