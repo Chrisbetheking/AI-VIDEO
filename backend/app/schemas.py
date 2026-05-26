@@ -770,6 +770,53 @@ class HeatRadarItem(BaseModel):
     raw: Dict[str, Any] = Field(default_factory=dict)
 
 
+
+
+class HeatRadarRewriteRequest(BaseModel):
+    heat_items: List[Dict[str, Any]] = Field(default_factory=list, max_length=10)
+    industry: str = Field(default='', max_length=160)
+    audience: str = Field(default='', max_length=2000)
+    selling_points: str = Field(default='', max_length=6000)
+    conversion_goal: str = Field(default='私信咨询 / 领取资料包 / 加微信顾问沟通', max_length=1000)
+    lead_magnet: str = Field(default='', max_length=500)
+    style: str = Field(default='老板口播、真实可信、强钩子、强转化', max_length=300)
+    target_duration_seconds: int = Field(default=35, ge=10, le=180)
+    platform: str = Field(default='douyin', max_length=80)
+
+
+class HeatRadarRewriteVariant(BaseModel):
+    source_topic: str = ''
+    target_audience: str = ''
+    customer_intent: str = ''
+    content_goal: str = ''
+    conversion_goal: str = ''
+    lead_magnet: str = ''
+    title: str = ''
+    hook: str = ''
+    script: str = ''
+    caption: str = ''
+    tags: List[str] = Field(default_factory=list)
+    shots: List[str] = Field(default_factory=list)
+    imitation_notes: List[str] = Field(default_factory=list)
+    differentiation: List[str] = Field(default_factory=list)
+    risk_notes: List[str] = Field(default_factory=list)
+    source_evidence: List[str] = Field(default_factory=list)
+    adaptation_map: List[str] = Field(default_factory=list)
+
+
+class HeatRadarRewriteResponse(BaseModel):
+    overview: str = ''
+    chosen_target: str = ''
+    target_reason: str = ''
+    content_objective: str = ''
+    primary_intent: str = ''
+    lead_magnet: str = ''
+    rewrite_strategy: List[str] = Field(default_factory=list)
+    source_evidence: List[str] = Field(default_factory=list)
+    variants: List[HeatRadarRewriteVariant] = Field(default_factory=list)
+    publish_checklist: List[str] = Field(default_factory=list)
+    warnings: List[str] = Field(default_factory=list)
+
 class HeatRadarRunResponse(BaseModel):
     ok: bool = True
     source_mode: str = ''

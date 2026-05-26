@@ -83,6 +83,8 @@ from app.schemas import (
     HeatRadarAccountInput,
     HeatRadarRunRequest,
     HeatRadarRunResponse,
+    HeatRadarRewriteRequest,
+    HeatRadarRewriteResponse,
 )
 from app.services.ad_analysis import analyze_ad
 from app.services.cover import create_cover
@@ -102,7 +104,7 @@ from app.services.video_edit import apply_video_edit
 from app.services.auto_collector import run_auto_collection
 from app.services.one_click import generate_one_click, revise_one_click
 from app.services.graphic_post import create_graphic_post
-from app.services.heat_radar import run_public_heat_radar
+from app.services.heat_radar import run_public_heat_radar, generate_heat_radar_rewrite
 
 app = FastAPI(title='AI-VIDEO 正式版 API', version='1.0.0')
 settings = get_settings()
@@ -833,6 +835,25 @@ async def api_heat_radar_run_public_crawl(req: HeatRadarRunRequest, settings: Se
             'fallback_used': True,
         }
 
+
+
+
+@app.post('/api/heat-radar/rewrite', response_model=HeatRadarRewriteResponse)
+async def api_heat_radar_rewrite(req: HeatRadarRewriteRequest, settings: Settings = Depends(get_settings), memory: MemoryStore = Depends(get_memory)) -> HeatRadarRewriteResponse:
+    result = await generate_heat_radar_rewrite(settings, req)
+    try:
+        memory.save_script_version({
+            'title': result.get('variants', [{}])[0].get('title', '热度雷达仿写方案') if isinstance(result, dict) else '热度雷达仿写方案',
+            'hook': result.get('variants', [{}])[0].get('hook', '') if isinstance(result, dict) else '',
+            'script': result.get('variants', [{}])[0].get('script', '') if isinstance(result, dict) else '',
+            'description': result.get('variants', [{}])[0].get('caption', '') if isinstance(result, dict) else '',
+            'tags': result.get('variants', [{}])[0].get('tags', []) if isinstance(result, dict) else [],
+            'source': 'heat_radar_rewrite',
+            'raw': {'request': req.model_dump(), 'response': result},
+        })
+    except Exception:
+        pass
+    return HeatRadarRewriteResponse(**result)
 
 @app.post('/api/generate-copy', response_model=GeneratedCopy)
 async def api_generate_copy(req: CopyRequest, settings: Settings = Depends(get_settings), kb: KnowledgeBase = Depends(get_kb), memory: MemoryStore = Depends(get_memory)) -> GeneratedCopy:

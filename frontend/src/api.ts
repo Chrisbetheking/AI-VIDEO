@@ -444,6 +444,41 @@ export interface HeatRadarRunResponse {
   next_actions: string[]
 }
 
+
+export interface HeatRadarRewriteVariant {
+  source_topic: string
+  target_audience: string
+  customer_intent: string
+  content_goal: string
+  conversion_goal: string
+  lead_magnet: string
+  title: string
+  hook: string
+  script: string
+  caption: string
+  tags: string[]
+  shots: string[]
+  imitation_notes: string[]
+  differentiation: string[]
+  risk_notes: string[]
+  source_evidence?: string[]
+  adaptation_map?: string[]
+}
+
+export interface HeatRadarRewriteResponse {
+  overview: string
+  chosen_target: string
+  target_reason: string
+  content_objective: string
+  primary_intent: string
+  lead_magnet: string
+  rewrite_strategy: string[]
+  source_evidence?: string[]
+  variants: HeatRadarRewriteVariant[]
+  publish_checklist: string[]
+  warnings: string[]
+}
+
 export interface OneClickGenerateRequest {
   industry: string
   audience: string

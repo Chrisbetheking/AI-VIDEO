@@ -1052,3 +1052,199 @@ async def run_public_heat_radar(settings: Settings, memory: MemoryStore, req: An
         'douyin_cookie_configured': _has_douyin_cookie(),
         'requires_cookie': any('DOUYIN_WEB_COOKIE' in w or '登录 Cookie' in w or '验证' in w for w in warnings),
     }
+
+
+
+def _safe_list(value: Any, fallback: List[str] | None = None, limit: int = 8) -> List[str]:
+    if isinstance(value, list):
+        items = value
+    elif isinstance(value, str):
+        items = re.split(r'[\n；;]+', value)
+    else:
+        items = []
+    out: List[str] = []
+    for item in items:
+        text = _clean_text(item, 240)
+        if text and text not in out:
+            out.append(text)
+        if len(out) >= limit:
+            break
+    return out or (fallback or [])
+
+
+def _heat_items_brief(items: List[Dict[str, Any]]) -> str:
+    rows: List[str] = []
+    for idx, item in enumerate(items[:8], 1):
+        title = _clean_text(item.get('topic') or item.get('title') or '未命名热度', 180)
+        platform = item.get('platform', '')
+        account = item.get('account_name', '')
+        intent = _clean_text(item.get('intent') or item.get('customer_intent') or '', 220)
+        signal = _clean_text(item.get('signal') or item.get('description') or '', 400)
+        score = item.get('score') or item.get('heat_score') or 0
+        url = item.get('source_url') or item.get('url') or ''
+        evidence = []
+        if score:
+            evidence.append(f'热度分 {score}')
+        for label, key in [('赞', 'like_count'), ('评', 'comment_count'), ('藏', 'favorite_count'), ('转', 'share_count'), ('播', 'view_count')]:
+            value = item.get(key)
+            if value:
+                evidence.append(f'{label}{value}')
+        rows.append(
+            f"{idx}. 【热点来源】平台:{platform}｜账号:{account}｜标题:{title}\n"
+            f"   【热度证据】{' / '.join(evidence) or signal or '已采集到公开内容'}\n"
+            f"   【客户意图】{intent or '待判断'}\n"
+            f"   【原始信号】{signal}\n"
+            f"   【链接】{url}"
+        )
+    return '\n'.join(rows)
+
+
+def _fallback_rewrite_payload(req: Any, reason: str = '') -> Dict[str, Any]:
+    items = list(getattr(req, 'heat_items', []) or [])
+    lead_magnet_default = str(getattr(req, 'lead_magnet', '') or '《马来西亚置业避坑报告》')
+    audience_default = str(getattr(req, 'audience', '') or '有马来西亚置业、第二家园、子女教育或资产配置需求的华人家庭')
+    conversion_default = str(getattr(req, 'conversion_goal', '') or f'私信领取{lead_magnet_default}，进入顾问需求筛选')
+    source_evidence: List[str] = []
+    variants: List[Dict[str, Any]] = []
+    source_items = items[:3] or [{'topic': getattr(req, 'industry', '') or '马来西亚置业避坑', 'intent': '资格/预算/流程判断', 'signal': '行业档案通用热点'}]
+    for idx, first in enumerate(source_items, 1):
+        topic = str(first.get('topic') or first.get('title') or getattr(req, 'industry', '') or '马来西亚置业避坑')
+        intent = str(first.get('intent') or '资格/预算/流程判断')
+        lead_magnet = str(first.get('lead_magnet') or lead_magnet_default)
+        signal = str(first.get('signal') or first.get('description') or '')
+        score = first.get('score') or first.get('heat_score') or 0
+        url = str(first.get('source_url') or first.get('url') or '')
+        evidence_line = f'{idx}. {first.get("platform", "热度来源")} / {first.get("account_name", "公开来源")} / {topic} / 热度{score} / {signal[:120]} / {url}'
+        source_evidence.append(evidence_line)
+        hook = f'刷到“{topic}”这种内容，先别急着跟风，真正要看的是这 3 个判断。'
+        script = (
+            f'{hook}\n'
+            f'第一，先确认它对应的真实需求是什么。很多人看热闹，其实背后问的是“{intent}”。\n'
+            f'第二，不要只学标题，要把问题换成自己的判断框架：目的、预算、城市、身份和长期持有成本。\n'
+            f'第三，结尾不要硬卖项目，要给用户一个能继续了解的入口。比如先领一份{lead_magnet}，再判断自己适不适合看房。\n'
+            f'所以如果你也在关注“{topic}”，可以先私信我“报告”，我把这份资料发你，先把条件和常见坑看清楚。'
+        )
+        variants.append({
+            'source_topic': topic,
+            'target_audience': audience_default[:260],
+            'customer_intent': intent,
+            'content_goal': '把采集到的热度话题改写成原创解释型内容，建立专业信任',
+            'conversion_goal': conversion_default,
+            'lead_magnet': lead_magnet,
+            'title': f'{topic}，别只看热闹，先看这 3 点',
+            'hook': hook,
+            'script': script,
+            'caption': f'这条是根据今天热度雷达里的“{topic}”重新做的原创解释，不照搬内容，只拆解背后的客户问题。需要{lead_magnet}，私信“报告”。',
+            'tags': ['马来西亚房产', '第二家园', '海外置业', '买房避坑'],
+            'shots': ['展示热度关键词卡片', '顾问正面口播解释', '三点判断框架卡片', '结尾展示资料包领取提示'],
+            'imitation_notes': ['参考热点的提问角度，不复制标题和原文', '保留“问题入口 + 三点判断 + 资料承接”的结构'],
+            'differentiation': ['加入自己的资格判断框架', '用资料包承接而不是硬广卖项目'],
+            'risk_notes': ['不承诺收益', '不搬运竞品素材', '不暗示一定能办理成功'],
+            'source_evidence': [evidence_line],
+            'adaptation_map': [f'热点问题：{topic}', f'改写角度：把围观热度转成顾问判断', f'承接方式：{lead_magnet}'],
+        })
+    return {
+        'overview': '已按当前热度雷达内容生成规则版原创仿写；每条稿子都绑定了采集到的热点来源，不再空口改写。',
+        'chosen_target': audience_default[:260],
+        'target_reason': f'当前热度集中在“{source_items[0].get("topic") or source_items[0].get("title") or "行业热点"}”，适合用问题解释和资料包承接筛选客户。',
+        'content_objective': '从真实热点切入，做原创解释内容，引导用户领取资料包并进入咨询。',
+        'primary_intent': str(source_items[0].get('intent') or '资格/预算/流程判断'),
+        'lead_magnet': lead_magnet_default,
+        'rewrite_strategy': ['先引用热度雷达里的真实热点作为选题依据', '只迁移结构和客户问题，不复制原文/画面', '用自己的顾问判断框架重写', '结尾用网页资料包承接'],
+        'source_evidence': source_evidence,
+        'variants': variants[:3],
+        'publish_checklist': ['标题必须原创', '口播里不要说“抄/仿某账号”', '评论区置顶资料关键词', '发布后把评论问题回流热度雷达'],
+        'warnings': [reason] if reason else [],
+    }
+
+
+async def generate_heat_radar_rewrite(settings: Settings, req: Any) -> Dict[str, Any]:
+    items = list(getattr(req, 'heat_items', []) or [])
+    if not items:
+        return _fallback_rewrite_payload(req, '当前没有热度内容，已按行业档案生成通用方案。')
+
+    heat_brief = _heat_items_brief(items)
+    lead_magnet = getattr(req, 'lead_magnet', '') or '网页资料包/避坑报告/预算测算表'
+    system = (
+        '你是短视频增长编导和获客策略负责人。你的任务是读取“当前热度雷达”的真实内容，'
+        '判断目标客户和客户意图，再把高热话题改写成原创口播/图文。必须只迁移结构和选题，不照抄原文、不搬运素材。'
+        '输出严格 JSON。'
+    )
+    user = f'''
+当前业务：{getattr(req, 'industry', '') or '马来西亚房产置业 / 第二家园 / 国际学校'}
+目标客户档案：{getattr(req, 'audience', '') or '华人家庭、企业主、高净值家庭、留学家庭、养老度假人群'}
+核心卖点/行业档案：{getattr(req, 'selling_points', '')[:3000]}
+转化目标：{getattr(req, 'conversion_goal', '') or '私信咨询 / 领取资料包 / 加微信顾问沟通'}
+承接资料包：{lead_magnet}
+内容风格：{getattr(req, 'style', '') or '老板口播、真实可信、强钩子、强转化'}
+目标时长：{getattr(req, 'target_duration_seconds', 35)} 秒
+平台：{getattr(req, 'platform', 'douyin')}
+
+当前热度雷达 Top 内容：
+{heat_brief}
+
+请输出 JSON：
+{{
+  "overview":"一句话说明这批热度该怎么跟",
+  "chosen_target":"本次最应该打的目标客户",
+  "target_reason":"为什么选这个目标",
+  "content_objective":"这条内容要完成什么转化任务",
+  "primary_intent":"客户核心意图",
+  "lead_magnet":"建议承接资料包",
+  "rewrite_strategy":["仿写策略/结构迁移点"],
+  "source_evidence":["用于改写的热点依据：平台/账号/标题/热度/链接"],
+  "variants":[{{
+    "source_topic":"参考的热度话题",
+    "target_audience":"这条内容打谁",
+    "customer_intent":"这群人为什么会被这条内容吸引",
+    "content_goal":"内容目标",
+    "conversion_goal":"转化目标",
+    "lead_magnet":"承接资料包",
+    "title":"原创标题",
+    "hook":"前三秒钩子",
+    "script":"完整口播稿，适合 30-45 秒，强钩子，中文自然口语，不照抄原内容",
+    "caption":"发布简介",
+    "tags":["话题标签"],
+    "shots":["镜头/图文页建议"],
+    "imitation_notes":["参考结构，不复制内容"],
+    "differentiation":["我们和竞品不同的角度"],
+    "risk_notes":["合规/表达风险"],
+    "source_evidence":["这条稿子参考了哪条热度内容，必须包含标题/平台/热度信号"],
+    "adaptation_map":["原热点的钩子是什么", "我们改成什么原创角度", "用哪个资料承接"]
+  }}],
+  "publish_checklist":["发布前检查事项"],
+  "warnings":["注意事项"]
+}}
+
+要求：
+1. variants 输出 2-3 条，第一条最推荐。
+2. 不要出现“仿某某账号”这种公开表达，内部可以叫参考结构。
+3. 目标一定要明确到人群和场景，例如“关注子女教育和第二家园身份的华人家庭”。
+4. 结尾必须用资料包/网页报告承接。
+5. 不承诺收益、不制造移民成功承诺。
+'''.strip()
+    try:
+        payload = await _chat_json(settings, system, user, temperature=0.72, timeout=90)
+        variants = payload.get('variants') if isinstance(payload, dict) else []
+        if not isinstance(variants, list) or not variants:
+            raise ValueError('empty variants')
+        payload['rewrite_strategy'] = _safe_list(payload.get('rewrite_strategy'), ['保留热度问题入口', '换成自己的顾问判断框架', '用资料包承接'], 8)
+        payload['source_evidence'] = _safe_list(payload.get('source_evidence'), _heat_items_brief(items).split('\n')[:6], 8)
+        payload['publish_checklist'] = _safe_list(payload.get('publish_checklist'), ['标题原创', '结尾引导资料包', '评论区置顶关键词'], 8)
+        payload['warnings'] = _safe_list(payload.get('warnings'), [], 5)
+        cleaned_variants = []
+        for v in variants[:3]:
+            if not isinstance(v, dict):
+                continue
+            v['tags'] = _safe_list(v.get('tags'), ['马来西亚房产', '第二家园', '海外置业'], 8)
+            v['shots'] = _safe_list(v.get('shots'), ['顾问正面口播', '资料包画面', '关键词卡片'], 8)
+            v['imitation_notes'] = _safe_list(v.get('imitation_notes'), ['只参考结构，不复制原文'], 6)
+            v['differentiation'] = _safe_list(v.get('differentiation'), ['加入自己的顾问判断和资料包承接'], 6)
+            v['risk_notes'] = _safe_list(v.get('risk_notes'), ['不承诺收益，不搬运竞品素材'], 6)
+            v['source_evidence'] = _safe_list(v.get('source_evidence'), [_heat_items_brief(items[:1])], 4)
+            v['adaptation_map'] = _safe_list(v.get('adaptation_map'), ['热点问题 → 原创判断框架', '竞品结构 → 自己的顾问视角', '围观流量 → 资料包承接'], 6)
+            cleaned_variants.append(v)
+        payload['variants'] = cleaned_variants or _fallback_rewrite_payload(req).get('variants')
+        return payload
+    except Exception as exc:
+        return _fallback_rewrite_payload(req, f'AI 仿写失败，已使用规则版：{str(exc)[:240]}')
