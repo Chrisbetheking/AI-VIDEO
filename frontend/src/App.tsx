@@ -42,6 +42,21 @@ type ModuleKey = 'dashboard' | 'monitor' | 'lead' | 'oneClick' | 'collector' | '
 type AssetClipSetting = { order: number; image_seconds: number; video_start: number; video_end: number }
 type AssetFolderKey = 'all' | 'self' | 'provided' | 'image' | 'collected' | 'ai'
 
+type LeadMagnetReport = {
+  id: string
+  title: string
+  keyword: string
+  subtitle: string
+  audience: string
+  promise: string
+  outline: string[]
+  landingTitle: string
+  landingSubtitle: string
+  cta: string
+  replyScript: string
+  shootingIdea: string
+}
+
 function Field({ label, children, hint }: { label: string; children: ReactNode; hint?: string }) {
   return <label className="field"><span>{label}</span>{children}{hint && <em>{hint}</em>}</label>
 }
@@ -55,6 +70,54 @@ function Pill({ children, tone = 'blue' }: { children: ReactNode; tone?: 'blue' 
 }
 
 function Empty({ children }: { children: ReactNode }) { return <div className="empty">{children}</div> }
+
+
+function ReportPreview({ reports, activeIndex, onSelect, onCopy, onUse, copyStatus, radarGroups, shootingTasks }: {
+  reports: LeadMagnetReport[]
+  activeIndex: number
+  onSelect: (index: number) => void
+  onCopy: () => void
+  onUse: (report?: LeadMagnetReport) => void
+  copyStatus: string
+  radarGroups: { highIntent: string[]; contentHooks: string[]; broadTraffic: string[] }
+  shootingTasks: { title: string; hook: string; shots: string[]; cta: string }[]
+}) {
+  const report = reports[Math.min(activeIndex, Math.max(0, reports.length - 1))]
+  if (!report) return <div className="reportWorkbench"><Empty>先在行业档案里配置私域资料包，比如《避坑报告》《预算测算表》《择校清单》。</Empty></div>
+  return <div className="reportWorkbench">
+    <div className="reportHead">
+      <div>
+        <span>网页资料包 / 获客报告</span>
+        <h3>微信未接入也能先演示承接链路</h3>
+        <p>把报告做成网页预览页，视频/图文结尾引导私信关键词；后续接微信时直接把这里的报告换成自动发送。</p>
+      </div>
+      <div className="reportActions">
+        <button className="btn ghost" onClick={onCopy}>{copyStatus || '复制报告页文案'}</button>
+        <button className="btn primary" onClick={() => onUse(report)}>用这个报告生成内容</button>
+      </div>
+    </div>
+    <div className="reportGrid">
+      <div className="reportList">
+        {reports.map((item, index) => <button key={item.id} className={index === activeIndex ? 'active' : ''} onClick={() => onSelect(index)}>
+          <b>{item.title}</b>
+          <span>私信关键词：{item.keyword}</span>
+        </button>)}
+      </div>
+      <div className="reportLandingMock">
+        <div className="mockTop"><span>网页报告预览</span><em>未接微信时临时承接</em></div>
+        <h2>{report.landingTitle}</h2>
+        <p>{report.landingSubtitle}</p>
+        <div className="reportOutline">{report.outline.map((x, i) => <div key={x}><strong>{i + 1}</strong><span>{x}</span></div>)}</div>
+        <div className="reportCta"><b>{report.cta}</b><small>{report.replyScript}</small></div>
+      </div>
+      <div className="advisorCards">
+        <div><h4>关键词雷达</h4><p><b>高意向：</b>{radarGroups.highIntent.join(' / ') || '暂无'}</p><p><b>内容钩子：</b>{radarGroups.contentHooks.join(' / ') || '暂无'}</p><p><b>泛流量：</b>{radarGroups.broadTraffic.join(' / ') || '暂无'}</p></div>
+        <div><h4>今天拍什么</h4>{shootingTasks.slice(0, 3).map(task => <p key={task.title}>· {task.title}<br /><small>{task.hook}</small></p>)}</div>
+        <div><h4>拍摄提示</h4><p>{report.shootingIdea}</p></div>
+      </div>
+    </div>
+  </div>
+}
 
 
 class AppErrorBoundary extends Component<{ children: ReactNode }, { error: string }> {
@@ -257,6 +320,94 @@ function formatBytes(size: number) {
   return `${(size / 1024 / 1024).toFixed(1)}MB`
 }
 
+function splitProfileLines(value: string, fallback: string[] = []) {
+  const items = safeText(value).split(/[\n,，;；]+/).map(x => x.replace(/^[-·\d.、\s]+/, '').trim()).filter(Boolean)
+  return items.length ? items : fallback
+}
+
+
+function cleanReportTitle(value: string) {
+  return safeText(value).replace(/[《》]/g, '').replace(/报告|清单|表|流程图/g, '').trim()
+}
+
+function buildLeadMagnetReports(params: {
+  privateDomainAssets: string
+  businessPositioning: string
+  industry: string
+  audience: string
+  trendKeywords: string
+  customerSegments: string
+  reportDelivery: string
+}): LeadMagnetReport[] {
+  const assetNames = splitProfileLines(params.privateDomainAssets, [
+    '马来西亚第二家园避坑报告',
+    '马来西亚国际学校择校清单',
+    '海外置业预算测算表',
+    '马来西亚买房完整流程图',
+    '线下说明会名额'
+  ]).slice(0, 6)
+  const keywords = splitProfileLines(params.trendKeywords, ['第二家园', '海外置业', '国际学校', '预算测算', '避坑'])
+  const segments = splitProfileLines(params.customerSegments, [params.audience || '目标客户'])
+  const baseIndustry = params.businessPositioning || params.industry || '行业获客'
+  return assetNames.map((name, index) => {
+    const clean = cleanReportTitle(name) || `资料包 ${index + 1}`
+    const keyword = keywords[index % keywords.length] || clean
+    const segment = segments[index % segments.length] || params.audience || '目标客户'
+    const ctaWord = keyword.includes('预算') ? '预算' : keyword.includes('学校') ? '学校' : keyword.includes('身份') || keyword.includes('第二家园') ? '身份' : '报告'
+    return {
+      id: `report_${index}`,
+      title: name,
+      keyword: ctaWord,
+      subtitle: `${clean}｜先收藏，咨询前直接对照。`,
+      audience: segment,
+      promise: `用一份网页资料先筛出真正有需求的人，再引导私信/微信领取完整版本。`,
+      outline: [
+        `适合谁：${segment}`,
+        `先看什么：${keyword} 相关条件、预算和风险`,
+        `避开什么：只看价格、不看身份/教育/长期规划`,
+        `怎么判断：用 3 个问题筛选真实需求`,
+        `下一步：私信“${ctaWord}”领取完整清单`
+      ],
+      landingTitle: clean.length > 18 ? clean : `${clean}｜领取前先看这 5 点`,
+      landingSubtitle: `${baseIndustry}，先用网页版资料承接线索，微信未接入时也能演示完整获客链路。`,
+      cta: `评论区或私信发送「${ctaWord}」，领取完整资料并做需求筛选。`,
+      replyScript: `收到，我先把《${clean}》网页版发你。你更关注【身份/教育/预算/项目】哪一块？我按你的情况发对应清单。`,
+      shootingIdea: `拍摄一条“领取${clean}前先看这 3 点”的口播，画面用报告预览页 + 房产/学校/顾问素材，结尾引导私信“${ctaWord}”。`
+    }
+  })
+}
+
+function buildReportLandingCopy(report: LeadMagnetReport | undefined) {
+  if (!report) return ''
+  return [
+    report.landingTitle,
+    report.landingSubtitle,
+    '',
+    '页面结构：',
+    ...report.outline.map((x, i) => `${i + 1}. ${x}`),
+    '',
+    `CTA：${report.cta}`,
+    `私信回复：${report.replyScript}`
+  ].join('\n')
+}
+
+
+async function copyTextToClipboard(text: string) {
+  try {
+    await navigator.clipboard?.writeText(text)
+    return true
+  } catch {
+    const el = document.createElement('textarea')
+    el.value = text
+    document.body.appendChild(el)
+    el.select()
+    document.execCommand('copy')
+    document.body.removeChild(el)
+    return true
+  }
+}
+
+
 function readMediaDuration(event: any, fallback = 0) {
   const el = event?.currentTarget || event?.target
   const value = Number(el?.duration)
@@ -375,6 +526,8 @@ function AppInner() {
   const [leadPlan, setLeadPlan] = useState<LeadAcquisitionPlanResponse | null>(null)
   const [leadChannels, setLeadChannels] = useState<string[]>(['抖音截留获客', '博主联动流量', '采集目标客户', '自动监听', '自动回复', '目标用户导流私域'])
   const [leadFixedOptions, setLeadFixedOptions] = useState('子女教育家庭、企业主资产配置、养老度假、海外第二居所、华人家庭、马来西亚城市、预算区间、国际学校、第二家园身份')
+  const [activeReportIndex, setActiveReportIndex] = useState(0)
+  const [reportCopyStatus, setReportCopyStatus] = useState('')
 
   const materialAssets = useMemo(() => assets.map((a, i) => normalizeAsset(a, i)).filter(a => Boolean(a.id && a.url) && !safeText(a.filename).startsWith('collected_')), [assets])
   const collectedVideos = useMemo(() => assets.map((a, i) => normalizeAsset(a, i)).filter(a => Boolean(a.id && a.url) && a.kind === 'video' && safeText(a.filename).startsWith('collected_')), [assets])
@@ -415,7 +568,31 @@ function AppInner() {
     `拍摄提示：${shootingBrief}`,
     `承接方式：${reportDelivery}`,
   ].filter(Boolean).join('\n'), [businessPositioning, industry, customerSegments, trendKeywords, privateDomainAssets, contentPillars, shootingBrief, reportDelivery])
-  const sellingPointsWithProfile = useMemo(() => `${sellingPoints}\n\n【行业获客档案】\n${profileContext}`.trim(), [sellingPoints, profileContext])
+  const leadMagnetReports = useMemo(() => buildLeadMagnetReports({ privateDomainAssets, businessPositioning, industry, audience, trendKeywords, customerSegments, reportDelivery }), [privateDomainAssets, businessPositioning, industry, audience, trendKeywords, customerSegments, reportDelivery])
+  const activeReport = leadMagnetReports[Math.min(activeReportIndex, Math.max(0, leadMagnetReports.length - 1))]
+  const reportLandingCopy = useMemo(() => buildReportLandingCopy(activeReport), [activeReport])
+  const radarKeywordGroups = useMemo(() => {
+    const keywords = splitProfileLines(trendKeywords, ['海外置业', '第二家园', '国际学校', '预算', '避坑'])
+    return {
+      highIntent: keywords.filter(x => /预算|条件|流程|申请|推荐|说明会|咨询|办理/.test(x)).slice(0, 6),
+      contentHooks: keywords.filter(x => /避坑|坑|真相|费用|适合|对比|不要|后悔/.test(x)).slice(0, 6),
+      broadTraffic: keywords.filter(x => !/预算|条件|流程|申请|推荐|说明会|咨询|办理|避坑|坑|真相|费用|适合|对比|不要|后悔/.test(x)).slice(0, 8),
+    }
+  }, [trendKeywords])
+  const shootingTaskSeeds = useMemo(() => {
+    const pillars = splitProfileLines(contentPillars, ['避坑类', '预算类', '流程类'])
+    const reports = leadMagnetReports.length ? leadMagnetReports : []
+    return pillars.slice(0, 4).map((pillar, index) => {
+      const report = reports[index % Math.max(1, reports.length)]
+      return {
+        title: `${pillar.replace(/：.*$/, '')}｜${report?.landingTitle || '先讲一个客户最容易忽略的问题'}`,
+        hook: report ? `先别急着咨询，${report.title.replace(/[《》]/g, '')}里这 3 点先看懂。` : '客户最常踩的坑，其实不是预算，而是顺序错了。',
+        shots: ['顾问正面口播', '素材/B-roll 快切', '资料包网页预览', '结尾私信关键词 CTA'],
+        cta: report?.cta || '私信“报告”领取完整资料。'
+      }
+    })
+  }, [contentPillars, leadMagnetReports])
+  const sellingPointsWithProfile = useMemo(() => `${sellingPoints}\n\n【行业获客档案】\n${profileContext}\n\n【网页资料包/报告承接】\n${reportLandingCopy}`.trim(), [sellingPoints, profileContext, reportLandingCopy])
   const learningSummary = memoryContext?.learning_summary || '保存客户定位、竞品账号和采集结果后，AI 会在文案、雷达、投流建议里自动读取。'
   const currentScript = copy.script || ''
   const currentVideoName = video?.video_name || extract?.collected_video_name || ''
@@ -663,6 +840,35 @@ function AppInner() {
     setLastHandoff('获客自动化作战图已生成。同行采集、文案生产、自动监听和私域承接会读取这套策略。')
     setActive('lead')
     await reloadMemoryContext()
+  }
+
+
+  async function copyActiveReportLanding() {
+    if (!activeReport) return
+    await copyTextToClipboard(reportLandingCopy)
+    setReportCopyStatus('已复制网页报告文案/私信话术')
+    setTimeout(() => setReportCopyStatus(''), 1800)
+  }
+
+  function useReportForContent(report = activeReport) {
+    if (!report) return
+    setConversionGoal(`私信「${report.keyword}」领取${report.title} / 需求筛选 / 加微信顾问沟通`)
+    setOneClickInstruction(`围绕《${report.title}》生成一条获客短视频：开头指出客户常见误区，中间给 3 个判断点，结尾引导私信“${report.keyword}”领取网页报告。字幕要强钩子，不要太书面。`)
+    setCoverStyle(report.landingTitle)
+    setSubtitleHighlight([report.keyword, '报告', '预算', '避坑', '私信'].filter(Boolean).join(','))
+    setLastHandoff(`已把「${report.title}」设为当前转化资料包。一键生成、文案、图文和发布草稿会围绕这个报告承接。`)
+    setActive('oneClick')
+  }
+
+  function expandKeywordsFromProfile() {
+    const seed = splitProfileLines(trendKeywords, ['马来西亚房产', '第二家园', '国际学校'])
+    const expanded = Array.from(new Set([
+      ...seed,
+      ...seed.flatMap(k => [`${k} 条件`, `${k} 费用`, `${k} 流程`, `${k} 避坑`, `${k} 适合谁`, `${k} 预算`, `${k} 线下说明会`]),
+      '马来西亚海外置业靠谱吗', '中国人买马来西亚房产流程', '马来西亚第二家园申请条件', '马来西亚国际学校费用', '海外资产配置避坑', '养老度假海外第二居所'
+    ])).slice(0, 42)
+    setTrendKeywords(expanded.join('，'))
+    setLastHandoff('关键词雷达已按“高意向/内容钩子/泛流量”自动扩展，可继续生成获客作战图或今日拍摄任务。')
   }
 
   async function reloadAssets() {
