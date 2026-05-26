@@ -808,7 +808,28 @@ async def api_heat_radar_run_public_crawl(req: HeatRadarRunRequest, settings: Se
     cron_token = os.getenv('HEAT_RADAR_CRON_TOKEN', '').strip()
     if cron_token and req.token != cron_token:
         raise HTTPException(status_code=403, detail='HEAT_RADAR_CRON_TOKEN 不匹配。')
-    return await run_public_heat_radar(settings, memory, req)
+    try:
+        return await run_public_heat_radar(settings, memory, req)
+    except Exception as exc:
+        # 热度采集不能把整个后端打挂。即使公开平台限制/网络失败，也返回可展示结果。
+        return {
+            'ok': False,
+            'source_mode': 'public_crawler_error_guard',
+            'accounts_count': 0,
+            'collected_count': 0,
+            'saved_count': 0,
+            'top_items': [],
+            'analysis': {
+                'summary': '热度雷达采集失败但后端已保护住。请补具体公开视频链接，或后续接第三方/官方数据源。',
+                'content_angles': [],
+                'customer_intents': [],
+                'lead_magnets': [],
+                'reply_hooks': [],
+                'next_actions': ['打开 Render Logs 查看具体错误', '先添加具体视频/笔记链接，不要只填主页', '如果要真实点赞评论收藏，后续接飞瓜/蝉妈妈/千瓜或官方 API']
+            },
+            'warnings': [f'热度雷达异常已拦截：{str(exc)[:240]}'],
+            'next_actions': ['查看 Render Logs', '补具体内容链接', '后续接官方或第三方数据源']
+        }
 
 
 @app.post('/api/generate-copy', response_model=GeneratedCopy)

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import html
+import json
 import os
 import re
 import uuid
@@ -12,13 +13,13 @@ from urllib.parse import urlparse
 import httpx
 
 from app.config import Settings
-from app.services.collector import collector_cookie_path
 from app.services.deepseek import DeepSeekError, _chat_json
 from app.services.memory import MemoryStore
 
 URL_RE = re.compile(r'https?://[^\s，。！？!！；;]+', re.I)
 TITLE_RE = re.compile(r'<title[^>]*>(.*?)</title>', re.I | re.S)
 DESC_RE = re.compile(r'<meta[^>]+(?:name|property)=["\'](?:description|og:description)["\'][^>]+content=["\']([^"\']+)["\']', re.I | re.S)
+OG_TITLE_RE = re.compile(r'<meta[^>]+property=["\']og:title["\'][^>]+content=["\']([^"\']+)["\']', re.I | re.S)
 
 
 def now_iso() -> str:
@@ -27,6 +28,10 @@ def now_iso() -> str:
 
 def today_key() -> str:
     return datetime.now(timezone.utc).date().isoformat()
+
+
+def _setting(settings: Settings, name: str, default: Any) -> Any:
+    return getattr(settings, name, default)
 
 
 def _clean_text(value: Any, limit: int = 300) -> str:
@@ -78,19 +83,6 @@ def heat_score(item: Dict[str, Any]) -> int:
     )
 
 
-def _is_specific_content_url(url: str) -> bool:
-    u = url.lower()
-    return any(x in u for x in ['/video/', '/note/', 'v.douyin.com', 'xhslink.com', '/discover/item/', '.mp4'])
-
-
-def _entry_url(entry: Dict[str, Any]) -> str:
-    for key in ('webpage_url', 'original_url', 'url'):
-        value = str(entry.get(key) or '').strip()
-        if value.startswith('http'):
-            return value
-    return ''
-
-
 def _platform_from_url(url: str, fallback: str = '') -> str:
     u = url.lower()
     if 'douyin' in u or 'iesdouyin' in u:
@@ -107,33 +99,45 @@ def _platform_from_url(url: str, fallback: str = '') -> str:
 def _title_from_html(text: str) -> Tuple[str, str]:
     title = ''
     desc = ''
-    match = TITLE_RE.search(text or '')
+    match = OG_TITLE_RE.search(text or '')
     if match:
         title = _clean_text(match.group(1), 180)
+    if not title:
+        match = TITLE_RE.search(text or '')
+        if match:
+            title = _clean_text(match.group(1), 180)
     match = DESC_RE.search(text or '')
     if match:
         desc = _clean_text(match.group(1), 500)
     return title, desc
 
 
+def _is_real_url(value: Any) -> bool:
+    return str(value or '').strip().startswith(('http://', 'https://'))
+
+
 async def _fetch_html_meta(settings: Settings, url: str, account: Dict[str, Any], warnings: List[str]) -> Dict[str, Any] | None:
+    """轻量公开采集：只读公开页面 HTML 的标题/描述，不调用重型解析器，避免 Render 免费实例被打崩。"""
     headers = {
-        'User-Agent': settings.collector_user_agent,
+        'User-Agent': _setting(settings, 'collector_user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122 Safari/537.36'),
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
         'Referer': 'https://www.douyin.com/',
     }
+    timeout = min(max(int(_setting(settings, 'collector_timeout_seconds', 8) or 8), 4), 12)
     try:
-        async with httpx.AsyncClient(timeout=30, follow_redirects=True, headers=headers) as client:
+        async with httpx.AsyncClient(timeout=timeout, follow_redirects=True, headers=headers) as client:
             res = await client.get(url)
             if res.status_code >= 400:
                 warnings.append(f'{url}: 公开页面读取失败 HTTP {res.status_code}')
                 return None
-            title, desc = _title_from_html(res.text)
+            # 避免大页面占内存，只解析前 300KB。
+            text = res.text[:300_000]
+            title, desc = _title_from_html(text)
     except Exception as exc:
-        warnings.append(f'{url}: 公开页面读取失败：{str(exc)[:180]}')
+        warnings.append(f'{url}: 公开页面读取失败：{str(exc)[:160]}')
         return None
     if not title and not desc:
-        warnings.append(f'{url}: 没有读取到标题/描述，平台可能需要登录或动态渲染。')
+        warnings.append(f'{url}: 未读取到标题/描述，平台可能需要登录、客户端渲染或限制公开访问。')
         return None
     item = {
         'id': str(uuid.uuid4()),
@@ -151,136 +155,71 @@ async def _fetch_html_meta(settings: Settings, url: str, account: Dict[str, Any]
         'favorite_count': 0,
         'share_count': 0,
         'view_count': 0,
-        'heat_score': 0,
+        'heat_score': 1,
         'keyword': ','.join(_split_keywords(account.get('tags'), 5)),
         'tags': _split_keywords(account.get('tags'), 8),
         'thumbnail_url': '',
-        'source_mode': 'public_html',
-        'raw': {'description': desc},
+        'source_mode': 'public_html_safe',
+        'raw': {'description': desc, 'note': '轻量公开采集只能拿公开标题/描述，点赞评论等热度字段需官方 API 或第三方数据源。'},
         'warnings': [],
     }
-    item['heat_score'] = heat_score(item)
+    item['heat_score'] = heat_score(item) or 1
     return item
 
 
-def _yt_opts(settings: Settings, *, flat: bool, limit: int = 3) -> Dict[str, Any]:
-    opts: Dict[str, Any] = {
-        'quiet': True,
-        'no_warnings': True,
-        'skip_download': True,
-        'ignoreerrors': True,
-        'socket_timeout': min(max(settings.collector_timeout_seconds, 30), 240),
-        'retries': 1,
-        'playlistend': max(1, min(limit, 20)),
-        'http_headers': {
-            'User-Agent': settings.collector_user_agent,
-            'Referer': 'https://www.douyin.com/',
-        },
-    }
-    if flat:
-        opts['extract_flat'] = True
-    cookie_path = collector_cookie_path(settings)
-    if cookie_path.exists() and cookie_path.stat().st_size > 20:
-        opts['cookiefile'] = str(cookie_path)
-    return opts
+def _extract_number_from_text(patterns: List[str], text: str) -> int:
+    for pat in patterns:
+        m = re.search(pat, text, re.I)
+        if m:
+            return _num(m.group(1))
+    return 0
 
 
-def _info_to_item(info: Dict[str, Any], url: str, account: Dict[str, Any]) -> Dict[str, Any]:
-    webpage_url = _entry_url(info) or url
-    title = _clean_text(info.get('title') or info.get('fulltitle') or info.get('description') or webpage_url, 180)
+def _manual_line_to_item(line: str, account: Dict[str, Any], keywords: List[str]) -> Dict[str, Any] | None:
+    """把运营粘贴的真实标题/链接/数据转成 item。用于没有企业认证时的真实数据兜底。"""
+    raw = _clean_text(line, 800)
+    if not raw:
+        return None
+    urls = URL_RE.findall(raw)
+    url = urls[0] if urls else str(account.get('url') or '')
+    title = raw
+    if url:
+        title = title.replace(url, '').strip(' -｜|') or url
     item = {
         'id': str(uuid.uuid4()),
         'date': today_key(),
-        'platform': _platform_from_url(webpage_url, str(account.get('platform') or '')),
+        'platform': _platform_from_url(url, str(account.get('platform') or '手动真实数据')),
         'account_id': str(account.get('id') or ''),
-        'account_name': str(account.get('name') or info.get('uploader') or '公开来源'),
-        'title': title or '公开内容',
-        'description': _clean_text(info.get('description') or '', 700),
-        'url': webpage_url,
-        'published_at': str(info.get('upload_date') or info.get('timestamp') or ''),
+        'account_name': str(account.get('name') or '手动导入'),
+        'title': title[:180],
+        'description': raw,
+        'url': url,
+        'published_at': '',
         'collected_at': now_iso(),
-        'like_count': _num(info.get('like_count')),
-        'comment_count': _num(info.get('comment_count')),
-        'favorite_count': _num(info.get('favorite_count') or info.get('favorites')),
-        'share_count': _num(info.get('repost_count') or info.get('share_count')),
-        'view_count': _num(info.get('view_count') or info.get('play_count')),
+        'like_count': _extract_number_from_text([r'(?:赞|点赞|like)[：:\s]*([\d.,万wk]+)'], raw),
+        'comment_count': _extract_number_from_text([r'(?:评论|comment)[：:\s]*([\d.,万wk]+)'], raw),
+        'favorite_count': _extract_number_from_text([r'(?:收藏|favorite|fav)[：:\s]*([\d.,万wk]+)'], raw),
+        'share_count': _extract_number_from_text([r'(?:分享|转发|share)[：:\s]*([\d.,万wk]+)'], raw),
+        'view_count': _extract_number_from_text([r'(?:播放|浏览|view)[：:\s]*([\d.,万wk]+)'], raw),
         'heat_score': 0,
-        'keyword': ','.join(_split_keywords(account.get('tags'), 5)),
-        'tags': _split_keywords(account.get('tags'), 8),
-        'thumbnail_url': str(info.get('thumbnail') or ''),
-        'source_mode': 'yt_dlp_public',
-        'raw': {
-            'extractor': info.get('extractor'),
-            'duration': info.get('duration'),
-            'uploader': info.get('uploader'),
-            'uploader_url': info.get('uploader_url'),
-        },
+        'keyword': ','.join([k for k in keywords if k and k in raw][:6]),
+        'tags': [k for k in keywords if k and k in raw][:8],
+        'thumbnail_url': '',
+        'source_mode': 'manual_real_data_line',
+        'raw': {'line': raw},
         'warnings': [],
     }
-    item['heat_score'] = heat_score(item)
+    item['heat_score'] = heat_score(item) or 1
     return item
 
 
-def _extract_with_ytdlp(settings: Settings, url: str, account: Dict[str, Any], limit: int, warnings: List[str]) -> List[Dict[str, Any]]:
-    if not settings.enable_ytdlp_collector:
-        warnings.append('ENABLE_YTDLP_COLLECTOR=false，跳过公开采集器。')
-        return []
-    try:
-        import yt_dlp  # type: ignore
-    except Exception as exc:
-        warnings.append(f'yt-dlp 不可用：{exc}')
-        return []
-
-    urls: List[str] = []
-    try:
-        if _is_specific_content_url(url):
-            urls = [url]
-        else:
-            with yt_dlp.YoutubeDL(_yt_opts(settings, flat=True, limit=limit * 2)) as ydl:
-                info = ydl.extract_info(url, download=False)
-            entries = info.get('entries') if isinstance(info, dict) else None
-            if isinstance(entries, list):
-                for entry in entries:
-                    if not isinstance(entry, dict):
-                        continue
-                    entry_url = _entry_url(entry)
-                    if entry_url and entry_url not in urls:
-                        urls.append(entry_url)
-                    elif entry.get('url') and str(entry.get('url')).startswith('http'):
-                        urls.append(str(entry.get('url')))
-                    if len(urls) >= limit:
-                        break
-            else:
-                direct = _entry_url(info) if isinstance(info, dict) else ''
-                if direct:
-                    urls.append(direct)
-    except Exception as exc:
-        warnings.append(f'{url}: 账号/链接发现失败：{str(exc)[:240]}')
-        return []
-
-    items: List[Dict[str, Any]] = []
-    for item_url in urls[:limit]:
-        try:
-            with yt_dlp.YoutubeDL(_yt_opts(settings, flat=False, limit=1)) as ydl:
-                info = ydl.extract_info(item_url, download=False)
-            if isinstance(info, dict):
-                items.append(_info_to_item(info, item_url, account))
-        except Exception as exc:
-            warnings.append(f'{item_url}: 内容热度采集失败：{str(exc)[:240]}')
-    return items
-
-
-async def _collect_account(settings: Settings, account: Dict[str, Any], limit: int, warnings: List[str]) -> List[Dict[str, Any]]:
+async def _collect_account(settings: Settings, account: Dict[str, Any], warnings: List[str]) -> List[Dict[str, Any]]:
     url = str(account.get('url') or '').strip()
-    if not url.startswith('http'):
-        warnings.append(f"{account.get('name') or '未命名账号'}: 没有主页/视频链接，跳过。")
+    if not _is_real_url(url):
+        warnings.append(f"{account.get('name') or '未命名账号'}: 没有有效公开链接，跳过自动采集。")
         return []
-    items = await asyncio.to_thread(_extract_with_ytdlp, settings, url, account, limit, warnings)
-    if not items and _is_specific_content_url(url):
-        fallback = await _fetch_html_meta(settings, url, account, warnings)
-        if fallback:
-            items.append(fallback)
-    return items
+    item = await _fetch_html_meta(settings, url, account, warnings)
+    return [item] if item else []
 
 
 def _dedupe_items(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -300,13 +239,16 @@ def _rank_top3(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
 
 def _fallback_analysis(top_items: List[Dict[str, Any]]) -> Dict[str, Any]:
-    topics = [str(x.get('title') or '')[:60] for x in top_items]
+    topics = [str(x.get('title') or '')[:60] for x in top_items if x.get('title')]
+    if not topics:
+        topics = ['马来西亚房产', '第二家园/MM2H', '吉隆坡/新山房产']
     return {
-        'summary': '已基于公开热度数据生成今日雷达。没有官方 API 时，系统只展示实际抓到的公开内容，不编造热度。',
+        'summary': '热度雷达已稳定运行。当前未接官方/第三方数据源时，只展示系统实际读取到的公开标题/导入数据，不编造点赞评论。',
         'content_angles': [f'围绕「{t}」做原创反打/解释内容' for t in topics[:5]],
         'customer_intents': ['税费/流程判断', '城市比较', '第二家园/身份规划', '教育家庭选盘'],
         'lead_magnets': ['马来西亚买房税费测算表', 'MM2H 与购房要求对照表', '吉隆坡 vs 新山选盘表'],
-        'next_actions': ['给每个竞品账号补充具体视频链接，公开主页抓不到时上传 Cookies 或等官方/第三方数据源。', '把热度最高的话题一键转为口播文案和图文引流包。'],
+        'reply_hooks': ['这个问题很多家庭都会先卡在资格、预算和城市选择上。', '如果你是为了教育/身份/养老，选盘逻辑完全不同。'],
+        'next_actions': ['补充具体公开视频/笔记链接可提升采集成功率。', '要看到真实点赞/评论/收藏，建议后续接飞瓜/蝉妈妈/千瓜导出或官方 API。'],
     }
 
 
@@ -317,17 +259,17 @@ async def analyze_heat_items(settings: Settings, top_items: List[Dict[str, Any]]
     for i, item in enumerate(top_items[:12], start=1):
         lines.append(
             f"{i}. 平台：{item.get('platform')}｜账号：{item.get('account_name')}｜标题：{item.get('title')}｜"
-            f"赞{item.get('like_count')} 评论{item.get('comment_count')} 收藏{item.get('favorite_count')} 分享{item.get('share_count')}｜链接：{item.get('url')}"
+            f"赞{item.get('like_count')} 评论{item.get('comment_count')} 收藏{item.get('favorite_count')} 分享{item.get('share_count')}｜链接：{item.get('url')}｜来源：{item.get('source_mode')}"
         )
-    system = '你是中国社媒获客热度雷达分析师。只基于已采集到的真实数据分析，不要编造数据。输出严格 JSON。'
+    system = '你是中国社媒获客热度雷达分析师。只基于已采集/导入的数据分析，不要编造数据。输出严格 JSON。'
     user = f"""
 监控关键词：{', '.join(keywords[:30]) or '未填写'}
-今日真实采集内容：
+今日数据：
 {chr(10).join(lines)}
 
 请输出 JSON：
 {{
-  "summary": "一句话总结今天热度方向",
+  "summary": "一句话总结今天热度方向，并说明数据来源限制",
   "content_angles": ["我们应该跟进的原创选题"],
   "customer_intents": ["客户真实需求/疑问"],
   "lead_magnets": ["适合承接的资料包/报告"],
@@ -336,7 +278,7 @@ async def analyze_heat_items(settings: Settings, top_items: List[Dict[str, Any]]
 }}
 """.strip()
     try:
-        payload = await _chat_json(settings, system, user, temperature=0.35, timeout=90)
+        payload = await _chat_json(settings, system, user, temperature=0.25, timeout=45)
         for key in ['content_angles', 'customer_intents', 'lead_magnets', 'reply_hooks', 'next_actions']:
             value = payload.get(key)
             if isinstance(value, str):
@@ -347,37 +289,59 @@ async def analyze_heat_items(settings: Settings, top_items: List[Dict[str, Any]]
         return payload
     except (DeepSeekError, Exception) as exc:
         analysis = _fallback_analysis(top_items)
-        analysis['warnings'] = [f'AI 分析失败，已降级规则分析：{str(exc)[:240]}']
+        analysis['warnings'] = [f'AI 分析失败，已降级规则分析：{str(exc)[:200]}']
         return analysis
 
 
+def _safe_memory_insert(memory: MemoryStore, collection: str, item: Dict[str, Any], warnings: List[str]) -> bool:
+    try:
+        memory.insert(collection, item)
+        return True
+    except Exception as exc:
+        warnings.append(f'{collection} 保存失败，已跳过：{str(exc)[:160]}')
+        return False
+
+
 async def run_public_heat_radar(settings: Settings, memory: MemoryStore, req: Any) -> Dict[str, Any]:
+    """Render 安全版热度雷达：不会因为公开采集失败导致后端重启/前端断连。"""
     warnings: List[str] = []
-    limit = max(1, min(int(getattr(req, 'limit_per_account', 3) or 3), 6))
     keywords = _split_keywords(getattr(req, 'keywords', []), 60)
     accounts: List[Dict[str, Any]] = []
 
     if bool(getattr(req, 'include_saved_accounts', True)):
-        saved = memory.list('heat_radar_accounts', limit=80)
-        if saved:
-            accounts.extend(saved)
-        else:
-            # 兼容旧竞品账号库。
-            for comp in memory.list('competitor_accounts', limit=50):
-                accounts.append({
-                    'id': comp.get('id'),
-                    'name': comp.get('name'),
-                    'platform': comp.get('platform'),
-                    'url': comp.get('url'),
-                    'tags': comp.get('positioning') or comp.get('notes') or '',
-                    'notes': comp.get('notes') or '',
-                })
+        try:
+            saved = memory.list('heat_radar_accounts', limit=60)
+            if saved:
+                accounts.extend(saved)
+            else:
+                for comp in memory.list('competitor_accounts', limit=30):
+                    accounts.append({
+                        'id': comp.get('id'),
+                        'name': comp.get('name'),
+                        'platform': comp.get('platform'),
+                        'url': comp.get('url'),
+                        'tags': comp.get('positioning') or comp.get('notes') or '',
+                        'notes': comp.get('notes') or '',
+                    })
+        except Exception as exc:
+            warnings.append(f'读取账号库失败：{str(exc)[:160]}')
 
     for acc in getattr(req, 'accounts', []) or []:
-        payload = acc.model_dump() if hasattr(acc, 'model_dump') else dict(acc)
-        accounts.append(payload)
+        try:
+            payload = acc.model_dump() if hasattr(acc, 'model_dump') else dict(acc)
+            accounts.append(payload)
+        except Exception:
+            continue
 
-    # 去重：URL 优先，其次名称。
+    # 从 notes/tags 支持粘贴真实数据行：标题 链接 赞/评论/收藏。
+    manual_lines: List[str] = []
+    for acc in accounts:
+        text = str(acc.get('notes') or '')
+        for line in re.split(r'[\n]+', text):
+            if len(line.strip()) > 10 and (URL_RE.search(line) or any(k in line for k in ['赞', '评论', '收藏', '播放'])):
+                manual_lines.append(line.strip())
+
+    # 去重账号，Render 免费实例先最多处理 5 个公开链接，避免前端断连。
     deduped: List[Dict[str, Any]] = []
     seen: set[str] = set()
     for acc in accounts:
@@ -387,20 +351,29 @@ async def run_public_heat_radar(settings: Settings, memory: MemoryStore, req: An
         seen.add(key)
         deduped.append(acc)
 
-    if not deduped:
-        warnings.append('没有可自动采集的账号/链接。请先添加竞品账号主页或具体公开视频链接。')
+    if not deduped and not manual_lines:
+        warnings.append('没有可采集的账号/链接。请先添加竞品账号主页、公开视频链接，或在备注里粘贴真实内容数据。')
 
     collected: List[Dict[str, Any]] = []
-    for acc in deduped[:30]:
+
+    # 先把备注里的真实数据行转成 item，保证没有官方 API 时也能展示真实人工采集数据。
+    for line in manual_lines[:60]:
+        item = _manual_line_to_item(line, {'name': '备注导入', 'platform': '真实数据导入'}, keywords)
+        if item:
+            collected.append(item)
+
+    max_accounts = int(os.getenv('HEAT_RADAR_MAX_PUBLIC_ACCOUNTS', '5') or '5')
+    max_accounts = max(1, min(max_accounts, 8))
+    for acc in deduped[:max_accounts]:
         try:
-            items = await _collect_account(settings, acc, limit, warnings)
+            items = await _collect_account(settings, acc, warnings)
             collected.extend(items)
         except Exception as exc:
-            warnings.append(f"{acc.get('name') or acc.get('url')}: 采集失败：{str(exc)[:240]}")
+            warnings.append(f"{acc.get('name') or acc.get('url')}: 采集失败：{str(exc)[:180]}")
 
     collected = _dedupe_items(collected)
     for item in collected:
-        item['heat_score'] = heat_score(item)
+        item['heat_score'] = heat_score(item) or int(item.get('heat_score') or 1)
         title_blob = ' '.join([str(item.get('title') or ''), str(item.get('description') or ''), str(item.get('keyword') or '')])
         matched = [k for k in keywords if k and k in title_blob]
         if matched:
@@ -411,10 +384,10 @@ async def run_public_heat_radar(settings: Settings, memory: MemoryStore, req: An
 
     saved_count = 0
     if bool(getattr(req, 'save_to_memory', True)):
-        for item in collected:
-            memory.insert('heat_radar_items', item)
-            saved_count += 1
-        memory.insert('heat_daily_top3', {
+        for item in collected[:120]:
+            if _safe_memory_insert(memory, 'heat_radar_items', item, warnings):
+                saved_count += 1
+        _safe_memory_insert(memory, 'heat_daily_top3', {
             'date': today_key(),
             'summary': analysis.get('summary', ''),
             'top_items': top_items,
@@ -422,16 +395,19 @@ async def run_public_heat_radar(settings: Settings, memory: MemoryStore, req: An
             'keywords': keywords,
             'accounts_count': len(deduped),
             'raw': {'warnings': warnings[:80]},
-        })
-        memory.save_learning_event({
-            'event_type': 'heat_radar_public_crawl',
-            'title': f'{today_key()} 自动热度雷达',
-            'payload': {'top_items': top_items, 'analysis': analysis, 'warnings': warnings[:80]},
-        })
+        }, warnings)
+        try:
+            memory.save_learning_event({
+                'event_type': 'heat_radar_public_crawl',
+                'title': f'{today_key()} 自动热度雷达',
+                'payload': {'top_items': top_items, 'analysis': analysis, 'warnings': warnings[:80]},
+            })
+        except Exception as exc:
+            warnings.append(f'学习事件保存失败：{str(exc)[:160]}')
 
     return {
         'ok': True,
-        'source_mode': 'public_crawler_without_enterprise_api',
+        'source_mode': 'public_crawler_safe_no_enterprise_api',
         'accounts_count': len(deduped),
         'collected_count': len(collected),
         'saved_count': saved_count,
