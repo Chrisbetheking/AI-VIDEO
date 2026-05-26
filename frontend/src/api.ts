@@ -84,6 +84,11 @@ export async function apiPost<T>(path: string, body: unknown): Promise<T> {
   }, timeoutMs)
 }
 
+export async function apiDelete<T>(path: string): Promise<T> {
+  const url = `${API_BASE}${path}`
+  return safeFetch<T>(url, { method: 'DELETE' })
+}
+
 export async function uploadAssets(files: FileList, folder = 'self'): Promise<AssetItem[]> {
   const form = new FormData()
   form.append('folder', folder)
@@ -411,6 +416,30 @@ export interface AutoCollectorRunResponse {
   saved_event_id?: string
   learning: any
   warnings: string[]
+}
+
+
+export interface HeatRadarAccountApi {
+  id?: string
+  name: string
+  platform: string
+  url: string
+  tags: string
+  notes: string
+  pinned?: boolean
+  created_at?: string
+}
+
+export interface HeatRadarRunResponse {
+  ok: boolean
+  source_mode: string
+  accounts_count: number
+  collected_count: number
+  saved_count: number
+  top_items: any[]
+  analysis: Record<string, any>
+  warnings: string[]
+  next_actions: string[]
 }
 
 export interface OneClickGenerateRequest {

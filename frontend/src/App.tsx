@@ -23,6 +23,7 @@ import {
   DigitalHumanCreateResponse,
   AutoCollectorStatusResponse,
   AutoCollectorRunResponse,
+  HeatRadarRunResponse,
   OneClickGenerateResponse,
   ModelStatusResponse,
   TTSResponse,
@@ -32,6 +33,7 @@ import {
   VoiceSegment,
   apiGet,
   apiPost,
+  apiDelete,
   getCollectorStatus,
   uploadCollectorCookies,
   uploadAssets,
@@ -654,6 +656,8 @@ function AppInner() {
   const [heatSnapshots, setHeatSnapshots] = useState<HeatRadarSnapshot[]>(() => loadLocalJson('ai_video_heat_snapshots_v1', [] as HeatRadarSnapshot[]))
   const [heatDraft, setHeatDraft] = useState<HeatRadarAccount>({ id: '', name: '', platform: '抖音', url: '', tags: '马来西亚房产,第二家园,海外置业', notes: '', pinned: true, created_at: '' })
   const [manualHeatText, setManualHeatText] = useState('')
+  const [heatCrawlerResult, setHeatCrawlerResult] = useState<HeatRadarRunResponse | null>(null)
+  const [heatCrawlerLimit, setHeatCrawlerLimit] = useState(3)
   const [activeReportIndex, setActiveReportIndex] = useState(0)
   const [reportCopyStatus, setReportCopyStatus] = useState('')
 
@@ -982,6 +986,101 @@ function AppInner() {
   }
 
 
+  function heatItemToSnapshot(item: any, index = 0): HeatRadarSnapshot {
+    const topic = String(item?.title || item?.topic || '未命名热度内容').trim()
+    const score = Number(item?.heat_score ?? item?.score ?? 0)
+    return {
+      id: String(item?.id || `heat_${Date.now()}_${index}`),
+      date: String(item?.date || todayKey()),
+      account_id: String(item?.account_id || ''),
+      account_name: String(item?.account_name || '公开来源'),
+      platform: String(item?.platform || '公开平台'),
+      topic,
+      signal: `真实采集：赞${Number(item?.like_count || 0)} / 评${Number(item?.comment_count || 0)} / 藏${Number(item?.favorite_count || 0)} / 分享${Number(item?.share_count || 0)}`,
+      score,
+      intent: String(item?.intent || (item?.matched_keywords?.length ? `匹配关键词：${item.matched_keywords.join('、')}` : '待 AI 判断客户意图')),
+      source_url: String(item?.url || item?.source_url || ''),
+      recommended_action: String(item?.recommended_action || '把这个热度话题转成原创口播/图文，并用资料包承接。'),
+      lead_magnet: String(item?.lead_magnet || activeReport?.title || '网页资料包')
+    }
+  }
+
+  async function addHeatAccount() {
+    const draft = { ...heatDraft, id: heatDraft.id || `heat_acc_${Date.now()}`, name: heatDraft.name.trim(), url: heatDraft.url.trim(), tags: heatDraft.tags.trim(), notes: heatDraft.notes.trim(), created_at: heatDraft.created_at || new Date().toISOString() }
+    if (!draft.name && !draft.url) return
+    setHeatAccounts(prev => [draft, ...prev.filter(x => x.id !== draft.id)])
+    await run('保存热度账号', () => apiPost('/api/heat-radar/accounts', draft)).catch(() => null)
+    setHeatDraft({ id: '', name: '', platform: '抖音', url: '', tags: '马来西亚房产,第二家园,海外置业', notes: '', pinned: true, created_at: '' })
+    setLastHandoff('竞品账号已固定。后续可点“自动采集真实热度”，系统会尝试从公开链接抓取真实热度数据并留存。')
+  }
+
+  function toggleHeatAccount(id: string) {
+    setHeatAccounts(prev => prev.map(x => x.id === id ? { ...x, pinned: !x.pinned } : x))
+  }
+
+  async function removeHeatAccount(id: string) {
+    setHeatAccounts(prev => prev.filter(x => x.id !== id))
+    await run('删除热度账号', () => apiDelete(`/api/heat-radar/accounts/${encodeURIComponent(id)}`)).catch(() => null)
+  }
+
+  function importManualHeatData() {
+    const lines = manualHeatText.split(/\n+/).map(x => x.trim()).filter(Boolean)
+    if (!lines.length) return
+    const snapshots = lines.slice(0, 20).map((line, idx): HeatRadarSnapshot => ({
+      id: `manual_heat_${Date.now()}_${idx}`,
+      date: todayKey(),
+      account_id: 'manual',
+      account_name: '手动导入',
+      platform: '人工采集',
+      topic: line.slice(0, 120),
+      signal: '人工导入的真实观察内容，等待 AI 分析。',
+      score: 70 + Math.max(0, 20 - idx),
+      intent: '待判断：税费/流程/城市/身份/教育/预算',
+      source_url: '',
+      recommended_action: '把这条内容作为选题参考，生成原创口播或图文。',
+      lead_magnet: activeReport?.title || '网页资料包'
+    }))
+    setHeatSnapshots(prev => [...snapshots, ...prev].slice(0, 200))
+    setManualHeatText('')
+    setLastHandoff('手动热度数据已导入今日热度池。')
+  }
+
+  function generateDailyHeatRadar() {
+    const accounts = heatAccounts.length ? heatAccounts : [{ id: 'seed', name: '行业关键词池', platform: '关键词', url: '', tags: heatRadarSeedKeywords.join(','), notes: '', pinned: true, created_at: new Date().toISOString() }]
+    const generated = accounts.flatMap((acc, accIdx) => heatRadarSeedKeywords.slice(0, 3).map((kw, i): HeatRadarSnapshot => ({
+      id: `seed_${acc.id}_${Date.now()}_${i}`,
+      date: todayKey(),
+      account_id: acc.id,
+      account_name: acc.name,
+      platform: acc.platform,
+      topic: `${kw}${i === 0 ? '真相' : i === 1 ? '避坑' : '怎么选'}`,
+      signal: '本地关键词模拟数据。要真实数据请点“自动采集真实热度”。',
+      score: 82 - accIdx * 2 - i,
+      intent: i === 0 ? '高意向搜索/交易前教育' : i === 1 ? '痛点避坑/评论区问题' : '城市比较/项目筛选',
+      source_url: acc.url,
+      recommended_action: '生成原创跟进内容，承接资料包。',
+      lead_magnet: activeReport?.title || '网页资料包'
+    }))).slice(0, 18)
+    setHeatSnapshots(prev => [...generated, ...prev].slice(0, 200))
+    setLastHandoff('已生成本地热度雷达演示。真实数据请用“自动采集真实热度”。')
+  }
+
+  async function runPublicHeatCrawler() {
+    const keywords = Array.from(new Set([...heatRadarSeedKeywords, ...trendKeywords.split(/[,，#\n\s]+/).map(x => x.trim()).filter(Boolean)])).slice(0, 60)
+    const res = await run('自动采集真实热度', () => apiPost<HeatRadarRunResponse>('/api/heat-radar/run-public-crawl', {
+      accounts: heatAccounts,
+      keywords,
+      limit_per_account: heatCrawlerLimit,
+      include_saved_accounts: true,
+      save_to_memory: true,
+      token: ''
+    }))
+    setHeatCrawlerResult(res!)
+    const snapshots = (res?.top_items || []).map((item, idx) => heatItemToSnapshot(item, idx))
+    if (snapshots.length) setHeatSnapshots(prev => [...snapshots, ...prev].slice(0, 200))
+    setLastHandoff(res?.collected_count ? `已采集到 ${res.collected_count} 条真实公开热度数据，并保存每日 Top 3。` : '本轮没有采集到真实公开数据。请补具体视频链接、账号链接或上传 Cookies。')
+  }
+
   async function copyActiveReportLanding() {
     if (!activeReport) return
     await copyTextToClipboard(reportLandingCopy)
@@ -1027,6 +1126,32 @@ function AppInner() {
     return status
   }
 
+  async function reloadHeatRadarData() {
+    const [accounts, items] = await Promise.all([
+      apiGet<any[]>('/api/heat-radar/accounts').catch(() => []),
+      apiGet<any[]>('/api/heat-radar/items').catch(() => [])
+    ])
+    if (Array.isArray(accounts) && accounts.length) {
+      setHeatAccounts(accounts.map((x: any) => ({
+        id: String(x.id || `heat_acc_${Date.now()}_${Math.random()}`),
+        name: String(x.name || x.account_name || '未命名账号'),
+        platform: String(x.platform || '抖音'),
+        url: String(x.url || ''),
+        tags: String(x.tags || x.positioning || ''),
+        notes: String(x.notes || ''),
+        pinned: Boolean(x.pinned ?? true),
+        created_at: String(x.created_at || '')
+      })))
+    }
+    if (Array.isArray(items) && items.length) {
+      const snapshots = items.slice(0, 60).map((item, idx) => heatItemToSnapshot(item, idx))
+      setHeatSnapshots(prev => {
+        const seen = new Set(prev.map(x => x.id))
+        return [...snapshots.filter(x => !seen.has(x.id)), ...prev].slice(0, 200)
+      })
+    }
+  }
+
   async function runAutoAgent() {
     const res = await run('自动采集/学习同行打法', () => apiPost<AutoCollectorRunResponse>('/api/agent/run-now', {
       seed_links: agentSeedLinks,
@@ -1057,6 +1182,7 @@ function AppInner() {
     reloadCollectorStatus().catch(() => null)
     reloadAgentStatus().catch(() => null)
     reloadMemoryContext(true).catch(() => null)
+    reloadHeatRadarData().catch(() => null)
   }, [])
 
   useEffect(() => {
@@ -1755,18 +1881,19 @@ ${manualText || ''}`.trim()
 
 
       {active === 'lead' && <section className="card modulePanel leadRadarPanel heatRadarPanel">
-        <div className="sectionHeader"><div><h2>热度雷达</h2><p>每天查看竞品账号和行业关键词的高热内容，保留每个账号热度前 3 的内容/话题，再交给 AI 判断客户意图和承接资料。拍摄和口播文案放在内容生产里，不混在这里。</p></div><div className="headerActions"><Button label="生成今日热度雷达" onClick={generateDailyHeatRadar} kind="primary" /><Button busy={busy === '生成热度雷达方案' ? busy : ''} label="AI 分析热度机会" onClick={makeLeadPlan} kind="soft" /></div></div>
+        <div className="sectionHeader"><div><h2>热度雷达</h2><p>先用公开链接/账号页做自动采集：每天保留竞品账号真实热度 Top 3，再给 AI 分析。企业认证/API 以后再接入，不影响现在上线演示。</p></div><div className="headerActions"><Button busy={busy === '自动采集真实热度' ? busy : ''} label="自动采集真实热度" onClick={runPublicHeatCrawler} kind="primary" /><Button label="生成本地演示雷达" onClick={generateDailyHeatRadar} kind="ghost" /><Button busy={busy === '生成热度雷达方案' ? busy : ''} label="AI 分析热度机会" onClick={makeLeadPlan} kind="soft" /></div></div>
         <div className="leadContext">
           <div><b>当前业务</b><span>{industry || businessPositioning}</span></div>
           <div><b>固定账号</b><span>{heatAccounts.length} 个竞品账号</span></div>
           <div><b>今日留存</b><span>{todayHeatSnapshots.length} 条热度内容</span></div>
+          <div><b>真实采集</b><span>{heatCrawlerResult ? `${heatCrawlerResult.collected_count} 条` : '待运行'}</span></div>
           <div><b>承接资料</b><span>{shortText(privateDomainAssets.split(/\n+/)[0] || reportDelivery, 52)}</span></div>
         </div>
         <div className="dataLoop heatLoop">{heatRadarDataLoop.map((item, i) => <div key={item}><span>{i + 1}</span><p>{item}</p></div>)}</div>
 
         <div className="heatControlGrid">
           <div className="heatPanel">
-            <div className="miniHeader"><div><h3>竞品账号库</h3><p>把要长期观察的账号固定在这里。现在先保存到浏览器本地；后续中国版上线后同步到 Supabase，截图/素材进 OSS/R2。</p></div><Pill tone="green">可添加 / 删除 / 置顶</Pill></div>
+            <div className="miniHeader"><div><h3>竞品账号库</h3><p>把要长期观察的账号/公开视频链接固定在这里。当前会保存到本地并同步后端，后端会优先写 Supabase，失败则本地 JSON 兜底。</p></div><Pill tone="green">可添加 / 删除 / 置顶</Pill></div>
             <div className="grid4">
               <Field label="账号名称"><input value={heatDraft.name} onChange={e => setHeatDraft({ ...heatDraft, name: e.target.value })} placeholder="例如：马来西亚房产顾问老吴" /></Field>
               <Field label="平台"><select value={heatDraft.platform} onChange={e => setHeatDraft({ ...heatDraft, platform: e.target.value })}><option>抖音</option><option>小红书</option><option>视频号</option><option>百度</option><option>其他</option></select></Field>
@@ -1774,20 +1901,22 @@ ${manualText || ''}`.trim()
               <Field label="监控标签"><input value={heatDraft.tags} onChange={e => setHeatDraft({ ...heatDraft, tags: e.target.value })} placeholder="马来西亚房产,第二家园" /></Field>
             </div>
             <Field label="账号备注 / 重点观察"><textarea value={heatDraft.notes} onChange={e => setHeatDraft({ ...heatDraft, notes: e.target.value })} placeholder="例如：每天看评论区问得最多的问题，保留点赞/评论高的前三条。" /></Field>
-            <div className="buttonRow"><button className="btn primary" onClick={addHeatAccount}>添加到账号库</button><button className="btn ghost" onClick={generateDailyHeatRadar}>按账号生成今日前 3</button></div>
+            <div className="buttonRow"><button className="btn primary" onClick={addHeatAccount}>添加到账号库</button><button className="btn soft" onClick={runPublicHeatCrawler}>自动采集真实热度</button><button className="btn ghost" onClick={generateDailyHeatRadar}>本地演示前 3</button></div>
             <div className="heatAccountList">{heatAccounts.length === 0 && <Empty>还没有固定竞品账号。先添加 3-10 个同行账号，热度雷达会按账号保留每日前 3 内容。</Empty>}{pinnedHeatAccounts.map(acc => <div className="heatAccountCard" key={acc.id}><div><strong>{acc.name}</strong><Pill tone={acc.pinned ? 'green' : 'purple'}>{acc.pinned ? '已置顶' : acc.platform}</Pill></div><p>{acc.tags || '未设置标签'}</p><small>{acc.url || '未填链接'}</small><em>{acc.notes || '暂无备注'}</em><div className="miniActions"><button onClick={() => toggleHeatAccount(acc.id)}>{acc.pinned ? '取消置顶' : '置顶'}</button><button onClick={() => removeHeatAccount(acc.id)}>删除</button></div></div>)}</div>
           </div>
 
           <div className="heatPanel">
-            <div className="miniHeader"><div><h3>手动导入 / 过渡方案</h3><p>那三个 API 先不急。现在可以先粘贴竞品标题、评论、热词或截图 OCR 后的文本，AI 先分析热度和客户意图。</p></div><Pill tone="orange">上线前可用</Pill></div>
+            <div className="miniHeader"><div><h3>无企业认证版采集</h3><p>不用销售每天手填；优先用账号/视频公开链接自动采集。平台限制时，再用 CSV/截图/文本作为备用入口。</p></div><Pill tone="orange">公开链接优先</Pill></div>
             <Field label="粘贴竞品内容 / 评论 / 热词"><textarea value={manualHeatText} onChange={e => setManualHeatText(e.target.value)} placeholder="一行一条：例如 马来西亚第二家园现在必须买房吗？" /></Field>
-            <button className="btn soft" onClick={importManualHeatData}>导入到今日热度池</button>
+            <div className="buttonRow"><button className="btn soft" onClick={importManualHeatData}>备用导入到今日热度池</button><Field label="每个账号采集条数"><input type="number" min={1} max={6} value={heatCrawlerLimit} onChange={e => setHeatCrawlerLimit(Math.max(1, Math.min(6, Number(e.target.value) || 3)))} /></Field></div>
             <div className="heatKeywordBox"><h4>内置社媒关键词池</h4><p>{heatRadarSeedKeywords.join(' / ')}</p></div>
+            <div className="crawlerNotice"><strong>采集边界</strong><p>只采集公开视频/账号页能公开返回的标题、链接、点赞、评论、收藏、分享等热度字段；不自动私信、不自动评论、不绕验证码。</p></div>
           </div>
         </div>
 
-        <div className="sectionSubhead"><h3>今日热度前 3 留存</h3><p>上线后这里会自动显示每个竞品账号当天热度前 3。现在先用账号标签、关键词池和手动导入生成演示数据。</p></div>
+        <div className="sectionSubhead"><h3>今日热度前 3 留存</h3><p>真实采集成功时这里显示真实公开数据；没有抓到时才使用演示/导入数据。后面企业认证后可无缝替换为巨量、抖音、百度 API。</p></div>
         <div className="opportunityBoard heatSnapshotBoard">{todayHeatSnapshots.map((item: any) => <div className="opportunityCard heatSnapshotCard" key={item.id}><div className="oppScore">{item.score}</div><strong>{item.topic}</strong><p>{item.intent}</p><small>{item.platform} · {item.account_name}</small><em>{item.signal}</em><em>{item.recommended_action}</em><Pill>{item.lead_magnet}</Pill></div>)}</div>
+        {heatCrawlerResult && <div className="resultBox heatCrawlerResult"><h3>{heatCrawlerResult.analysis?.summary || '真实热度采集完成'}</h3><div className="splitGrid"><div><h4>跟进选题</h4>{(heatCrawlerResult.analysis?.content_angles || []).map((x: string) => <p key={x}>· {x}</p>)}</div><div><h4>客户意图</h4>{(heatCrawlerResult.analysis?.customer_intents || []).map((x: string) => <p key={x}>· {x}</p>)}</div><div><h4>资料承接</h4>{(heatCrawlerResult.analysis?.lead_magnets || []).map((x: string) => <p key={x}>· {x}</p>)}</div></div>{heatCrawlerResult.warnings?.slice(0, 6).map(w => <div className="warn" key={w}>{w}</div>)}</div>}
 
         <div className="connectorGrid">{realDataConnectors.slice(0, 4).map(conn => <div className="connectorCard" key={conn.name}><div><strong>{conn.name}</strong><Pill tone={conn.status.includes('优先') ? 'green' : 'purple'}>{conn.status}</Pill></div><p>{conn.purpose}</p><small>{conn.note}</small><code>{conn.fields.join(' / ')}</code></div>)}</div>
 

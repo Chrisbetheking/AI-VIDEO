@@ -969,3 +969,26 @@ input:focus,textarea:focus,select:focus{
   .heatAccountList { grid-template-columns: 1fr; }
   .miniHeader, .sectionSubhead { flex-direction: column; align-items: stretch; }
 }
+
+.crawlerNotice {
+  margin-top: 12px;
+  padding: 12px 14px;
+  border: 1px dashed rgba(59, 130, 246, .35);
+  border-radius: 16px;
+  background: rgba(59, 130, 246, .06);
+}
+.crawlerNotice strong {
+  display: block;
+  font-size: 13px;
+  color: #1d4ed8;
+  margin-bottom: 4px;
+}
+.crawlerNotice p {
+  margin: 0;
+  font-size: 12px;
+  color: #475569;
+  line-height: 1.65;
+}
+.heatCrawlerResult {
+  margin-top: 16px;
+}

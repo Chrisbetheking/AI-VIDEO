@@ -79,6 +79,10 @@ from app.schemas import (
     GraphicPostImage,
     LeadAcquisitionRequest,
     LeadAcquisitionPlanResponse,
+    CompetitorAccount,
+    HeatRadarAccountInput,
+    HeatRadarRunRequest,
+    HeatRadarRunResponse,
 )
 from app.services.ad_analysis import analyze_ad
 from app.services.cover import create_cover
@@ -98,6 +102,7 @@ from app.services.video_edit import apply_video_edit
 from app.services.auto_collector import run_auto_collection
 from app.services.one_click import generate_one_click, revise_one_click
 from app.services.graphic_post import create_graphic_post
+from app.services.heat_radar import run_public_heat_radar
 
 app = FastAPI(title='AI-VIDEO 正式版 API', version='1.0.0')
 settings = get_settings()
@@ -760,6 +765,50 @@ def api_memory_script_version(req: ScriptVersionSave, memory: MemoryStore = Depe
 @app.post('/api/memory/events')
 def api_memory_event(req: MemoryEventInput, memory: MemoryStore = Depends(get_memory)) -> dict:
     return memory.save_learning_event(req.model_dump())
+
+
+@app.get('/api/heat-radar/accounts')
+def api_heat_radar_accounts(memory: MemoryStore = Depends(get_memory)) -> list[dict]:
+    # 新热度账号库优先；没有时兼容旧竞品账号库。
+    items = memory.list('heat_radar_accounts', limit=120)
+    deleted_ids = {str(x.get('account_id') or '') for x in memory.list('heat_radar_account_deletes', limit=300)}
+    active = [x for x in items if str(x.get('id') or '') not in deleted_ids and not x.get('deleted')]
+    if active:
+        return active
+    return memory.list('competitor_accounts', limit=80)
+
+
+@app.post('/api/heat-radar/accounts')
+def api_heat_radar_save_account(req: HeatRadarAccountInput, memory: MemoryStore = Depends(get_memory)) -> dict:
+    item = req.model_dump()
+    item.setdefault('id', str(uuid.uuid4()))
+    item['raw'] = {'source': 'heat_radar_account_library'}
+    return memory.insert('heat_radar_accounts', item)
+
+
+@app.delete('/api/heat-radar/accounts/{account_id}')
+def api_heat_radar_delete_account(account_id: str, memory: MemoryStore = Depends(get_memory)) -> dict:
+    # Supabase 表未建 delete/upsert 时也能通过软删除事件过滤。
+    memory.insert('heat_radar_account_deletes', {'account_id': account_id, 'deleted': True})
+    return {'ok': True, 'deleted': account_id}
+
+
+@app.get('/api/heat-radar/items')
+def api_heat_radar_items(memory: MemoryStore = Depends(get_memory)) -> list[dict]:
+    return memory.list('heat_radar_items', limit=120)
+
+
+@app.get('/api/heat-radar/daily-top3')
+def api_heat_radar_daily_top3(memory: MemoryStore = Depends(get_memory)) -> list[dict]:
+    return memory.list('heat_daily_top3', limit=30)
+
+
+@app.post('/api/heat-radar/run-public-crawl', response_model=HeatRadarRunResponse)
+async def api_heat_radar_run_public_crawl(req: HeatRadarRunRequest, settings: Settings = Depends(get_settings), memory: MemoryStore = Depends(get_memory)) -> dict:
+    cron_token = os.getenv('HEAT_RADAR_CRON_TOKEN', '').strip()
+    if cron_token and req.token != cron_token:
+        raise HTTPException(status_code=403, detail='HEAT_RADAR_CRON_TOKEN 不匹配。')
+    return await run_public_heat_radar(settings, memory, req)
 
 
 @app.post('/api/generate-copy', response_model=GeneratedCopy)

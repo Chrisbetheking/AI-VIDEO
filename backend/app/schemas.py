@@ -723,3 +723,60 @@ class ModelStatusResponse(BaseModel):
     image_provider: str
     image_model: str
     image_edit_model: str
+
+
+class HeatRadarAccountInput(BaseModel):
+    id: str = ''
+    name: str = ''
+    platform: str = '抖音'
+    url: str = ''
+    tags: str = ''
+    notes: str = ''
+    pinned: bool = False
+    created_at: str = ''
+
+
+class HeatRadarRunRequest(BaseModel):
+    accounts: List[HeatRadarAccountInput] = Field(default_factory=list)
+    keywords: List[str] = Field(default_factory=list)
+    limit_per_account: int = Field(default=3, ge=1, le=6)
+    include_saved_accounts: bool = True
+    save_to_memory: bool = True
+    token: str = ''
+
+
+class HeatRadarItem(BaseModel):
+    id: str = ''
+    date: str = ''
+    platform: str = ''
+    account_id: str = ''
+    account_name: str = ''
+    title: str = ''
+    description: str = ''
+    url: str = ''
+    published_at: str = ''
+    collected_at: str = ''
+    like_count: int = 0
+    comment_count: int = 0
+    favorite_count: int = 0
+    share_count: int = 0
+    view_count: int = 0
+    heat_score: int = 0
+    keyword: str = ''
+    tags: List[str] = Field(default_factory=list)
+    thumbnail_url: str = ''
+    source_mode: str = ''
+    warnings: List[str] = Field(default_factory=list)
+    raw: Dict[str, Any] = Field(default_factory=dict)
+
+
+class HeatRadarRunResponse(BaseModel):
+    ok: bool = True
+    source_mode: str = ''
+    accounts_count: int = 0
+    collected_count: int = 0
+    saved_count: int = 0
+    top_items: List[Dict[str, Any]] = Field(default_factory=list)
+    analysis: Dict[str, Any] = Field(default_factory=dict)
+    warnings: List[str] = Field(default_factory=list)
+    next_actions: List[str] = Field(default_factory=list)
