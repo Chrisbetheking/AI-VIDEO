@@ -5,6 +5,7 @@ import hashlib
 import json
 import mimetypes
 import os
+import re
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -631,14 +632,66 @@ async def api_one_click_chat(req: OneClickChatRequest, settings: Settings = Depe
     return result
 
 
+def _fallback_lead_acquisition_plan(req: LeadAcquisitionRequest, reason: str = '') -> LeadAcquisitionPlanResponse:
+    kws = []
+    for part in [req.listening_keywords, req.trend_keywords, req.industry, '马来西亚房产，马来西亚买房，第二家园，MM2H，吉隆坡房产，新山房产，国际学校']:
+        for x in re.split(r'[,，#\n\s/]+', str(part or '')):
+            x = x.strip()
+            if x and x not in kws:
+                kws.append(x)
+    kws = kws[:18]
+    lead_magnets = [x.strip(' -·') for x in re.split(r'[\n；;]+', str(req.private_domain_assets or req.report_delivery or '马来西亚买房税费测算表\nMM2H 与购房要求对照表\n吉隆坡 vs 新山选盘表')) if x.strip()][:6]
+    if not lead_magnets:
+        lead_magnets = ['马来西亚买房税费测算表', 'MM2H 与购房要求对照表', '吉隆坡 vs 新山选盘表']
+    opportunities = []
+    for i, kw in enumerate((kws or ['马来西亚买房税费', '马来西亚第二家园', 'Mont Kiara 国际学校附近公寓'])[:6]):
+        opportunities.append({
+            'score': max(72, 94 - i * 4),
+            'source': '热度雷达/关键词池',
+            'keyword': kw,
+            'intent': '交易前教育/资格判断/城市比较/资料领取',
+            'action': f'围绕「{kw}」生成原创口播或图文，结尾承接资料包。',
+            'asset': lead_magnets[i % len(lead_magnets)],
+        })
+    return LeadAcquisitionPlanResponse(
+        overview=f"热度雷达方案已生成。{('AI 接口失败，已用规则兜底：' + reason[:120]) if reason else '基于当前行业档案与热度内容生成。'}",
+        audience_segments=[x.strip() for x in re.split(r'[\n；;]+', str(req.customer_segments or req.audience or '高净值家庭\n教育规划家庭\n第二家园/身份规划人群')) if x.strip()][:8],
+        listening_keywords=kws,
+        content_triggers=[f'{kw}：做成“问题解释 + 资料领取”内容' for kw in kws[:8]],
+        reply_templates=[f'这个问题很多家庭都会先卡在资格、预算和城市选择上。我整理了《{lead_magnets[0]}》，需要的话可以发你。'],
+        private_domain_sop=['评论区人工回复，不自动私信、不自动刷评论。', '用资料包关键词承接：报告/预算/MM2H/学校。', '收集需求后再引导加微信或预约顾问。'],
+        daily_automation_tasks=['每天自动跑热度雷达：今天有新内容看今天 Top 3，没有则回看最近 3 条。', '把高热话题转成原创口播/图文，不照抄竞品原文。', '把线索问题同步到资料包和私信话术。'],
+        next_actions=['先固定 5-10 个竞品账号/具体视频链接。', '在账号备注里补真实指标格式：标题 链接 赞xx 评论xx 收藏xx。', '后面企业认证后接巨量/抖音/百度 API。'],
+        content_matrix=[f'{kw}：短视频口播 / 小红书图文 / FAQ 落地页' for kw in kws[:6]],
+        lead_magnets=lead_magnets,
+        shooting_prompts=[],
+        required_integrations=['当前无需企业认证：公开链接留存 + 备注/CSV 真实指标。', '后续接入：巨量引擎、抖音开放平台、百度营销或第三方数据平台。'],
+        data_sources=[
+            {'name': '公开链接/账号库', 'status': '当前可用', 'purpose': '留存竞品内容来源', 'required_fields': ['账号名', '平台', '公开链接', '备注'], 'next_step': '补具体视频/笔记链接'},
+            {'name': '备注/CSV 真实指标', 'status': '当前可用', 'purpose': '补充点赞评论收藏等热度字段', 'required_fields': ['标题', '链接', '点赞', '评论', '收藏', '分享'], 'next_step': '按行粘贴或批量导入'},
+        ],
+        interception_opportunities=opportunities,
+        monitoring_sop=['固定竞品账号库。', '每天点自动采集真实热度。', '今天没有新内容自动回看最近 3 条。', 'AI 根据热度内容给出原创跟进方向和资料包承接。'],
+        compliance_notes=['不自动私信。', '不自动评论。', '不绕验证码/登录限制。', '只处理公开内容和用户主动提供/导入的数据。'],
+    )
+
+
 @app.post('/api/lead-acquisition/plan', response_model=LeadAcquisitionPlanResponse)
 async def api_lead_acquisition_plan(req: LeadAcquisitionRequest, settings: Settings = Depends(get_settings), memory: MemoryStore = Depends(get_memory)) -> LeadAcquisitionPlanResponse:
-    ctx = memory.context()
-    if ctx.get('learning_summary') and not req.existing_context:
-        req.existing_context = str(ctx.get('learning_summary') or '')[:8000]
-    result = await generate_lead_acquisition_plan(settings, req)
-    memory.save_learning_event({'event_type': 'lead_acquisition_plan', 'title': req.industry or '获客自动化作战图', 'payload': result.model_dump()})
-    return result
+    try:
+        ctx = memory.context()
+        if ctx.get('learning_summary') and not req.existing_context:
+            req.existing_context = str(ctx.get('learning_summary') or '')[:8000]
+        result = await generate_lead_acquisition_plan(settings, req)
+        memory.save_learning_event({'event_type': 'lead_acquisition_plan', 'title': req.industry or '热度雷达方案', 'payload': result.model_dump()})
+        return result
+    except BaseException as exc:
+        result = _fallback_lead_acquisition_plan(req, str(exc))
+        try:
+            memory.save_learning_event({'event_type': 'lead_acquisition_plan_fallback', 'title': req.industry or '热度雷达方案兜底', 'payload': result.model_dump(), 'error': str(exc)[:500]})
+        except BaseException:
+            pass
+        return result
 
 
 @app.get('/api/memory/context', response_model=MemoryContextResponse)

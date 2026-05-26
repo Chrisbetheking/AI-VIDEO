@@ -694,8 +694,14 @@ function AppInner() {
   const pinnedHeatAccounts = useMemo(() => heatAccounts.filter(x => x.pinned).concat(heatAccounts.filter(x => !x.pinned)), [heatAccounts])
   const todayHeatSnapshots = useMemo(() => {
     const today = todayKey()
-    const todayList = heatSnapshots.filter(x => x.date === today)
-    return todayList.length ? todayList : heatRadarFallbackSnapshots
+    const realList = heatSnapshots.filter(x => {
+      const id = String(x.id || '')
+      const signal = String(x.signal || '')
+      const topic = String(x.topic || '')
+      return !id.startsWith('seed_') && !signal.includes('本地关键词模拟') && !topic.includes('本地关键词模拟')
+    })
+    const todayList = realList.filter(x => x.date === today)
+    return (todayList.length ? todayList : realList).slice(0, 3)
   }, [heatSnapshots])
   const referenceText = useMemo(() => extract?.transcript || manualText || sourceUrl, [extract, manualText, sourceUrl])
   const competitorNotes = useMemo(() => competitors.map(c => `${c.platform}｜${c.name}｜${c.positioning}｜${c.notes}`).join('\n'), [competitors])
@@ -960,7 +966,7 @@ function AppInner() {
     const res = await run('生成热度雷达方案', () => apiPost<LeadAcquisitionPlanResponse>('/api/lead-acquisition/plan', {
       industry,
       audience,
-      selling_points: limitText(sellingPointsWithProfile, 1800),
+      selling_points: limitText(sellingPointsWithProfile, 1200),
       style,
       lead_region: leadRegion,
       conversion_goal: conversionGoal,
@@ -977,7 +983,7 @@ function AppInner() {
       content_pillars: contentPillars,
       shooting_brief: shootingBrief,
       report_delivery: reportDelivery,
-      existing_context: `${memoryContext?.learning_summary || ''}\n\n${profileContext}`.trim()
+      existing_context: `${memoryContext?.learning_summary || ''}\n\n${profileContext}\n\n当前热度雷达内容：${todayHeatSnapshots.map(x => `${x.platform}/${x.account_name}/${x.topic}/${x.signal}`).join('；')}`.trim()
     }))
     setLeadPlan(res!)
     setLastHandoff('热度雷达方案已生成。后续可把高热话题同步到文案、图文、报告承接和发布草稿。')
@@ -1046,23 +1052,9 @@ function AppInner() {
   }
 
   function generateDailyHeatRadar() {
-    const accounts = heatAccounts.length ? heatAccounts : [{ id: 'seed', name: '行业关键词池', platform: '关键词', url: '', tags: heatRadarSeedKeywords.join(','), notes: '', pinned: true, created_at: new Date().toISOString() }]
-    const generated = accounts.flatMap((acc, accIdx) => heatRadarSeedKeywords.slice(0, 3).map((kw, i): HeatRadarSnapshot => ({
-      id: `seed_${acc.id}_${Date.now()}_${i}`,
-      date: todayKey(),
-      account_id: acc.id,
-      account_name: acc.name,
-      platform: acc.platform,
-      topic: `${kw}${i === 0 ? '真相' : i === 1 ? '避坑' : '怎么选'}`,
-      signal: '本地关键词模拟数据。要真实数据请点“自动采集真实热度”。',
-      score: 82 - accIdx * 2 - i,
-      intent: i === 0 ? '高意向搜索/交易前教育' : i === 1 ? '痛点避坑/评论区问题' : '城市比较/项目筛选',
-      source_url: acc.url,
-      recommended_action: '生成原创跟进内容，承接资料包。',
-      lead_magnet: activeReport?.title || '网页资料包'
-    }))).slice(0, 18)
-    setHeatSnapshots(prev => [...generated, ...prev].slice(0, 200))
-    setLastHandoff('已生成本地热度雷达演示。真实数据请用“自动采集真实热度”。')
+    const cleaned = heatSnapshots.filter(x => !String(x.id || '').startsWith('seed_') && !String(x.signal || '').includes('本地关键词模拟'))
+    setHeatSnapshots(cleaned)
+    setLastHandoff('已清理本地演示/模拟热度数据。热度雷达只显示自动采集、历史留存或手动导入的真实内容。')
   }
 
   async function runPublicHeatCrawler() {
@@ -1153,10 +1145,14 @@ function AppInner() {
       })))
     }
     if (Array.isArray(items) && items.length) {
-      const snapshots = items.slice(0, 60).map((item, idx) => heatItemToSnapshot(item, idx))
+      const snapshots = items
+        .filter((item: any) => !String(item?.source_mode || '').match(/seed|demo|local/i))
+        .slice(0, 60)
+        .map((item, idx) => heatItemToSnapshot(item, idx))
       setHeatSnapshots(prev => {
-        const seen = new Set(prev.map(x => x.id))
-        return [...snapshots.filter(x => !seen.has(x.id)), ...prev].slice(0, 200)
+        const cleanedPrev = prev.filter(x => !String(x.id || '').startsWith('seed_') && !String(x.signal || '').includes('本地关键词模拟'))
+        const seen = new Set(cleanedPrev.map(x => x.id))
+        return [...snapshots.filter(x => !seen.has(x.id)), ...cleanedPrev].slice(0, 200)
       })
     }
   }
@@ -1890,7 +1886,7 @@ ${manualText || ''}`.trim()
 
 
       {active === 'lead' && <section className="card modulePanel leadRadarPanel heatRadarPanel">
-        <div className="sectionHeader"><div><h2>热度雷达</h2><p>先用公开链接/账号页做自动采集：今天有新内容就留今天 Top 3；今天没有新内容，就自动展示最近留存的 3 条，不再生成假数据。企业认证/API 以后再接入。</p></div><div className="headerActions"><Button busy={busy === '自动采集真实热度' ? busy : ''} label="自动采集真实热度" onClick={runPublicHeatCrawler} kind="primary" /><Button label="生成本地演示雷达" onClick={generateDailyHeatRadar} kind="ghost" /><Button busy={busy === '生成热度雷达方案' ? busy : ''} label="AI 分析热度机会" onClick={makeLeadPlan} kind="soft" /></div></div>
+        <div className="sectionHeader"><div><h2>热度雷达</h2><p>先用公开链接/账号页做自动采集：今天有新内容就留今天 Top 3；今天没有新内容，就自动展示最近留存的 3 条，不再生成假数据。企业认证/API 以后再接入。</p></div><div className="headerActions"><Button busy={busy === '自动采集真实热度' ? busy : ''} label="自动采集真实热度" onClick={runPublicHeatCrawler} kind="primary" /><Button label="清理模拟数据" onClick={generateDailyHeatRadar} kind="ghost" /><Button busy={busy === '生成热度雷达方案' ? busy : ''} label="AI 分析热度机会" onClick={makeLeadPlan} kind="soft" /></div></div>
         <div className="leadContext">
           <div><b>当前业务</b><span>{industry || businessPositioning}</span></div>
           <div><b>固定账号</b><span>{heatAccounts.length} 个竞品账号</span></div>
@@ -1910,7 +1906,7 @@ ${manualText || ''}`.trim()
               <Field label="监控标签"><input value={heatDraft.tags} onChange={e => setHeatDraft({ ...heatDraft, tags: e.target.value })} placeholder="马来西亚房产,第二家园" /></Field>
             </div>
             <Field label="账号备注 / 重点观察"><textarea value={heatDraft.notes} onChange={e => setHeatDraft({ ...heatDraft, notes: e.target.value })} placeholder="例如：每天看评论区问得最多的问题，保留点赞/评论高的前三条。" /></Field>
-            <div className="buttonRow"><button className="btn primary" onClick={addHeatAccount}>添加到账号库</button><button className="btn soft" onClick={runPublicHeatCrawler}>自动采集真实热度</button><button className="btn ghost" onClick={generateDailyHeatRadar}>本地演示前 3</button></div>
+            <div className="buttonRow"><button className="btn primary" onClick={addHeatAccount}>添加到账号库</button><button className="btn soft" onClick={runPublicHeatCrawler}>自动采集真实热度</button><button className="btn ghost" onClick={generateDailyHeatRadar}>清理模拟数据</button></div>
             <div className="heatAccountList">{heatAccounts.length === 0 && <Empty>还没有固定竞品账号。先添加 3-10 个同行账号，热度雷达会按账号保留每日前 3 内容。</Empty>}{pinnedHeatAccounts.map(acc => <div className="heatAccountCard" key={acc.id}><div><strong>{acc.name}</strong><Pill tone={acc.pinned ? 'green' : 'purple'}>{acc.pinned ? '已置顶' : acc.platform}</Pill></div><p>{acc.tags || '未设置标签'}</p><small>{acc.url || '未填链接'}</small><em>{acc.notes || '暂无备注'}</em><div className="miniActions"><button onClick={() => toggleHeatAccount(acc.id)}>{acc.pinned ? '取消置顶' : '置顶'}</button><button onClick={() => removeHeatAccount(acc.id)}>删除</button></div></div>)}</div>
           </div>
 
@@ -1923,8 +1919,8 @@ ${manualText || ''}`.trim()
           </div>
         </div>
 
-        <div className="sectionSubhead"><h3>今日热度前 3 留存</h3><p>真实采集成功时显示今天 Top 3；如果今天没有新视频/新笔记，会自动回看最近留存 3 条。不会再用本地假数据冒充真实采集。</p></div>
-        <div className="opportunityBoard heatSnapshotBoard">{todayHeatSnapshots.map((item: any) => <div className="opportunityCard heatSnapshotCard" key={item.id}><div className="oppScore">{item.score}</div><strong>{item.topic}</strong><p>{item.intent}</p><small>{item.platform} · {item.account_name}</small><em>{item.signal}</em><em>{item.recommended_action}</em><Pill>{item.lead_magnet}</Pill></div>)}</div>
+        <div className="sectionSubhead"><h3>今日热度前 3 留存</h3><p>真实采集成功时显示今天 Top 3；如果今天没有新视频/新笔记，会自动回看最近留存 3 条。没有真实内容时会显示空状态和提示，不再用本地假数据冒充真实采集。</p></div>
+        <div className="opportunityBoard heatSnapshotBoard">{todayHeatSnapshots.length === 0 && <Empty>还没有真实热度内容。先添加具体视频/笔记链接，或在账号备注/导入框里粘贴一行真实数据：标题 + 链接 + 点赞/评论/收藏/分享。</Empty>}{todayHeatSnapshots.map((item: any) => <div className="opportunityCard heatSnapshotCard" key={item.id}><div className="oppScore">{item.score}</div><strong>{item.topic}</strong><p>{item.intent}</p><small>{item.platform} · {item.account_name}</small>{item.source_url && <a className="tinyLink" href={item.source_url} target="_blank" rel="noreferrer">打开原链接</a>}<em>{item.signal}</em><em>{item.recommended_action}</em><Pill>{item.lead_magnet}</Pill></div>)}</div>
         {heatCrawlerResult && <div className="resultBox heatCrawlerResult"><h3>{heatCrawlerResult.analysis?.summary || '真实热度采集完成'}</h3><div className="splitGrid"><div><h4>跟进选题</h4>{(heatCrawlerResult.analysis?.content_angles || []).map((x: string) => <p key={x}>· {x}</p>)}</div><div><h4>客户意图</h4>{(heatCrawlerResult.analysis?.customer_intents || []).map((x: string) => <p key={x}>· {x}</p>)}</div><div><h4>资料承接</h4>{(heatCrawlerResult.analysis?.lead_magnets || []).map((x: string) => <p key={x}>· {x}</p>)}</div></div>{heatCrawlerResult.warnings?.slice(0, 6).map(w => <div className="warn" key={w}>{w}</div>)}</div>}
 
         <div className="connectorGrid">{realDataConnectors.slice(0, 4).map(conn => <div className="connectorCard" key={conn.name}><div><strong>{conn.name}</strong><Pill tone={conn.status.includes('优先') ? 'green' : 'purple'}>{conn.status}</Pill></div><p>{conn.purpose}</p><small>{conn.note}</small><code>{conn.fields.join(' / ')}</code></div>)}</div>

@@ -448,9 +448,9 @@ class GrowthDecisionResponse(BaseModel):
 
 class CustomerProfileSave(BaseModel):
     industry: str = Field(default='', max_length=120)
-    audience: str = Field(default='', max_length=300)
+    audience: str = Field(default='', max_length=2000)
     selling_points: str = Field(default='', max_length=2000)
-    style: str = Field(default='', max_length=300)
+    style: str = Field(default='', max_length=1000)
     lead_region: str = Field(default='', max_length=200)
     conversion_goal: str = Field(default='', max_length=200)
     trend_keywords: str = Field(default='', max_length=1000)
@@ -512,19 +512,19 @@ class ScriptVersionSave(BaseModel):
 
 class LeadAcquisitionRequest(BaseModel):
     industry: str = Field(default='', max_length=160)
-    audience: str = Field(default='', max_length=300)
-    selling_points: str = Field(default='', max_length=1500)
-    style: str = Field(default='', max_length=300)
-    lead_region: str = Field(default='', max_length=300)
-    conversion_goal: str = Field(default='', max_length=300)
+    audience: str = Field(default='', max_length=2000)
+    selling_points: str = Field(default='', max_length=6000)
+    style: str = Field(default='', max_length=1000)
+    lead_region: str = Field(default='', max_length=2000)
+    conversion_goal: str = Field(default='', max_length=2000)
     channels: List[str] = Field(default_factory=list, max_length=20)
     data_sources: List[str] = Field(default_factory=list, max_length=20)
     competitor_accounts: List[str] = Field(default_factory=list, max_length=50)
     search_query_import: str = Field(default='', max_length=12000)
     fixed_options: str = Field(default='', max_length=3000)
     competitor_notes: str = Field(default='', max_length=6000)
-    trend_keywords: str = Field(default='', max_length=2000)
-    existing_context: str = Field(default='', max_length=8000)
+    trend_keywords: str = Field(default='', max_length=6000)
+    existing_context: str = Field(default='', max_length=16000)
     business_positioning: str = Field(default='', max_length=500)
     listening_keywords: str = Field(default='', max_length=3000)
     customer_segments: str = Field(default='', max_length=3000)
@@ -637,8 +637,8 @@ class AutoCollectorRunResponse(BaseModel):
 
 class OneClickGenerateRequest(BaseModel):
     industry: str = Field(default='', max_length=160)
-    audience: str = Field(default='', max_length=300)
-    selling_points: str = Field(default='', max_length=1500)
+    audience: str = Field(default='', max_length=2000)
+    selling_points: str = Field(default='', max_length=6000)
     style: str = Field(default='老板口播、真实可信、抖音强钩子', max_length=300)
     duration_seconds: int = Field(default=35, ge=10, le=180)
     goal: str = Field(default='私信咨询 / 加微信 / 留资', max_length=200)
@@ -669,8 +669,8 @@ class OneClickChatRequest(BaseModel):
     instruction: str = Field(..., min_length=1, max_length=3000)
     current: OneClickGenerateResponse
     industry: str = Field(default='', max_length=160)
-    audience: str = Field(default='', max_length=300)
-    selling_points: str = Field(default='', max_length=1500)
+    audience: str = Field(default='', max_length=2000)
+    selling_points: str = Field(default='', max_length=6000)
 
 
 
@@ -688,8 +688,8 @@ class GraphicPostRequest(BaseModel):
     hook: str = Field(default='', max_length=300)
     script: str = Field(default='', max_length=12000)
     industry: str = Field(default='', max_length=160)
-    audience: str = Field(default='', max_length=300)
-    selling_points: str = Field(default='', max_length=1500)
+    audience: str = Field(default='', max_length=2000)
+    selling_points: str = Field(default='', max_length=6000)
     style: str = Field(default='精美商业感、抖音图文、小红书收藏感', max_length=500)
     platform: str = Field(default='xiaohongshu', max_length=40)
     slide_count: int = Field(default=5, ge=3, le=8)
@@ -773,6 +773,8 @@ class HeatRadarItem(BaseModel):
 class HeatRadarRunResponse(BaseModel):
     ok: bool = True
     source_mode: str = ''
+    top_mode: str = ''
+    fallback_used: bool = False
     accounts_count: int = 0
     collected_count: int = 0
     saved_count: int = 0

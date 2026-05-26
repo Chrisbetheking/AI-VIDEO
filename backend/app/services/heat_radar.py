@@ -196,12 +196,21 @@ def _line_looks_like_heat_record(line: str) -> bool:
 
 
 def _manual_line_to_item(line: str, account: Dict[str, Any], keywords: List[str]) -> Dict[str, Any] | None:
-    raw = _clean_text(line, 1000)
+    raw = _clean_text(line, 1200)
     if not raw or not _line_looks_like_heat_record(raw):
         return None
     urls = URL_RE.findall(raw)
     url = urls[0] if urls else str(account.get('url') or '')
-    title = raw.replace(url, '').strip(' -｜|') if url else raw
+    title = raw.replace(url, '').strip(' -｜|：:') if url else raw
+    # 如果备注里只有链接，没有标题，就用账号名 + 平台生成一个非造假的占位标题。
+    if not title or len(title) < 4:
+        title = f"{str(account.get('name') or '竞品账号')} 的公开内容链接"
+    like_count = _extract_number_from_text([r'(?:赞|点赞|like)[：:\s]*([\d.,万wk]+)'], raw)
+    comment_count = _extract_number_from_text([r'(?:评论|comment)[：:\s]*([\d.,万wk]+)'], raw)
+    favorite_count = _extract_number_from_text([r'(?:收藏|favorite|fav)[：:\s]*([\d.,万wk]+)'], raw)
+    share_count = _extract_number_from_text([r'(?:分享|转发|share)[：:\s]*([\d.,万wk]+)'], raw)
+    view_count = _extract_number_from_text([r'(?:播放|浏览|view)[：:\s]*([\d.,万wk]+)'], raw)
+    has_metrics = any([like_count, comment_count, favorite_count, share_count, view_count])
     item = {
         'id': str(uuid.uuid4()),
         'date': today_key(),
@@ -213,20 +222,21 @@ def _manual_line_to_item(line: str, account: Dict[str, Any], keywords: List[str]
         'url': url,
         'published_at': '',
         'collected_at': now_iso(),
-        'like_count': _extract_number_from_text([r'(?:赞|点赞|like)[：:\s]*([\d.,万wk]+)'], raw),
-        'comment_count': _extract_number_from_text([r'(?:评论|comment)[：:\s]*([\d.,万wk]+)'], raw),
-        'favorite_count': _extract_number_from_text([r'(?:收藏|favorite|fav)[：:\s]*([\d.,万wk]+)'], raw),
-        'share_count': _extract_number_from_text([r'(?:分享|转发|share)[：:\s]*([\d.,万wk]+)'], raw),
-        'view_count': _extract_number_from_text([r'(?:播放|浏览|view)[：:\s]*([\d.,万wk]+)'], raw),
+        'like_count': like_count,
+        'comment_count': comment_count,
+        'favorite_count': favorite_count,
+        'share_count': share_count,
+        'view_count': view_count,
         'heat_score': 0,
         'keyword': ','.join([k for k in keywords if k and k in raw][:6]),
         'tags': [k for k in keywords if k and k in raw][:8],
         'thumbnail_url': '',
-        'source_mode': 'manual_or_csv_real_data_line',
-        'raw': {'line': raw},
-        'warnings': [],
+        'source_mode': 'manual_or_csv_real_data_line' if has_metrics else 'public_link_saved_no_metrics',
+        'raw': {'line': raw, 'has_metrics': has_metrics},
+        'warnings': [] if has_metrics else ['这条公开链接已留存，但平台没有公开返回点赞/评论/收藏；可在备注行补：赞xxx 评论xxx 收藏xxx。'],
     }
-    item['heat_score'] = heat_score(item) or 1
+    # 无指标的公开链接也保留在看板，但分数很低，不冒充高热数据。
+    item['heat_score'] = heat_score(item) or (3 if url else 1)
     return item
 
 
@@ -299,7 +309,7 @@ def _fallback_analysis(top_items: List[Dict[str, Any]]) -> Dict[str, Any]:
     if not topics:
         topics = ['暂无真实热度内容']
     return {
-        'summary': '热度雷达已进入安全模式：不再让 Render 因公开网页采集而 500。当前只分析已保存账号、备注/CSV 里的真实数据，以及可选轻量公开标题。',
+        'summary': '热度雷达已进入安全模式：只基于账号库公开链接、备注/CSV 真实数据和历史留存分析，不再生成本地假数据。',
         'content_angles': [f'围绕「{t}」做原创反打/解释内容' for t in topics[:5] if t != '暂无真实热度内容'],
         'customer_intents': ['税费/流程判断', '城市比较', '第二家园/身份规划', '教育家庭选盘'],
         'lead_magnets': ['马来西亚买房税费测算表', 'MM2H 与购房要求对照表', '吉隆坡 vs 新山选盘表'],
@@ -427,8 +437,20 @@ async def run_public_heat_radar(settings: Settings, memory: MemoryStore, req: An
                 if item:
                     collected.append(item)
         else:
+            # 安全模式下不拉重页面，但会把具体视频/笔记链接作为“待补指标的真实来源”留存，
+            # 这样点击自动采集后看板不会消失，也不会用模拟关键词冒充真实数据。
+            for acc in deduped[:20]:
+                url = str(acc.get('url') or '').strip()
+                if not _is_real_url(url):
+                    continue
+                title_seed = str(acc.get('notes') or '').split('\n', 1)[0].strip() or str(acc.get('name') or '')
+                line = f"{title_seed} {url}".strip()
+                item = _manual_line_to_item(line, acc, keywords)
+                if item:
+                    item['source_mode'] = 'account_public_link_safe_saved'
+                    collected.append(item)
             if deduped:
-                warnings.append('安全模式已关闭公开网页抓取，避免 Render 免费实例 500。需要测试公开标题采集时设置 HEAT_RADAR_PUBLIC_FETCH=true。')
+                warnings.append('安全模式未主动读取公开网页，只把账号库里的具体公开链接留存。要拿点赞/评论/收藏，请在备注补数字、接第三方数据源，或设置 HEAT_RADAR_PUBLIC_FETCH=true 测试轻量标题采集。')
 
         if not deduped and not manual_lines:
             warnings.append('没有可采集的账号/链接。请先添加竞品账号主页、公开视频链接，或在备注里粘贴真实数据行；如果今天没新内容，系统会自动回看最近 3 条历史留存。')

@@ -992,3 +992,14 @@ input:focus,textarea:focus,select:focus{
 .heatCrawlerResult {
   margin-top: 16px;
 }
+
+.tinyLink {
+  display: inline-block;
+  margin: 6px 0;
+  font-size: 12px;
+  color: #2563eb;
+  text-decoration: none;
+  font-weight: 700;
+}
+.tinyLink:hover { text-decoration: underline; }
+.heatSnapshotBoard .empty { grid-column: 1 / -1; }

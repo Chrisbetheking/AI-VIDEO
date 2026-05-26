@@ -433,6 +433,8 @@ export interface HeatRadarAccountApi {
 export interface HeatRadarRunResponse {
   ok: boolean
   source_mode: string
+  top_mode?: string
+  fallback_used?: boolean
   accounts_count: number
   collected_count: number
   saved_count: number
