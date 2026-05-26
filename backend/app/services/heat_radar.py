@@ -174,9 +174,30 @@ def _extract_number_from_text(patterns: List[str], text: str) -> int:
     return 0
 
 
+def _line_looks_like_heat_record(line: str) -> bool:
+    """判断备注/粘贴内容是不是一条真实热度记录，而不是操作说明。
+
+    之前把“每天查看所有视频，采集点赞评论前三条”这种说明误识别成内容，
+    导致页面出现假数据。现在必须满足：有 URL，或有明确数字指标。
+    """
+    raw = str(line or '').strip()
+    if not raw:
+        return False
+    if URL_RE.search(raw):
+        return True
+    metric_with_number = re.search(r'(赞|点赞|评论|收藏|分享|转发|播放|浏览|like|comment|favorite|share|view)[：:\s]*[0-9]', raw, re.I)
+    if metric_with_number:
+        return True
+    # CSV/表格行：标题,链接,点赞,评论... 这种也允许；纯说明文字不允许。
+    cells = [x.strip() for x in re.split(r'[,，\t|｜]', raw) if x.strip()]
+    has_number = any(re.search(r'\d', c) for c in cells)
+    has_metric_word = any(any(w in c.lower() for w in ['赞', '点赞', '评论', '收藏', '分享', '播放', '浏览', 'like', 'comment', 'view']) for c in cells)
+    return len(cells) >= 3 and has_number and has_metric_word
+
+
 def _manual_line_to_item(line: str, account: Dict[str, Any], keywords: List[str]) -> Dict[str, Any] | None:
     raw = _clean_text(line, 1000)
-    if not raw:
+    if not raw or not _line_looks_like_heat_record(raw):
         return None
     urls = URL_RE.findall(raw)
     url = urls[0] if urls else str(account.get('url') or '')
@@ -223,6 +244,54 @@ def _dedupe_items(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
 def _rank_top3(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return sorted(items, key=lambda x: int(x.get('heat_score') or 0), reverse=True)[:3]
+
+
+def _time_sort_value(item: Dict[str, Any]) -> str:
+    return str(item.get('published_at') or item.get('collected_at') or item.get('created_at') or item.get('date') or '')
+
+
+def _normalize_existing_item(item: Dict[str, Any]) -> Dict[str, Any] | None:
+    if not isinstance(item, dict):
+        return None
+    title = str(item.get('title') or item.get('topic') or '').strip()
+    url = str(item.get('url') or item.get('source_url') or '').strip()
+    # 过滤早期的关键词模拟/操作说明数据，避免“真实采集”里混假内容。
+    source_mode = str(item.get('source_mode') or '').lower()
+    if 'seed' in source_mode or 'local' in source_mode or 'demo' in source_mode:
+        return None
+    if not title and not url:
+        return None
+    out = dict(item)
+    out.setdefault('id', str(uuid.uuid4()))
+    out.setdefault('date', str(item.get('date') or today_key()))
+    out.setdefault('platform', str(item.get('platform') or '历史留存'))
+    out.setdefault('account_id', str(item.get('account_id') or ''))
+    out.setdefault('account_name', str(item.get('account_name') or '历史留存'))
+    out.setdefault('title', title or url or '历史留存内容')
+    out.setdefault('url', url)
+    out.setdefault('collected_at', str(item.get('collected_at') or item.get('created_at') or now_iso()))
+    out.setdefault('like_count', _num(item.get('like_count')))
+    out.setdefault('comment_count', _num(item.get('comment_count')))
+    out.setdefault('favorite_count', _num(item.get('favorite_count')))
+    out.setdefault('share_count', _num(item.get('share_count')))
+    out.setdefault('view_count', _num(item.get('view_count')))
+    out['heat_score'] = int(item.get('heat_score') or heat_score(out) or 1)
+    out['source_mode'] = str(item.get('source_mode') or 'recent_saved_fallback')
+    return out
+
+
+def _rank_today_or_recent(items: List[Dict[str, Any]], limit: int = 3) -> Tuple[List[Dict[str, Any]], str]:
+    """优先返回今天真实采集 TopN；今天没有则返回最近留存 TopN。"""
+    normalized = [x for x in (_normalize_existing_item(i) for i in items) if x]
+    if not normalized:
+        return [], 'empty'
+    today = today_key()
+    today_items = [x for x in normalized if str(x.get('date') or '').startswith(today)]
+    if today_items:
+        return sorted(today_items, key=lambda x: int(x.get('heat_score') or 0), reverse=True)[:limit], 'today_top'
+    # 没有今天内容：先按发布时间/采集时间取最近一批，再按热度取 TopN。
+    recent_pool = sorted(normalized, key=_time_sort_value, reverse=True)[: max(20, limit * 4)]
+    return sorted(recent_pool, key=lambda x: int(x.get('heat_score') or 0), reverse=True)[:limit], 'recent_top_fallback'
 
 
 def _fallback_analysis(top_items: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -328,7 +397,7 @@ async def run_public_heat_radar(settings: Settings, memory: MemoryStore, req: An
             text = str(acc.get('notes') or '')
             for line in re.split(r'[\n]+', text):
                 line = line.strip()
-                if len(line) > 10 and (URL_RE.search(line) or any(k in line for k in ['赞', '评论', '收藏', '播放', '分享'])):
+                if len(line) > 10 and _line_looks_like_heat_record(line):
                     manual_lines.append((line, acc))
 
         deduped: List[Dict[str, Any]] = []
@@ -362,7 +431,7 @@ async def run_public_heat_radar(settings: Settings, memory: MemoryStore, req: An
                 warnings.append('安全模式已关闭公开网页抓取，避免 Render 免费实例 500。需要测试公开标题采集时设置 HEAT_RADAR_PUBLIC_FETCH=true。')
 
         if not deduped and not manual_lines:
-            warnings.append('没有可采集的账号/链接。请先添加竞品账号主页、公开视频链接，或在备注里粘贴真实数据行。')
+            warnings.append('没有可采集的账号/链接。请先添加竞品账号主页、公开视频链接，或在备注里粘贴真实数据行；如果今天没新内容，系统会自动回看最近 3 条历史留存。')
 
         collected = _dedupe_items(collected)
         for item in collected:
@@ -372,7 +441,23 @@ async def run_public_heat_radar(settings: Settings, memory: MemoryStore, req: An
             if matched:
                 item['matched_keywords'] = matched[:6]
 
-        top_items = _rank_top3(collected)
+        existing_items: List[Dict[str, Any]] = []
+        try:
+            existing_items = [_normalize_existing_item(x) for x in memory.list('heat_radar_items', limit=300)]
+            existing_items = [x for x in existing_items if x]
+        except BaseException as exc:
+            warnings.append(f'读取历史热度留存失败：{str(exc)[:160]}')
+
+        ranked_input = collected + existing_items
+        top_items, top_mode = _rank_today_or_recent(ranked_input, limit=3)
+        if top_mode == 'recent_top_fallback':
+            warnings.append('今天没有采集到新内容，已自动展示最近留存的 3 条高热内容。')
+            for item in top_items:
+                item['source_mode'] = str(item.get('source_mode') or '') + '_recent_fallback'
+                item['date_basis'] = 'recent_when_no_today_content'
+        elif top_mode == 'empty':
+            warnings.append('没有可展示的真实内容。请先添加具体视频/笔记链接，或在账号备注里粘贴真实热度数据行。')
+
         analysis = await analyze_heat_items(settings, top_items, keywords)
 
         saved_count = 0
@@ -401,6 +486,8 @@ async def run_public_heat_radar(settings: Settings, memory: MemoryStore, req: An
         return {
             'ok': True,
             'source_mode': 'heat_radar_safe_mode_no_crash',
+            'top_mode': top_mode,
+            'fallback_used': top_mode == 'recent_top_fallback',
             'accounts_count': len(deduped),
             'collected_count': len(collected),
             'saved_count': saved_count,
