@@ -138,10 +138,10 @@ async def rewrite_from_inspiration(settings: Settings, req: RewriteFromInspirati
 
 
 async def generate_lead_acquisition_plan(settings: Settings, req: LeadAcquisitionRequest) -> LeadAcquisitionPlanResponse:
-    channels = req.channels or ['抖音截留获客', '抖音养号', '采集目标客户', '自动监听', '自动回复', '目标用户导流私域']
-    system = '你是海外房产行业的增长数据分析负责人，目标不是拍摄，而是通过真实搜索词、评论、竞品内容和线索表单发现可截流客户。必须输出严格 JSON，不能编造已采集数据；没有真实接入时要标注为待接入/待验证。'
+    channels = req.channels or ['热度雷达', '抖音养号', '采集目标客户', '自动监听', '自动回复', '目标用户导流私域']
+    system = '你是海外房产行业的增长数据分析负责人，目标不是拍摄，而是通过真实搜索词、评论、竞品内容和线索表单发现高热度获客机会。必须输出严格 JSON，不能编造已采集数据；没有真实接入时要标注为待接入/待验证。'
     user = f"""
-请为以下业务生成一套可执行的短视频获客自动化作战图。
+请为以下业务生成一套可执行的每日热度雷达与获客机会图。
 行业：{req.industry or '海外房产置业 / 第二家园'}
 目标客户：{req.audience or '有海外置业、第二家园、子女教育、养老度假和资产配置需求的人群'}
 核心卖点：{req.selling_points or '海外第二家园规划、项目筛选、置业流程、生活配套与长期服务'}
@@ -178,7 +178,7 @@ async def generate_lead_acquisition_plan(settings: Settings, req: LeadAcquisitio
   "next_actions": ["下一步人工确认事项"],
   "content_matrix": ["可直接生成的选题/栏目"],
   "lead_magnets": ["可领取的报告/清单/测算表"],
-  "shooting_prompts": ["把截流机会转成口播/图文的方向，不要写成拍摄任务"],
+  "shooting_prompts": ["把热度机会转成口播/图文的方向，不要写成拍摄任务"],
   "required_integrations": ["真实数据需要接入的平台/API/人工导入表"],
   "data_sources": [{"name":"数据源", "status":"已接入/待接入", "purpose":"用途", "required_fields":["需要的环境变量或授权"], "next_step":"下一步"}],
   "interception_opportunities": [{"score":90, "source":"平台/来源", "keyword":"真实或待验证关键词", "intent":"客户意图", "action":"截流动作", "asset":"承接资料包"}],
@@ -187,7 +187,7 @@ async def generate_lead_acquisition_plan(settings: Settings, req: LeadAcquisitio
 }}
 
 要求：
-1. 截流获客只输出“数据源、关键词、评论问题、竞品流量、承接动作”，不要把拍摄任务混在这里。
+1. 热度雷达只输出“数据源、关键词、评论问题、竞品流量、承接动作”，不要把拍摄任务混在这里。
 2. 真实数据没有接入时，必须写“待接入/待验证”，不要装成已经采集。
 3. 重点围绕资格判断、城市比较、项目筛选、税费测算、MM2H/第二家园这五类高意向场景。
 4. 自动化要落到系统能执行的动作：API授权、关键词监听、评论采集、线索表单、网页报告、私信/企微承接。
@@ -260,7 +260,7 @@ async def generate_lead_acquisition_plan(settings: Settings, req: LeadAcquisitio
             overview='围绕海外第二家园客户建立“同行打法学习—内容触发—评论私信承接—微信私域跟进”的获客闭环。',
             audience_segments=['子女教育规划家庭', '企业主资产配置人群', '养老度假第二居所人群', '海外生活方式升级人群'],
             channel_playbook=[
-                LeadChannelPlaybook(channel='抖音截留获客', goal='承接同行内容下的同类需求', actions=['监控同行爆款选题和评论高频问题', '用同结构不同表达发布观点型视频', '在评论和私信中引导做需求筛选'], automation=['自动采集同行口令/视频', '提炼钩子公式', '生成对应海外置业选题'], required_inputs=['竞品账号', '目标国家', '客户预算段'], success_metric='私信率、留资率、微信添加率'),
+                LeadChannelPlaybook(channel='抖音热度获客', goal='承接同行内容下的同类需求', actions=['监控同行爆款选题和评论高频问题', '用同结构不同表达发布观点型视频', '在评论和私信中引导做需求筛选'], automation=['自动采集同行口令/视频', '提炼钩子公式', '生成对应海外置业选题'], required_inputs=['竞品账号', '目标国家', '客户预算段'], success_metric='私信率、留资率、微信添加率'),
                 LeadChannelPlaybook(channel='博主联动流量', goal='通过同领域内容形成关联曝光', actions=['建立相关博主库', '围绕相同热点做不同角度视频', '用评论区问题反推下一条内容'], automation=['自动学习博主钩子和选题节奏', '生成联动选题清单'], required_inputs=['博主主页链接', '账号定位备注'], success_metric='关联话题播放量、评论转私信数量'),
                 LeadChannelPlaybook(channel='自动监听', goal='持续发现潜在线索和选题机会', actions=['监听海外房产、第二家园、子女教育、养老度假等关键词', '记录高频疑问', '触发内容生产'], automation=['每日后台采集学习', '生成行业雷达', '更新回复模板'], required_inputs=['关键词', '目标客群', '服务国家/城市'], success_metric='每日有效选题数、线索问题命中率'),
                 LeadChannelPlaybook(channel='自动回复', goal='把评论和私信导向需求诊断', actions=['准备不同客户分层回复', '优先问预算、国家、用途、时间', '把泛流量筛成有效咨询'], automation=['生成评论回复模板', '生成私信筛选问题', '沉淀高意向话术'], required_inputs=['FAQ', '服务边界', '顾问联系方式'], success_metric='回复率、有效需求表完成率'),

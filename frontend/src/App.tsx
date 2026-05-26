@@ -57,6 +57,33 @@ type LeadMagnetReport = {
   shootingIdea: string
 }
 
+
+type HeatRadarAccount = {
+  id: string
+  name: string
+  platform: string
+  url: string
+  tags: string
+  notes: string
+  pinned: boolean
+  created_at: string
+}
+
+type HeatRadarSnapshot = {
+  id: string
+  date: string
+  account_id: string
+  account_name: string
+  platform: string
+  topic: string
+  signal: string
+  score: number
+  intent: string
+  source_url: string
+  recommended_action: string
+  lead_magnet: string
+}
+
 function Field({ label, children, hint }: { label: string; children: ReactNode; hint?: string }) {
   return <label className="field"><span>{label}</span>{children}{hint && <em>{hint}</em>}</label>
 }
@@ -162,6 +189,31 @@ function safeProjectDuration(...values: unknown[]) {
 }
 
 
+function loadLocalJson<T>(key: string, fallback: T): T {
+  try {
+    const raw = window.localStorage.getItem(key)
+    if (!raw) return fallback
+    const parsed = JSON.parse(raw)
+    return parsed ?? fallback
+  } catch {
+    return fallback
+  }
+}
+
+function makeId(prefix = 'id') {
+  return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
+}
+
+function todayKey() {
+  return new Date().toISOString().slice(0, 10)
+}
+
+function limitText(value: string, limit = 980) {
+  const clean = safeText(value).replace(/\s+/g, ' ').trim()
+  return clean.length > limit ? clean.slice(0, limit - 1) + '…' : clean
+}
+
+
 function normalizeAssetFolder(raw: any, kind?: string, filename?: string): AssetFolderKey {
   const value = safeText(raw).toLowerCase().replace(/[-\s]/g, '_')
   const name = safeText(filename).toLowerCase()
@@ -257,7 +309,7 @@ const defaultSegment: VoiceSegment = {
 const modules: { key: ModuleKey; icon: string; title: string; desc: string; tag: string }[] = [
   { key: 'dashboard', icon: '总', title: '流程总览', desc: '一条视频从采集到发布的主流程', tag: '总览' },
   { key: 'monitor', icon: '控', title: '运营中控台', desc: '总览进度、数据库、插件和待办', tag: '监控' },
-  { key: 'lead', icon: '获', title: '截流获客雷达', desc: '真实数据采集、关键词监控、评论线索和私域承接', tag: '截流' },
+  { key: 'lead', icon: '热', title: '热度雷达', desc: '每日查看高热话题、竞品账号内容和可承接客户需求', tag: '热度' },
   { key: 'oneClick', icon: '生', title: '一键生成中心', desc: '基于素材、行业档案和报告钩子生成完整内容包', tag: '一键' },
   { key: 'assets', icon: '素', title: '1. 素材选择', desc: '先选/上传素材，确定图片停留和视频截取区间', tag: '素材' },
   { key: 'copy', icon: '文', title: '2. 文案生产', desc: '根据素材和客户目标生成口播文案', tag: '文案' },
@@ -344,12 +396,24 @@ const interceptionOpportunityFallback = [
   { score: 81, source: '百度长尾词', keyword: '中国人可以买马来西亚房产吗', intent: '资格判断 / 初筛', action: '做 FAQ 落地页 + 顾问筛选表单', asset: '《马来西亚买房资格清单》' }
 ]
 
-const leadDataLoop = [
-  '采集真实搜索词、竞品视频标题、评论问题、表单线索和私信关键词',
-  'AI 按“流量热度 × 转化意图 × 可承接资料包”给每条机会打分',
-  '自动生成截流动作：发哪条内容、评论区怎么引导、用哪个报告承接',
-  '线索进入网页报告 / 私信关键词 / 企微后，回写标签和复盘数据',
-  '下一轮内容不靠猜，直接按高分机会继续生成口播、图文和落地页'
+const heatRadarSeedKeywords = [
+  '马来西亚房产', '马来西亚买房', '马来西亚投资房产', '大马房产', '马来西亚第二家园', 'MM2H',
+  '吉隆坡房产', '新山房产', '槟城房产', '马来西亚国际学校', '马来西亚买房税费', '马来西亚买房流程',
+  'Mont Kiara 国际学校附近公寓', '新山 RTS 附近房产', '吉隆坡和新山哪里更值得买', '中国人可以买马来西亚房产吗'
+]
+
+const heatRadarDataLoop = [
+  '每日固定查看竞品账号和关键词热度，不再叫“截流”，改成“热度雷达”',
+  '每个竞品账号只保留当日热度前 3 条内容/话题，避免信息太乱',
+  'AI 只负责分析热度、客户意图、可承接资料包和下一步动作',
+  '账号库长期固定，可添加、删除、置顶，后续接 API 后自动采集',
+  '当前没接三方 API 时先用手动导入/链接记录；上线后存 Supabase，素材和截图存 R2'
+]
+
+const heatRadarFallbackSnapshots: HeatRadarSnapshot[] = [
+  { id: 'seed_tax', date: todayKey(), account_id: 'seed', account_name: '行业热词', platform: '百度/巨量/小红书', topic: '马来西亚买房税费怎么算', signal: '交易前教育词，适合税费测算表承接', score: 94, intent: '税费/预算测算', source_url: '', recommended_action: '做税费测算落地页和 30 秒问答视频', lead_magnet: '《马来西亚买房税费测算表》' },
+  { id: 'seed_mm2h', date: todayKey(), account_id: 'seed', account_name: '行业热词', platform: '抖音/百度', topic: '马来西亚第二家园一定要买房吗', signal: '身份规划与购房门槛强相关', score: 92, intent: 'MM2H/身份规划', source_url: '', recommended_action: '做 MM2H 类别对照图文和私信关键词“身份”', lead_magnet: '《MM2H 与购房要求对照表》' },
+  { id: 'seed_mk', date: todayKey(), account_id: 'seed', account_name: '行业热词', platform: '小红书/抖音', topic: 'Mont Kiara 国际学校附近公寓', signal: '教育家庭高意向场景', score: 89, intent: '子女教育/区域选盘', source_url: '', recommended_action: '做国际学校周边选盘图文包', lead_magnet: '《马来西亚国际学校择校清单》' }
 ]
 
 function asOpportunityList(plan: LeadAcquisitionPlanResponse | null) {
@@ -586,6 +650,10 @@ function AppInner() {
   const [leadPlan, setLeadPlan] = useState<LeadAcquisitionPlanResponse | null>(null)
   const [leadChannels, setLeadChannels] = useState<string[]>(['百度搜索关键词', '巨量搜索/抖音搜索', '抖音视频评论', '小红书笔记评论', '竞品账号监控', '微信/企微私域承接'])
   const [leadFixedOptions, setLeadFixedOptions] = useState('子女教育家庭、企业主资产配置、养老度假、海外第二居所、华人家庭、马来西亚城市、预算区间、国际学校、第二家园身份')
+  const [heatAccounts, setHeatAccounts] = useState<HeatRadarAccount[]>(() => loadLocalJson('ai_video_heat_accounts_v1', [] as HeatRadarAccount[]))
+  const [heatSnapshots, setHeatSnapshots] = useState<HeatRadarSnapshot[]>(() => loadLocalJson('ai_video_heat_snapshots_v1', [] as HeatRadarSnapshot[]))
+  const [heatDraft, setHeatDraft] = useState<HeatRadarAccount>({ id: '', name: '', platform: '抖音', url: '', tags: '马来西亚房产,第二家园,海外置业', notes: '', pinned: true, created_at: '' })
+  const [manualHeatText, setManualHeatText] = useState('')
   const [activeReportIndex, setActiveReportIndex] = useState(0)
   const [reportCopyStatus, setReportCopyStatus] = useState('')
 
@@ -617,6 +685,14 @@ function AppInner() {
     .map(id => materialAssets.find(a => a.id === id))
     .filter((a): a is AssetItem => Boolean(a && a.id && a.url))
     .map((a, i) => normalizeAsset(a, i)), [materialAssets, selectedMaterialIds])
+  useEffect(() => { window.localStorage.setItem('ai_video_heat_accounts_v1', JSON.stringify(heatAccounts)) }, [heatAccounts])
+  useEffect(() => { window.localStorage.setItem('ai_video_heat_snapshots_v1', JSON.stringify(heatSnapshots.slice(0, 200))) }, [heatSnapshots])
+  const pinnedHeatAccounts = useMemo(() => heatAccounts.filter(x => x.pinned).concat(heatAccounts.filter(x => !x.pinned)), [heatAccounts])
+  const todayHeatSnapshots = useMemo(() => {
+    const today = todayKey()
+    const todayList = heatSnapshots.filter(x => x.date === today)
+    return todayList.length ? todayList : heatRadarFallbackSnapshots
+  }, [heatSnapshots])
   const referenceText = useMemo(() => extract?.transcript || manualText || sourceUrl, [extract, manualText, sourceUrl])
   const competitorNotes = useMemo(() => competitors.map(c => `${c.platform}｜${c.name}｜${c.positioning}｜${c.notes}`).join('\n'), [competitors])
   const profileContext = useMemo(() => [
@@ -877,10 +953,10 @@ function AppInner() {
   }
 
   async function makeLeadPlan() {
-    const res = await run('生成获客自动化作战图', () => apiPost<LeadAcquisitionPlanResponse>('/api/lead-acquisition/plan', {
+    const res = await run('生成热度雷达方案', () => apiPost<LeadAcquisitionPlanResponse>('/api/lead-acquisition/plan', {
       industry,
       audience,
-      selling_points: sellingPointsWithProfile,
+      selling_points: limitText(sellingPointsWithProfile, 1800),
       style,
       lead_region: leadRegion,
       conversion_goal: conversionGoal,
@@ -900,7 +976,7 @@ function AppInner() {
       existing_context: `${memoryContext?.learning_summary || ''}\n\n${profileContext}`.trim()
     }))
     setLeadPlan(res!)
-    setLastHandoff('获客自动化作战图已生成。同行采集、文案生产、自动监听和私域承接会读取这套策略。')
+    setLastHandoff('热度雷达方案已生成。后续可把高热话题同步到文案、图文、报告承接和发布草稿。')
     setActive('lead')
     await reloadMemoryContext()
   }
@@ -1208,7 +1284,7 @@ ${manualText || ''}`.trim()
       topic: sellingPoints,
       industry,
       audience,
-      selling_points: `${sellingPointsWithProfile}\n获客地域/人群：${leadRegion}\n转化目标：${conversionGoal}`,
+      selling_points: limitText(`${sellingPointsWithProfile}\n获客地域/人群：${leadRegion}\n转化目标：${conversionGoal}`, 950),
       style,
       duration_seconds: autoProjectSeconds,
       knowledge_examples: manualText ? [manualText] : []
@@ -1224,7 +1300,7 @@ ${manualText || ''}`.trim()
       reference_text: referenceText || '请根据业务信息生成原创老板口播文案。',
       industry,
       audience,
-      selling_points: `${sellingPointsWithProfile}\n获客地域/人群：${leadRegion}\n转化目标：${conversionGoal}`,
+      selling_points: limitText(`${sellingPointsWithProfile}\n获客地域/人群：${leadRegion}\n转化目标：${conversionGoal}`, 950),
       style,
       duration_seconds: autoProjectSeconds
     }))
@@ -1678,34 +1754,49 @@ ${manualText || ''}`.trim()
       </section>}
 
 
-      {active === 'lead' && <section className="card modulePanel leadRadarPanel">
-        <div className="sectionHeader"><div><h2>真实数据截流获客雷达</h2><p>这个区域只负责“去哪截流、谁有需求、怎么承接”。拍摄和口播文案已经单独放到内容生产里的“拍摄 / 口播策划”。</p></div><div className="headerActions"><Button busy={busy === '生成获客自动化作战图' ? busy : ''} label="生成截流机会图" onClick={makeLeadPlan} kind="soft" /><Button label="保存行业档案" onClick={saveCustomerProfile} kind="ghost" /></div></div>
+      {active === 'lead' && <section className="card modulePanel leadRadarPanel heatRadarPanel">
+        <div className="sectionHeader"><div><h2>热度雷达</h2><p>每天查看竞品账号和行业关键词的高热内容，保留每个账号热度前 3 的内容/话题，再交给 AI 判断客户意图和承接资料。拍摄和口播文案放在内容生产里，不混在这里。</p></div><div className="headerActions"><Button label="生成今日热度雷达" onClick={generateDailyHeatRadar} kind="primary" /><Button busy={busy === '生成热度雷达方案' ? busy : ''} label="AI 分析热度机会" onClick={makeLeadPlan} kind="soft" /></div></div>
         <div className="leadContext">
           <div><b>当前业务</b><span>{industry || businessPositioning}</span></div>
-          <div><b>目标人群</b><span>{shortText(audience, 52)}</span></div>
-          <div><b>资料钩子</b><span>{shortText(privateDomainAssets.split(/\n+/)[0] || reportDelivery, 52)}</span></div>
-          <div><b>截流目标</b><span>{conversionGoal}</span></div>
+          <div><b>固定账号</b><span>{heatAccounts.length} 个竞品账号</span></div>
+          <div><b>今日留存</b><span>{todayHeatSnapshots.length} 条热度内容</span></div>
+          <div><b>承接资料</b><span>{shortText(privateDomainAssets.split(/\n+/)[0] || reportDelivery, 52)}</span></div>
         </div>
-        <div className="dataLoop">{leadDataLoop.map((item, i) => <div key={item}><span>{i + 1}</span><p>{item}</p></div>)}</div>
-        <div className="connectorGrid">{realDataConnectors.map(conn => <div className="connectorCard" key={conn.name}><div><strong>{conn.name}</strong><Pill tone={conn.status.includes('优先') ? 'green' : 'purple'}>{conn.status}</Pill></div><p>{conn.purpose}</p><small>{conn.note}</small><code>{conn.fields.join(' / ')}</code></div>)}</div>
-        <div className="channelSelector leadChannelSelect">
-          {['百度搜索关键词','巨量搜索/抖音搜索','抖音视频评论','小红书笔记评论','竞品账号监控','微信/企微私域承接','手动CSV/链接导入'].map(item => <button key={item} className={leadChannels.includes(item) ? 'selected' : ''} onClick={() => toggleLeadChannel(item)}>{item}</button>)}
+        <div className="dataLoop heatLoop">{heatRadarDataLoop.map((item, i) => <div key={item}><span>{i + 1}</span><p>{item}</p></div>)}</div>
+
+        <div className="heatControlGrid">
+          <div className="heatPanel">
+            <div className="miniHeader"><div><h3>竞品账号库</h3><p>把要长期观察的账号固定在这里。现在先保存到浏览器本地；后续中国版上线后同步到 Supabase，截图/素材进 OSS/R2。</p></div><Pill tone="green">可添加 / 删除 / 置顶</Pill></div>
+            <div className="grid4">
+              <Field label="账号名称"><input value={heatDraft.name} onChange={e => setHeatDraft({ ...heatDraft, name: e.target.value })} placeholder="例如：马来西亚房产顾问老吴" /></Field>
+              <Field label="平台"><select value={heatDraft.platform} onChange={e => setHeatDraft({ ...heatDraft, platform: e.target.value })}><option>抖音</option><option>小红书</option><option>视频号</option><option>百度</option><option>其他</option></select></Field>
+              <Field label="主页/视频链接"><input value={heatDraft.url} onChange={e => setHeatDraft({ ...heatDraft, url: e.target.value })} placeholder="粘贴账号主页或重点视频链接" /></Field>
+              <Field label="监控标签"><input value={heatDraft.tags} onChange={e => setHeatDraft({ ...heatDraft, tags: e.target.value })} placeholder="马来西亚房产,第二家园" /></Field>
+            </div>
+            <Field label="账号备注 / 重点观察"><textarea value={heatDraft.notes} onChange={e => setHeatDraft({ ...heatDraft, notes: e.target.value })} placeholder="例如：每天看评论区问得最多的问题，保留点赞/评论高的前三条。" /></Field>
+            <div className="buttonRow"><button className="btn primary" onClick={addHeatAccount}>添加到账号库</button><button className="btn ghost" onClick={generateDailyHeatRadar}>按账号生成今日前 3</button></div>
+            <div className="heatAccountList">{heatAccounts.length === 0 && <Empty>还没有固定竞品账号。先添加 3-10 个同行账号，热度雷达会按账号保留每日前 3 内容。</Empty>}{pinnedHeatAccounts.map(acc => <div className="heatAccountCard" key={acc.id}><div><strong>{acc.name}</strong><Pill tone={acc.pinned ? 'green' : 'purple'}>{acc.pinned ? '已置顶' : acc.platform}</Pill></div><p>{acc.tags || '未设置标签'}</p><small>{acc.url || '未填链接'}</small><em>{acc.notes || '暂无备注'}</em><div className="miniActions"><button onClick={() => toggleHeatAccount(acc.id)}>{acc.pinned ? '取消置顶' : '置顶'}</button><button onClick={() => removeHeatAccount(acc.id)}>删除</button></div></div>)}</div>
+          </div>
+
+          <div className="heatPanel">
+            <div className="miniHeader"><div><h3>手动导入 / 过渡方案</h3><p>那三个 API 先不急。现在可以先粘贴竞品标题、评论、热词或截图 OCR 后的文本，AI 先分析热度和客户意图。</p></div><Pill tone="orange">上线前可用</Pill></div>
+            <Field label="粘贴竞品内容 / 评论 / 热词"><textarea value={manualHeatText} onChange={e => setManualHeatText(e.target.value)} placeholder="一行一条：例如 马来西亚第二家园现在必须买房吗？" /></Field>
+            <button className="btn soft" onClick={importManualHeatData}>导入到今日热度池</button>
+            <div className="heatKeywordBox"><h4>内置社媒关键词池</h4><p>{heatRadarSeedKeywords.join(' / ')}</p></div>
+          </div>
         </div>
-        <div className="grid2">
-          <Field label="监听关键词 / 搜索词种子"><textarea value={trendKeywords} onChange={e => setTrendKeywords(e.target.value)} /></Field>
-          <Field label="截流人群 / 筛选条件"><textarea value={leadFixedOptions} onChange={e => setLeadFixedOptions(e.target.value)} /></Field>
-        </div>
-        {!leadPlan && <div className="opportunityBoard">
-          {asOpportunityList(null).map((item: any) => <div className="opportunityCard" key={`${item.source}-${item.keyword}`}><div className="oppScore">{item.score}</div><strong>{item.keyword}</strong><p>{item.intent}</p><small>来源：{item.source}</small><em>{item.action}</em><Pill>{item.asset}</Pill></div>)}
-        </div>}
+
+        <div className="sectionSubhead"><h3>今日热度前 3 留存</h3><p>上线后这里会自动显示每个竞品账号当天热度前 3。现在先用账号标签、关键词池和手动导入生成演示数据。</p></div>
+        <div className="opportunityBoard heatSnapshotBoard">{todayHeatSnapshots.map((item: any) => <div className="opportunityCard heatSnapshotCard" key={item.id}><div className="oppScore">{item.score}</div><strong>{item.topic}</strong><p>{item.intent}</p><small>{item.platform} · {item.account_name}</small><em>{item.signal}</em><em>{item.recommended_action}</em><Pill>{item.lead_magnet}</Pill></div>)}</div>
+
+        <div className="connectorGrid">{realDataConnectors.slice(0, 4).map(conn => <div className="connectorCard" key={conn.name}><div><strong>{conn.name}</strong><Pill tone={conn.status.includes('优先') ? 'green' : 'purple'}>{conn.status}</Pill></div><p>{conn.purpose}</p><small>{conn.note}</small><code>{conn.fields.join(' / ')}</code></div>)}</div>
+
         {leadPlan && <div className="resultBox leadResult"><h3>{leadPlan.overview}</h3>
           <div className="chips">{leadPlan.audience_segments?.map(x => <Pill key={x} tone="purple">{x}</Pill>)}</div>
           <div className="opportunityBoard">{asOpportunityList(leadPlan).map((item: any) => <div className="opportunityCard" key={`${item.source}-${item.keyword}`}><div className="oppScore">{item.score || 80}</div><strong>{item.keyword}</strong><p>{item.intent}</p><small>来源：{item.source}</small><em>{item.action}</em><Pill>{item.asset}</Pill></div>)}</div>
           {(leadPlan as any).required_integrations?.length ? <div className="integrationBox"><h4>需要接入的数据源</h4>{(leadPlan as any).required_integrations.map((x: string) => <p key={x}>· {x}</p>)}</div> : null}
-          <div className="leadPlaybookGrid">{leadPlan.channel_playbook?.map(item => <div className="leadPlaybook" key={item.channel}><strong>{item.channel}</strong><p>{item.goal}</p><h4>截流动作</h4>{item.actions?.map(x => <small key={x}>· {x}</small>)}<h4>自动化</h4>{item.automation?.map(x => <small key={x}>· {x}</small>)}<em>{item.success_metric}</em></div>)}</div>
           <div className="splitGrid"><div><h4>监听词</h4>{leadPlan.listening_keywords?.map(x => <p key={x}>· {x}</p>)}</div><div><h4>触发内容</h4>{leadPlan.content_triggers?.map(x => <p key={x}>· {x}</p>)}</div><div><h4>每日自动任务</h4>{leadPlan.daily_automation_tasks?.map(x => <p key={x}>· {x}</p>)}</div></div>
-          <div className="splitGrid"><div><h4>自动回复</h4>{leadPlan.reply_templates?.map(x => <p key={x}>· {x}</p>)}</div><div><h4>私域承接</h4>{leadPlan.private_domain_sop?.map(x => <p key={x}>· {x}</p>)}</div><div><h4>下一步</h4>{leadPlan.next_actions?.map(x => <p key={x}>· {x}</p>)}</div></div>
-          <div className="splitGrid"><div><h4>内容矩阵</h4>{leadPlan.content_matrix?.map(x => <p key={x}>· {x}</p>)}</div><div><h4>资料钩子</h4>{leadPlan.lead_magnets?.map(x => <p key={x}>· {x}</p>)}</div><div><h4>转成内容</h4>{leadPlan.shooting_prompts?.map(x => <p key={x}>· {x}</p>)}</div></div>
+          <div className="splitGrid"><div><h4>回复模板</h4>{leadPlan.reply_templates?.map(x => <p key={x}>· {x}</p>)}</div><div><h4>资料承接</h4>{leadPlan.lead_magnets?.map(x => <p key={x}>· {x}</p>)}</div><div><h4>合规边界</h4>{leadPlan.compliance_notes?.map(x => <p key={x}>· {x}</p>)}</div></div>
         </div>}
       </section>}
 

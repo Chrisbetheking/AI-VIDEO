@@ -881,3 +881,91 @@ input:focus,textarea:focus,select:focus{
   .dataLoop { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .connectorGrid, .opportunityBoard { grid-template-columns: 1fr; }
 }
+
+/* Hotness radar upgrade */
+.heatRadarPanel .sectionHeader p { max-width: 840px; }
+.heatLoop > div {
+  background: linear-gradient(180deg, rgba(34,197,94,0.08), rgba(255,255,255,0.96));
+  border-color: rgba(34,197,94,0.18);
+}
+.heatControlGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(320px, .75fr);
+  gap: 16px;
+  margin: 18px 0;
+}
+.heatPanel {
+  border: 1px solid rgba(47, 107, 255, .15);
+  border-radius: 24px;
+  background: linear-gradient(180deg, #fff, #f8fbff);
+  padding: 18px;
+  box-shadow: 0 18px 50px rgba(22, 45, 90, .07);
+}
+.miniHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 14px;
+}
+.miniHeader h3 { margin: 0 0 4px; font-size: 22px; color: #0f1b33; }
+.miniHeader p { margin: 0; color: #5c6d89; line-height: 1.55; }
+.heatAccountList {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 14px;
+}
+.heatAccountCard {
+  border: 1px solid rgba(15, 23, 42, .1);
+  border-radius: 18px;
+  padding: 14px;
+  background: #fff;
+}
+.heatAccountCard > div:first-child {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.heatAccountCard strong { color: #0f1b33; font-size: 16px; }
+.heatAccountCard p { margin: 8px 0 6px; color: #1f3b73; font-weight: 800; }
+.heatAccountCard small { display: block; color: #66758f; word-break: break-all; }
+.heatAccountCard em { display: block; margin-top: 8px; color: #41506a; font-style: normal; line-height: 1.5; }
+.miniActions { display: flex; gap: 8px; margin-top: 10px; }
+.miniActions button {
+  border: 1px solid rgba(47, 107, 255, .2);
+  background: #f4f8ff;
+  color: #2454d6;
+  border-radius: 12px;
+  padding: 7px 10px;
+  font-weight: 800;
+  cursor: pointer;
+}
+.heatKeywordBox {
+  margin-top: 16px;
+  border-radius: 18px;
+  border: 1px dashed rgba(47, 107, 255, .22);
+  background: #f7fbff;
+  padding: 14px;
+}
+.heatKeywordBox h4 { margin: 0 0 8px; color: #10213f; }
+.heatKeywordBox p { margin: 0; color: #355076; line-height: 1.7; }
+.sectionSubhead {
+  margin-top: 18px;
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-end;
+}
+.sectionSubhead h3 { margin: 0; color: #0f1b33; font-size: 24px; }
+.sectionSubhead p { margin: 0; color: #66758f; max-width: 760px; }
+.heatSnapshotBoard .opportunityCard {
+  background: linear-gradient(135deg, #ffffff, #f2fff7);
+  border-color: rgba(34,197,94,.2);
+}
+@media (max-width: 1180px) {
+  .heatControlGrid { grid-template-columns: 1fr; }
+  .heatAccountList { grid-template-columns: 1fr; }
+  .miniHeader, .sectionSubhead { flex-direction: column; align-items: stretch; }
+}

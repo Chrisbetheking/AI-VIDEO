@@ -9,7 +9,7 @@ class CopyRequest(BaseModel):
     topic: str = Field(..., min_length=1, max_length=500)
     industry: str = Field(default='', max_length=120)
     audience: str = Field(default='', max_length=200)
-    selling_points: str = Field(default='', max_length=1000)
+    selling_points: str = Field(default='', max_length=4000)
     style: str = Field(default='老板口播、真实、有信任感、短平快', max_length=200)
     duration_seconds: int = Field(default=35, ge=10, le=180)
     knowledge_examples: List[str] = Field(default_factory=list, max_length=20)
@@ -87,7 +87,7 @@ class VoiceDirectorRequest(BaseModel):
     intensity: str = Field(default='标准', max_length=40)
     target_seconds: int = Field(default=35, ge=5, le=180)
     audience: str = Field(default='', max_length=200)
-    selling_points: str = Field(default='', max_length=1000)
+    selling_points: str = Field(default='', max_length=4000)
 
 
 class VoiceDirectorResponse(BaseModel):
@@ -174,7 +174,7 @@ class RewriteFromInspirationRequest(BaseModel):
     reference_text: str = Field(..., min_length=1, max_length=12000)
     industry: str = Field(default='', max_length=120)
     audience: str = Field(default='', max_length=200)
-    selling_points: str = Field(default='', max_length=1000)
+    selling_points: str = Field(default='', max_length=4000)
     style: str = Field(default='老板口播、真实可信、强转化', max_length=200)
     duration_seconds: int = Field(default=35, ge=10, le=180)
 
@@ -299,7 +299,7 @@ class CopyRefineRequest(BaseModel):
     instruction: str = Field(..., min_length=1, max_length=2000)
     industry: str = Field(default='', max_length=120)
     audience: str = Field(default='', max_length=200)
-    selling_points: str = Field(default='', max_length=1000)
+    selling_points: str = Field(default='', max_length=4000)
 
 
 class VideoEditChatRequest(BaseModel):
@@ -375,7 +375,7 @@ class ShootingPlanRequest(BaseModel):
     script: str = Field(default='', max_length=12000)
     industry: str = Field(default='', max_length=120)
     audience: str = Field(default='', max_length=200)
-    selling_points: str = Field(default='', max_length=1000)
+    selling_points: str = Field(default='', max_length=4000)
     available_assets: str = Field(default='', max_length=3000)
     duration_seconds: int = Field(default=35, ge=5, le=180)
 
