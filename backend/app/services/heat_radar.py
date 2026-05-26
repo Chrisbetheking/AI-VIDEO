@@ -887,7 +887,7 @@ def _fallback_analysis(top_items: List[Dict[str, Any]]) -> Dict[str, Any]:
     if not topics:
         topics = ['补具体视频/笔记链接或 DOUYIN_WEB_COOKIE', '接入第三方/官方数据源', '补点赞评论收藏指标']
     return {
-        'summary': '已按真实来源运行热度雷达：优先采集今天内容；今天没有新内容时，自动回看最近 3 条。不会再生成本地假数据。',
+        'summary': '热度雷达只展示真实采集或真实留存内容：今天没有新内容时，自动回看最近 3 条。',
         'content_angles': [f'围绕「{t}」做原创跟进/解释内容' for t in topics[:5]],
         'customer_intents': ['税费/流程判断', '城市比较', '第二家园/身份规划', '教育家庭选盘'],
         'lead_magnets': ['马来西亚买房税费测算表', 'MM2H 与购房要求对照表', '吉隆坡 vs 新山选盘表'],

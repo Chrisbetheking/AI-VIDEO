@@ -1287,3 +1287,93 @@ input:focus,textarea:focus,select:focus{
   .subtitlePresetGrid { grid-template-columns: 1fr; }
   .smartSubtitleBox { flex-direction: column; align-items: flex-start; }
 }
+
+/* Heat radar grouping polish: real blogger streams, less clutter */
+.bloggerHeatPanel .miniHeader { align-items: flex-start; }
+.heatBloggerList {
+  display: grid;
+  gap: 14px;
+}
+.heatBloggerGroup {
+  border: 1px solid rgba(47, 107, 255, .14);
+  border-radius: 24px;
+  background: linear-gradient(180deg, #ffffff, #f8fbff);
+  overflow: hidden;
+  box-shadow: 0 12px 36px rgba(22,45,90,.05);
+}
+.heatBloggerHead {
+  appearance: none;
+  width: 100%;
+  border: 0;
+  background: linear-gradient(135deg, rgba(34,197,94,.08), rgba(47,107,255,.08));
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 14px;
+  padding: 16px 18px;
+  cursor: pointer;
+  text-align: left;
+}
+.heatBloggerHead span {
+  display: inline-flex;
+  width: fit-content;
+  margin-bottom: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: #eaf2ff;
+  color: #2454d6;
+  font-size: 12px;
+  font-weight: 900;
+}
+.heatBloggerHead strong {
+  display: block;
+  color: #0f172a;
+  font-size: 18px;
+  line-height: 1.25;
+}
+.heatBloggerHead em {
+  display: block;
+  margin-top: 4px;
+  color: #64748b;
+  font-style: normal;
+  font-weight: 800;
+  font-size: 13px;
+}
+.heatBloggerHead b {
+  flex: 0 0 auto;
+  border: 1px solid rgba(47,107,255,.18);
+  color: #2454d6;
+  background: white;
+  border-radius: 999px;
+  padding: 8px 14px;
+  font-size: 13px;
+  box-shadow: 0 10px 24px rgba(47,107,255,.08);
+}
+.heatTimeline.grouped {
+  padding: 14px;
+  background: #fff;
+}
+.heatTimelineItem.compact {
+  grid-template-columns: 42px minmax(0, 1fr);
+  border-color: rgba(47,107,255,.12);
+  background: #fff;
+}
+.heatTimelineItem.compact .timelineRank {
+  width: 40px;
+  height: 40px;
+  border-radius: 14px;
+}
+.heatTimelineItem.compact .timelineBody h4 {
+  font-size: 17px;
+}
+.heatRadarV2 .heatCrawlerResult.slim {
+  border-style: dashed;
+  background: #fbfdff;
+}
+.heatRadarV2 .connectorGrid.subtleConnectors {
+  display: none;
+}
+@media (max-width: 760px) {
+  .heatBloggerHead { align-items: flex-start; flex-direction: column; }
+  .heatBloggerHead b { align-self: flex-start; }
+}
