@@ -1377,3 +1377,49 @@ input:focus,textarea:focus,select:focus{
   .heatBloggerHead { align-items: flex-start; flex-direction: column; }
   .heatBloggerHead b { align-self: flex-start; }
 }
+
+
+/* OpenClaw automation panel */
+.openClawPanel {
+  grid-column: 1 / -1;
+  background: linear-gradient(135deg, rgba(238,245,255,.96), rgba(255,255,255,.98));
+  border: 1px solid rgba(82, 130, 255, .22);
+}
+.endpointBox {
+  display: grid;
+  grid-template-columns: 120px 1fr;
+  gap: 12px;
+  align-items: center;
+  padding: 14px 16px;
+  border: 1px dashed rgba(55, 101, 255, .28);
+  border-radius: 18px;
+  background: rgba(255,255,255,.75);
+  margin: 12px 0;
+}
+.endpointBox span { color: #64748b; font-weight: 800; }
+.endpointBox code {
+  display: block;
+  overflow-x: auto;
+  white-space: nowrap;
+  color: #0f172a;
+  font-weight: 800;
+}
+.auditBoard {
+  margin-top: 14px;
+  padding: 14px;
+  border-radius: 20px;
+  background: rgba(248, 250, 252, .95);
+  border: 1px solid rgba(148, 163, 184, .22);
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+.auditBoard > div {
+  padding: 12px;
+  border-radius: 16px;
+  background: #fff;
+  border: 1px solid rgba(226,232,240,.9);
+}
+.auditBoard strong { display:block; font-size: 24px; color:#2563eb; }
+.auditBoard span { color:#64748b; font-size: 13px; font-weight: 800; }
+.auditBoard p { grid-column: 1 / -1; margin: 4px 0; color:#334155; }

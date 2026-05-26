@@ -831,3 +831,102 @@ class HeatRadarRunResponse(BaseModel):
     analysis: Dict[str, Any] = Field(default_factory=dict)
     warnings: List[str] = Field(default_factory=list)
     next_actions: List[str] = Field(default_factory=list)
+
+
+class HeatRadarOpenClawItemInput(BaseModel):
+    platform: str = '抖音'
+    account_name: str = ''
+    account_url: str = ''
+    account_id: str = ''
+    title: str = ''
+    description: str = ''
+    url: str = ''
+    published_at: str = ''
+    collected_at: str = ''
+    like_count: int = 0
+    comment_count: int = 0
+    favorite_count: int = 0
+    share_count: int = 0
+    view_count: int = 0
+    thumbnail_url: str = ''
+    tags: List[str] = Field(default_factory=list)
+    raw: Dict[str, Any] = Field(default_factory=dict)
+
+
+class HeatRadarOpenClawAccountInput(BaseModel):
+    id: str = ''
+    name: str = ''
+    platform: str = '抖音'
+    url: str = ''
+    tags: List[str] = Field(default_factory=list)
+    notes: str = ''
+    followers_count: int = 0
+    following_count: int = 0
+    total_likes: int = 0
+    last_post_at: str = ''
+    recent_items: List[HeatRadarOpenClawItemInput] = Field(default_factory=list)
+    raw: Dict[str, Any] = Field(default_factory=dict)
+
+
+class HeatRadarAccountDecision(BaseModel):
+    account_name: str = ''
+    platform: str = ''
+    account_url: str = ''
+    decision: str = 'watch'
+    score: int = 0
+    freshness_score: int = 0
+    relevance_score: int = 0
+    heat_score: int = 0
+    latest_post_at: str = ''
+    days_since_latest: int = 9999
+    recent_items_count: int = 0
+    reason: str = ''
+    next_action: str = ''
+
+
+class HeatRadarOpenClawIngestRequest(BaseModel):
+    token: str = ''
+    source_name: str = 'openclaw'
+    run_id: str = ''
+    keywords: List[str] = Field(default_factory=list)
+    accounts: List[HeatRadarOpenClawAccountInput] = Field(default_factory=list)
+    items: List[HeatRadarOpenClawItemInput] = Field(default_factory=list)
+    save_to_memory: bool = True
+    auto_add_accounts: bool = True
+    auto_accept_min_score: int = Field(default=72, ge=0, le=100)
+    max_stale_days: int = Field(default=90, ge=7, le=730)
+
+
+class HeatRadarOpenClawIngestResponse(BaseModel):
+    ok: bool = True
+    source_name: str = 'openclaw'
+    run_id: str = ''
+    received_accounts: int = 0
+    received_items: int = 0
+    saved_accounts: int = 0
+    saved_items: int = 0
+    accepted_accounts: List[HeatRadarAccountDecision] = Field(default_factory=list)
+    watch_accounts: List[HeatRadarAccountDecision] = Field(default_factory=list)
+    rejected_accounts: List[HeatRadarAccountDecision] = Field(default_factory=list)
+    archived_accounts: List[HeatRadarAccountDecision] = Field(default_factory=list)
+    top_items: List[Dict[str, Any]] = Field(default_factory=list)
+    warnings: List[str] = Field(default_factory=list)
+    next_actions: List[str] = Field(default_factory=list)
+
+
+class HeatRadarAccountAuditRequest(BaseModel):
+    token: str = ''
+    accounts: List[HeatRadarAccountInput] = Field(default_factory=list)
+    keywords: List[str] = Field(default_factory=list)
+    include_saved_accounts: bool = True
+    max_stale_days: int = Field(default=90, ge=7, le=730)
+
+
+class HeatRadarAccountAuditResponse(BaseModel):
+    ok: bool = True
+    reviewed_count: int = 0
+    keep: List[HeatRadarAccountDecision] = Field(default_factory=list)
+    watch: List[HeatRadarAccountDecision] = Field(default_factory=list)
+    archive: List[HeatRadarAccountDecision] = Field(default_factory=list)
+    warnings: List[str] = Field(default_factory=list)
+    next_actions: List[str] = Field(default_factory=list)

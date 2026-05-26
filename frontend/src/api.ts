@@ -445,6 +445,50 @@ export interface HeatRadarRunResponse {
 }
 
 
+
+export interface HeatRadarAccountDecision {
+  account_name: string
+  platform: string
+  account_url: string
+  decision: 'accept' | 'watch' | 'reject' | 'archive' | string
+  score: number
+  freshness_score: number
+  relevance_score: number
+  heat_score: number
+  latest_post_at: string
+  days_since_latest: number
+  recent_items_count: number
+  reason: string
+  next_action: string
+}
+
+export interface HeatRadarOpenClawIngestResponse {
+  ok: boolean
+  source_name: string
+  run_id: string
+  received_accounts: number
+  received_items: number
+  saved_accounts: number
+  saved_items: number
+  accepted_accounts: HeatRadarAccountDecision[]
+  watch_accounts: HeatRadarAccountDecision[]
+  rejected_accounts: HeatRadarAccountDecision[]
+  archived_accounts: HeatRadarAccountDecision[]
+  top_items: any[]
+  warnings: string[]
+  next_actions: string[]
+}
+
+export interface HeatRadarAccountAuditResponse {
+  ok: boolean
+  reviewed_count: number
+  keep: HeatRadarAccountDecision[]
+  watch: HeatRadarAccountDecision[]
+  archive: HeatRadarAccountDecision[]
+  warnings: string[]
+  next_actions: string[]
+}
+
 export interface HeatRadarRewriteVariant {
   source_topic: string
   target_audience: string

@@ -85,6 +85,10 @@ from app.schemas import (
     HeatRadarRunResponse,
     HeatRadarRewriteRequest,
     HeatRadarRewriteResponse,
+    HeatRadarOpenClawIngestRequest,
+    HeatRadarOpenClawIngestResponse,
+    HeatRadarAccountAuditRequest,
+    HeatRadarAccountAuditResponse,
 )
 from app.services.ad_analysis import analyze_ad
 from app.services.cover import create_cover
@@ -104,7 +108,7 @@ from app.services.video_edit import apply_video_edit
 from app.services.auto_collector import run_auto_collection
 from app.services.one_click import generate_one_click, revise_one_click
 from app.services.graphic_post import create_graphic_post
-from app.services.heat_radar import run_public_heat_radar, generate_heat_radar_rewrite
+from app.services.heat_radar import run_public_heat_radar, generate_heat_radar_rewrite, ingest_openclaw_heat_radar, audit_heat_radar_accounts
 
 app = FastAPI(title='AI-VIDEO 正式版 API', version='1.0.0')
 settings = get_settings()
@@ -836,6 +840,39 @@ async def api_heat_radar_run_public_crawl(req: HeatRadarRunRequest, settings: Se
         }
 
 
+
+
+
+
+@app.post('/api/heat-radar/openclaw/ingest', response_model=HeatRadarOpenClawIngestResponse)
+async def api_heat_radar_openclaw_ingest(req: HeatRadarOpenClawIngestRequest, settings: Settings = Depends(get_settings), memory: MemoryStore = Depends(get_memory)) -> HeatRadarOpenClawIngestResponse:
+    try:
+        result = await ingest_openclaw_heat_radar(settings, memory, req)
+        return HeatRadarOpenClawIngestResponse(**result)
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except Exception as exc:
+        # 外部采集器接入不能把服务打挂；返回结构化错误，方便 OpenClaw 重试。
+        return HeatRadarOpenClawIngestResponse(
+            ok=False,
+            source_name=req.source_name or 'openclaw',
+            run_id=req.run_id or '',
+            received_accounts=len(req.accounts or []),
+            received_items=len(req.items or []),
+            warnings=[f'OpenClaw 入库失败：{str(exc)[:300]}'],
+            next_actions=['检查 JSON 字段是否包含账号、链接、标题、发布时间和互动数', '查看 Render Logs', '必要时降低单次推送数量'],
+        )
+
+
+@app.post('/api/heat-radar/accounts/audit-staleness', response_model=HeatRadarAccountAuditResponse)
+async def api_heat_radar_account_audit(req: HeatRadarAccountAuditRequest, settings: Settings = Depends(get_settings), memory: MemoryStore = Depends(get_memory)) -> HeatRadarAccountAuditResponse:
+    try:
+        result = await audit_heat_radar_accounts(settings, memory, req)
+        return HeatRadarAccountAuditResponse(**result)
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except Exception as exc:
+        return HeatRadarAccountAuditResponse(ok=False, warnings=[f'账号价值审计失败：{str(exc)[:300]}'], next_actions=['确认账号库不为空', '先完成一次自动采集', '查看 Render Logs'])
 
 
 @app.post('/api/heat-radar/rewrite', response_model=HeatRadarRewriteResponse)

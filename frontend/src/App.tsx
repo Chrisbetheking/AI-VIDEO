@@ -25,6 +25,7 @@ import {
   AutoCollectorRunResponse,
   HeatRadarRunResponse,
   HeatRadarRewriteResponse,
+  HeatRadarAccountAuditResponse,
   OneClickGenerateResponse,
   ModelStatusResponse,
   TTSResponse,
@@ -32,6 +33,7 @@ import {
   VideoEditChatResponse,
   VoiceDirectorResponse,
   VoiceSegment,
+  API_BASE,
   apiGet,
   apiPost,
   apiDelete,
@@ -711,6 +713,8 @@ function AppInner() {
   const [heatRewrite, setHeatRewrite] = useState<HeatRadarRewriteResponse | null>(null)
   const [heatCrawlerLimit, setHeatCrawlerLimit] = useState(3)
   const [expandedHeatGroups, setExpandedHeatGroups] = useState<Record<string, boolean>>({})
+  const [heatAccountAudit, setHeatAccountAudit] = useState<HeatRadarAccountAuditResponse | null>(null)
+  const [heatAutomationToken, setHeatAutomationToken] = useState('')
   const [activeReportIndex, setActiveReportIndex] = useState(0)
   const [reportCopyStatus, setReportCopyStatus] = useState('')
 
@@ -1145,6 +1149,52 @@ function AppInner() {
     }
   }
 
+
+
+
+  async function auditHeatAccountValue() {
+    const keywords = Array.from(new Set([...heatRadarSeedKeywords, ...trendKeywords.split(/[,，#\n\s]+/).map(x => x.trim()).filter(Boolean)])).slice(0, 80)
+    const res = await run('审计博主价值', () => apiPost<HeatRadarAccountAuditResponse>('/api/heat-radar/accounts/audit-staleness', {
+      accounts: heatAccounts,
+      keywords,
+      include_saved_accounts: true,
+      max_stale_days: 90,
+      token: heatAutomationToken
+    }))
+    setHeatAccountAudit(res!)
+    setLastHandoff(`已审计 ${res?.reviewed_count || 0} 个博主：保留 ${res?.keep?.length || 0}，观察 ${res?.watch?.length || 0}，建议暂停 ${res?.archive?.length || 0}。`)
+  }
+
+  async function copyOpenClawExample() {
+    const example = {
+      token: heatAutomationToken || '如果 Render 设置了 HEAT_RADAR_INGEST_TOKEN，这里填同一个 token',
+      source_name: 'openclaw',
+      run_id: `openclaw_${todayKey()}`,
+      keywords: heatRadarSeedKeywords.slice(0, 8),
+      auto_add_accounts: true,
+      auto_accept_min_score: 72,
+      max_stale_days: 90,
+      accounts: [{
+        name: 'Justin陈皆廷',
+        platform: '抖音',
+        url: 'https://www.douyin.com/user/xxx',
+        tags: ['马来西亚房产', '第二家园'],
+        last_post_at: new Date().toISOString(),
+        recent_items: [{
+          title: '马来西亚买房税费怎么算',
+          url: 'https://www.douyin.com/video/xxx',
+          published_at: new Date().toISOString(),
+          like_count: 1762,
+          comment_count: 80,
+          favorite_count: 261,
+          share_count: 580
+        }]
+      }],
+      items: []
+    }
+    await copyTextToClipboard(JSON.stringify(example, null, 2))
+    setLastHandoff('已复制 OpenClaw 接入 JSON 示例。让采集器每天 POST 到热度雷达入库接口即可。')
+  }
 
   function applyHeatRewriteVariant(variant: any) {
     if (!variant) return
@@ -2112,6 +2162,23 @@ ${manualText || ''}`.trim()
               <div className="buttonRow"><button className="btn soft" onClick={importManualHeatData}>导入真实数据</button><button className="btn ghost" onClick={generateDailyHeatRadar}>清空旧缓存</button></div>
               <div className="heatKeywordBox"><h4>内置社媒关键词池</h4><p>{heatRadarSeedKeywords.join(' / ')}</p></div>
               <div className="crawlerNotice"><strong>采集边界</strong><p>只采集公开视频/账号页能公开返回的数据；不自动私信、不自动评论、不绕验证码。</p></div>
+            </div>
+
+            <div className="heatPanel openClawPanel">
+              <div className="miniHeader"><div><h3>OpenClaw 自动采集接入</h3><p>让外部采集器每天把博主最近内容推到这里；系统会自动判断账号值不值得加入固定库，太久不更新的账号会建议暂停。</p></div><Pill tone="purple">自动化接口</Pill></div>
+              <div className="endpointBox"><span>POST 接口</span><code>{API_BASE}/api/heat-radar/openclaw/ingest</code></div>
+              <div className="grid2">
+                <Field label="接口 Token，可选"><input value={heatAutomationToken} onChange={e => setHeatAutomationToken(e.target.value)} placeholder="和 Render 的 HEAT_RADAR_INGEST_TOKEN 保持一致" /></Field>
+                <Field label="账号时间规则"><input value="90 天无有效更新 → 建议暂停采集" readOnly /></Field>
+              </div>
+              <div className="buttonRow"><button className="btn soft" onClick={copyOpenClawExample}>复制接入 JSON 示例</button><button className="btn primary" onClick={auditHeatAccountValue}>审计博主价值</button></div>
+              {heatAccountAudit && <div className="auditBoard">
+                <div><strong>{heatAccountAudit.keep.length}</strong><span>继续固定</span></div>
+                <div><strong>{heatAccountAudit.watch.length}</strong><span>观察</span></div>
+                <div><strong>{heatAccountAudit.archive.length}</strong><span>建议暂停</span></div>
+                {[...heatAccountAudit.keep, ...heatAccountAudit.watch, ...heatAccountAudit.archive].slice(0, 6).map(item => <p key={`${item.account_name}-${item.decision}`}>· {item.account_name}：{item.decision}｜{item.score} 分｜{item.reason}</p>)}
+              </div>}
+              <div className="crawlerNotice"><strong>自动化建议</strong><p>OpenClaw 负责打开平台、拿最近视频和互动数；本站只负责入库、评分、留存 Top3 和 AI 改写。采集失败不清空旧结果。</p></div>
             </div>
           </div>
         </details>

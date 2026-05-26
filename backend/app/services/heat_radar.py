@@ -1248,3 +1248,376 @@ async def generate_heat_radar_rewrite(settings: Settings, req: Any) -> Dict[str,
         return payload
     except Exception as exc:
         return _fallback_rewrite_payload(req, f'AI 仿写失败，已使用规则版：{str(exc)[:240]}')
+
+
+# ---------------------------------------------------------------------------
+# OpenClaw / external browser-agent ingestion
+# ---------------------------------------------------------------------------
+
+def _parse_dt(value: Any) -> datetime | None:
+    text = str(value or '').strip()
+    if not text:
+        return None
+    try:
+        if text.endswith('Z'):
+            text = text[:-1] + '+00:00'
+        dt = datetime.fromisoformat(text)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=CN_TZ)
+        return dt.astimezone(timezone.utc)
+    except Exception:
+        pass
+    for fmt in ['%Y-%m-%d %H:%M:%S', '%Y-%m-%d', '%Y/%m/%d %H:%M', '%Y/%m/%d']:
+        try:
+            return datetime.strptime(text, fmt).replace(tzinfo=CN_TZ).astimezone(timezone.utc)
+        except Exception:
+            continue
+    return None
+
+
+def _days_since(value: Any) -> int:
+    dt = _parse_dt(value)
+    if not dt:
+        return 9999
+    return max(0, int((datetime.now(timezone.utc) - dt).total_seconds() // 86400))
+
+
+def _freshness_score(days: int, max_stale_days: int = 90) -> int:
+    if days <= 3:
+        return 30
+    if days <= 7:
+        return 27
+    if days <= 14:
+        return 22
+    if days <= 30:
+        return 16
+    if days <= 60:
+        return 9
+    if days <= max_stale_days:
+        return 4
+    return -18
+
+
+def _relevance_score(text: str, keywords: List[str]) -> int:
+    blob = (text or '').lower()
+    keys = [str(k or '').strip().lower() for k in keywords if str(k or '').strip()]
+    if not keys:
+        keys = ['马来西亚', '房产', '买房', '置业', '第二家园', 'mm2h', '国际学校', '吉隆坡', '新山']
+    hits = [k for k in keys if k and k in blob]
+    score = min(30, len(hits) * 8)
+    if any(k in blob for k in ['马来西亚', '大马', '吉隆坡', '新山', 'mm2h', '第二家园']):
+        score += 10
+    if any(k in blob for k in ['买房', '房产', '置业', '投资', '税费', '流程', '预算', '国际学校']):
+        score += 8
+    return max(0, min(35, score))
+
+
+def _normalize_openclaw_item(raw: Dict[str, Any], fallback_account: Dict[str, Any] | None = None, source_name: str = 'openclaw') -> Dict[str, Any]:
+    fallback_account = fallback_account or {}
+    tags = raw.get('tags') or fallback_account.get('tags') or []
+    if isinstance(tags, str):
+        tags = _split_keywords(tags, 12)
+    item = {
+        'id': str(raw.get('id') or f"heat_{source_name}_{uuid.uuid4().hex[:12]}"),
+        'date': today_key(),
+        'platform': _clean_text(raw.get('platform') or fallback_account.get('platform') or _platform_from_url(str(raw.get('url') or fallback_account.get('url') or ''), '公开平台'), 40),
+        'account_id': str(raw.get('account_id') or fallback_account.get('id') or ''),
+        'account_name': _clean_text(raw.get('account_name') or fallback_account.get('name') or '未命名账号', 80),
+        'title': _clean_text(raw.get('title') or raw.get('topic') or raw.get('desc') or '未命名内容', 220),
+        'description': _clean_text(raw.get('description') or raw.get('desc') or '', 800),
+        'url': str(raw.get('url') or raw.get('source_url') or '').strip(),
+        'published_at': str(raw.get('published_at') or raw.get('create_time') or raw.get('time') or ''),
+        'collected_at': str(raw.get('collected_at') or now_iso()),
+        'like_count': _num(raw.get('like_count') or raw.get('likes') or raw.get('digg_count') or raw.get('赞')),
+        'comment_count': _num(raw.get('comment_count') or raw.get('comments') or raw.get('评论')),
+        'favorite_count': _num(raw.get('favorite_count') or raw.get('collect_count') or raw.get('favorites') or raw.get('收藏')),
+        'share_count': _num(raw.get('share_count') or raw.get('shares') or raw.get('分享')),
+        'view_count': _num(raw.get('view_count') or raw.get('play_count') or raw.get('views') or raw.get('播放')),
+        'keyword': ','.join(_split_keywords(raw.get('keyword') or raw.get('keywords') or tags, 8)),
+        'tags': tags[:12] if isinstance(tags, list) else [],
+        'thumbnail_url': str(raw.get('thumbnail_url') or raw.get('cover') or ''),
+        'source_mode': f'{source_name}_automation',
+        'raw': raw,
+        'warnings': [],
+    }
+    item['heat_score'] = heat_score(item)
+    return item
+
+
+def _account_key(account: Dict[str, Any]) -> str:
+    return str(account.get('url') or account.get('account_url') or account.get('name') or account.get('account_name') or '').strip().lower()
+
+
+def _account_items_for_review(memory: MemoryStore, account: Dict[str, Any], extra_items: List[Dict[str, Any]] | None = None) -> List[Dict[str, Any]]:
+    extra_items = extra_items or []
+    name = str(account.get('name') or account.get('account_name') or '').strip()
+    url = str(account.get('url') or account.get('account_url') or '').strip()
+    aid = str(account.get('id') or account.get('account_id') or '').strip()
+    rows: List[Dict[str, Any]] = []
+    for item in extra_items:
+        if aid and str(item.get('account_id') or '') == aid:
+            rows.append(item)
+        elif name and str(item.get('account_name') or '').strip() == name:
+            rows.append(item)
+        elif url and (str(item.get('account_url') or '') == url or str(item.get('raw', {}).get('account_url') or '') == url):
+            rows.append(item)
+    try:
+        for item in memory.list('heat_radar_items', limit=300):
+            if aid and str(item.get('account_id') or '') == aid:
+                rows.append(item)
+            elif name and str(item.get('account_name') or '').strip() == name:
+                rows.append(item)
+            elif url and (str(item.get('url') or '').startswith(url) or str(item.get('raw', {}).get('account_url') or '') == url):
+                rows.append(item)
+    except Exception:
+        pass
+    return _dedupe_items(rows)
+
+
+def _review_account_value(account: Dict[str, Any], items: List[Dict[str, Any]], keywords: List[str], max_stale_days: int = 90, accept_min_score: int = 72) -> Dict[str, Any]:
+    title_blob = ' '.join([
+        str(account.get('name') or account.get('account_name') or ''),
+        str(account.get('tags') or ''),
+        str(account.get('notes') or ''),
+        ' '.join(str(x.get('title') or '') for x in items[:8]),
+        ' '.join(str(x.get('description') or '') for x in items[:8]),
+    ])
+    latest = ''
+    latest_dt: datetime | None = None
+    for item in items:
+        dt = _parse_dt(item.get('published_at') or item.get('collected_at') or item.get('date'))
+        if dt and (latest_dt is None or dt > latest_dt):
+            latest_dt = dt
+            latest = dt.isoformat()
+    if not latest and account.get('last_post_at'):
+        dt = _parse_dt(account.get('last_post_at'))
+        if dt:
+            latest_dt = dt
+            latest = dt.isoformat()
+    days = _days_since(latest) if latest else 9999
+    freshness = _freshness_score(days, max_stale_days)
+    relevance = _relevance_score(title_blob, keywords)
+    top_heat = sum(sorted([int(x.get('heat_score') or heat_score(x)) for x in items], reverse=True)[:3])
+    heat_part = min(25, int(top_heat / 180)) if top_heat else 0
+    activity = min(10, len([x for x in items if _days_since(x.get('published_at') or x.get('collected_at')) <= 30]) * 3)
+    score = max(0, min(100, 25 + freshness + relevance + heat_part + activity))
+
+    if days > max_stale_days * 2 and len(items) == 0:
+        decision = 'archive'
+        reason = f'超过 {max_stale_days * 2} 天没有可用新内容，也没有历史热度记录。'
+        next_action = '暂停自动采集；保留档案但不占用每日采集额度。'
+    elif days > max_stale_days and score < 58:
+        decision = 'archive'
+        reason = f'最近内容距今约 {days} 天，且相关性/热度不足。'
+        next_action = '移入观察/归档；以后有新视频链接再恢复。'
+    elif score >= accept_min_score:
+        decision = 'accept'
+        reason = '近期内容、赛道相关性和互动信号达到自动入库标准。'
+        next_action = '加入固定账号库；每天自动采集最近内容并保留 Top 3。'
+    elif score >= 52:
+        decision = 'watch'
+        reason = '有一定相关性，但近期热度或更新频率还不够稳定。'
+        next_action = '加入观察池；连续 3 次采集有高热内容后再固定。'
+    else:
+        decision = 'reject'
+        reason = '当前内容与业务关键词或高意向客户需求关联较弱。'
+        next_action = '暂不加入固定库；换更垂直的博主或关键词。'
+
+    return {
+        'account_name': _clean_text(account.get('name') or account.get('account_name') or '未命名账号', 80),
+        'platform': _clean_text(account.get('platform') or '公开平台', 40),
+        'account_url': str(account.get('url') or account.get('account_url') or ''),
+        'decision': decision,
+        'score': int(score),
+        'freshness_score': int(freshness),
+        'relevance_score': int(relevance),
+        'heat_score': int(heat_part),
+        'latest_post_at': latest,
+        'days_since_latest': int(days),
+        'recent_items_count': len(items),
+        'reason': reason,
+        'next_action': next_action,
+    }
+
+
+def _existing_account_keys(memory: MemoryStore) -> set[str]:
+    keys: set[str] = set()
+    try:
+        for acc in memory.list('heat_radar_accounts', limit=300):
+            key = _account_key(acc)
+            if key:
+                keys.add(key)
+    except Exception:
+        pass
+    return keys
+
+
+async def ingest_openclaw_heat_radar(settings: Settings, memory: MemoryStore, req: Any) -> Dict[str, Any]:
+    token = os.getenv('HEAT_RADAR_INGEST_TOKEN', '').strip() or os.getenv('OPENCLAW_INGEST_TOKEN', '').strip()
+    if token and str(getattr(req, 'token', '') or '') != token:
+        raise PermissionError('HEAT_RADAR_INGEST_TOKEN 不匹配。')
+
+    source_name = _clean_text(getattr(req, 'source_name', '') or 'openclaw', 40).lower().replace(' ', '_')
+    run_id = str(getattr(req, 'run_id', '') or f'{source_name}_{datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")}')
+    keywords = _split_keywords(getattr(req, 'keywords', []), 80)
+    max_stale_days = int(getattr(req, 'max_stale_days', 90) or 90)
+    accept_min = int(getattr(req, 'auto_accept_min_score', 72) or 72)
+    warnings: List[str] = []
+
+    account_payloads: List[Dict[str, Any]] = []
+    for acc in getattr(req, 'accounts', []) or []:
+        payload = acc.model_dump() if hasattr(acc, 'model_dump') else dict(acc)
+        payload.setdefault('id', payload.get('id') or f'openclaw_acc_{uuid.uuid4().hex[:12]}')
+        if isinstance(payload.get('tags'), str):
+            payload['tags'] = _split_keywords(payload.get('tags'), 12)
+        account_payloads.append(payload)
+
+    normalized_items: List[Dict[str, Any]] = []
+    for item in getattr(req, 'items', []) or []:
+        payload = item.model_dump() if hasattr(item, 'model_dump') else dict(item)
+        fallback = {}
+        name = str(payload.get('account_name') or '').strip()
+        if name:
+            fallback = next((a for a in account_payloads if str(a.get('name') or '').strip() == name), {})
+        normalized_items.append(_normalize_openclaw_item(payload, fallback, source_name))
+
+    # Also accept recent_items nested under accounts.
+    for acc in account_payloads:
+        for item in acc.get('recent_items') or []:
+            payload = item.model_dump() if hasattr(item, 'model_dump') else dict(item)
+            payload.setdefault('account_name', acc.get('name'))
+            payload.setdefault('account_url', acc.get('url'))
+            payload.setdefault('platform', acc.get('platform'))
+            normalized_items.append(_normalize_openclaw_item(payload, acc, source_name))
+
+    normalized_items = _dedupe_items(normalized_items)
+    for item in normalized_items:
+        item['run_id'] = run_id
+        item['source_name'] = source_name
+
+    decisions = [_review_account_value(acc, _account_items_for_review(memory, acc, normalized_items), keywords, max_stale_days, accept_min) for acc in account_payloads]
+    accepted = [d for d in decisions if d['decision'] == 'accept']
+    watch = [d for d in decisions if d['decision'] == 'watch']
+    rejected = [d for d in decisions if d['decision'] == 'reject']
+    archived = [d for d in decisions if d['decision'] == 'archive']
+
+    saved_items = 0
+    saved_accounts = 0
+    if bool(getattr(req, 'save_to_memory', True)):
+        for item in normalized_items[:300]:
+            try:
+                memory.insert('heat_radar_items', item)
+                saved_items += 1
+            except Exception as exc:
+                warnings.append(f'保存采集内容失败：{str(exc)[:160]}')
+        try:
+            existing = _existing_account_keys(memory)
+            for acc in account_payloads:
+                review = next((d for d in accepted if d.get('account_name') == (acc.get('name') or acc.get('account_name'))), None)
+                if not review or not bool(getattr(req, 'auto_add_accounts', True)):
+                    continue
+                key = _account_key(acc)
+                if key and key in existing:
+                    continue
+                item = {
+                    'id': acc.get('id') or f'openclaw_acc_{uuid.uuid4().hex[:12]}',
+                    'name': acc.get('name') or acc.get('account_name') or review.get('account_name'),
+                    'platform': acc.get('platform') or review.get('platform') or '公开平台',
+                    'url': acc.get('url') or acc.get('account_url') or review.get('account_url'),
+                    'tags': ','.join(acc.get('tags') or keywords[:6]),
+                    'notes': f"OpenClaw 自动加入｜评分 {review.get('score')}｜{review.get('reason')}",
+                    'pinned': True,
+                    'created_at': now_iso(),
+                    'raw': {'source': source_name, 'run_id': run_id, 'review': review, 'account': acc},
+                }
+                memory.insert('heat_radar_accounts', item)
+                saved_accounts += 1
+                if key:
+                    existing.add(key)
+        except Exception as exc:
+            warnings.append(f'自动写入账号库失败：{str(exc)[:160]}')
+        for review in decisions:
+            try:
+                memory.insert('heat_radar_account_reviews', {'run_id': run_id, 'source_name': source_name, **review, 'created_at': now_iso()})
+            except Exception:
+                pass
+        try:
+            top_items = _rank_top3(normalized_items)
+            memory.insert('heat_daily_top3', {
+                'date': today_key(),
+                'summary': f'{source_name} 自动采集 {len(normalized_items)} 条，入库账号 {saved_accounts} 个。',
+                'top_items': top_items,
+                'analysis': _fallback_analysis(top_items),
+                'keywords': keywords,
+                'accounts_count': len(account_payloads),
+                'top_mode': 'openclaw_ingest',
+                'fallback_used': False,
+                'raw': {'run_id': run_id, 'decisions': decisions},
+            })
+        except Exception:
+            pass
+
+    top_items = _rank_top3(normalized_items)
+    return {
+        'ok': True,
+        'source_name': source_name,
+        'run_id': run_id,
+        'received_accounts': len(account_payloads),
+        'received_items': len(normalized_items),
+        'saved_accounts': saved_accounts,
+        'saved_items': saved_items,
+        'accepted_accounts': accepted,
+        'watch_accounts': watch,
+        'rejected_accounts': rejected,
+        'archived_accounts': archived,
+        'top_items': top_items,
+        'warnings': warnings[:60],
+        'next_actions': [
+            '让 OpenClaw 每天把账号主页和最近视频 JSON POST 到该接口',
+            '评分达标账号会自动进入固定账号库；过久不更新的账号进入归档建议',
+            '热度雷达继续基于真实入库内容做 AI 改写和目标判断',
+        ],
+    }
+
+
+async def audit_heat_radar_accounts(settings: Settings, memory: MemoryStore, req: Any) -> Dict[str, Any]:
+    token = os.getenv('HEAT_RADAR_INGEST_TOKEN', '').strip() or os.getenv('OPENCLAW_INGEST_TOKEN', '').strip()
+    if token and str(getattr(req, 'token', '') or '') != token:
+        raise PermissionError('HEAT_RADAR_INGEST_TOKEN 不匹配。')
+    keywords = _split_keywords(getattr(req, 'keywords', []), 80)
+    max_stale_days = int(getattr(req, 'max_stale_days', 90) or 90)
+    accounts: List[Dict[str, Any]] = []
+    if bool(getattr(req, 'include_saved_accounts', True)):
+        accounts.extend(memory.list('heat_radar_accounts', limit=200))
+    for acc in getattr(req, 'accounts', []) or []:
+        accounts.append(acc.model_dump() if hasattr(acc, 'model_dump') else dict(acc))
+    deduped: List[Dict[str, Any]] = []
+    seen: set[str] = set()
+    for acc in accounts:
+        key = _account_key(acc)
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        deduped.append(acc)
+    reviews = [_review_account_value(acc, _account_items_for_review(memory, acc), keywords, max_stale_days=max_stale_days) for acc in deduped]
+    keep = [r for r in reviews if r['decision'] == 'accept']
+    watch = [r for r in reviews if r['decision'] in {'watch', 'reject'}]
+    archive = [r for r in reviews if r['decision'] == 'archive']
+    for r in reviews:
+        try:
+            memory.insert('heat_radar_account_reviews', {'run_id': f'audit_{today_key()}', **r, 'created_at': now_iso()})
+        except Exception:
+            pass
+    return {
+        'ok': True,
+        'reviewed_count': len(reviews),
+        'keep': keep,
+        'watch': watch,
+        'archive': archive,
+        'warnings': [],
+        'next_actions': [
+            '保留 keep 账号继续自动采集',
+            'watch 账号保留观察，连续几天无热度再移出',
+            'archive 账号建议暂停采集，避免浪费采集额度',
+        ],
+    }
