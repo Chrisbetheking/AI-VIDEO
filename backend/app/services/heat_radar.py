@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import asyncio
 import html
 import json
 import os
 import re
+import tempfile
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Iterable, List, Tuple
@@ -183,6 +185,180 @@ def _douyin_headers(settings: Settings, url: str = 'https://www.douyin.com/') ->
     if cookie:
         headers['Cookie'] = cookie
     return headers
+
+
+
+def _douyin_cookie_file_from_env() -> str:
+    """Create a temporary Netscape cookie file from DOUYIN_WEB_COOKIE for yt-dlp.
+
+    yt-dlp works much better with a cookie file than with only raw Cookie headers.
+    The file is best-effort and safe to omit when no cookie is configured.
+    """
+    raw = os.getenv('DOUYIN_WEB_COOKIE', '').strip() or os.getenv('HEAT_RADAR_DOUYIN_COOKIE', '').strip()
+    if not raw:
+        return ''
+    try:
+        lines = ['# Netscape HTTP Cookie File']
+        for part in raw.split(';'):
+            if '=' not in part:
+                continue
+            name, value = part.split('=', 1)
+            name = name.strip()
+            value = value.strip()
+            if not name:
+                continue
+            # domain, include_subdomains, path, secure, expiry, name, value
+            lines.append(f'.douyin.com\tTRUE\t/\tFALSE\t2147483647\t{name}\t{value}')
+            lines.append(f'www.douyin.com\tFALSE\t/\tFALSE\t2147483647\t{name}\t{value}')
+        if len(lines) <= 1:
+            return ''
+        path = os.path.join(tempfile.gettempdir(), 'douyin_web_cookie.txt')
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write('\n'.join(lines) + '\n')
+        return path
+    except Exception:
+        return ''
+
+
+def _flatten_ytdlp_entries(info: Any, limit: int) -> List[Dict[str, Any]]:
+    entries: List[Dict[str, Any]] = []
+    if not isinstance(info, dict):
+        return entries
+    raw_entries = info.get('entries')
+    if raw_entries is None:
+        entries = [info]
+    else:
+        for entry in raw_entries:
+            if isinstance(entry, dict):
+                entries.append(entry)
+            if len(entries) >= limit:
+                break
+    return entries[:limit]
+
+
+def _ytdlp_extract_sync(url: str, limit: int, headers: Dict[str, str]) -> Dict[str, Any]:
+    """Run yt-dlp in-process.
+
+    This is the strongest no-enterprise fallback for Douyin profile pages because
+    yt-dlp keeps up with many public web changes better than our hand-written
+    HTML/API parser. It still obeys public-page limits: no login bypass, no
+    CAPTCHA bypass, no auto-comment/private-message behavior.
+    """
+    from yt_dlp import YoutubeDL  # type: ignore
+
+    cookiefile = _douyin_cookie_file_from_env()
+    opts: Dict[str, Any] = {
+        'quiet': True,
+        'no_warnings': True,
+        'skip_download': True,
+        'ignoreerrors': True,
+        'noplaylist': False,
+        'playlistend': max(3, min(int(limit or 3), 12)),
+        'extract_flat': 'in_playlist',
+        'socket_timeout': int(os.getenv('HEAT_RADAR_YTDLP_SOCKET_TIMEOUT', '12')),
+        'retries': 1,
+        'fragment_retries': 0,
+        'nocheckcertificate': True,
+        'http_headers': {k: v for k, v in headers.items() if v},
+    }
+    if cookiefile:
+        opts['cookiefile'] = cookiefile
+    with YoutubeDL(opts) as ydl:
+        return ydl.extract_info(url, download=False) or {}
+
+
+def _normalize_ytdlp_entry(account: Dict[str, Any], entry: Dict[str, Any], source_url: str, source_mode: str) -> Dict[str, Any] | None:
+    if not isinstance(entry, dict):
+        return None
+    title = _clean_text(
+        entry.get('title')
+        or entry.get('fulltitle')
+        or entry.get('description')
+        or entry.get('alt_title')
+        or entry.get('id')
+        or str(account.get('name') or '抖音视频'),
+        180,
+    )
+    desc = _clean_text(entry.get('description') or entry.get('title') or '', 700)
+    raw_url = str(entry.get('webpage_url') or entry.get('url') or entry.get('original_url') or source_url or '')
+    if raw_url and raw_url.startswith('//'):
+        raw_url = 'https:' + raw_url
+    if raw_url and not raw_url.startswith('http'):
+        # Flat playlist entries sometimes return only an ID or relative URL.
+        vid = _extract_video_id(raw_url) or str(entry.get('id') or '')
+        raw_url = f'https://www.douyin.com/video/{vid}' if vid and re.fullmatch(r'\d{8,}', vid) else source_url
+    vid = _extract_video_id(raw_url) or str(entry.get('id') or '')
+    if vid and re.fullmatch(r'\d{8,}', vid):
+        raw_url = f'https://www.douyin.com/video/{vid}'
+    published_at = ''
+    if entry.get('timestamp'):
+        published_at = _published_from_ts(entry.get('timestamp'))
+    elif entry.get('release_timestamp'):
+        published_at = _published_from_ts(entry.get('release_timestamp'))
+    item = _make_item(
+        account,
+        title=title,
+        url=raw_url or source_url,
+        description=desc,
+        source_mode=source_mode,
+        published_at=published_at,
+        raw={'yt_dlp': {k: entry.get(k) for k in ['id', 'title', 'webpage_url', 'url', 'duration', 'timestamp', 'view_count', 'like_count', 'comment_count', 'repost_count'] if k in entry}},
+    )
+    item['like_count'] = _num(entry.get('like_count') or entry.get('like_count_str'))
+    item['comment_count'] = _num(entry.get('comment_count') or entry.get('comment_count_str'))
+    item['favorite_count'] = _num(entry.get('favorite_count') or entry.get('collect_count'))
+    item['share_count'] = _num(entry.get('repost_count') or entry.get('share_count'))
+    item['view_count'] = _num(entry.get('view_count') or entry.get('play_count'))
+    item['thumbnail_url'] = str(entry.get('thumbnail') or '')
+    item['heat_score'] = heat_score(item)
+    if not item.get('title') and not item.get('url'):
+        return None
+    return item
+
+
+async def _collect_douyin_with_ytdlp(settings: Settings, account: Dict[str, Any], input_url: str, warnings: List[str], limit: int) -> List[Dict[str, Any]]:
+    if os.getenv('HEAT_RADAR_DISABLE_YTDLP', '').strip().lower() in {'1', 'true', 'yes', 'on'}:
+        return []
+    if not input_url.startswith('http'):
+        return []
+    timeout = max(12, min(int(os.getenv('HEAT_RADAR_YTDLP_TIMEOUT', '38') or '38'), 75))
+    try:
+        headers = _douyin_headers(settings, input_url)
+        info = await asyncio.wait_for(asyncio.to_thread(_ytdlp_extract_sync, input_url, limit, headers), timeout=timeout)
+        entries = _flatten_ytdlp_entries(info, max(3, limit))
+        items: List[Dict[str, Any]] = []
+        is_profile = bool(info.get('entries'))
+        for entry in entries[:max(3, limit)]:
+            item = _normalize_ytdlp_entry(account, entry, input_url, 'douyin_ytdlp_profile_recent3' if is_profile else 'douyin_ytdlp_video')
+            if item:
+                items.append(item)
+        items = _dedupe_items(items)[:limit]
+        if items:
+            warnings.append(f'yt-dlp 已从抖音公开页提取 {len(items)} 条最近内容。')
+            return items
+        warnings.append('yt-dlp 没有返回视频条目，继续使用网页/API兜底。')
+    except Exception as exc:
+        warnings.append(f'yt-dlp 抖音采集失败，继续使用网页/API兜底：{str(exc)[:220]}')
+    return []
+
+
+def _extract_aweme_ids_from_text(text: str, limit: int = 6) -> List[str]:
+    ids: List[str] = []
+    for pattern in [
+        r'"aweme_id"\s*:\s*"?(\d{8,})"?',
+        r'"awemeId"\s*:\s*"?(\d{8,})"?',
+        r'"itemId"\s*:\s*"?(\d{8,})"?',
+        r'"modal_id"\s*:\s*"?(\d{8,})"?',
+        r'/video/(\d{8,})',
+        r'aweme_id=(\d{8,})',
+    ]:
+        for m in re.finditer(pattern, text or ''):
+            vid = m.group(1)
+            if vid not in ids:
+                ids.append(vid)
+            if len(ids) >= limit:
+                return ids
+    return ids
 
 
 async def _resolve_url(settings: Settings, url: str, warnings: List[str]) -> str:
@@ -422,6 +598,12 @@ def _items_from_render_data(account: Dict[str, Any], payloads: List[Any], limit:
 
 
 async def _collect_douyin_url(settings: Settings, account: Dict[str, Any], input_url: str, warnings: List[str], limit: int) -> List[Dict[str, Any]]:
+    # Strongest public fallback first: yt-dlp can often read a Douyin profile's
+    # latest playlist entries even when the web API needs dynamic params.
+    ytdlp_items = await _collect_douyin_with_ytdlp(settings, account, input_url, warnings, max(3, limit))
+    if ytdlp_items:
+        return ytdlp_items[:limit]
+
     final_url = await _resolve_url(settings, input_url, warnings)
     if final_url != input_url:
         warnings.append(f'短链已转换：{input_url} → {final_url}')
@@ -439,11 +621,26 @@ async def _collect_douyin_url(settings: Settings, account: Dict[str, Any], input
     render_items = _items_from_render_data(account, _parse_render_json(html_text), limit)
     if render_items:
         return render_items[:limit]
+
+    html_ids = _extract_aweme_ids_from_text(html_text, max(3, limit))
+    html_items: List[Dict[str, Any]] = []
+    for vid in html_ids[:max(3, limit)]:
+        detail_items = await _fetch_douyin_detail(settings, vid, account, warnings)
+        if detail_items:
+            html_items.extend(detail_items)
+        else:
+            html_items.append(_make_item(account, title=f'{account.get("name") or "抖音账号"} 最近视频 {vid}', url=f'https://www.douyin.com/video/{vid}', description='从主页 HTML 识别到视频 ID，但公开详情接口未返回热度指标。', source_mode='douyin_html_aweme_id'))
+    if html_items:
+        return _dedupe_items(html_items)[:limit]
+
     sec_uid = _extract_sec_uid(final_url, html_text)
     if sec_uid:
         items = await _fetch_douyin_post_api(settings, sec_uid, account, warnings, limit)
         if items:
             return items[:limit]
+        ytdlp_final_items = await _collect_douyin_with_ytdlp(settings, account, final_url, warnings, max(3, limit))
+        if ytdlp_final_items:
+            return ytdlp_final_items[:limit]
         title, desc = _title_from_html(html_text)
         placeholder = _make_item(
             account,
