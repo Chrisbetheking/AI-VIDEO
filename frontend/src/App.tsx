@@ -257,8 +257,8 @@ const defaultSegment: VoiceSegment = {
 const modules: { key: ModuleKey; icon: string; title: string; desc: string; tag: string }[] = [
   { key: 'dashboard', icon: '总', title: '流程总览', desc: '一条视频从采集到发布的主流程', tag: '总览' },
   { key: 'monitor', icon: '控', title: '运营中控台', desc: '总览进度、数据库、插件和待办', tag: '监控' },
-  { key: 'lead', icon: '获', title: '获客自动化', desc: '监听、内容、私域承接和自动回复', tag: '获客' },
-  { key: 'oneClick', icon: '生', title: '一键生成中心', desc: '在一个窗口完成文案、配音分段、字幕、图文和发布草稿', tag: '一键' },
+  { key: 'lead', icon: '获', title: '截流获客雷达', desc: '真实数据采集、关键词监控、评论线索和私域承接', tag: '截流' },
+  { key: 'oneClick', icon: '生', title: '一键生成中心', desc: '基于素材、行业档案和报告钩子生成完整内容包', tag: '一键' },
   { key: 'assets', icon: '素', title: '1. 素材选择', desc: '先选/上传素材，确定图片停留和视频截取区间', tag: '素材' },
   { key: 'copy', icon: '文', title: '2. 文案生产', desc: '根据素材和客户目标生成口播文案', tag: '文案' },
   { key: 'voice', icon: '声', title: '3. 配音导演', desc: '克隆音色、分段情绪、语速停顿', tag: '配音' },
@@ -267,10 +267,10 @@ const modules: { key: ModuleKey; icon: string; title: string; desc: string; tag:
   { key: 'collector', icon: '采', title: '同行采集', desc: '可选：采集同行视频、口令和钩子结构', tag: '采集' },
   { key: 'subtitleCover', icon: '视', title: '6. 字幕 / 封面 / 图文', desc: '抖音风字幕、素材截图封面、AI 图文素材', tag: '视觉' },
   { key: 'publish', icon: '发', title: '7. 平台发布', desc: '发布草稿、平台适配、开放接口预留', tag: '发布' },
-  { key: 'strategy', icon: '档', title: '行业获客档案', desc: '业务定位、关键词、客群、资料包和拍摄提示词', tag: '档案' },
+  { key: 'strategy', icon: '档', title: '行业获客档案', desc: '业务定位、关键词、客群、资料包和承接钩子', tag: '档案' },
   { key: 'competitor', icon: '竞', title: '竞品账号库', desc: '长期沉淀同行账号和爆款特征', tag: '账号' },
-  { key: 'trend', icon: '雷', title: '行业爆点', desc: '选题雷达、热点关键词、拍摄方向', tag: '雷达' },
-  { key: 'shooting', icon: '拍', title: '运营拍摄', desc: '拍摄任务单、提词器、B-roll 清单', tag: '拍摄' },
+  { key: 'trend', icon: '雷', title: '行业爆点', desc: '热点关键词、截流机会和内容方向', tag: '雷达' },
+  { key: 'shooting', icon: '拍', title: '拍摄 / 口播策划', desc: '口播文案、拍摄任务单、提词器和 B-roll 清单', tag: '口播' },
   { key: 'growth', icon: '投', title: '增长投流细节', desc: '流量数据、机器学习投流、优化动作', tag: '增长' }
 ]
 
@@ -297,6 +297,66 @@ const pluginMatrix = [
   { name: '记忆数据库', desc: 'Supabase 保存账号、采集、文案、投流复盘', status: 'supabase' },
   { name: '平台发布', desc: '抖音/视频号/快手/小红书开放平台预留', status: 'publish' }
 ]
+
+const realDataConnectors = [
+  {
+    name: '百度搜索 / 百度营销',
+    status: '推荐优先接',
+    purpose: '拿搜索词、关键词规划、广告线索和高意向查询词',
+    fields: ['BAIDU_MARKETING_APP_ID', 'BAIDU_MARKETING_SECRET', 'BAIDU_MARKETING_ACCESS_TOKEN'],
+    note: '适合抓“买房条件/流程/税费/MM2H/城市区域”等主动搜索需求。'
+  },
+  {
+    name: '巨量引擎 / 抖音搜索',
+    status: '第二优先',
+    purpose: '拿抖音搜索、广告报表、线索表单、关键词和内容热度',
+    fields: ['OCEANENGINE_APP_ID', 'OCEANENGINE_SECRET', 'OCEANENGINE_ACCESS_TOKEN'],
+    note: '适合发现抖音里正在被搜索和评论的问题，用来做截流内容。'
+  },
+  {
+    name: '抖音开放平台',
+    status: '可接入',
+    purpose: '关键词视频搜索、授权账号评论、视频评论管理和回复',
+    fields: ['DOUYIN_CLIENT_KEY', 'DOUYIN_CLIENT_SECRET', 'DOUYIN_ACCESS_TOKEN'],
+    note: '官方能力更适合管理自己授权账号和合规获取评论；竞品全量采集需要谨慎。'
+  },
+  {
+    name: '小红书数据源',
+    status: '建议第三方/人工导入',
+    purpose: '笔记标题、评论问题、收藏转发趋势和图文选题',
+    fields: ['XHS_DATA_PROVIDER_KEY 或 CSV 导入'],
+    note: '小红书公开 API 能力有限，先做链接/CSV/表格导入，再考虑合规数据服务商。'
+  },
+  {
+    name: '企业微信 / SCRM',
+    status: '微信未接入前先网页模拟',
+    purpose: '报告领取、客户标签、私信筛选、顾问跟进和转化复盘',
+    fields: ['WECHAT_CORP_ID', 'WECHAT_AGENT_ID', 'WECHAT_SECRET'],
+    note: '微信生态更适合承接和培育，不建议当海外房产直接买量主入口。'
+  }
+]
+
+const interceptionOpportunityFallback = [
+  { score: 92, source: '百度搜索', keyword: '马来西亚买房税费怎么算', intent: '税费测算 / 交易前教育', action: '做税费计算器落地页 + 领取税费测算表', asset: '《马来西亚买房税费测算表》' },
+  { score: 88, source: '抖音搜索/评论', keyword: '马来西亚第二家园一定要买房吗', intent: '身份规划 / MM2H', action: '做 30 秒问答视频 + 评论关键词“身份”', asset: '《MM2H 与购房要求对照表》' },
+  { score: 86, source: '小红书图文', keyword: 'Mont Kiara 国际学校附近公寓', intent: '教育家庭 / 城市筛选', action: '做 5 页图文包 + 私信“学校”领取清单', asset: '《马来西亚国际学校择校清单》' },
+  { score: 84, source: '竞品评论区', keyword: '吉隆坡和新山哪里更值得买', intent: '城市比较 / 项目筛选', action: '做对比内容 + 领取城市对比表', asset: '《吉隆坡 vs 新山选盘表》' },
+  { score: 81, source: '百度长尾词', keyword: '中国人可以买马来西亚房产吗', intent: '资格判断 / 初筛', action: '做 FAQ 落地页 + 顾问筛选表单', asset: '《马来西亚买房资格清单》' }
+]
+
+const leadDataLoop = [
+  '采集真实搜索词、竞品视频标题、评论问题、表单线索和私信关键词',
+  'AI 按“流量热度 × 转化意图 × 可承接资料包”给每条机会打分',
+  '自动生成截流动作：发哪条内容、评论区怎么引导、用哪个报告承接',
+  '线索进入网页报告 / 私信关键词 / 企微后，回写标签和复盘数据',
+  '下一轮内容不靠猜，直接按高分机会继续生成口播、图文和落地页'
+]
+
+function asOpportunityList(plan: LeadAcquisitionPlanResponse | null) {
+  const fromPlan = (plan as any)?.interception_opportunities
+  if (Array.isArray(fromPlan) && fromPlan.length) return fromPlan
+  return interceptionOpportunityFallback
+}
 
 function nextStepOf(active: ModuleKey): ModuleKey {
   const order: ModuleKey[] = ['oneClick','assets','copy','voice','digitalHuman','video','subtitleCover','publish']
@@ -524,7 +584,7 @@ function AppInner() {
   const [knowledgeDialog, setKnowledgeDialog] = useState({ open: false, source: '', title: '', content: '', tags: '老板口播,获客,短视频' })
 
   const [leadPlan, setLeadPlan] = useState<LeadAcquisitionPlanResponse | null>(null)
-  const [leadChannels, setLeadChannels] = useState<string[]>(['抖音截留获客', '博主联动流量', '采集目标客户', '自动监听', '自动回复', '目标用户导流私域'])
+  const [leadChannels, setLeadChannels] = useState<string[]>(['百度搜索关键词', '巨量搜索/抖音搜索', '抖音视频评论', '小红书笔记评论', '竞品账号监控', '微信/企微私域承接'])
   const [leadFixedOptions, setLeadFixedOptions] = useState('子女教育家庭、企业主资产配置、养老度假、海外第二居所、华人家庭、马来西亚城市、预算区间、国际学校、第二家园身份')
   const [activeReportIndex, setActiveReportIndex] = useState(0)
   const [reportCopyStatus, setReportCopyStatus] = useState('')
@@ -565,8 +625,9 @@ function AppInner() {
     `监听关键词：${trendKeywords}`,
     `私域承接物：${privateDomainAssets}`,
     `内容栏目：${contentPillars}`,
-    `拍摄提示：${shootingBrief}`,
     `承接方式：${reportDelivery}`,
+    `内容栏目：${contentPillars}`,
+    `拍摄口播要求（仅用于内容生产，不用于截流雷达）：${shootingBrief}`,
   ].filter(Boolean).join('\n'), [businessPositioning, industry, customerSegments, trendKeywords, privateDomainAssets, contentPillars, shootingBrief, reportDelivery])
   const leadMagnetReports = useMemo(() => buildLeadMagnetReports({ privateDomainAssets, businessPositioning, industry, audience, trendKeywords, customerSegments, reportDelivery }), [privateDomainAssets, businessPositioning, industry, audience, trendKeywords, customerSegments, reportDelivery])
   const activeReport = leadMagnetReports[Math.min(activeReportIndex, Math.max(0, leadMagnetReports.length - 1))]
@@ -824,6 +885,8 @@ function AppInner() {
       lead_region: leadRegion,
       conversion_goal: conversionGoal,
       channels: leadChannels,
+      data_sources: realDataConnectors.map(x => x.name),
+      competitor_accounts: competitors.map(c => `${c.platform}:${c.name}:${c.url}`),
       fixed_options: leadFixedOptions,
       competitor_notes: competitorNotes,
       trend_keywords: trendKeywords,
@@ -1475,7 +1538,7 @@ ${manualText || ''}`.trim()
   const digitalHumanStatus = String(digitalHuman?.status || '').toLowerCase()
   const hasRunningDigitalHumanTask = Boolean(digitalHuman?.job_id && !digitalHuman?.video_url && !['failed', 'error', 'done'].includes(digitalHumanStatus))
   const digitalHumanPrimaryLabel = hasRunningDigitalHumanTask ? '查询当前数字人任务' : '生成数字人片段'
-  const contentNavKeys: ModuleKey[] = ['oneClick','assets','copy','voice','digitalHuman','video','subtitleCover','publish','collector']
+  const contentNavKeys: ModuleKey[] = ['shooting','oneClick','assets','copy','voice','digitalHuman','video','subtitleCover','publish','collector']
 
   return <div className="appShell">
     <aside className="studioNav">
@@ -1494,7 +1557,7 @@ ${manualText || ''}`.trim()
         {contentNavOpen && contentNavKeys.map(key => modules.find(item => item.key === key)).filter(Boolean).map(item => <button key={item!.key} className={`subNav ${active === item!.key ? 'active' : ''}`} onClick={() => setActive(item!.key)}>
           <span>{item!.icon}</span><b>{item!.title}</b><em>{item!.tag}</em>
         </button>)}
-        {modules.filter(item => ['strategy','competitor','trend','shooting','growth'].includes(item.key)).map(item => <button key={item.key} className={active === item.key ? 'active' : ''} onClick={() => setActive(item.key)}>
+        {modules.filter(item => ['strategy','competitor','trend','growth'].includes(item.key)).map(item => <button key={item.key} className={active === item.key ? 'active' : ''} onClick={() => setActive(item.key)}>
           <span>{item.icon}</span><b>{item.title}</b><em>{item.tag}</em>
         </button>)}
       </nav>
@@ -1615,41 +1678,39 @@ ${manualText || ''}`.trim()
       </section>}
 
 
-      {active === 'lead' && <section className="card modulePanel leadPanel">
-        <div className="sectionHeader"><div><h2>获客自动化</h2><p>围绕海外房产置业和第二家园，把同行流量打法转成可执行的截留、监听、回复和私域承接流程。</p></div><div className="headerActions"><Button busy={busy === '生成获客自动化作战图' ? busy : ''} label="生成获客作战图" onClick={makeLeadPlan} kind="soft" /><Button label="保存行业档案" onClick={saveCustomerProfile} kind="ghost" /></div></div>
-        <div className="leadHero">
-          <div><span>当前业务</span><strong>{businessPositioning || industry}</strong><p>{audience}</p></div>
-          <div><span>转化目标</span><strong>{conversionGoal}</strong><p>{leadRegion}</p></div>
+      {active === 'lead' && <section className="card modulePanel leadRadarPanel">
+        <div className="sectionHeader"><div><h2>真实数据截流获客雷达</h2><p>这个区域只负责“去哪截流、谁有需求、怎么承接”。拍摄和口播文案已经单独放到内容生产里的“拍摄 / 口播策划”。</p></div><div className="headerActions"><Button busy={busy === '生成获客自动化作战图' ? busy : ''} label="生成截流机会图" onClick={makeLeadPlan} kind="soft" /><Button label="保存行业档案" onClick={saveCustomerProfile} kind="ghost" /></div></div>
+        <div className="leadContext">
+          <div><b>当前业务</b><span>{industry || businessPositioning}</span></div>
+          <div><b>目标人群</b><span>{shortText(audience, 52)}</span></div>
+          <div><b>资料钩子</b><span>{shortText(privateDomainAssets.split(/\n+/)[0] || reportDelivery, 52)}</span></div>
+          <div><b>截流目标</b><span>{conversionGoal}</span></div>
         </div>
-        <div className="leadProfileStrip">
-          <div><b>资料包</b><span>{privateDomainAssets.split(/\n+/)[0] || '未配置'}</span></div>
-          <div><b>关键词</b><span>{trendKeywords.split(/[,，\n]+/).slice(0, 5).join(' / ')}</span></div>
-          <div><b>拍摄</b><span>{shortText(shootingBrief, 42)}</span></div>
-        </div>
-        <div className="leadChannelSelect">
-          {['抖音截留获客','博主联动流量','采集目标客户','自动监听','自动回复','目标用户导流私域'].map(item => <button key={item} className={leadChannels.includes(item) ? 'selected' : ''} onClick={() => toggleLeadChannel(item)}>{item}</button>)}
+        <div className="dataLoop">{leadDataLoop.map((item, i) => <div key={item}><span>{i + 1}</span><p>{item}</p></div>)}</div>
+        <div className="connectorGrid">{realDataConnectors.map(conn => <div className="connectorCard" key={conn.name}><div><strong>{conn.name}</strong><Pill tone={conn.status.includes('优先') ? 'green' : 'purple'}>{conn.status}</Pill></div><p>{conn.purpose}</p><small>{conn.note}</small><code>{conn.fields.join(' / ')}</code></div>)}</div>
+        <div className="channelSelector leadChannelSelect">
+          {['百度搜索关键词','巨量搜索/抖音搜索','抖音视频评论','小红书笔记评论','竞品账号监控','微信/企微私域承接','手动CSV/链接导入'].map(item => <button key={item} className={leadChannels.includes(item) ? 'selected' : ''} onClick={() => toggleLeadChannel(item)}>{item}</button>)}
         </div>
         <div className="grid2">
-          <Field label="目标客户与固定选项"><textarea value={leadFixedOptions} onChange={e => setLeadFixedOptions(e.target.value)} /></Field>
-          <Field label="监听关键词"><textarea value={trendKeywords} onChange={e => setTrendKeywords(e.target.value)} /></Field>
+          <Field label="监听关键词 / 搜索词种子"><textarea value={trendKeywords} onChange={e => setTrendKeywords(e.target.value)} /></Field>
+          <Field label="截流人群 / 筛选条件"><textarea value={leadFixedOptions} onChange={e => setLeadFixedOptions(e.target.value)} /></Field>
         </div>
-        {!leadPlan && <div className="leadBlueprint">
-          <div><b>截留</b><span>同行爆款 → 钩子公式 → 同主题不同角度视频</span></div>
-          <div><b>监听</b><span>关键词、评论区问题、竞品更新自动沉淀</span></div>
-          <div><b>承接</b><span>自动回复模板 → 私信筛选 → 微信私域标签</span></div>
-          <div><b>复盘</b><span>播放、私信、留资、预约数据回流给下一条视频</span></div>
+        {!leadPlan && <div className="opportunityBoard">
+          {asOpportunityList(null).map((item: any) => <div className="opportunityCard" key={`${item.source}-${item.keyword}`}><div className="oppScore">{item.score}</div><strong>{item.keyword}</strong><p>{item.intent}</p><small>来源：{item.source}</small><em>{item.action}</em><Pill>{item.asset}</Pill></div>)}
         </div>}
         {leadPlan && <div className="resultBox leadResult"><h3>{leadPlan.overview}</h3>
           <div className="chips">{leadPlan.audience_segments?.map(x => <Pill key={x} tone="purple">{x}</Pill>)}</div>
-          <div className="leadPlaybookGrid">{leadPlan.channel_playbook?.map(item => <div className="leadPlaybook" key={item.channel}><strong>{item.channel}</strong><p>{item.goal}</p><h4>动作</h4>{item.actions?.map(x => <small key={x}>· {x}</small>)}<h4>自动化</h4>{item.automation?.map(x => <small key={x}>· {x}</small>)}<em>{item.success_metric}</em></div>)}</div>
+          <div className="opportunityBoard">{asOpportunityList(leadPlan).map((item: any) => <div className="opportunityCard" key={`${item.source}-${item.keyword}`}><div className="oppScore">{item.score || 80}</div><strong>{item.keyword}</strong><p>{item.intent}</p><small>来源：{item.source}</small><em>{item.action}</em><Pill>{item.asset}</Pill></div>)}</div>
+          {(leadPlan as any).required_integrations?.length ? <div className="integrationBox"><h4>需要接入的数据源</h4>{(leadPlan as any).required_integrations.map((x: string) => <p key={x}>· {x}</p>)}</div> : null}
+          <div className="leadPlaybookGrid">{leadPlan.channel_playbook?.map(item => <div className="leadPlaybook" key={item.channel}><strong>{item.channel}</strong><p>{item.goal}</p><h4>截流动作</h4>{item.actions?.map(x => <small key={x}>· {x}</small>)}<h4>自动化</h4>{item.automation?.map(x => <small key={x}>· {x}</small>)}<em>{item.success_metric}</em></div>)}</div>
           <div className="splitGrid"><div><h4>监听词</h4>{leadPlan.listening_keywords?.map(x => <p key={x}>· {x}</p>)}</div><div><h4>触发内容</h4>{leadPlan.content_triggers?.map(x => <p key={x}>· {x}</p>)}</div><div><h4>每日自动任务</h4>{leadPlan.daily_automation_tasks?.map(x => <p key={x}>· {x}</p>)}</div></div>
           <div className="splitGrid"><div><h4>自动回复</h4>{leadPlan.reply_templates?.map(x => <p key={x}>· {x}</p>)}</div><div><h4>私域承接</h4>{leadPlan.private_domain_sop?.map(x => <p key={x}>· {x}</p>)}</div><div><h4>下一步</h4>{leadPlan.next_actions?.map(x => <p key={x}>· {x}</p>)}</div></div>
-          <div className="splitGrid"><div><h4>内容矩阵</h4>{leadPlan.content_matrix?.map(x => <p key={x}>· {x}</p>)}</div><div><h4>资料钩子</h4>{leadPlan.lead_magnets?.map(x => <p key={x}>· {x}</p>)}</div><div><h4>拍摄提示词</h4>{leadPlan.shooting_prompts?.map(x => <p key={x}>· {x}</p>)}</div></div>
+          <div className="splitGrid"><div><h4>内容矩阵</h4>{leadPlan.content_matrix?.map(x => <p key={x}>· {x}</p>)}</div><div><h4>资料钩子</h4>{leadPlan.lead_magnets?.map(x => <p key={x}>· {x}</p>)}</div><div><h4>转成内容</h4>{leadPlan.shooting_prompts?.map(x => <p key={x}>· {x}</p>)}</div></div>
         </div>}
       </section>}
 
       {active === 'strategy' && <section className="card modulePanel industryProfilePanel">
-        <div className="sectionHeader"><div><h2>行业获客档案</h2><p>把业务定位、监听词、目标客群、资料包和拍摄提示词沉淀成长期档案。后面文案、图文、剪辑、私信回复都会自动读取。</p></div><div className="headerActions"><Button label="套用马来西亚房产模板" onClick={applyMalaysiaPreset} kind="ghost" /><Button busy={busy === '保存行业档案' ? busy : ''} label="保存行业档案" onClick={saveCustomerProfile} kind="soft" /><Button busy={busy === '生成获客自动化作战图' ? busy : ''} label="生成获客作战图" onClick={makeLeadPlan} kind="primary" /></div></div>
+        <div className="sectionHeader"><div><h2>行业获客档案</h2><p>把业务定位、监听词、目标客群、资料包和承接钩子沉淀成长期档案。后面截流雷达、文案、图文、剪辑、私信回复都会自动读取。</p></div><div className="headerActions"><Button label="套用马来西亚房产模板" onClick={applyMalaysiaPreset} kind="ghost" /><Button busy={busy === '保存行业档案' ? busy : ''} label="保存行业档案" onClick={saveCustomerProfile} kind="soft" /><Button busy={busy === '生成获客自动化作战图' ? busy : ''} label="生成获客作战图" onClick={makeLeadPlan} kind="primary" /></div></div>
         <div className="profileHero">
           <div><span>业务定位</span><strong>{businessPositioning || industry}</strong><p>{conversionGoal}</p></div>
           <div><span>私域承接</span><strong>{reportDelivery}</strong><p>{privateDomainAssets.split(/\n+/)[0] || '资料包/报告/清单'}</p></div>
@@ -1664,7 +1725,7 @@ ${manualText || ''}`.trim()
         </div>
         <div className="profileSection"><h3>监听词与客户分层</h3><div className="grid2"><Field label="监听关键词库" hint="用逗号或换行分隔，同行采集、雷达和选题会读取。"><textarea value={trendKeywords} onChange={e => setTrendKeywords(e.target.value)} /></Field><Field label="目标客户分层" hint="把不同人群拆开，生成内容时会按人群出不同钩子。"><textarea value={customerSegments} onChange={e => setCustomerSegments(e.target.value)} /></Field></div></div>
         <div className="profileSection"><h3>私域承接与内容栏目</h3><div className="grid2"><Field label="私域承接物 / 报告清单"><textarea value={privateDomainAssets} onChange={e => setPrivateDomainAssets(e.target.value)} /></Field><Field label="内容栏目 / 选题方向"><textarea value={contentPillars} onChange={e => setContentPillars(e.target.value)} /></Field></div></div>
-        <div className="profileSection"><h3>拍摄方案和 AI 提示词</h3><Field label="拍摄方案 / 提示词要求"><textarea value={shootingBrief} onChange={e => setShootingBrief(e.target.value)} /></Field><Field label="报告/微信承接方式"><input value={reportDelivery} onChange={e => setReportDelivery(e.target.value)} /></Field></div>
+        <div className="profileSection"><h3>内容承接规则</h3><Field label="口播/拍摄风格要求（给内容生产用）"><textarea value={shootingBrief} onChange={e => setShootingBrief(e.target.value)} /></Field><Field label="报告/微信承接方式"><input value={reportDelivery} onChange={e => setReportDelivery(e.target.value)} /></Field></div>
         <div className="profileQuickActions">
           <button onClick={() => setActive('oneClick')}>用档案生成完整视频方案</button>
           <button onClick={generateDirectCopy}>生成短视频文案</button>
@@ -1676,7 +1737,7 @@ ${manualText || ''}`.trim()
       </section>}
 
       {active === 'trend' && <section className="card modulePanel">
-        <div className="sectionHeader"><div><h2>行业爆点与选题雷达</h2><p>根据行业、目标客户、同行账号和采集内容，生成可拍选题、监控关键词和下一步动作。</p></div><Button busy={busy === '生成行业爆点雷达' ? busy : ''} label="自动采集/生成行业雷达" onClick={makeTrendRadar} /></div>
+        <div className="sectionHeader"><div><h2>行业爆点与截流雷达</h2><p>根据搜索词、评论、同行账号和采集内容，生成可截流的机会、监控关键词和下一步动作。</p></div><Button busy={busy === '生成行业爆点雷达' ? busy : ''} label="自动采集/生成行业雷达" onClick={makeTrendRadar} /></div>
         <div className="grid2">
           <Field label="监控关键词"><input value={trendKeywords} onChange={e => setTrendKeywords(e.target.value)} placeholder="海外房产,第二家园,海外置业,子女教育,养老度假" /></Field>
           <Field label="同行备注汇总"><textarea value={`${competitorNotes}${extract?.summary ? '\n' + extract.summary : ''}`} readOnly placeholder="竞品账号库和同行采集结果会自动汇总到这里" /></Field>
@@ -1815,7 +1876,7 @@ https://www.douyin.com/user/..." /></Field>
       </section>}
 
       {active === 'shooting' && <section className="card modulePanel">
-        <div className="sectionHeader"><div><h2>运营拍摄任务</h2><p>把文案变成老板、员工能直接照着拍的镜头清单、B-roll 清单和提词器。</p></div><Button busy={busy === '生成运营拍摄任务' ? busy : ''} label="生成拍摄任务单" onClick={makeShootingPlan} disabled={!currentScript} /></div>
+        <div className="sectionHeader"><div><h2>拍摄 / 口播文案策划</h2><p>这里专门管“拍什么、怎么说、需要什么画面”。截流获客雷达只负责真实数据和线索机会，不混在一起。</p></div><Button busy={busy === '生成运营拍摄任务' ? busy : ''} label="生成拍摄/口播任务单" onClick={makeShootingPlan} disabled={!currentScript} /></div>
         {shootingPlan ? <div className="resultBox"><h3>{shootingPlan.summary}</h3><div className="shotTable">{shootingPlan.shot_tasks?.map((task, i) => <div className="shotRow" key={`${task.scene}-${i}`}><span>{task.priority}</span><strong>{task.scene}</strong><em>{task.duration}</em><p>{task.content}</p><small>{task.camera}</small><small>{task.props}</small></div>)}</div><div className="splitGrid"><div><h4>B-roll 补拍</h4>{shootingPlan.broll_list?.map(x => <p key={x}>· {x}</p>)}</div><div><h4>提词器短句</h4>{shootingPlan.teleprompter?.map(x => <p key={x}>· {x}</p>)}</div><div><h4>拍摄检查</h4>{shootingPlan.checklist?.map(x => <p key={x}>· {x}</p>)}</div></div></div> : <Empty>先生成文案，再生成拍摄任务单。</Empty>}
       </section>}
 

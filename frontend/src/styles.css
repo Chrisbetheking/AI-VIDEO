@@ -779,3 +779,105 @@ input:focus,textarea:focus,select:focus{
   .reportHead, .advisorConsole { flex-direction: column; align-items: stretch; }
   .reportActions { justify-content: flex-start; }
 }
+
+/* Real-data lead interception upgrade */
+.leadRadarPanel .sectionHeader p { max-width: 760px; }
+.dataLoop {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 12px;
+  margin: 18px 0;
+}
+.dataLoop > div {
+  border: 1px solid rgba(47, 107, 255, 0.18);
+  background: linear-gradient(180deg, rgba(47,107,255,0.08), rgba(255,255,255,0.95));
+  border-radius: 18px;
+  padding: 14px;
+  min-height: 108px;
+}
+.dataLoop span {
+  display: inline-flex;
+  width: 30px;
+  height: 30px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  color: #fff;
+  font-weight: 900;
+  background: linear-gradient(135deg, #2f6bff, #7c5cff);
+  margin-bottom: 8px;
+}
+.dataLoop p { margin: 0; font-weight: 700; color: #10213f; line-height: 1.55; }
+.connectorGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  margin: 16px 0 18px;
+}
+.connectorCard {
+  border: 1px solid rgba(20, 38, 70, 0.1);
+  border-radius: 20px;
+  background: #fff;
+  padding: 16px;
+  box-shadow: 0 16px 44px rgba(22, 45, 90, 0.07);
+}
+.connectorCard > div { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.connectorCard strong { font-size: 17px; color: #0f1b33; }
+.connectorCard p { margin: 10px 0 8px; color: #33435f; font-weight: 700; }
+.connectorCard small { display: block; color: #697892; line-height: 1.55; }
+.connectorCard code {
+  display: block;
+  margin-top: 10px;
+  padding: 9px 10px;
+  border-radius: 12px;
+  background: #0f172a;
+  color: #dbeafe;
+  white-space: normal;
+  line-height: 1.45;
+}
+.opportunityBoard {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  margin: 16px 0;
+}
+.opportunityCard {
+  position: relative;
+  border: 1px solid rgba(47, 107, 255, 0.16);
+  border-radius: 22px;
+  padding: 18px 18px 16px 78px;
+  background: linear-gradient(135deg, #ffffff, #f7fbff);
+  min-height: 150px;
+}
+.oppScore {
+  position: absolute;
+  left: 18px;
+  top: 18px;
+  width: 44px;
+  height: 44px;
+  border-radius: 16px;
+  background: linear-gradient(135deg, #22c55e, #2f6bff);
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 900;
+  box-shadow: 0 12px 24px rgba(47, 107, 255, 0.2);
+}
+.opportunityCard strong { display: block; font-size: 17px; color: #0f1b33; margin-bottom: 6px; }
+.opportunityCard p { margin: 0 0 8px; color: #33435f; font-weight: 700; }
+.opportunityCard small { display: block; color: #6b7890; margin-bottom: 8px; }
+.opportunityCard em { display: block; color: #1f3b73; font-style: normal; line-height: 1.55; margin-bottom: 10px; }
+.integrationBox {
+  border: 1px solid rgba(255, 153, 0, 0.25);
+  background: #fff8eb;
+  border-radius: 18px;
+  padding: 16px;
+  margin: 14px 0;
+}
+.integrationBox h4 { margin: 0 0 8px; color: #9a4b00; }
+.integrationBox p { margin: 4px 0; color: #5b3510; }
+@media (max-width: 1100px) {
+  .dataLoop { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .connectorGrid, .opportunityBoard { grid-template-columns: 1fr; }
+}

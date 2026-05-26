@@ -518,6 +518,9 @@ class LeadAcquisitionRequest(BaseModel):
     lead_region: str = Field(default='', max_length=300)
     conversion_goal: str = Field(default='', max_length=300)
     channels: List[str] = Field(default_factory=list, max_length=20)
+    data_sources: List[str] = Field(default_factory=list, max_length=20)
+    competitor_accounts: List[str] = Field(default_factory=list, max_length=50)
+    search_query_import: str = Field(default='', max_length=12000)
     fixed_options: str = Field(default='', max_length=3000)
     competitor_notes: str = Field(default='', max_length=6000)
     trend_keywords: str = Field(default='', max_length=2000)
@@ -540,6 +543,23 @@ class LeadChannelPlaybook(BaseModel):
     success_metric: str = ''
 
 
+class LeadDataSource(BaseModel):
+    name: str
+    status: str = ''
+    purpose: str = ''
+    required_fields: List[str] = Field(default_factory=list)
+    next_step: str = ''
+
+
+class LeadInterceptionOpportunity(BaseModel):
+    score: int = Field(default=70, ge=0, le=100)
+    source: str = ''
+    keyword: str = ''
+    intent: str = ''
+    action: str = ''
+    asset: str = ''
+
+
 class LeadAcquisitionPlanResponse(BaseModel):
     overview: str
     audience_segments: List[str] = Field(default_factory=list)
@@ -553,6 +573,11 @@ class LeadAcquisitionPlanResponse(BaseModel):
     content_matrix: List[str] = Field(default_factory=list)
     lead_magnets: List[str] = Field(default_factory=list)
     shooting_prompts: List[str] = Field(default_factory=list)
+    required_integrations: List[str] = Field(default_factory=list)
+    data_sources: List[LeadDataSource] = Field(default_factory=list)
+    interception_opportunities: List[LeadInterceptionOpportunity] = Field(default_factory=list)
+    monitoring_sop: List[str] = Field(default_factory=list)
+    compliance_notes: List[str] = Field(default_factory=list)
 
 
 class DigitalHumanCreateRequest(BaseModel):

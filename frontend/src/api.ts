@@ -320,6 +320,24 @@ export interface CustomerProfileSave {
 }
 
 
+
+export interface LeadDataSource {
+  name: string
+  status: string
+  purpose: string
+  required_fields: string[]
+  next_step: string
+}
+
+export interface LeadInterceptionOpportunity {
+  score: number
+  source: string
+  keyword: string
+  intent: string
+  action: string
+  asset: string
+}
+
 export interface LeadChannelPlaybook {
   channel: string
   goal: string
@@ -342,6 +360,11 @@ export interface LeadAcquisitionPlanResponse {
   content_matrix?: string[]
   lead_magnets?: string[]
   shooting_prompts?: string[]
+  required_integrations?: string[]
+  data_sources?: LeadDataSource[]
+  interception_opportunities?: LeadInterceptionOpportunity[]
+  monitoring_sop?: string[]
+  compliance_notes?: string[]
 }
 
 export interface DigitalHumanCreateRequest {

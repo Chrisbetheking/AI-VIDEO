@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Optional
 
 from app.config import Settings
 from app.services.llm import LLMError, chat_json, test_llm
-from app.schemas import CopyRequest, EditPlanRequest, EditPlanResponse, GeneratedCopy, RewriteFromInspirationRequest, VoiceDirectorRequest, VoiceDirectorResponse, LeadAcquisitionRequest, LeadAcquisitionPlanResponse, LeadChannelPlaybook
+from app.schemas import CopyRequest, EditPlanRequest, EditPlanResponse, GeneratedCopy, RewriteFromInspirationRequest, VoiceDirectorRequest, VoiceDirectorResponse, LeadAcquisitionRequest, LeadAcquisitionPlanResponse, LeadChannelPlaybook, LeadDataSource, LeadInterceptionOpportunity
 
 
 class DeepSeekError(RuntimeError):
@@ -139,7 +139,7 @@ async def rewrite_from_inspiration(settings: Settings, req: RewriteFromInspirati
 
 async def generate_lead_acquisition_plan(settings: Settings, req: LeadAcquisitionRequest) -> LeadAcquisitionPlanResponse:
     channels = req.channels or ['抖音截留获客', '抖音养号', '采集目标客户', '自动监听', '自动回复', '目标用户导流私域']
-    system = '你是海外房产置业与第二家园行业的短视频增长负责人，擅长把同行视频打法迁移成获客流程。必须输出严格 JSON，不能生成抄袭文案，重点是获客路径和自动化动作。'
+    system = '你是海外房产行业的增长数据分析负责人，目标不是拍摄，而是通过真实搜索词、评论、竞品内容和线索表单发现可截流客户。必须输出严格 JSON，不能编造已采集数据；没有真实接入时要标注为待接入/待验证。'
     user = f"""
 请为以下业务生成一套可执行的短视频获客自动化作战图。
 行业：{req.industry or '海外房产置业 / 第二家园'}
@@ -155,7 +155,10 @@ async def generate_lead_acquisition_plan(settings: Settings, req: LeadAcquisitio
 拍摄/提示词要求：{req.shooting_brief or '给出可拍镜头、口播提词、B-roll 和封面标题'}
 报告/微信承接方式：{req.report_delivery or '评论关键词或私信领取资料，再进入微信做需求筛选'}
 可选固定人群/场景：{req.fixed_options or '无'}
-重点渠道：{', '.join(channels)}
+重点数据源/渠道：{', '.join(channels)}
+用户选择的数据源：{', '.join(req.data_sources or []) or '未配置'}
+竞品账号：{', '.join(req.competitor_accounts or []) or '未录入'}
+手动导入搜索/评论数据：{req.search_query_import or '暂无'}
 同行/内容沉淀：
 {req.competitor_notes or '暂无'}
 监控关键词：{req.trend_keywords or '海外房产,第二家园,海外置业,移居,资产配置'}
@@ -175,14 +178,21 @@ async def generate_lead_acquisition_plan(settings: Settings, req: LeadAcquisitio
   "next_actions": ["下一步人工确认事项"],
   "content_matrix": ["可直接生成的选题/栏目"],
   "lead_magnets": ["可领取的报告/清单/测算表"],
-  "shooting_prompts": ["拍摄方案和提示词"]
+  "shooting_prompts": ["把截流机会转成口播/图文的方向，不要写成拍摄任务"],
+  "required_integrations": ["真实数据需要接入的平台/API/人工导入表"],
+  "data_sources": [{"name":"数据源", "status":"已接入/待接入", "purpose":"用途", "required_fields":["需要的环境变量或授权"], "next_step":"下一步"}],
+  "interception_opportunities": [{"score":90, "source":"平台/来源", "keyword":"真实或待验证关键词", "intent":"客户意图", "action":"截流动作", "asset":"承接资料包"}],
+  "monitoring_sop": ["每天如何采集、去重、评分、分发给内容/私域"],
+  "compliance_notes": ["采集/投放/回复需要注意的合规边界"]
 }}
 
 要求：
-1. 学习同行博主的钩子公式、选题切入、评论区互动、流量承接方法，不照抄原文。
-2. 针对海外房产/第二家园行业，强调信任、咨询、资产与生活规划，不做夸大承诺。
-3. 自动化要落到系统能执行的动作：账号库、关键词监听、采集库、文案生成、评论/私信模板、私域承接。
-4. 语气专业，不要出现“我认为”“可能可以”这种犹豫表达。
+1. 截流获客只输出“数据源、关键词、评论问题、竞品流量、承接动作”，不要把拍摄任务混在这里。
+2. 真实数据没有接入时，必须写“待接入/待验证”，不要装成已经采集。
+3. 重点围绕资格判断、城市比较、项目筛选、税费测算、MM2H/第二家园这五类高意向场景。
+4. 自动化要落到系统能执行的动作：API授权、关键词监听、评论采集、线索表单、网页报告、私信/企微承接。
+5. 合规提醒要明确：只处理公开/授权数据，微信海外房产更适合私域承接而不是直接买量。
+6. 语气专业，不要出现“我认为”“可能可以”这种犹豫表达。
 """.strip()
     try:
         payload = await _chat_json(settings, system, user, temperature=0.62, timeout=90)
@@ -199,6 +209,27 @@ async def generate_lead_acquisition_plan(settings: Settings, req: LeadAcquisitio
                 ))
         if not playbook:
             raise ValueError('empty playbook')
+        data_sources = []
+        for item in payload.get('data_sources') or []:
+            if isinstance(item, dict):
+                data_sources.append(LeadDataSource(
+                    name=str(item.get('name') or '数据源'),
+                    status=str(item.get('status') or '待接入'),
+                    purpose=str(item.get('purpose') or ''),
+                    required_fields=_as_list(item, 'required_fields'),
+                    next_step=str(item.get('next_step') or ''),
+                ))
+        opportunities = []
+        for item in payload.get('interception_opportunities') or []:
+            if isinstance(item, dict):
+                opportunities.append(LeadInterceptionOpportunity(
+                    score=int(item.get('score') or 70),
+                    source=str(item.get('source') or ''),
+                    keyword=str(item.get('keyword') or ''),
+                    intent=str(item.get('intent') or ''),
+                    action=str(item.get('action') or ''),
+                    asset=str(item.get('asset') or ''),
+                ))
         return LeadAcquisitionPlanResponse(
             overview=_as_str(payload, 'overview', '以同行打法为输入，围绕海外第二家园客户建立内容、互动、私域三段式获客闭环。'),
             audience_segments=_as_list(payload, 'audience_segments') or ['子女教育家庭', '资产配置型企业主', '养老度假型家庭', '海外生活规划人群'],
@@ -211,7 +242,18 @@ async def generate_lead_acquisition_plan(settings: Settings, req: LeadAcquisitio
             next_actions=_as_list(payload, 'next_actions') or ['补充竞品账号', '确认目标国家和项目类型', '录入客户常见问题'],
             content_matrix=_as_list(payload, 'content_matrix') or ['避坑类：海外置业最容易踩的 3 个坑', '教育类：国际学校和第二家园怎么一起规划', '预算类：几百万预算如何配置海外资产', '流程类：中国人买房从咨询到交付完整流程'],
             lead_magnets=_as_list(payload, 'lead_magnets') or ['《海外置业避坑报告》', '《第二家园身份规划清单》', '《预算测算表》', '《国际学校择校清单》'],
-            shooting_prompts=_as_list(payload, 'shooting_prompts') or ['顾问正面口播 + 海外社区/泳池/学校 B-roll', '用地图、预算表和清单做视觉辅助', '结尾用私信关键词引导领取报告'],
+            shooting_prompts=_as_list(payload, 'shooting_prompts') or ['把税费/流程/资格判断转成 30 秒口播', '把城市比较转成 5 页图文', '把 MM2H 问题转成 FAQ 视频'],
+            required_integrations=_as_list(payload, 'required_integrations') or ['百度营销/关键词规划师', '巨量引擎 Marketing API', '抖音开放平台评论/关键词视频搜索', '小红书数据源或 CSV 导入', '企业微信/SCRM'],
+            data_sources=data_sources or [
+                LeadDataSource(name='百度搜索 / 百度营销', status='待接入', purpose='搜索词、关键词规划和线索', required_fields=['BAIDU_MARKETING_APP_ID','BAIDU_MARKETING_SECRET','BAIDU_MARKETING_ACCESS_TOKEN'], next_step='申请百度营销开发者并授权广告账号'),
+                LeadDataSource(name='巨量引擎 / 抖音搜索', status='待接入', purpose='抖音搜索、广告报表、线索表单和内容热度', required_fields=['OCEANENGINE_APP_ID','OCEANENGINE_SECRET','OCEANENGINE_ACCESS_TOKEN'], next_step='开通巨量引擎开放平台 Marketing API'),
+            ],
+            interception_opportunities=opportunities or [
+                LeadInterceptionOpportunity(score=92, source='百度搜索', keyword='马来西亚买房税费怎么算', intent='税费测算/交易前教育', action='做税费测算页 + 评论/私信领取测算表', asset='《马来西亚买房税费测算表》'),
+                LeadInterceptionOpportunity(score=88, source='抖音搜索/评论', keyword='马来西亚第二家园一定要买房吗', intent='MM2H/身份规划', action='做问答短视频 + 私信“身份”领取对照表', asset='《MM2H 与购房要求对照表》'),
+            ],
+            monitoring_sop=_as_list(payload, 'monitoring_sop') or ['每日拉取关键词/评论/线索表', 'AI 去重并按转化意图评分', '高分机会推送到内容生产和私域回复', '转化数据回写行业档案'],
+            compliance_notes=_as_list(payload, 'compliance_notes') or ['只采集公开或授权数据', '竞品内容只能学习结构，不能照抄', '微信生态优先做私域承接和资料发送'],
         )
     except Exception:
         return LeadAcquisitionPlanResponse(
@@ -232,7 +274,22 @@ async def generate_lead_acquisition_plan(settings: Settings, req: LeadAcquisitio
             next_actions=['录入 5 个同领域博主账号', '确认主推国家/城市', '整理常见客户问题', '准备 3 个真实案例素材'],
             content_matrix=['避坑类：海外买房别只看价格', '教育类：国际学校和第二家园怎么一起规划', '预算类：几百万预算怎么配置海外资产', '身份类：第二家园适合哪些家庭', '案例类：真实客户从咨询到落地的过程'],
             lead_magnets=['《马来西亚第二家园避坑报告》', '《海外置业预算测算表》', '《马来西亚国际学校择校清单》', '《置业流程图》', '《线下说明会名额》'],
-            shooting_prompts=['顾问正面口播，旁边放报告/预算表，结尾引导私信关键词', 'B-roll 使用住宅外景、泳池、国际学校、家庭咨询、地图和清单', '封面大字突出“避坑/预算/第二家园/国际学校”，不要堆太多小字'],
+            shooting_prompts=['把高分截流词转成口播/图文选题', '把评论区高频疑问转成 FAQ 内容', '把资料包钩子接到发布文案和私信回复'],
+            required_integrations=['百度营销/关键词规划师', '巨量引擎 Marketing API', '抖音开放平台评论/关键词视频搜索', '小红书数据源或 CSV 导入', '企业微信/SCRM'],
+            data_sources=[
+                LeadDataSource(name='百度搜索 / 百度营销', status='待接入', purpose='搜索词、关键词规划和线索', required_fields=['BAIDU_MARKETING_APP_ID','BAIDU_MARKETING_SECRET','BAIDU_MARKETING_ACCESS_TOKEN'], next_step='申请百度营销开发者并授权广告账号'),
+                LeadDataSource(name='巨量引擎 / 抖音搜索', status='待接入', purpose='抖音搜索、广告报表、线索表单和内容热度', required_fields=['OCEANENGINE_APP_ID','OCEANENGINE_SECRET','OCEANENGINE_ACCESS_TOKEN'], next_step='开通巨量引擎开放平台 Marketing API'),
+                LeadDataSource(name='抖音开放平台', status='可接入', purpose='关键词视频搜索和授权评论管理', required_fields=['DOUYIN_CLIENT_KEY','DOUYIN_CLIENT_SECRET','DOUYIN_ACCESS_TOKEN'], next_step='申请关键词视频搜索和评论管理能力'),
+                LeadDataSource(name='小红书数据源', status='建议第三方/导入', purpose='笔记标题、评论问题和图文趋势', required_fields=['CSV 导入或数据服务商 Key'], next_step='先用 CSV/链接导入，后续接合规数据商'),
+            ],
+            interception_opportunities=[
+                LeadInterceptionOpportunity(score=92, source='百度搜索', keyword='马来西亚买房税费怎么算', intent='税费测算/交易前教育', action='做税费测算页 + 评论/私信领取测算表', asset='《马来西亚买房税费测算表》'),
+                LeadInterceptionOpportunity(score=88, source='抖音搜索/评论', keyword='马来西亚第二家园一定要买房吗', intent='MM2H/身份规划', action='做问答短视频 + 私信“身份”领取对照表', asset='《MM2H 与购房要求对照表》'),
+                LeadInterceptionOpportunity(score=86, source='小红书图文', keyword='Mont Kiara 国际学校附近公寓', intent='教育家庭/城市筛选', action='做 5 页图文包 + 私信“学校”领取清单', asset='《马来西亚国际学校择校清单》'),
+                LeadInterceptionOpportunity(score=84, source='竞品评论区', keyword='吉隆坡和新山哪里更值得买', intent='城市比较/项目筛选', action='做对比内容 + 领取城市对比表', asset='《吉隆坡 vs 新山选盘表》'),
+            ],
+            monitoring_sop=['每日拉取关键词/评论/线索表', 'AI 去重并按转化意图评分', '高分机会推送到内容生产和私域回复', '转化数据回写行业档案'],
+            compliance_notes=['只采集公开或授权数据', '竞品内容只能学习结构，不能照抄', '微信生态优先做私域承接和资料发送'],
         )
 
 
