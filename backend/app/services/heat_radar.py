@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import html
+import json
 import os
 import re
 import uuid
-from datetime import datetime, timezone
-from typing import Any, Dict, List, Tuple
-from urllib.parse import urlparse
+from datetime import datetime, timedelta, timezone
+from typing import Any, Dict, Iterable, List, Tuple
+from urllib.parse import parse_qs, unquote, urlparse
 
 import httpx
 
@@ -17,6 +18,11 @@ from app.services.memory import MemoryStore
 URL_RE = re.compile(r'https?://[^\s，。！？!！；;）)]+', re.I)
 TITLE_RE = re.compile(r'<title[^>]*>(.*?)</title>', re.I | re.S)
 DESC_RE = re.compile(r'<meta[^>]+(?:name|property)=["\'](?:description|og:description)["\'][^>]+content=["\']([^"\']+)["\']', re.I | re.S)
+RENDER_DATA_RE = re.compile(r'<script[^>]+id=["\']RENDER_DATA["\'][^>]*>(.*?)</script>', re.I | re.S)
+JSON_STATE_RE = re.compile(r'<script[^>]+id=["\']__NEXT_DATA__["\'][^>]*>(.*?)</script>', re.I | re.S)
+DOUYIN_VIDEO_RE = re.compile(r'/(?:video|note)/(\d+)|(?:aweme_id|modal_id|item_id)=([0-9]{8,})', re.I)
+
+CN_TZ = timezone(timedelta(hours=8))
 
 
 def now_iso() -> str:
@@ -24,7 +30,7 @@ def now_iso() -> str:
 
 
 def today_key() -> str:
-    return datetime.now(timezone.utc).date().isoformat()
+    return datetime.now(CN_TZ).date().isoformat()
 
 
 def _clean_text(value: Any, limit: int = 300) -> str:
@@ -52,7 +58,7 @@ def _num(value: Any) -> int:
         if value is None:
             return 0
         if isinstance(value, str):
-            v = value.strip().lower().replace(',', '')
+            v = value.strip().lower().replace(',', '').replace(' ', '')
             if not v:
                 return 0
             multiplier = 1
@@ -75,7 +81,7 @@ def heat_score(item: Dict[str, Any]) -> int:
         + _num(item.get('favorite_count')) * 4
         + _num(item.get('share_count')) * 6
         + min(_num(item.get('view_count')) // 100, 5000)
-        + (1 if item.get('url') else 0)
+        + (10 if item.get('url') else 0)
     )
 
 
@@ -117,7 +123,6 @@ def _extract_urls(*parts: Any) -> List[str]:
 
 
 def _metric_value(text: str, names: List[str]) -> int:
-    # 支持：赞123、点赞 1.2万、评论:34、收藏0、分享 5、播放 3000
     name_pat = '|'.join(map(re.escape, names))
     m = re.search(rf'(?:{name_pat})\s*[:：]?\s*([0-9]+(?:\.[0-9]+)?\s*(?:万|w|W|k|K)?)', text, re.I)
     if not m:
@@ -136,7 +141,7 @@ def _line_title(line: str, fallback: str) -> str:
     return cleaned or fallback
 
 
-def _make_item(account: Dict[str, Any], *, title: str, url: str = '', description: str = '', source_mode: str = 'manual_or_public', line: str = '') -> Dict[str, Any]:
+def _make_item(account: Dict[str, Any], *, title: str, url: str = '', description: str = '', source_mode: str = 'manual_or_public', line: str = '', published_at: str = '', raw: Dict[str, Any] | None = None) -> Dict[str, Any]:
     raw_line = line or ' '.join([title, description])
     item = {
         'id': str(uuid.uuid4()),
@@ -145,9 +150,9 @@ def _make_item(account: Dict[str, Any], *, title: str, url: str = '', descriptio
         'account_id': str(account.get('id') or ''),
         'account_name': str(account.get('name') or '公开来源'),
         'title': _clean_text(title or str(account.get('name') or '公开内容'), 180),
-        'description': _clean_text(description, 700),
+        'description': _clean_text(description, 900),
         'url': url,
-        'published_at': '',
+        'published_at': published_at,
         'collected_at': now_iso(),
         'like_count': _metric_value(raw_line, ['赞', '点赞', 'like', 'likes']),
         'comment_count': _metric_value(raw_line, ['评论', 'comment', 'comments']),
@@ -159,48 +164,334 @@ def _make_item(account: Dict[str, Any], *, title: str, url: str = '', descriptio
         'tags': _split_keywords(account.get('tags'), 8),
         'thumbnail_url': '',
         'source_mode': source_mode,
-        'raw': {'line': line},
+        'raw': raw or {'line': line},
         'warnings': [],
     }
     item['heat_score'] = heat_score(item)
     return item
 
 
-async def _fetch_html_meta(settings: Settings, url: str, account: Dict[str, Any], warnings: List[str]) -> Dict[str, Any] | None:
-    if os.getenv('HEAT_RADAR_PUBLIC_FETCH', '').strip().lower() not in {'1', 'true', 'yes', 'on'}:
-        return None
+def _douyin_headers(settings: Settings, url: str = 'https://www.douyin.com/') -> Dict[str, str]:
+    cookie = os.getenv('DOUYIN_WEB_COOKIE', '').strip() or os.getenv('HEAT_RADAR_DOUYIN_COOKIE', '').strip()
     headers = {
-        'User-Agent': getattr(settings, 'collector_user_agent', '') or 'Mozilla/5.0',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'User-Agent': getattr(settings, 'collector_user_agent', '') or 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,application/json,*/*;q=0.8',
+        'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
         'Referer': 'https://www.douyin.com/',
+        'Origin': 'https://www.douyin.com',
+    }
+    if cookie:
+        headers['Cookie'] = cookie
+    return headers
+
+
+async def _resolve_url(settings: Settings, url: str, warnings: List[str]) -> str:
+    """Resolve share links such as https://v.douyin.com/xxxx/ into the real page URL."""
+    url = (url or '').strip()
+    if not url.startswith('http'):
+        return url
+    try:
+        async with httpx.AsyncClient(timeout=10, follow_redirects=True, headers=_douyin_headers(settings, url)) as client:
+            res = await client.get(url)
+            final = str(res.url)
+            # Some share pages include an intermediate href rather than a normal redirect.
+            if ('v.douyin.com' in final or 'iesdouyin.com/share' in final) and res.text:
+                m = re.search(r'https://www\.douyin\.com/[^"\'<>\s]+', res.text)
+                if m:
+                    final = html.unescape(m.group(0))
+            return final or url
+    except Exception as exc:
+        warnings.append(f'{url}: 短链转换失败：{str(exc)[:160]}')
+        return url
+
+
+def _extract_video_id(url: str) -> str:
+    m = DOUYIN_VIDEO_RE.search(url or '')
+    if not m:
+        return ''
+    return m.group(1) or m.group(2) or ''
+
+
+def _extract_sec_uid(url: str, html_text: str = '') -> str:
+    candidates: List[str] = []
+    parsed = urlparse(url or '')
+    qs = parse_qs(parsed.query or '')
+    for key in ['sec_uid', 'sec_user_id']:
+        candidates.extend(qs.get(key) or [])
+    m = re.search(r'/user/([^/?#]+)', parsed.path or '')
+    if m:
+        candidates.append(m.group(1))
+    for text in [url, html_text or '']:
+        candidates.extend(re.findall(r'(MS4wLjAB[0-9A-Za-z_\-\.]+)', text))
+        candidates.extend(re.findall(r'"sec_uid"\s*:\s*"([^"]+)"', text))
+        candidates.extend(re.findall(r'"sec_user_id"\s*:\s*"([^"]+)"', text))
+    for c in candidates:
+        c = unquote(str(c or '')).strip()
+        if c:
+            return c
+    return ''
+
+
+def _walk_json(obj: Any) -> Iterable[Any]:
+    yield obj
+    if isinstance(obj, dict):
+        for v in obj.values():
+            yield from _walk_json(v)
+    elif isinstance(obj, list):
+        for v in obj:
+            yield from _walk_json(v)
+
+
+def _parse_render_json(html_text: str) -> List[Any]:
+    payloads: List[Any] = []
+    for regex in [RENDER_DATA_RE, JSON_STATE_RE]:
+        for m in regex.finditer(html_text or ''):
+            raw = html.unescape(m.group(1) or '').strip()
+            if not raw:
+                continue
+            for candidate in [raw, unquote(raw)]:
+                try:
+                    payloads.append(json.loads(candidate))
+                    break
+                except Exception:
+                    continue
+    # Generic fallback: find aweme_list JSON fragments if present.
+    return payloads
+
+
+def _published_from_ts(ts: Any) -> str:
+    n = _num(ts)
+    if n <= 0:
+        return ''
+    # Douyin create_time is usually seconds.
+    if n > 10_000_000_000:
+        n = n // 1000
+    try:
+        return datetime.fromtimestamp(n, tz=timezone.utc).isoformat()
+    except Exception:
+        return ''
+
+
+def _normalize_aweme(account: Dict[str, Any], aweme: Dict[str, Any], source_mode: str = 'douyin_web_api') -> Dict[str, Any] | None:
+    if not isinstance(aweme, dict):
+        return None
+    aweme_id = str(aweme.get('aweme_id') or aweme.get('id') or aweme.get('item_id') or '')
+    desc = _clean_text(aweme.get('desc') or aweme.get('share_info', {}).get('share_desc') or aweme.get('caption') or '', 500)
+    title = desc or _clean_text(aweme.get('share_info', {}).get('share_title') or aweme.get('seo_info', {}).get('seo_ocr_content') or '抖音视频', 180)
+    url = f'https://www.douyin.com/video/{aweme_id}' if aweme_id else str(aweme.get('share_url') or aweme.get('url') or '')
+    stats = aweme.get('statistics') or aweme.get('stats') or {}
+    published_at = _published_from_ts(aweme.get('create_time') or aweme.get('createTime'))
+    item = _make_item(account, title=title, url=url, description=desc, source_mode=source_mode, published_at=published_at, raw={'aweme': aweme})
+    item['like_count'] = _num(stats.get('digg_count') or stats.get('like_count') or stats.get('diggCount'))
+    item['comment_count'] = _num(stats.get('comment_count') or stats.get('commentCount'))
+    item['favorite_count'] = _num(stats.get('collect_count') or stats.get('favorite_count') or stats.get('collectCount'))
+    item['share_count'] = _num(stats.get('share_count') or stats.get('shareCount'))
+    item['view_count'] = _num(stats.get('play_count') or stats.get('playCount'))
+    video = aweme.get('video') or {}
+    cover = video.get('cover') or video.get('origin_cover') or video.get('dynamic_cover') or {}
+    if isinstance(cover, dict):
+        urls = cover.get('url_list') or cover.get('urlList') or []
+        if urls:
+            item['thumbnail_url'] = str(urls[0])
+    item['heat_score'] = heat_score(item)
+    return item
+
+
+async def _fetch_douyin_post_api(settings: Settings, sec_uid: str, account: Dict[str, Any], warnings: List[str], limit: int) -> List[Dict[str, Any]]:
+    if not sec_uid:
+        return []
+    url = 'https://www.douyin.com/aweme/v1/web/aweme/post/'
+    params = {
+        'device_platform': 'webapp',
+        'aid': '6383',
+        'channel': 'channel_pc_web',
+        'sec_user_id': sec_uid,
+        'max_cursor': '0',
+        'locate_query': 'false',
+        'show_live_replay_strategy': '1',
+        'need_time_list': '1',
+        'time_list_query': '0',
+        'count': str(max(3, min(limit, 10))),
+        'publish_video_strategy_type': '2',
+        'from_user_page': '1',
+        'update_version_code': '170400',
+        'pc_client_type': '1',
+        'version_code': '290100',
+        'version_name': '29.1.0',
+        'cookie_enabled': 'true',
+        'screen_width': '1920',
+        'screen_height': '1080',
+        'browser_language': 'zh-CN',
+        'browser_platform': 'Win32',
+        'browser_name': 'Chrome',
+        'browser_version': '124.0.0.0',
     }
     try:
-        async with httpx.AsyncClient(timeout=8, follow_redirects=True, headers=headers) as client:
+        async with httpx.AsyncClient(timeout=12, follow_redirects=True, headers=_douyin_headers(settings)) as client:
+            res = await client.get(url, params=params)
+            if res.status_code >= 400:
+                warnings.append(f'抖音主页接口 HTTP {res.status_code}：公开接口可能要求 Cookie/验证。')
+                return []
+            data = res.json()
+    except Exception as exc:
+        warnings.append(f'抖音主页最近视频接口失败：{str(exc)[:180]}')
+        return []
+    awemes = data.get('aweme_list') or data.get('awemeList') or []
+    if not awemes:
+        status_msg = data.get('status_msg') or data.get('message') or ''
+        warnings.append(f'抖音主页接口未返回最近视频。{status_msg}'.strip())
+        return []
+    items: List[Dict[str, Any]] = []
+    for aweme in awemes[:limit]:
+        item = _normalize_aweme(account, aweme, source_mode='douyin_profile_recent_api')
+        if item:
+            items.append(item)
+    return items
+
+
+async def _fetch_douyin_detail(settings: Settings, aweme_id: str, account: Dict[str, Any], warnings: List[str]) -> List[Dict[str, Any]]:
+    if not aweme_id:
+        return []
+    url = 'https://www.douyin.com/aweme/v1/web/aweme/detail/'
+    params = {
+        'device_platform': 'webapp',
+        'aid': '6383',
+        'aweme_id': aweme_id,
+        'pc_client_type': '1',
+        'version_code': '290100',
+        'version_name': '29.1.0',
+        'cookie_enabled': 'true',
+        'screen_width': '1920',
+        'screen_height': '1080',
+        'browser_language': 'zh-CN',
+        'browser_platform': 'Win32',
+        'browser_name': 'Chrome',
+        'browser_version': '124.0.0.0',
+    }
+    try:
+        async with httpx.AsyncClient(timeout=12, follow_redirects=True, headers=_douyin_headers(settings)) as client:
+            res = await client.get(url, params=params)
+            if res.status_code < 400:
+                data = res.json()
+                aweme = data.get('aweme_detail') or data.get('aweme') or data.get('item')
+                item = _normalize_aweme(account, aweme or {}, source_mode='douyin_video_detail_api')
+                if item:
+                    return [item]
+            warnings.append(f'抖音视频详情接口未返回：{aweme_id} HTTP {res.status_code}')
+    except Exception as exc:
+        warnings.append(f'抖音视频详情接口失败：{str(exc)[:180]}')
+    return []
+
+
+async def _fetch_html(settings: Settings, url: str, warnings: List[str]) -> tuple[str, str]:
+    try:
+        async with httpx.AsyncClient(timeout=10, follow_redirects=True, headers=_douyin_headers(settings, url)) as client:
+            res = await client.get(url)
+            final = str(res.url)
+            if res.status_code >= 400:
+                warnings.append(f'{url}: 页面读取失败 HTTP {res.status_code}')
+                return final, ''
+            return final, res.text or ''
+    except Exception as exc:
+        warnings.append(f'{url}: 页面读取失败：{str(exc)[:160]}')
+        return url, ''
+
+
+def _items_from_render_data(account: Dict[str, Any], payloads: List[Any], limit: int) -> List[Dict[str, Any]]:
+    items: List[Dict[str, Any]] = []
+    for payload in payloads:
+        for node in _walk_json(payload):
+            if isinstance(node, dict):
+                # Direct aweme object.
+                if node.get('aweme_id') or node.get('desc') and node.get('statistics'):
+                    item = _normalize_aweme(account, node, source_mode='douyin_render_data')
+                    if item:
+                        items.append(item)
+                # aweme list nested in any key.
+                for key in ['aweme_list', 'awemeList', 'post', 'items']:
+                    value = node.get(key)
+                    if isinstance(value, list):
+                        for aweme in value:
+                            if isinstance(aweme, dict):
+                                item = _normalize_aweme(account, aweme, source_mode='douyin_render_data')
+                                if item:
+                                    items.append(item)
+            if len(items) >= limit:
+                return _dedupe_items(items)[:limit]
+    return _dedupe_items(items)[:limit]
+
+
+async def _collect_douyin_url(settings: Settings, account: Dict[str, Any], input_url: str, warnings: List[str], limit: int) -> List[Dict[str, Any]]:
+    final_url = await _resolve_url(settings, input_url, warnings)
+    if final_url != input_url:
+        warnings.append(f'短链已转换：{input_url} → {final_url}')
+    video_id = _extract_video_id(final_url)
+    if video_id:
+        items = await _fetch_douyin_detail(settings, video_id, account, warnings)
+        if items:
+            return items[:limit]
+    final_url, html_text = await _fetch_html(settings, final_url, warnings)
+    video_id = video_id or _extract_video_id(final_url) or _extract_video_id(html_text)
+    if video_id:
+        items = await _fetch_douyin_detail(settings, video_id, account, warnings)
+        if items:
+            return items[:limit]
+    render_items = _items_from_render_data(account, _parse_render_json(html_text), limit)
+    if render_items:
+        return render_items[:limit]
+    sec_uid = _extract_sec_uid(final_url, html_text)
+    if sec_uid:
+        items = await _fetch_douyin_post_api(settings, sec_uid, account, warnings, limit)
+        if items:
+            return items[:limit]
+        title, desc = _title_from_html(html_text)
+        placeholder = _make_item(
+            account,
+            title=(title or str(account.get('name') or '抖音账号主页已转换')),
+            url=final_url,
+            description='主页短链已转换，并识别到 sec_uid；但公开接口没有返回最近三条。建议在 Render 环境变量添加 DOUYIN_WEB_COOKIE，或粘贴具体视频链接。',
+            source_mode='douyin_profile_resolved_no_posts',
+            raw={'sec_uid': sec_uid, 'final_url': final_url},
+        )
+        placeholder['warnings'] = ['主页已转换，但未拿到最近视频列表。']
+        return [placeholder]
+    title, desc = _title_from_html(html_text)
+    return [_make_item(
+        account,
+        title=title or str(account.get('name') or '抖音公开链接已留存'),
+        url=final_url,
+        description=desc or '公开链接已留存，但没有识别到视频 ID 或 sec_uid。请确认链接不是过期短链。',
+        source_mode='douyin_public_url_unresolved',
+        raw={'final_url': final_url},
+    )]
+
+
+async def _fetch_html_meta(settings: Settings, url: str, account: Dict[str, Any], warnings: List[str]) -> Dict[str, Any] | None:
+    # Non-Douyin lightweight title fetch. It is safe and short-timeout; no heavy crawler.
+    if not url.startswith('http'):
+        return None
+    try:
+        async with httpx.AsyncClient(timeout=8, follow_redirects=True, headers=_douyin_headers(settings, url)) as client:
             res = await client.get(url)
             if res.status_code >= 400:
                 warnings.append(f'{url}: 公开页面读取失败 HTTP {res.status_code}')
                 return None
             title, desc = _title_from_html(res.text)
+            final_url = str(res.url)
     except Exception as exc:
         warnings.append(f'{url}: 公开页面读取失败：{str(exc)[:160]}')
         return None
     if not title and not desc:
-        warnings.append(f'{url}: 没有读取到标题/描述，平台可能需要登录或动态渲染。')
         return None
-    return _make_item(account, title=title or desc[:80] or '公开内容', url=url, description=desc, source_mode='public_html')
+    return _make_item(account, title=title or desc[:80] or '公开内容', url=final_url or url, description=desc, source_mode='public_html')
 
 
 def _parse_account_notes(account: Dict[str, Any], warnings: List[str], limit: int) -> List[Dict[str, Any]]:
-    """从账号 URL、备注、标签中提取真实可追溯内容。
-
-    不编造点赞/评论；只要有公开链接或用户手动写了指标，就进入热度池。
-    """
     items: List[Dict[str, Any]] = []
     notes = str(account.get('notes') or '')
     url = str(account.get('url') or '').strip()
     fallback_title = str(account.get('name') or '竞品账号观察').strip() or '竞品账号观察'
 
-    # 逐行解析：优先保留带链接或带真实指标的行。
     for line in re.split(r'[\n\r]+', notes):
         line = line.strip()
         if not line:
@@ -214,7 +505,6 @@ def _parse_account_notes(account: Dict[str, Any], warnings: List[str], limit: in
         if len(items) >= limit:
             break
 
-    # 如果账号主链接本身是具体内容链接，也要作为真实公开链接留存。
     if len(items) < limit and url.startswith('http'):
         already = {str(x.get('url') or '') for x in items}
         if url not in already:
@@ -229,21 +519,38 @@ def _parse_account_notes(account: Dict[str, Any], warnings: List[str], limit: in
 
 
 async def _collect_account(settings: Settings, account: Dict[str, Any], limit: int, warnings: List[str]) -> List[Dict[str, Any]]:
-    items = _parse_account_notes(account, warnings, limit)
-    # 对带 URL 的条目可选读取标题；失败不影响展示。
+    urls = _extract_urls(account.get('url'), account.get('notes'))
+    collected: List[Dict[str, Any]] = []
+    douyin_urls = [u for u in urls if 'douyin.com' in u.lower() or 'iesdouyin.com' in u.lower()]
+    for url in douyin_urls[:3]:
+        try:
+            collected.extend(await _collect_douyin_url(settings, account, url, warnings, limit))
+        except Exception as exc:
+            warnings.append(f'{url}: 抖音采集失败：{str(exc)[:200]}')
+        if len(collected) >= limit:
+            break
+
+    # Parse manual metric lines as additional real items.
+    collected.extend(_parse_account_notes(account, warnings, limit))
+
     enriched: List[Dict[str, Any]] = []
-    for item in items:
+    for item in collected:
         url = str(item.get('url') or '')
-        meta = await _fetch_html_meta(settings, url, account, warnings) if url else None
+        if item.get('source_mode', '').startswith('douyin_'):
+            enriched.append(item)
+            continue
+        meta = None
+        if url and 'douyin.com' not in url.lower():
+            meta = await _fetch_html_meta(settings, url, account, warnings)
         if meta:
-            # 保留手动指标，用公开 title 替换更干净的标题。
             for key in ['like_count', 'comment_count', 'favorite_count', 'share_count', 'view_count']:
-                meta[key] = item.get(key, meta.get(key, 0))
+                if item.get(key):
+                    meta[key] = item.get(key, meta.get(key, 0))
             meta['heat_score'] = heat_score(meta)
             enriched.append(meta)
         else:
             enriched.append(item)
-    return enriched[:limit]
+    return _dedupe_items(enriched)[:limit]
 
 
 def _dedupe_items(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -258,8 +565,38 @@ def _dedupe_items(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return out
 
 
+def _item_date_cn(item: Dict[str, Any]) -> str:
+    for field in ['published_at', 'collected_at']:
+        value = str(item.get(field) or '')
+        if not value:
+            continue
+        try:
+            dt = datetime.fromisoformat(value.replace('Z', '+00:00'))
+            return dt.astimezone(CN_TZ).date().isoformat()
+        except Exception:
+            continue
+    return str(item.get('date') or '')[:10]
+
+
 def _rank_top3(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    return sorted(items, key=lambda x: (int(x.get('heat_score') or 0), str(x.get('collected_at') or '')), reverse=True)[:3]
+    return sorted(items, key=lambda x: (int(x.get('heat_score') or 0), str(x.get('published_at') or x.get('collected_at') or '')), reverse=True)[:3]
+
+
+def _recent3(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    return sorted(items, key=lambda x: (str(x.get('published_at') or ''), str(x.get('collected_at') or '')), reverse=True)[:3]
+
+
+def _pick_top_items(collected: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], str, bool]:
+    today = today_key()
+    real_posts = [x for x in collected if not str(x.get('source_mode') or '').endswith('_observation')]
+    today_items = [x for x in real_posts if _item_date_cn(x) == today]
+    if today_items:
+        return _rank_top3(today_items), 'today_top3', False
+    if real_posts:
+        return _recent3(real_posts), 'recent3_no_today', True
+    if collected:
+        return collected[:3], 'resolved_homepage_no_posts', True
+    return [], 'empty', True
 
 
 def _recent_real_items(memory: MemoryStore, limit: int = 3) -> List[Dict[str, Any]]:
@@ -272,20 +609,20 @@ def _recent_real_items(memory: MemoryStore, limit: int = 3) -> List[Dict[str, An
         if not (item.get('url') or item.get('title')):
             continue
         valid.append(item)
-    return _rank_top3(valid)[:limit]
+    return _recent3(valid)[:limit]
 
 
 def _fallback_analysis(top_items: List[Dict[str, Any]]) -> Dict[str, Any]:
     topics = [str(x.get('title') or '')[:60] for x in top_items if x.get('title')]
     if not topics:
-        topics = ['补充竞品具体视频/笔记链接', '补充点赞评论收藏指标', '接入第三方/官方数据源']
+        topics = ['补具体视频/笔记链接或 DOUYIN_WEB_COOKIE', '接入第三方/官方数据源', '补点赞评论收藏指标']
     return {
-        'summary': '已进入安全热度雷达：只基于账号库公开链接、备注/CSV 真实数据和历史留存分析，不再生成本地假数据。',
+        'summary': '已按真实来源运行热度雷达：优先采集今天内容；今天没有新内容时，自动回看最近 3 条。不会再生成本地假数据。',
         'content_angles': [f'围绕「{t}」做原创跟进/解释内容' for t in topics[:5]],
         'customer_intents': ['税费/流程判断', '城市比较', '第二家园/身份规划', '教育家庭选盘'],
         'lead_magnets': ['马来西亚买房税费测算表', 'MM2H 与购房要求对照表', '吉隆坡 vs 新山选盘表'],
         'reply_hooks': ['这个问题先看你的用途和预算，再判断城市/区域。', '我整理了一个对照表，可以先帮你判断方向。'],
-        'next_actions': ['给竞品账号备注补 1-3 条具体视频/笔记链接。', '如果主页无法公开列出最近视频，后续接 Cookie、第三方数据平台或官方 API。', '把热度最高的话题一键转为口播文案和图文引流包。'],
+        'next_actions': ['主页短链已支持自动转换；若拿不到最近三条，在 Render 添加 DOUYIN_WEB_COOKIE。', '给重点竞品补 1-3 条具体视频链接，系统可立即分析。', '后续企业认证后替换为巨量/抖音/百度 API。'],
     }
 
 
@@ -303,7 +640,7 @@ async def analyze_heat_items(settings: Settings, top_items: List[Dict[str, Any]]
     system = '你是中国社媒获客热度雷达分析师。只基于已采集到的真实数据分析，不要编造数据。输出严格 JSON。'
     user = f"""
 监控关键词：{', '.join(keywords[:30]) or '未填写'}
-今日真实采集内容：
+今日/最近真实采集内容：
 {chr(10).join(lines)}
 
 请输出 JSON：
@@ -370,7 +707,7 @@ async def run_public_heat_radar(settings: Settings, memory: MemoryStore, req: An
         warnings.append('没有可采集的账号/链接。请先添加竞品账号主页、具体公开视频链接，或在备注里粘贴真实数据行。')
 
     collected: List[Dict[str, Any]] = []
-    for acc in deduped[:30]:
+    for acc in deduped[:20]:
         try:
             items = await _collect_account(settings, acc, limit, warnings)
             collected.extend(items)
@@ -385,18 +722,20 @@ async def run_public_heat_radar(settings: Settings, memory: MemoryStore, req: An
         if matched:
             item['matched_keywords'] = matched[:6]
 
-    top_items = _rank_top3(collected)
-    top_mode = 'today_top3'
-    fallback_used = False
+    top_items, top_mode, fallback_used = _pick_top_items(collected)
     if not top_items:
         recent = _recent_real_items(memory, 3)
         if recent:
             top_items = recent
-            top_mode = 'recent_top_fallback'
+            top_mode = 'recent_stored_fallback'
             fallback_used = True
-            warnings.append('本轮没有采到新内容，已回看最近真实留存 3 条。')
+            warnings.append('本轮没有采到新内容，已回看历史真实留存 3 条。')
         else:
-            warnings.append('本轮没有真实内容可展示：请补具体视频/笔记链接，或在备注/导入框粘贴一行真实数据。')
+            warnings.append('本轮没有真实内容可展示：请补具体视频/笔记链接，或在 Render 添加 DOUYIN_WEB_COOKIE 后重试主页采集。')
+    elif top_mode == 'recent3_no_today':
+        warnings.append('今天没有新视频/新笔记，已自动回看最近 3 条。')
+    elif top_mode == 'resolved_homepage_no_posts':
+        warnings.append('主页链接已转换/留存，但公开接口没有返回最近三条；建议添加 DOUYIN_WEB_COOKIE 或补具体视频链接。')
 
     analysis = await analyze_heat_items(settings, top_items, keywords)
 
@@ -430,7 +769,7 @@ async def run_public_heat_radar(settings: Settings, memory: MemoryStore, req: An
 
     return {
         'ok': True,
-        'source_mode': 'public_links_notes_csv_without_enterprise_api',
+        'source_mode': 'douyin_homepage_converter_public_recent3_without_enterprise_api',
         'accounts_count': len(deduped),
         'collected_count': len(collected),
         'saved_count': saved_count,
