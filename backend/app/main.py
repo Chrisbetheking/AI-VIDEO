@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import List, Optional
 from urllib.parse import urlparse
 
-from fastapi import BackgroundTasks, Depends, FastAPI, File, HTTPException, Request, UploadFile
+from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
@@ -922,8 +922,42 @@ def api_add_knowledge(item: KnowledgeCreate, kb: KnowledgeBase = Depends(get_kb)
     return kb.add(item)
 
 
+
+
+def _normalize_asset_folder(value: str, *, kind: str = '', filename: str = '') -> str:
+    raw = (value or '').strip().lower().replace(' ', '_').replace('-', '_')
+    name = (filename or '').lower()
+    if raw in {'self', 'own', 'my', 'mine', 'shot', '拍摄', '自己拍的素材', 'ziji'}:
+        return 'self'
+    if raw in {'provided', 'client', 'other', 'others', '别人提供的素材', '客户提供', 'provided_by_client'}:
+        return 'provided'
+    if raw in {'image', 'images', '图片', '图片素材'}:
+        return 'image'
+    if raw in {'collected', 'crawler', '采集', '采集视频'}:
+        return 'collected'
+    if raw in {'ai', 'generated', 'ai_image', 'generated_image', 'ai生成', 'ai生成图'}:
+        return 'ai'
+    if name.startswith('collected_'):
+        return 'collected'
+    if name.startswith(('ai_image_', 'graphic_', 'cover_')):
+        return 'ai'
+    if kind == 'image':
+        return 'image'
+    return 'self'
+
+
+def _asset_source_type(folder: str, filename: str = '') -> str:
+    if folder == 'collected':
+        return 'collected'
+    if folder == 'ai' or (filename or '').startswith(('ai_image_', 'graphic_', 'cover_')):
+        return 'ai_generated'
+    if folder == 'provided':
+        return 'provided'
+    return 'upload'
+
+
 @app.post('/api/assets', response_model=List[AssetItem])
-async def api_upload_assets(request: Request, files: List[UploadFile] = File(...), settings: Settings = Depends(get_settings)) -> List[AssetItem]:
+async def api_upload_assets(request: Request, files: List[UploadFile] = File(...), folder: str = Form('self'), settings: Settings = Depends(get_settings)) -> List[AssetItem]:
     """Upload material assets.
 
     Fixes two common production problems:
@@ -964,6 +998,7 @@ async def api_upload_assets(request: Request, files: List[UploadFile] = File(...
                 pass
 
         kind = 'image' if ext in IMAGE_EXTS else 'video'
+        item_folder = _normalize_asset_folder(folder, kind=kind, filename=original)
         created_at = now_iso()
         public_url = maybe_upload_to_r2(settings, dest, prefix='uploads')
         url = upload_url(request, dest_name, public_url)
@@ -975,6 +1010,8 @@ async def api_upload_assets(request: Request, files: List[UploadFile] = File(...
             url=url,
             size_bytes=total,
             created_at=created_at,
+            folder=item_folder,
+            source_type=_asset_source_type(item_folder, original),
         )
         upsert_asset(settings, {
             'id': asset_id,
@@ -984,6 +1021,8 @@ async def api_upload_assets(request: Request, files: List[UploadFile] = File(...
             'url': url,
             'size_bytes': total,
             'created_at': created_at,
+            'folder': item_folder,
+            'source_type': _asset_source_type(item_folder, original),
             'r2_url': public_url or '',
             'r2_key': f'uploads/{dest_name}' if public_url else '',
         })
@@ -1047,6 +1086,8 @@ def api_list_assets(
                 url=url,
                 size_bytes=int(raw.get('size_bytes') or (local_path.stat().st_size if local_path.exists() else 0)),
                 created_at=str(raw.get('created_at') or now_iso()),
+                folder=_normalize_asset_folder(str(raw.get('folder') or ''), kind=str(raw.get('kind') or ('image' if ext in IMAGE_EXTS else 'video')), filename=filename),
+                source_type=str(raw.get('source_type') or _asset_source_type(_normalize_asset_folder(str(raw.get('folder') or ''), kind=str(raw.get('kind') or ('image' if ext in IMAGE_EXTS else 'video')), filename=filename), filename)),
             ))
         except Exception:
             continue
@@ -1066,6 +1107,8 @@ def api_list_assets(
                 url=upload_url(request, path.name),
                 size_bytes=stat.st_size,
                 created_at=datetime.fromtimestamp(stat.st_mtime, timezone.utc).isoformat(),
+                folder=_normalize_asset_folder('', kind=item_kind, filename=path.name),
+                source_type=_asset_source_type(_normalize_asset_folder('', kind=item_kind, filename=path.name), path.name),
             ))
 
     # 3) R2 fallback after Render restart/OOM. Short timeouts in storage.py prevent hanging.
@@ -1091,6 +1134,8 @@ def api_list_assets(
                     url=obj.get('url') or upload_url(request, name),
                     size_bytes=int(obj.get('size') or 0),
                     created_at=created_at,
+                    folder=_normalize_asset_folder('', kind=item_kind, filename=name),
+                    source_type=_asset_source_type(_normalize_asset_folder('', kind=item_kind, filename=name), name),
                 ))
 
     items.sort(key=lambda it: it.created_at, reverse=True)
@@ -1160,10 +1205,10 @@ async def api_compose_video(req: ComposeRequest, request: Request, settings: Set
 
     if req.asset_plan:
         try:
-            compose_max_assets = int(os.getenv('COMPOSE_MAX_ASSETS', '3'))
+            compose_max_assets = int(os.getenv('COMPOSE_MAX_ASSETS', '8'))
         except Exception:
             compose_max_assets = 3
-        compose_max_assets = max(1, min(5, compose_max_assets))
+        compose_max_assets = max(1, min(12, compose_max_assets))
         sorted_plan = sorted(req.asset_plan, key=lambda x: x.order)
         if len(sorted_plan) > compose_max_assets:
             pre_warnings.append(f'当前 Render 免费实例为稳定演示，剪辑合成先使用前 {compose_max_assets} 个素材；其余素材不会下载，避免后端重启。')
@@ -1175,10 +1220,10 @@ async def api_compose_video(req: ComposeRequest, request: Request, settings: Set
                 missing_asset_ids.append(str(clip_req.asset_id))
     elif req.asset_ids:
         try:
-            compose_max_assets = int(os.getenv('COMPOSE_MAX_ASSETS', '3'))
+            compose_max_assets = int(os.getenv('COMPOSE_MAX_ASSETS', '8'))
         except Exception:
             compose_max_assets = 3
-        compose_max_assets = max(1, min(5, compose_max_assets))
+        compose_max_assets = max(1, min(12, compose_max_assets))
         if len(req.asset_ids) > compose_max_assets:
             pre_warnings.append(f'当前 Render 免费实例为稳定演示，剪辑合成先使用前 {compose_max_assets} 个素材；其余素材不会下载，避免后端重启。')
         for order, asset_id in enumerate(req.asset_ids[:compose_max_assets]):
@@ -1298,7 +1343,7 @@ async def api_cover(req: CoverRequest, request: Request, settings: Settings = De
 
 @app.post('/api/image/generate', response_model=ImageGenerateResponse)
 async def api_image_generate(req: ImageGenerateRequest, request: Request, settings: Settings = Depends(get_settings)) -> ImageGenerateResponse:
-    final_prompt = f"{req.prompt}\n风格要求：{req.style}\n要求：适合短视频封面/图文素材，精美商业感，高清，画面不要直接生成大量中文字，文字后续由系统叠加。"
+    final_prompt = f"{req.prompt}\n风格要求：{req.style}\n用途：作为图文引流或视频封面的纯视觉背景，保留干净留白，标题文案由系统后期叠加。"
     try:
         path, source_url, warnings = await generate_image_to_file(settings, final_prompt, size=req.size or settings.image_size, quality=req.quality or settings.image_quality)
     except Exception as exc:
@@ -1342,7 +1387,7 @@ async def api_graphic_post_generate(req: GraphicPostRequest, request: Request, s
             warnings.append('背景图下载失败，已使用系统背景。')
 
     if source_path is None and mode in {'ai', 'ai_image', 'seedream'}:
-        prompt = req.image_prompt.strip() or f"{req.industry or req.title}，商业引流图文背景，真实高级，适合小红书和抖音图文，画面精美，不要文字"
+        prompt = req.image_prompt.strip() or f"{req.industry or req.title}，商业引流图文背景，真实高级，适合小红书和抖音图文，画面精美，干净留白，后期叠加标题"
         try:
             source_path, _source_url, ai_warnings = await generate_image_to_file(settings, prompt, size=settings.image_size, quality=settings.image_quality)
             warnings.extend(ai_warnings)

@@ -111,6 +111,9 @@ class AssetItem(BaseModel):
     url: str
     size_bytes: int
     created_at: str
+    # 素材文件夹：self=自己拍的，provided=别人提供，image=图片素材，collected=采集视频，ai=AI生成图
+    folder: str = 'self'
+    source_type: str = 'upload'
 
 
 class ComposeAssetClip(BaseModel):

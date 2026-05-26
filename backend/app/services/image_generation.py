@@ -10,6 +10,44 @@ import httpx
 from app.config import Settings
 
 
+
+
+_FORBIDDEN_PROMPT_PHRASES = [
+    '不要文字', '不要有文字', '不要加文字', '无文字', '没有文字', '不带文字', '去掉文字', '不要中文', '不要英文',
+    'no text', 'without text', 'do not include text', 'no words', 'no letters', 'no typography'
+]
+
+
+def _clean_user_prompt(prompt: str) -> str:
+    """Seedream sometimes treats negative text instructions as visible content.
+
+    Keep user visual intent, but remove explicit "no text" phrases from the main prompt
+    and put them into negative_prompt instead.
+    """
+    text = (prompt or '').strip()
+    for phrase in _FORBIDDEN_PROMPT_PHRASES:
+        text = text.replace(phrase, '')
+        text = text.replace(phrase.upper(), '')
+        text = text.replace(phrase.title(), '')
+    text = '，'.join([part.strip(' ，,;；') for part in text.replace('\n', '，').split('，') if part.strip(' ，,;；')])
+    return text[:1800] or '精美商业场景背景，真实光影，高级质感，适合短视频和图文引流'
+
+
+def _visual_only_prompt(prompt: str) -> str:
+    clean = _clean_user_prompt(prompt)
+    return (
+        f"{clean}\n"
+        "生成纯视觉素材：真实场景、人物/物体、光影、构图、氛围和留白区域。"
+        "标题、卖点、字幕、编号、品牌字样全部由后期系统叠加；画面本身保持干净。"
+    )
+
+
+def _negative_prompt() -> str:
+    return (
+        "汉字, 中文, 英文, 数字, 字母, words, letters, typography, captions, subtitles, "
+        "watermark, logo, signboard, poster text, UI text, button text, label text, QR code, messy hands, distorted face"
+    )
+
 class ImageGenerationError(RuntimeError):
     pass
 
@@ -81,7 +119,8 @@ async def generate_image_to_file(settings: Settings, prompt: str, *, size: str =
         url = f'{_base_url(settings)}/images/generations'
         body = {
             'model': model,
-            'prompt': prompt,
+            'prompt': _visual_only_prompt(prompt),
+            'negative_prompt': _negative_prompt(),
             'response_format': 'url',
             'size': size or getattr(settings, 'image_size', '') or '2K',
             'stream': False,

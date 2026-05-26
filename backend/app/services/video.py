@@ -71,6 +71,44 @@ def normalize_text(text: str) -> str:
     return re.sub(r"\s+", " ", text.replace("\u3000", " ")).strip()
 
 
+
+_PUNCT_ONLY_RE = re.compile(r'^[\s。！？!?，,、；;：:.．…·“”"\'（）()【】\[\]-]+$')
+
+
+def clean_subtitle_text(text: str) -> str:
+    text = normalize_text(text)
+    text = text.replace('……', '…')
+    # 字幕不需要单独显示句号，避免出现独立“。”或“.”一帧。
+    text = re.sub(r'[。．\.]+$', '', text).strip()
+    text = re.sub(r'^[。．\.,，、；;：:]+', '', text).strip()
+    return '' if _PUNCT_ONLY_RE.match(text or '') else text
+
+
+def subtitle_chunks(text: str, max_chars: int = 14) -> List[str]:
+    raw = normalize_text(text)
+    if not raw:
+        return []
+    # 先按语义标点断句；标点留在前句，不产生独立标点行。
+    pieces = [p.strip() for p in re.split(r'(?<=[，,。！？!?；;：:])', raw) if p.strip()]
+    chunks: list[str] = []
+    for piece in pieces or [raw]:
+        piece = clean_subtitle_text(piece)
+        if not piece:
+            continue
+        while len(piece) > max_chars:
+            cut = max(piece.rfind('，', 0, max_chars), piece.rfind(',', 0, max_chars), piece.rfind('、', 0, max_chars), piece.rfind(' ', 0, max_chars))
+            if cut <= 4:
+                cut = max_chars
+            chunk = clean_subtitle_text(piece[:cut])
+            if chunk:
+                chunks.append(chunk)
+            piece = piece[cut:].strip(' ，,、')
+        piece = clean_subtitle_text(piece)
+        if piece:
+            chunks.append(piece)
+    # 再做一遍兜底过滤，避免任何孤立标点。
+    return [c for c in chunks if c and not _PUNCT_ONLY_RE.match(c)][:20]
+
 def split_script(text: str, max_chars: int = 14) -> List[str]:
     text = normalize_text(text)
     if not text:
@@ -104,16 +142,25 @@ def fmt_srt_time(seconds: float) -> str:
 def _append_srt_line(lines: list[str], index: int, start: float, end: float, text: str) -> int:
     if end <= start:
         end = start + 0.8
-    clean = normalize_text(text)
-    # 口播字幕不要太长，否则会挡住人物主体。每句尽量 12-14 字。
-    chunks = split_script(clean, max_chars=14)
+    clean = clean_subtitle_text(text)
+    if not clean:
+        return index
+    # 口播字幕不要太长，否则会挡住人物主体。每句尽量 12-14 字；不显示孤立标点。
+    chunks = subtitle_chunks(clean, max_chars=14) or [clean]
+    chunks = [clean_subtitle_text(c) for c in chunks if clean_subtitle_text(c)]
+    if not chunks:
+        return index
     if len(chunks) <= 1:
-        lines.append(f"{index}\n{fmt_srt_time(start)} --> {fmt_srt_time(end)}\n{clean}\n")
+        lines.append(f"{index}\n{fmt_srt_time(start)} --> {fmt_srt_time(end)}\n{chunks[0]}\n")
         return index + 1
-    span = max(0.4, (end - start) / len(chunks))
+    weights = [max(2, len(re.sub(r'[，,、；;：:！？!?]', '', c))) for c in chunks]
+    total_weight = max(1, sum(weights))
     cursor = start
-    for chunk in chunks:
+    for chunk, weight in zip(chunks, weights):
+        span = max(0.35, (end - start) * weight / total_weight)
         next_end = min(end, cursor + span)
+        if next_end <= cursor + 0.2:
+            next_end = min(end, cursor + 0.35)
         lines.append(f"{index}\n{fmt_srt_time(cursor)} --> {fmt_srt_time(next_end)}\n{chunk}\n")
         cursor = next_end
         index += 1
@@ -134,7 +181,7 @@ def create_srt(script: str, duration: float, output_path: Path, subtitle_segment
             if text:
                 index = _append_srt_line(lines, index, start, min(end, duration), text)
     if not lines:
-        chunks = split_script(script)
+        chunks = subtitle_chunks(script) or split_script(script)
         duration = max(duration, len(chunks) * 1.2)
         weights = [max(4, len(chunk)) for chunk in chunks]
         total_weight = sum(weights)
@@ -238,7 +285,7 @@ def _render_clip_to_temp(clip: MediaClip, duration: float, output_path: Path, w:
 def build_video_base(asset_paths: Iterable[Union[Path, MediaClip]], duration: float, output_path: Path) -> Tuple[Path, List[str]]:
     warnings: List[str] = []
     duration = max(3.0, min(float(duration), float(_env_int("COMPOSE_MAX_SECONDS", 60, 5, 180))))
-    max_assets = _env_int("COMPOSE_MAX_ASSETS", 5, 1, 10)
+    max_assets = _env_int("COMPOSE_MAX_ASSETS", 8, 1, 12)
     clips = [_coerce_clip(item, idx) for idx, item in enumerate(asset_paths)]
     valid_clips = [c for c in clips if c is not None and c.path.exists() and (is_image(c.path) or is_video(c.path))]
     valid_clips.sort(key=lambda c: c.order)
@@ -270,15 +317,22 @@ def build_video_base(asset_paths: Iterable[Union[Path, MediaClip]], duration: fl
             warnings.append(f"素材 {idx + 1} 预处理失败，已跳过：{err}")
 
     if original_count > len(valid_clips):
-        warnings.append(f"为保证 Render 稳定，本次最多使用前 {len(valid_clips)} 个素材；更多素材请升级后端或降低时长。")
+        warnings.append(f"为保证后端稳定，本次最多使用前 {len(valid_clips)} 个素材；更多素材请升级后端或降低时长。")
 
     if not normalized_paths:
         warnings.append("所有素材预处理失败，已降级默认背景，避免服务崩溃。")
         return build_default_base(duration, output_path)
 
     concat_file = tmp_dir / f"concat_{task}.txt"
-    concat_file.write_text("".join(f"file '{_concat_escape(p)}'\n" for p in normalized_paths), encoding="utf-8")
-    target_duration = max(3.0, min(duration, used_duration or duration))
+    # 如果素材总时长短于配音时长，循环素材列表补足整条音频，避免视频只出现前几段就结束。
+    target_duration = max(3.0, duration)
+    repeated: list[Path] = []
+    loop_budget = max(1, int(math.ceil(target_duration / max(0.5, used_duration or target_duration))))
+    for _ in range(min(loop_budget, 20)):
+        repeated.extend(normalized_paths)
+        if len(repeated) >= 80:
+            break
+    concat_file.write_text("".join(f"file '{_concat_escape(p)}'\n" for p in repeated), encoding="utf-8")
 
     # First try stream-copy concat because all temporary clips have the same codec/size/fps.
     cmd = [

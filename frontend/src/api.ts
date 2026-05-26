@@ -84,8 +84,9 @@ export async function apiPost<T>(path: string, body: unknown): Promise<T> {
   }, timeoutMs)
 }
 
-export async function uploadAssets(files: FileList): Promise<AssetItem[]> {
+export async function uploadAssets(files: FileList, folder = 'self'): Promise<AssetItem[]> {
   const form = new FormData()
+  form.append('folder', folder)
   Array.from(files).forEach(file => form.append('files', file))
   const url = `${API_BASE}/api/assets`
   return safeFetch<AssetItem[]>(url, { method: 'POST', body: form }, 180000)
@@ -109,7 +110,7 @@ export interface GeneratedCopy {
 export interface TTSVoice { id: string; name: string; provider: string; language: string; note?: string }
 export interface AudioSegmentTiming { index: number; text: string; start: number; end: number; duration: number }
 export interface TTSResponse { file_url: string; file_name: string; duration_seconds: number; warning?: string; segments?: AudioSegmentTiming[] }
-export interface AssetItem { id: string; filename: string; original_name: string; kind: 'image' | 'video'; url: string; size_bytes: number; created_at: string }
+export interface AssetItem { id: string; filename: string; original_name: string; kind: 'image' | 'video'; url: string; size_bytes: number; created_at: string; folder?: string; source_type?: string }
 
 
 export interface CollectorCookieStatus {
