@@ -639,10 +639,11 @@ function AppInner() {
 
   const [segmentSeconds, setSegmentSeconds] = useState<Record<number, number>>({})
   const [segmentTransitions, setSegmentTransitions] = useState<Record<number, string>>({})
-  const [subtitleSize, setSubtitleSize] = useState(18)
-  const [subtitleMarginV, setSubtitleMarginV] = useState(70)
+  const [subtitleSize, setSubtitleSize] = useState(20)
+  const [subtitleMarginV, setSubtitleMarginV] = useState(86)
   const [subtitlePosition, setSubtitlePosition] = useState<'bottom_safe' | 'middle_low' | 'center'>('bottom_safe')
-  const [subtitleColor, setSubtitleColor] = useState('#ffffff')
+  const [subtitlePreset, setSubtitlePreset] = useState<'douyin_boss' | 'knowledge_highlight' | 'clean_trust' | 'cta_pop'>('douyin_boss')
+  const subtitleColor = subtitlePreset === 'clean_trust' ? '#ffffff' : subtitlePreset === 'cta_pop' ? '#FFD84D' : '#ffffff'
   const [subtitleHighlight, setSubtitleHighlight] = useState('第二家园,海外置业,子女教育,养老度假,资产配置,私信咨询')
   const [coverStyle, setCoverStyle] = useState('海外第二家园强钩子封面')
 
@@ -662,8 +663,7 @@ function AppInner() {
   const [ad, setAd] = useState<AdAnalysisResponse | null>(null)
   const [platform, setPlatform] = useState('douyin')
   const [publish, setPublish] = useState<PlatformPublishResponse | null>(null)
-  const [lastHandoff, setLastHandoff] = useState('系统会把上一模块结果自动带到下一模块。')
-  const [autoAdvance, setAutoAdvance] = useState(true)
+  const [lastHandoff, setLastHandoff] = useState('每个模块会读取前面结果；点击上方流程卡可直接跳到对应步骤。')
   const [knowledgeDialog, setKnowledgeDialog] = useState({ open: false, source: '', title: '', content: '', tags: '老板口播,获客,短视频' })
 
   const [leadPlan, setLeadPlan] = useState<LeadAcquisitionPlanResponse | null>(null)
@@ -1427,7 +1427,6 @@ function AppInner() {
     await reloadAssets()
     await reloadMemoryContext()
     setLastHandoff('同行采集结果已入库。下一步可以直接仿写改写，文案模块会自动读取这条采集内容。')
-    if (autoAdvance) setActive('copy')
   }
 
 
@@ -1594,7 +1593,6 @@ ${manualText || ''}`.trim()
     const res = await run('生成分段情绪配音', () => apiPost<TTSResponse>('/api/tts-segments', { segments, voice, overall_rate: '+0%' }))
     setAudio(res!)
     setLastHandoff('配音已生成。可以继续做数字人片段，或直接进入素材选择和剪辑合成。')
-    if (autoAdvance) setActive('assets')
   }
 
 
@@ -1624,7 +1622,6 @@ ${manualText || ''}`.trim()
     setDigitalHumanLastChecked(new Date().toLocaleTimeString())
     if (res?.video_url) {
       setLastHandoff('数字人片段已生成。可以把它作为素材进入素材选择和剪辑合成。')
-      if (autoAdvance) setActive('assets')
     } else {
       setLastHandoff('火山即梦任务已提交。不要重复提交；系统会自动查询，通常需要 5-30 分钟。')
     }
@@ -1709,15 +1706,16 @@ ${manualText || ''}`.trim()
       subtitle_size: subtitleSize,
       subtitle_margin_v: subtitleMarginV,
       subtitle_position: subtitlePosition,
+      subtitle_style_preset: subtitlePreset,
+      subtitle_keywords: subtitleHighlight,
       subtitle_segments: safeSubtitleSegments
     }))
     setVideo(res!)
-    setLastHandoff('视频已合成。字幕已按配音分段时间轴烧录；封面和平台发布会自动读取这条成片。')
-    if (autoAdvance) setActive('subtitleCover')
+    setLastHandoff('视频已出片。已把配音和字幕压到画面上，先预览一遍再决定是否调字幕位置。')
   }
 
   async function chatEditVideo() {
-    const richInstruction = `${editInstruction}\n字幕样式：字号 ${subtitleSize}，颜色 ${subtitleColor}，重点词：${subtitleHighlight}\n分段时长：${voiceSegments.map((s, i) => `第${i + 1}段 ${segmentSeconds[i] || estimateSeconds(s.text, s.speed_ratio)}秒 ${segmentTransitions[i] || '叠化'}`).join('；')}`
+    const richInstruction = `${editInstruction}\n字幕模板：${subtitlePreset}，字号 ${subtitleSize}，重点词：${subtitleHighlight}\n处理顺序：先按素材生成画面底片，再叠加配音和字幕，不把配音分段绑定到单个视频片段。`
     const res = await run('AI + 插件修改视频', () => apiPost<VideoEditChatResponse>('/api/video-edit-chat', {
       video_file_name: currentVideoName,
       instruction: richInstruction,
@@ -1814,14 +1812,14 @@ ${manualText || ''}`.trim()
     setActive('publish')
   }
 
-  const stageCards = [
-    { label: '1 素材选择', done: selectedMaterialIds.length > 0, value: selectedMaterialIds.length ? `已选 ${selectedMaterialIds.length} 个素材` : '先选素材' },
-    { label: '2 文案生产', done: Boolean(copy.hook || copy.script), value: copy.title || '待生成' },
-    { label: '3 配音分段', done: Boolean(audio), value: voiceSegments.length ? `${voiceSegments.length} 段 · ${selectedVoiceName}` : '待配音' },
-    { label: '4 数字人', done: Boolean(digitalHuman?.video_url), value: digitalHuman?.video_url ? `数字人 #${digitalHumanVersion}` : '可选' },
-    { label: '5 剪辑合成', done: Boolean(video?.video_url), value: video?.video_name || '待合成' },
-    { label: '6 字幕/封面/图文', done: Boolean(cover || subtitleAI || generatedImage || graphicPost), value: graphicPost ? `${graphicPost.images.length}张图文` : cover?.cover_name || generatedImage?.image_name || (subtitleAI ? '重点字幕已生成' : '待处理') },
-    { label: '7 平台发布', done: Boolean(publish), value: publish?.status || '草稿预留' }
+  const stageCards: Array<{ key: ModuleKey; label: string; done: boolean; value: string }> = [
+    { key: 'assets', label: '1 素材选择', done: selectedMaterialIds.length > 0, value: selectedMaterialIds.length ? `已选 ${selectedMaterialIds.length} 个素材` : '先选素材' },
+    { key: 'copy', label: '2 文案生产', done: Boolean(copy.hook || copy.script), value: copy.title || '待生成' },
+    { key: 'voice', label: '3 配音分段', done: Boolean(audio), value: voiceSegments.length ? `${voiceSegments.length} 段 · ${selectedVoiceName}` : '待配音' },
+    { key: 'digitalHuman', label: '4 数字人', done: Boolean(digitalHuman?.video_url), value: digitalHuman?.video_url ? `数字人 #${digitalHumanVersion}` : '可选' },
+    { key: 'video', label: '5 剪辑合成', done: Boolean(video?.video_url), value: video?.video_name || '待合成' },
+    { key: 'subtitleCover', label: '6 字幕/封面/图文', done: Boolean(cover || subtitleAI || generatedImage || graphicPost), value: graphicPost ? `${graphicPost.images.length}张图文` : cover?.cover_name || generatedImage?.image_name || (subtitleAI ? '重点字幕已生成' : '待处理') },
+    { key: 'publish', label: '7 平台发布', done: Boolean(publish), value: publish?.status || '草稿预留' }
   ]
 
   const digitalHumanStatus = String(digitalHuman?.status || '').toLowerCase()
@@ -1858,7 +1856,7 @@ ${manualText || ''}`.trim()
         <div>
           <span className="eyebrow">AI Growth Studio</span>
           <h1>从同行洞察到成片发布，一套闭环获客生产线</h1>
-          <p>系统沉淀客户画像、竞品打法、文案资产和素材资产；每一步结果自动流转，减少重复操作，提升内容获客效率。</p>
+          <p>把热度、文案、素材、配音和剪辑放在一条线上，少来回找文件，直接出能用的内容。</p>
         </div>
         <div className="scoreCard"><span>当前进度</span><strong>{leadScore}%</strong><small>{leadScore >= 80 ? '可以进入发布前检查' : '继续补齐内容和素材'}</small></div>
       </header>
@@ -1866,8 +1864,7 @@ ${manualText || ''}`.trim()
       {error && <div className="globalError">{error}</div>}
       {busy && <div className="busy">正在执行：{busy}</div>}
       <div className="handoffBar">
-        <div><strong>当前联动</strong><span>{lastHandoff}</span></div>
-        <label><input type="checkbox" checked={autoAdvance} onChange={e => setAutoAdvance(e.target.checked)} /> 完成后自动切到下一步</label>
+        <div><strong>当前状态</strong><span>{lastHandoff}</span></div>
         {nextTodo && <button onClick={() => setActive(nextTodo.go)}>下一件事：{nextTodo.text}</button>}
       </div>
 
@@ -1882,13 +1879,13 @@ ${manualText || ''}`.trim()
       </div>}
 
       <section className="progressRail">
-        {stageCards.map((s, idx) => <div key={s.label} className={`stage ${s.done ? 'done' : ''}`}>
+        {stageCards.map((s, idx) => <button key={s.label} className={`stage ${s.done ? 'done' : ''} ${active === s.key ? 'active' : ''}`} onClick={() => setActive(s.key)}>
           <span>{idx + 1}</span><strong>{s.label}</strong><em>{s.value}</em>
-        </div>)}
+        </button>)}
       </section>
 
       {active === 'oneClick' && <section className="card modulePanel oneClickPanel">
-        <div className="sectionHeader"><div><h2>一键生成中心</h2><p>不跳步骤，也能在一个窗口里生成和修改完整项目；同步后仍可去文案、配音、数字人、素材、剪辑等单独步骤精修。</p></div><Button busy={busy === '一键生成完整方案' ? busy : ''} label="一键生成方案" onClick={runOneClickGenerate} /></div>
+        <div className="sectionHeader"><div><h2>一键生成中心</h2><p>想快就一键出方案；想细调就进文案、配音、素材、剪辑单独改。</p></div><Button busy={busy === '一键生成完整方案' ? busy : ''} label="一键生成方案" onClick={runOneClickGenerate} /></div>
         <div className="oneClickIntro">
           <strong>推荐顺序</strong>
           <span>先选/上传素材 → 填行业和目标客户 → 一键生成文案、配音分段、剪辑和图文方案。没有素材时也能先出方案，但演示建议先选素材。</span>
@@ -2133,7 +2130,7 @@ ${manualText || ''}`.trim()
           </div>
         </div>
         <div className="agentPanel">
-          <div className="sectionHeader compact"><div><h3>后台自动学习智能体</h3><p>它会读取竞品账号库和种子链接，尽力发现/采集新视频，然后只学习钩子公式、节奏和转化结构，不复制原文。</p></div><div className="buttonRow mini"><Button label="刷新智能体" onClick={() => reloadAgentStatus()} kind="ghost" /><Button busy={busy === '自动采集/学习同行打法' ? busy : ''} label="立即跑一轮" onClick={runAutoAgent} kind="soft" /></div></div>
+          <div className="sectionHeader compact"><div><h3>自动学习同行打法</h3><p>读取账号库和链接，沉淀钩子、节奏和承接方式，不复制原文。</p></div><div className="buttonRow mini"><Button label="刷新智能体" onClick={() => reloadAgentStatus()} kind="ghost" /><Button busy={busy === '自动采集/学习同行打法' ? busy : ''} label="立即跑一轮" onClick={runAutoAgent} kind="soft" /></div></div>
           <div className="grid2">
             <Field label="种子链接（可选，一行一个）" hint="可以填某个博主的主页/爆款视频链接；空着时会自动读取竞品账号库 URL。"><textarea value={agentSeedLinks} onChange={e => setAgentSeedLinks(e.target.value)} placeholder="https://v.douyin.com/...
 https://www.douyin.com/user/..." /></Field>
@@ -2167,19 +2164,19 @@ https://www.douyin.com/user/..." /></Field>
       </section>}
 
       {active === 'copy' && <section className="card modulePanel">
-        <div className="sectionHeader"><div><h2>第二步：文案生产</h2><p>文案不再手填时长，系统会按已选素材和最终配音自动决定长度。这里专注改标题、开头、口播稿和发布简介。</p></div></div>
+        <div className="sectionHeader"><div><h2>第二步：文案生产</h2><p>文案不再手填时长，不用再填时长。这里只改标题、开头、口播稿和发布文案。</p></div></div>
         <div className="grid4"><Field label="素材状态"><input value={selectedMaterialIds.length ? `已选 ${selectedMaterialIds.length} 个素材` : '未选素材，建议先去素材选择'} readOnly /></Field><Field label="标题字数方向"><input value="短、狠、直给" readOnly /></Field><Field label="开头策略"><input value="痛点/反差/警告/结果" readOnly /></Field><Field label="当前风险"><input value={matchedBadWords.length ? `${matchedBadWords.length} 个敏感词` : '暂无明显风险'} readOnly /></Field></div>
         <div className="buttonRow"><Button busy={busy === '原创改写' ? busy : ''} label="第二步：仿写改写" onClick={rewrite} /><Button busy={busy === '生成文案' ? busy : ''} label="直接生成新文案" onClick={generateDirectCopy} kind="ghost" /><Button busy={busy === '文案细改' ? busy : ''} label="细改/优化文案" onClick={refineCopy} kind="soft" disabled={!currentScript} /><Button label="把当前文案放进知识库" onClick={() => openKnowledgeSave('手动保存当前文案', copy)} kind="ghost" disabled={!currentScript} /><Button label="继续去配音分段" onClick={() => setActive('voice')} kind="soft" disabled={!currentScript} /></div>
-        <div className="flowSource"><strong>自动带入来源</strong><span>客户定位：{industry} / {audience}</span><span>同行采集：{extract?.summary ? shortText(extract.summary) : '暂无'}</span><span>数据库记忆：{memoryContext?.memory_enabled ? 'Supabase 已启用' : '本地调试记忆'}</span></div>
+        <div className="flowSource"><strong>当前参考</strong><span>{industry} · {audience}</span><span>热点/同行：{extract?.summary ? shortText(extract.summary) : '暂无'}</span><span>记忆库：{memoryContext?.memory_enabled ? '已连接' : '本地模式'}</span></div>
         <div className="copyEditor"><Field label="标题"><input value={copy.title} onChange={e => setCopy({ ...copy, title: e.target.value })} /></Field><Field label="黄金三秒钩子"><textarea value={copy.hook} onChange={e => setCopy({ ...copy, hook: e.target.value })} /></Field><Field label="完整口播稿"><textarea className="scriptArea" value={copy.script} onChange={e => setCopy({ ...copy, script: e.target.value })} placeholder="这里可以精修口播稿；选中文本后点“加入分段”。" /></Field><Field label="发布简介"><textarea value={copy.description} onChange={e => setCopy({ ...copy, description: e.target.value })} /></Field><Field label="细改要求"><input value={refineInstruction} onChange={e => setRefineInstruction(e.target.value)} /></Field></div>
         <div className="chips">{matchedBadWords.length ? matchedBadWords.map(x => <Pill key={x} tone="red">风险词：{x}</Pill>) : <Pill tone="green">违禁词初筛通过</Pill>}</div>
       </section>}
 
       {active === 'voice' && <section className="card modulePanel">
-        <div className="sectionHeader"><div><h2>第四步：配音导演</h2><p>情绪改成纯中文选项；语速、音量范围加大。调完以后必须重新生成配音，剪辑会用配音时间轴自动对齐字幕。</p></div></div>
+        <div className="sectionHeader"><div><h2>第四步：配音导演</h2><p>把口播拆成几段，调整语速、停顿和重点。生成后剪辑会按真实音频时长对齐字幕。</p></div></div>
         <div className="grid4"><Field label="音色"><select value={voice} onChange={e => setVoice(e.target.value)}>{voices.map(v => <option key={v.id} value={v.id}>{v.name || v.id}</option>)}</select></Field><Field label="配音风格"><select value={voiceStyle} onChange={e => setVoiceStyle(e.target.value)}>{['老板压迫感','真实聊天感','短视频强钩子','销售转化感','案例讲述感','沉稳信任感'].map(x => <option key={x}>{x}</option>)}</select></Field><Field label="情绪强度"><select value={voiceIntensity} onChange={e => setVoiceIntensity(e.target.value)}>{['轻微','标准','强烈'].map(x => <option key={x}>{x}</option>)}</select></Field><div className="stackButtons"><Button busy={busy === '生成配音导演稿' ? busy : ''} label="生成配音导演稿" onClick={makeVoiceDirector} kind="ghost" disabled={!currentScript} /><Button busy={busy === '生成分段情绪配音' ? busy : ''} label="重新生成配音并校准时间轴" onClick={makeSegmentTTS} disabled={!currentScript} /></div></div>
         {voiceNotes.length > 0 && <div className="tips">{voiceNotes.map(x => <span key={x}>{x}</span>)}</div>}
-        <div className="hintBox">说明：豆包音色对不同 voice_type 的“情绪词”支持不完全一致，真正生效的是语速/音量/停顿参数；本版把范围加大，并把字幕对齐改为读取配音实际分段时间。</div>
+        <div className="hintBox">提示：想要更像真人口播，优先调语速、停顿和重点句；情绪只是辅助。</div>
         <div className="buttonRow"><button className="addSegment" onClick={addVoiceSegment}>+ 手动添加空白分段</button><button className="addSegment" onClick={addSelectedScriptAsSegment}>+ 把选中文案加入分段</button></div>
         <div className="segments">{voiceSegments.map((seg, i) => <div className="segmentCard" key={i}><div className="segmentHead"><strong>第 {i + 1} 段 · {audio?.segments?.[i]?.duration?.toFixed?.(1) || segmentSeconds[i] || estimateSeconds(seg.text, seg.speed_ratio)} 秒</strong><div><button onClick={() => moveVoiceSegment(i, -1)}>↑</button><button onClick={() => moveVoiceSegment(i, 1)}>↓</button><button onClick={() => removeVoiceSegment(i)}>删除</button></div></div><textarea value={seg.text} onChange={e => updateVoiceSegment(i, { text: e.target.value })} /><div className="presetRow"><button onClick={() => applyVoicePreset(i, 'urgent')}>急迫提醒</button><button onClick={() => applyVoicePreset(i, 'emphasis')}>重点加重</button><button onClick={() => applyVoicePreset(i, 'calm')}>冷静信任</button><button onClick={() => applyVoicePreset(i, 'cta')}>结尾号召</button></div><div className="segmentGrid"><Field label="情绪"><select value={seg.emotion} onChange={e => updateVoiceSegment(i, { emotion: e.target.value })}>{emotionOptions.map(x => <option key={x}>{x}</option>)}</select></Field><Field label={`语速 ${seg.speed_ratio.toFixed(2)}x`}><input type="range" min="0.65" max="1.55" step="0.01" value={seg.speed_ratio} onChange={e => updateVoiceSegment(i, { speed_ratio: Number(e.target.value) })} /></Field><Field label={`音量 ${seg.volume_ratio.toFixed(2)}x`}><input type="range" min="0.45" max="2.2" step="0.01" value={seg.volume_ratio} onChange={e => updateVoiceSegment(i, { volume_ratio: Number(e.target.value) })} /></Field><Field label={`停顿 ${seg.pause_after_ms}ms`}><input type="range" min="0" max="2200" step="50" value={seg.pause_after_ms} onChange={e => updateVoiceSegment(i, { pause_after_ms: Number(e.target.value) })} /></Field></div></div>)}</div>
         {audio && <div className="mediaBox"><audio controls src={audio.file_url} /><a href={audio.file_url} target="_blank">下载配音</a><Pill tone="green">已生成 {audio.segments?.length || voiceSegments.length} 段时间轴</Pill>{audio.warning && <div className="warn">{audio.warning}</div>}</div>}
@@ -2244,19 +2241,27 @@ https://www.douyin.com/user/..." /></Field>
       </section>}
 
       {active === 'video' && <section className="card modulePanel">
-        <div className="sectionHeader"><div><h2>第六步：剪辑合成 / 字幕烧录</h2><p>这里直接调字幕位置和素材顺序。时长跟配音走，素材按已选顺序自动铺满；字幕优先使用配音分段时间轴，减少音画不同步。</p></div><Button busy={busy === '合成视频并烧字幕' ? busy : ''} label="生成视频并下载 MP4" onClick={composeVideo} disabled={!currentScript} /></div>
-        <div className="grid4"><Field label="字幕字号"><input type="number" min="12" max="36" value={subtitleSize} onChange={e => setSubtitleSize(Number(e.target.value || 18))} /></Field><Field label="字幕位置"><select value={subtitlePosition} onChange={e => setSubtitlePosition(e.target.value as any)}><option value="bottom_safe">底部安全区，不挡脸</option><option value="middle_low">中下方，大字口播</option><option value="center">居中强调，慎用</option></select></Field><Field label={`离底部 ${subtitleMarginV}px`}><input type="range" min="20" max="260" step="5" value={subtitleMarginV} onChange={e => setSubtitleMarginV(Number(e.target.value))} /></Field><Field label="字幕颜色"><input type="color" value={subtitleColor} onChange={e => setSubtitleColor(e.target.value)} /></Field></div>
-        <div className="hintBox">字幕对齐规则：优先用“重新生成配音并校准时间轴”得到的分段时间；没有时间轴时才按文案长度估算。演示前建议先重新生成配音一次。</div>
-        <div className="timelineEditor"><h3>配音分段 / 转场参考</h3>{voiceSegments.length === 0 && <Empty>先生成配音导演稿，或手动添加分段。</Empty>}{voiceSegments.map((seg, i) => <div className="timelineRow" key={i}><span>第{i + 1}段</span><input type="number" min="1" max="60" step="0.5" value={audio?.segments?.[i]?.duration || segmentSeconds[i] || estimateSeconds(seg.text, seg.speed_ratio)} onChange={e => setSegmentSeconds(prev => ({ ...prev, [i]: Number(e.target.value) }))} /><select value={segmentTransitions[i] || '叠化'} onChange={e => setSegmentTransitions(prev => ({ ...prev, [i]: e.target.value }))}><option>叠化</option><option>虚化</option><option>快切</option><option>推近</option><option>闪白</option></select><em>{seg.text.slice(0, 28)}...</em></div>)}</div>
+        <div className="sectionHeader"><div><h2>第五步：剪辑合成 / 抖音字幕</h2><p>先按素材顺序生成画面底片，再叠加配音和字幕。字幕样式用整套模板，不再单独挑颜色。</p></div><Button busy={busy === '合成视频并烧字幕' ? busy : ''} label="生成视频并下载 MP4" onClick={composeVideo} disabled={!currentScript} /></div>
+        <div className="subtitlePresetGrid">
+          {[
+            ['douyin_boss','老板口播大字','白字黑描边 + 痛点词亮黄/红，适合强转化口播'],
+            ['knowledge_highlight','知识科普高亮','双行字幕 + 关键词放大，适合解释流程/费用'],
+            ['clean_trust','干净可信','克制白字 + 深色底描边，适合房产/教育信任感'],
+            ['cta_pop','结尾强 CTA','亮色重点词 + 结尾放大，适合私信/领取资料']
+          ].map(([value,title,desc]) => <button key={value} className={subtitlePreset === value ? 'selected' : ''} onClick={() => setSubtitlePreset(value as any)}><strong>{title}</strong><span>{desc}</span></button>)}
+        </div>
+        <div className="grid3"><Field label="字幕字号"><input type="number" min="16" max="34" value={subtitleSize} onChange={e => setSubtitleSize(Number(e.target.value || 20))} /></Field><Field label="字幕位置"><select value={subtitlePosition} onChange={e => setSubtitlePosition(e.target.value as any)}><option value="bottom_safe">底部安全区，不挡脸</option><option value="middle_low">中下方，大字口播</option><option value="center">居中强调，慎用</option></select></Field><Field label={`离底部 ${subtitleMarginV}px`}><input type="range" min="40" max="260" step="5" value={subtitleMarginV} onChange={e => setSubtitleMarginV(Number(e.target.value))} /></Field></div>
+        <div className="smartSubtitleBox"><div><strong>智能重点词</strong><p>{subtitleHighlight || '系统会从文案里识别费用、避坑、身份、学校、私信等转化词，自动放大或高亮。'}</p></div><Button busy={busy === '智能字幕重点' ? busy : ''} label="AI 识别重点词" onClick={makeSubtitleAI} disabled={!currentScript} kind="soft" /></div>
+        <div className="hintBox">对齐逻辑：以最终配音真实时长为准；先生成画面，再叠加配音与字幕。后半段会自动提前补偿，避免越往后越慢。</div>
         <div className="selectedTimeline compact"><h3>本次合成素材顺序</h3>{selectedMaterialAssets.length === 0 ? <Empty>未选择素材，会自动使用前几个素材；建议先去素材选择页确认顺序和截取区间。</Empty> : selectedMaterialAssets.map((asset, index) => { const cfg = getClipSetting(asset, index); return <div key={asset.id} className="assetRow"><span>{index + 1}</span><strong>{asset.original_name || asset.filename}</strong><em>{asset.kind === 'image' ? `${cfg.image_seconds.toFixed(1)}秒` : `${cfg.video_start.toFixed(1)}-${cfg.video_end ? cfg.video_end.toFixed(1) : '自动'}秒`}</em><button className="mini" onClick={() => setActive('assets')}>调整</button></div>})}</div>
         {video && <div className="videoGrid"><video controls src={video.video_url} /><div className="downloadPanel"><a className="download" href={video.video_url} target="_blank">下载视频 MP4</a>{video.subtitle_url && <a href={video.subtitle_url} target="_blank">下载字幕 SRT</a>}{video.audio_url && <a href={video.audio_url} target="_blank">下载音频</a>}{video.warnings?.map(w => <div className="warn" key={w}>{w}</div>)}</div></div>}
         <div className="editChatBox"><Field label="AI + 插件剪辑指令"><textarea value={editInstruction} onChange={e => setEditInstruction(e.target.value)} placeholder="例如：去掉开头2秒、整体加速1.1倍、重新加字幕、转成9:16。" /></Field><Button busy={busy === 'AI + 插件修改视频' ? busy : ''} label="AI + 插件修改视频" onClick={chatEditVideo} kind="ghost" disabled={!currentVideoName} />{editChat.map((msg, i) => <div className="chatMsg" key={i}><strong>AI：</strong>{msg.assistant_message}<p>{msg.summary}</p><div className="chips">{msg.actions?.map(x => <Pill key={x}>{x}</Pill>)}</div>{msg.new_video_url && <a href={msg.new_video_url} target="_blank">打开修改后视频</a>}{msg.warnings?.map(w => <div className="warn" key={w}>{w}</div>)}</div>)}</div>
       </section>}
 
       {active === 'subtitleCover' && <section className="card modulePanel visualPanel">
-        <div className="sectionHeader"><div><h2>第六步：字幕 / 封面 / 图文引流</h2><p>这里分清楚：封面负责视频点击；图文引流负责小红书/抖音图文/朋友圈获客，可以直接生成 3-8 张收藏型图文。</p></div><div className="stackButtons"><Button busy={busy === '智能字幕重点' ? busy : ''} label="智能识别重点字幕" onClick={makeSubtitleAI} disabled={!currentScript} kind="ghost" /><Button busy={busy === '生成图文引流包' ? busy : ''} label="生成图文引流包" onClick={makeGraphicPost} /></div></div>
+        <div className="sectionHeader"><div><h2>第六步：字幕 / 封面 / 图文引流</h2><p>封面负责点击，图文负责收藏和私信。文字由系统叠加，图片只做背景，避免 AI 把提示词画进图里。</p></div><div className="stackButtons"><Button busy={busy === '智能字幕重点' ? busy : ''} label="智能识别重点字幕" onClick={makeSubtitleAI} disabled={!currentScript} kind="ghost" /><Button busy={busy === '生成图文引流包' ? busy : ''} label="生成图文引流包" onClick={makeGraphicPost} /></div></div>
         <div className="visualTabs"><span>字幕</span><span>封面</span><span>图文素材</span></div>
-        <div className="grid4"><Field label="字幕字号"><input type="number" value={subtitleSize} onChange={e => setSubtitleSize(Number(e.target.value || 58))} /></Field><Field label="字幕颜色"><input type="color" value={subtitleColor} onChange={e => setSubtitleColor(e.target.value)} /></Field><Field label="重点词"><input value={subtitleHighlight} onChange={e => setSubtitleHighlight(e.target.value)} /></Field><Field label="封面大标题"><input value={copy.title || coverStyle} onChange={e => setCopy({ ...copy, title: e.target.value })} placeholder="例如：海外买房避坑指南" /></Field></div>
+        <div className="grid4"><Field label="字幕模板"><select value={subtitlePreset} onChange={e => setSubtitlePreset(e.target.value as any)}><option value="douyin_boss">老板口播大字</option><option value="knowledge_highlight">知识科普高亮</option><option value="clean_trust">干净可信</option><option value="cta_pop">结尾强 CTA</option></select></Field><Field label="字幕字号"><input type="number" min="16" max="34" value={subtitleSize} onChange={e => setSubtitleSize(Number(e.target.value || 20))} /></Field><Field label="重点词"><input value={subtitleHighlight} onChange={e => setSubtitleHighlight(e.target.value)} placeholder="AI 可自动识别，也可补充关键词" /></Field><Field label="封面大标题"><input value={copy.title || coverStyle} onChange={e => setCopy({ ...copy, title: e.target.value })} placeholder="例如：海外买房避坑指南" /></Field></div>
         <div className="coverBuilder">
           <div>
             <h3>封面生成方式</h3>

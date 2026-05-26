@@ -84,6 +84,35 @@ def clean_subtitle_text(text: str) -> str:
     return '' if _PUNCT_ONLY_RE.match(text or '') else text
 
 
+
+
+_DEFAULT_HIGHLIGHT_WORDS = ['第二家园', 'MM2H', '税费', '预算', '国际学校', '吉隆坡', '新山', '避坑', '风险', '流程', '身份', '资产配置', '养老', '子女教育', '私信', '报告', '马来西亚']
+
+def _subtitle_keywords(raw: str = '', script: str = '') -> list[str]:
+    words: list[str] = []
+    for item in re.split(r'[,，、/\s]+', raw or ''):
+        item = clean_subtitle_text(item)
+        if item and len(item) >= 2 and item not in words:
+            words.append(item)
+    # AI/前端没传时，后端兜底从业务高频词里自动识别。
+    for item in _DEFAULT_HIGHLIGHT_WORDS:
+        if item in (script or '') and item not in words:
+            words.append(item)
+    return words[:12]
+
+
+def _apply_srt_emphasis(text: str, preset: str = 'douyin_boss', keywords: Optional[list[str]] = None) -> str:
+    if not text or not keywords:
+        return text
+    color = '#FFD84D' if preset != 'clean_trust' else '#FFFFFF'
+    if preset == 'cta_pop':
+        color = '#FF3B30'
+    out = text
+    for word in sorted([w for w in keywords if w and w in out], key=len, reverse=True):
+        safe = re.escape(word)
+        out = re.sub(safe, f'<font color="{color}"><b>{word}</b></font>', out, count=1)
+    return out
+
 def subtitle_chunks(text: str, max_chars: int = 14) -> List[str]:
     raw = normalize_text(text)
     if not raw:
@@ -139,7 +168,7 @@ def fmt_srt_time(seconds: float) -> str:
     return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
 
 
-def _append_srt_line(lines: list[str], index: int, start: float, end: float, text: str) -> int:
+def _append_srt_line(lines: list[str], index: int, start: float, end: float, text: str, *, preset: str = 'douyin_boss', keywords: Optional[list[str]] = None) -> int:
     if end <= start:
         end = start + 0.8
     clean = clean_subtitle_text(text)
@@ -151,7 +180,8 @@ def _append_srt_line(lines: list[str], index: int, start: float, end: float, tex
     if not chunks:
         return index
     if len(chunks) <= 1:
-        lines.append(f"{index}\n{fmt_srt_time(start)} --> {fmt_srt_time(end)}\n{chunks[0]}\n")
+        line_text = _apply_srt_emphasis(chunks[0], preset, keywords)
+        lines.append(f"{index}\n{fmt_srt_time(start)} --> {fmt_srt_time(end)}\n{line_text}\n")
         return index + 1
     weights = [max(2, len(re.sub(r'[，,、；;：:！？!?]', '', c))) for c in chunks]
     total_weight = max(1, sum(weights))
@@ -161,7 +191,8 @@ def _append_srt_line(lines: list[str], index: int, start: float, end: float, tex
         next_end = min(end, cursor + span)
         if next_end <= cursor + 0.2:
             next_end = min(end, cursor + 0.35)
-        lines.append(f"{index}\n{fmt_srt_time(cursor)} --> {fmt_srt_time(next_end)}\n{chunk}\n")
+        line_text = _apply_srt_emphasis(chunk, preset, keywords)
+        lines.append(f"{index}\n{fmt_srt_time(cursor)} --> {fmt_srt_time(next_end)}\n{line_text}\n")
         cursor = next_end
         index += 1
     return index
@@ -297,14 +328,15 @@ def _normalize_subtitle_segments(script: str, duration: float, subtitle_segments
         if item['end'] <= item['start'] + 0.25:
             item['end'] = min(duration, item['start'] + 0.55)
     return shifted
-def create_srt(script: str, duration: float, output_path: Path, subtitle_segments: Optional[list[dict[str, Any]]] = None) -> None:
+def create_srt(script: str, duration: float, output_path: Path, subtitle_segments: Optional[list[dict[str, Any]]] = None, subtitle_style_preset: str = 'douyin_boss', subtitle_keywords: str = '') -> None:
     lines: List[str] = []
     index = 1
     normalized_segments = _normalize_subtitle_segments(script, duration, subtitle_segments=subtitle_segments)
+    keywords = _subtitle_keywords(subtitle_keywords, script)
     for seg in normalized_segments:
-        index = _append_srt_line(lines, index, float(seg['start']), float(seg['end']), str(seg['text']))
+        index = _append_srt_line(lines, index, float(seg['start']), float(seg['end']), str(seg['text']), preset=subtitle_style_preset, keywords=keywords)
     if not lines:
-        index = _append_srt_line(lines, index, 0.0, max(1.0, duration), script[:24] or ' ')
+        index = _append_srt_line(lines, index, 0.0, max(1.0, duration), script[:24] or ' ', preset=subtitle_style_preset, keywords=keywords)
     output_path.write_text("\n".join(lines), encoding="utf-8")
 
 
@@ -486,6 +518,59 @@ def build_video_base(asset_paths: Iterable[Union[Path, MediaClip]], duration: fl
     return default_path, warnings
 
 
+
+
+def _ass_color_from_hex(hex_color: str, alpha: str = '00') -> str:
+    """Convert #RRGGBB to ASS &HAABBGGRR."""
+    value = (hex_color or '#ffffff').strip().lstrip('#')
+    if len(value) != 6:
+        value = 'ffffff'
+    rr, gg, bb = value[0:2], value[2:4], value[4:6]
+    return f"&H{alpha}{bb}{gg}{rr}"
+
+
+def _subtitle_force_style(preset: str, font_size: int, margin_v: int, alignment: int = 2) -> str:
+    preset = (preset or 'douyin_boss').strip().lower()
+    base = {
+        'FontName': 'Noto Sans CJK SC',
+        'FontSize': str(font_size),
+        'Alignment': str(alignment),
+        'MarginV': str(margin_v),
+        'Bold': '1',
+        'BorderStyle': '1',
+        'Shadow': '0.8',
+    }
+    if preset == 'knowledge_highlight':
+        base.update({
+            'PrimaryColour': _ass_color_from_hex('#ffffff'),
+            'OutlineColour': _ass_color_from_hex('#0f172a', '55'),
+            'BackColour': _ass_color_from_hex('#000000', '78'),
+            'Outline': '2.8',
+        })
+    elif preset == 'clean_trust':
+        base.update({
+            'PrimaryColour': _ass_color_from_hex('#ffffff'),
+            'OutlineColour': _ass_color_from_hex('#111827', '48'),
+            'Outline': '2.2',
+            'Shadow': '0.5',
+        })
+    elif preset == 'cta_pop':
+        base.update({
+            'PrimaryColour': _ass_color_from_hex('#FFD84D'),
+            'OutlineColour': _ass_color_from_hex('#111827', '28'),
+            'Outline': '3.4',
+            'Shadow': '1.2',
+        })
+    else:
+        # douyin_boss: 抖音常见老板口播大字，白字黑描边，重点词由前端/AI 放到更短字幕块里显示。
+        base.update({
+            'PrimaryColour': _ass_color_from_hex('#ffffff'),
+            'OutlineColour': _ass_color_from_hex('#000000', '30'),
+            'Outline': '3.2',
+            'Shadow': '0.9',
+        })
+    return ','.join(f'{k}={v}' for k, v in base.items())
+
 def burn_subtitles_and_audio(
     base_video: Path,
     subtitle_path: Optional[Path],
@@ -496,6 +581,8 @@ def burn_subtitles_and_audio(
     subtitle_size: int = 18,
     subtitle_margin_v: int = 70,
     subtitle_position: str = 'bottom_safe',
+    subtitle_style_preset: str = 'douyin_boss',
+    subtitle_keywords: str = '',
 ) -> List[str]:
     warnings: List[str] = []
     w, h = target_size()
@@ -508,8 +595,8 @@ def burn_subtitles_and_audio(
             margin_v = max(margin_v, 220)
         elif subtitle_position == 'center':
             margin_v = max(margin_v, 360)
-        # 默认放底部安全区：不压脸；用半透明描边保证不同素材上可读。
-        style = f"FontName=Noto Sans CJK SC,FontSize={font_size},PrimaryColour=&H00FFFFFF,OutlineColour=&H70000000,BorderStyle=1,Outline=2.4,Shadow=0.7,Alignment=2,MarginV={margin_v},Bold=1"
+        # 默认放底部安全区：不压脸；字幕样式用整套模板控制，不再让用户单独挑颜色。
+        style = _subtitle_force_style(subtitle_style_preset, font_size, margin_v, alignment=2)
         vf += f",subtitles='{sub_path}':force_style='{style}'"
 
     cmd = ["ffmpeg", "-hide_banner", "-loglevel", "warning", "-y", "-i", str(base_video)]
@@ -561,6 +648,8 @@ async def compose_video(
     subtitle_size: int = 18,
     subtitle_margin_v: int = 70,
     subtitle_position: str = 'bottom_safe',
+    subtitle_style_preset: str = 'douyin_boss',
+    subtitle_keywords: str = '',
 ) -> VideoResult:
     warnings: List[str] = []
 
@@ -585,7 +674,7 @@ async def compose_video(
     subtitle_path = settings.outputs_dir / f"sub_{task_id}.srt"
     output_video = settings.outputs_dir / f"video_{task_id}.mp4"
 
-    create_srt(script, duration, subtitle_path, subtitle_segments=subtitle_segments)
+    create_srt(script, duration, subtitle_path, subtitle_segments=subtitle_segments, subtitle_style_preset=subtitle_style_preset, subtitle_keywords=subtitle_keywords)
     if subtitle_segments:
         warnings.append('字幕已按最终音频时长重新缩放，并对后半段自动提前，减少越往后越慢的问题。')
     base_video, base_warnings = build_video_base(list(asset_paths), duration, base_video)
@@ -599,6 +688,8 @@ async def compose_video(
         subtitle_size=subtitle_size,
         subtitle_margin_v=subtitle_margin_v,
         subtitle_position=subtitle_position,
+        subtitle_style_preset=subtitle_style_preset,
+        subtitle_keywords=subtitle_keywords,
     ))
 
     try:

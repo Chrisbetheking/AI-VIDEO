@@ -1363,6 +1363,8 @@ async def api_compose_video(req: ComposeRequest, request: Request, settings: Set
             subtitle_size=req.subtitle_size,
             subtitle_margin_v=req.subtitle_margin_v,
             subtitle_position=req.subtitle_position,
+            subtitle_style_preset=req.subtitle_style_preset,
+            subtitle_keywords=req.subtitle_keywords,
         )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f'视频合成失败：{str(exc)[:1800]}') from exc

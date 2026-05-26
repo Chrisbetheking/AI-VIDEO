@@ -1232,3 +1232,58 @@ input:focus,textarea:focus,select:focus{
   .heatMainGridV2,
   .targetStrip.compact { grid-template-columns: 1fr; }
 }
+
+/* --- UI polish: cleaner workflow cards and subtitle presets --- */
+.progressRail .stage {
+  appearance: none;
+  border: 1px solid rgba(37,99,235,.10);
+  text-align: left;
+  cursor: pointer;
+  transition: transform .16s ease, box-shadow .16s ease, border-color .16s ease;
+}
+.progressRail .stage:hover { transform: translateY(-2px); box-shadow: 0 16px 34px rgba(37, 99, 235, .12); }
+.progressRail .stage.active { border-color: rgba(37, 99, 235, .45); box-shadow: inset 0 -3px 0 #3b82f6, 0 14px 30px rgba(37,99,235,.12); }
+.handoffBar label { display: none !important; }
+.subtitlePresetGrid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+  margin: 18px 0;
+}
+.subtitlePresetGrid button {
+  border: 1px solid #dbeafe;
+  background: linear-gradient(180deg, #fff, #f8fbff);
+  border-radius: 18px;
+  padding: 16px;
+  text-align: left;
+  cursor: pointer;
+  color: #0f172a;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, .05);
+}
+.subtitlePresetGrid button strong { display: block; font-size: 16px; margin-bottom: 6px; }
+.subtitlePresetGrid button span { display: block; color: #64748b; line-height: 1.55; font-size: 13px; }
+.subtitlePresetGrid button.selected {
+  border-color: #2563eb;
+  background: linear-gradient(135deg, #eff6ff, #eef2ff);
+  box-shadow: inset 0 -3px 0 #2563eb, 0 14px 28px rgba(37,99,235,.12);
+}
+.smartSubtitleBox {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  border: 1px dashed #bfdbfe;
+  background: #f8fbff;
+  border-radius: 18px;
+  padding: 16px 18px;
+  margin: 14px 0;
+}
+.smartSubtitleBox strong { display: block; font-size: 16px; margin-bottom: 4px; }
+.smartSubtitleBox p { margin: 0; color: #64748b; line-height: 1.6; }
+@media (max-width: 1180px) {
+  .subtitlePresetGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 720px) {
+  .subtitlePresetGrid { grid-template-columns: 1fr; }
+  .smartSubtitleBox { flex-direction: column; align-items: flex-start; }
+}

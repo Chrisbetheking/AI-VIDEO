@@ -137,6 +137,8 @@ class ComposeRequest(BaseModel):
     subtitle_size: int = Field(default=18, ge=12, le=36)
     subtitle_margin_v: int = Field(default=70, ge=20, le=320)
     subtitle_position: str = Field(default='bottom_safe', max_length=40)
+    subtitle_style_preset: str = Field(default='douyin_boss', max_length=40)
+    subtitle_keywords: str = Field(default='', max_length=500)
     subtitle_segments: List[AudioSegmentTiming] = Field(default_factory=list)
 
 
