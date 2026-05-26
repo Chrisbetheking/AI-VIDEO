@@ -180,8 +180,8 @@ async def generate_lead_acquisition_plan(settings: Settings, req: LeadAcquisitio
   "lead_magnets": ["可领取的报告/清单/测算表"],
   "shooting_prompts": ["把热度机会转成口播/图文的方向，不要写成拍摄任务"],
   "required_integrations": ["真实数据需要接入的平台/API/人工导入表"],
-  "data_sources": [{"name":"数据源", "status":"已接入/待接入", "purpose":"用途", "required_fields":["需要的环境变量或授权"], "next_step":"下一步"}],
-  "interception_opportunities": [{"score":90, "source":"平台/来源", "keyword":"真实或待验证关键词", "intent":"客户意图", "action":"截流动作", "asset":"承接资料包"}],
+  "data_sources": [{{"name":"数据源", "status":"已接入/待接入", "purpose":"用途", "required_fields":["需要的环境变量或授权"], "next_step":"下一步"}}],
+  "interception_opportunities": [{{"score":90, "source":"平台/来源", "keyword":"真实或待验证关键词", "intent":"客户意图", "action":"截流动作", "asset":"承接资料包"}}],
   "monitoring_sop": ["每天如何采集、去重、评分、分发给内容/私域"],
   "compliance_notes": ["采集/投放/回复需要注意的合规边界"]
 }}

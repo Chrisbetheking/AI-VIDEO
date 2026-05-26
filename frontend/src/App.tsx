@@ -1069,8 +1069,12 @@ function AppInner() {
     }))
     setHeatCrawlerResult(res!)
     const snapshots = (res?.top_items || []).map((item, idx) => heatItemToSnapshot(item, idx))
-    // 自动采集结果直接替换当前看板，避免旧的“本地演示/模拟数据”继续混在真实热度里。
-    setHeatSnapshots(snapshots)
+    // 有真实/留存结果才替换看板；没有结果时保留当前看板，避免点一次按钮以后页面变空。
+    if (snapshots.length) {
+      setHeatSnapshots(snapshots)
+    } else {
+      setHeatSnapshots(prev => prev.filter(x => !String(x.id || '').startsWith('seed_') && !String(x.signal || '').includes('本地关键词模拟')))
+    }
     const topMode = String((res as any)?.top_mode || '')
     const fallbackUsed = Boolean((res as any)?.fallback_used) || topMode === 'recent_top_fallback'
     if (fallbackUsed) {
