@@ -1423,3 +1423,102 @@ input:focus,textarea:focus,select:focus{
 .auditBoard strong { display:block; font-size: 24px; color:#2563eb; }
 .auditBoard span { color:#64748b; font-size: 13px; font-weight: 800; }
 .auditBoard p { grid-column: 1 / -1; margin: 4px 0; color:#334155; }
+
+/* Heat Radar sync / compact account management */
+.syncStatusBar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 10px 0 12px;
+}
+.syncStatusBar span {
+  padding: 7px 10px;
+  border-radius: 999px;
+  background: rgba(239, 246, 255, .9);
+  color: #334155;
+  border: 1px solid rgba(147, 197, 253, .55);
+  font-size: 12px;
+  font-weight: 800;
+}
+.heatAccountFilters {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) 160px;
+  gap: 10px;
+  margin: 10px 0;
+}
+.heatAccountList.compact {
+  display: grid;
+  gap: 8px;
+  max-height: 420px;
+  overflow: auto;
+  padding-right: 4px;
+}
+.heatAccountRow {
+  border: 1px solid rgba(203, 213, 225, .85);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, .88);
+  overflow: hidden;
+}
+.heatAccountRowHead {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  display: grid;
+  grid-template-columns: minmax(120px, 1.2fr) 80px minmax(120px, 1fr) 54px;
+  gap: 10px;
+  align-items: center;
+  text-align: left;
+  padding: 12px 14px;
+  color: #0f172a;
+}
+.heatAccountRowHead strong { font-size: 15px; }
+.heatAccountRowHead span,
+.heatAccountRowHead em,
+.heatAccountRowHead b { color: #64748b; font-size: 12px; font-style: normal; font-weight: 800; }
+.heatAccountRowHead b { color: #2563eb; text-align: right; }
+.heatAccountRowBody {
+  border-top: 1px solid rgba(226, 232, 240, .9);
+  padding: 12px 14px;
+  background: rgba(248, 250, 252, .82);
+}
+.heatAccountRowBody p { margin: 0 0 8px; color: #334155; }
+.heatAccountRowBody small {
+  display: block;
+  color: #64748b;
+  word-break: break-all;
+  margin-bottom: 10px;
+}
+.reviewDrawer {
+  margin-top: 14px;
+  border: 1px solid rgba(203, 213, 225, .85);
+  border-radius: 18px;
+  background: rgba(255,255,255,.84);
+  overflow: hidden;
+}
+.reviewDrawer summary {
+  cursor: pointer;
+  padding: 12px 14px;
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+.reviewDrawer summary span { color: #64748b; font-size: 12px; font-weight: 800; }
+.reviewListCompact { display: grid; gap: 8px; padding: 0 12px 12px; }
+.reviewRow {
+  padding: 12px;
+  border-radius: 14px;
+  background: #f8fafc;
+  border: 1px solid rgba(226,232,240,.9);
+}
+.reviewRow strong { margin-right: 8px; }
+.reviewRow p { margin: 8px 0 4px; color: #334155; }
+.reviewRow small { color: #64748b; }
+.heatCommandGrid { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+.heatControlGrid.compactControls { grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
+.grid4 { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+@media (max-width: 760px) {
+  .heatAccountFilters { grid-template-columns: 1fr; }
+  .heatAccountRowHead { grid-template-columns: 1fr auto; }
+  .heatAccountRowHead em { grid-column: 1 / -1; }
+}

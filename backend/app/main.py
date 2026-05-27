@@ -89,6 +89,8 @@ from app.schemas import (
     HeatRadarOpenClawIngestResponse,
     HeatRadarAccountAuditRequest,
     HeatRadarAccountAuditResponse,
+    HeatRadarVideoIntakeRequest,
+    HeatRadarVideoIntakeResponse,
 )
 from app.services.ad_analysis import analyze_ad
 from app.services.cover import create_cover
@@ -108,7 +110,7 @@ from app.services.video_edit import apply_video_edit
 from app.services.auto_collector import run_auto_collection
 from app.services.one_click import generate_one_click, revise_one_click
 from app.services.graphic_post import create_graphic_post
-from app.services.heat_radar import run_public_heat_radar, generate_heat_radar_rewrite, ingest_openclaw_heat_radar, audit_heat_radar_accounts
+from app.services.heat_radar import run_public_heat_radar, generate_heat_radar_rewrite, ingest_openclaw_heat_radar, audit_heat_radar_accounts, analyze_heat_radar_video_intake
 
 app = FastAPI(title='AI-VIDEO 正式版 API', version='1.0.0')
 settings = get_settings()
@@ -787,9 +789,17 @@ def api_heat_radar_accounts(memory: MemoryStore = Depends(get_memory)) -> list[d
 @app.post('/api/heat-radar/accounts')
 def api_heat_radar_save_account(req: HeatRadarAccountInput, memory: MemoryStore = Depends(get_memory)) -> dict:
     item = req.model_dump()
-    item.setdefault('id', str(uuid.uuid4()))
+    if not str(item.get('name') or '').strip() and not str(item.get('url') or '').strip():
+        raise HTTPException(status_code=400, detail='请至少填写账号名称或主页/视频链接。')
+    # 前端旧版本会传 heat_acc_xxx；如果 Supabase id 是 uuid 会写入失败，所以统一让后端/数据库生成 id。
+    item.pop('id', None)
+    if not item.get('created_at'):
+        item.pop('created_at', None)
     item['raw'] = {'source': 'heat_radar_account_library'}
-    return memory.insert('heat_radar_accounts', item)
+    saved = memory.insert('heat_radar_accounts', item)
+    if saved.get('_memory_warning'):
+        raise HTTPException(status_code=500, detail=saved['_memory_warning'])
+    return saved
 
 
 @app.delete('/api/heat-radar/accounts/{account_id}')
@@ -807,6 +817,11 @@ def api_heat_radar_items(memory: MemoryStore = Depends(get_memory)) -> list[dict
 @app.get('/api/heat-radar/daily-top3')
 def api_heat_radar_daily_top3(memory: MemoryStore = Depends(get_memory)) -> list[dict]:
     return memory.list('heat_daily_top3', limit=30)
+
+
+@app.get('/api/heat-radar/account-reviews')
+def api_heat_radar_account_reviews(memory: MemoryStore = Depends(get_memory)) -> list[dict]:
+    return memory.list('heat_radar_account_reviews', limit=120)
 
 
 @app.post('/api/heat-radar/run-public-crawl')
@@ -873,6 +888,17 @@ async def api_heat_radar_account_audit(req: HeatRadarAccountAuditRequest, settin
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     except Exception as exc:
         return HeatRadarAccountAuditResponse(ok=False, warnings=[f'账号价值审计失败：{str(exc)[:300]}'], next_actions=['确认账号库不为空', '先完成一次自动采集', '查看 Render Logs'])
+
+
+@app.post('/api/heat-radar/video-intake', response_model=HeatRadarVideoIntakeResponse)
+async def api_heat_radar_video_intake(req: HeatRadarVideoIntakeRequest, settings: Settings = Depends(get_settings), memory: MemoryStore = Depends(get_memory)) -> HeatRadarVideoIntakeResponse:
+    try:
+        result = await analyze_heat_radar_video_intake(settings, memory, req)
+        return HeatRadarVideoIntakeResponse(**result)
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except Exception as exc:
+        return HeatRadarVideoIntakeResponse(ok=False, warnings=[f'视频入库/分析失败：{str(exc)[:300]}'], next_actions=['确认视频链接可公开访问', '检查 R2/豆包视频理解配置', '查看 Render Logs'])
 
 
 @app.post('/api/heat-radar/rewrite', response_model=HeatRadarRewriteResponse)

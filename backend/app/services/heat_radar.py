@@ -1302,14 +1302,58 @@ def _relevance_score(text: str, keywords: List[str]) -> int:
     blob = (text or '').lower()
     keys = [str(k or '').strip().lower() for k in keywords if str(k or '').strip()]
     if not keys:
-        keys = ['马来西亚', '房产', '买房', '置业', '第二家园', 'mm2h', '国际学校', '吉隆坡', '新山']
+        keys = ['马来西亚', '大马', '吉隆坡', '新山', '槟城', '第二家园', 'mm2h', '房产', '买房', '置业', '生活成本', '国际学校', '陪读', '养老', '医疗', '交通', '华人区']
     hits = [k for k in keys if k and k in blob]
-    score = min(30, len(hits) * 8)
-    if any(k in blob for k in ['马来西亚', '大马', '吉隆坡', '新山', 'mm2h', '第二家园']):
-        score += 10
-    if any(k in blob for k in ['买房', '房产', '置业', '投资', '税费', '流程', '预算', '国际学校']):
+    score = min(22, len(hits) * 5)
+    if any(k in blob for k in ['马来西亚', '大马', '吉隆坡', '新山', '槟城', 'mm2h', '第二家园']):
         score += 8
+    if any(k in blob for k in ['买房', '房产', '置业', '投资', '税费', '流程', '预算', '租金', '回报']):
+        score += 8
+    # 买房客户会关心的不只是房价，生活、教育、医疗、交通同样可作为收录依据。
+    if any(k in blob for k in ['生活', '生活成本', '超市', '买菜', '交通', '地铁', '通勤', '医疗', '医院', '教育', '学校', '国际学校', '陪读', '养老', '安全', '华人', '社区', '签证', '身份']):
+        score += 7
     return max(0, min(35, score))
+
+
+def _intent_score(text: str) -> int:
+    blob = (text or '').lower()
+    groups = [
+        ['预算', '价格', '房价', '税费', '贷款', '租金', '回报'],
+        ['教育', '国际学校', '陪读', '孩子', '上学'],
+        ['医疗', '养老', '医院', '保险'],
+        ['生活成本', '买菜', '超市', '交通', '通勤', '安全', '华人区', '社区'],
+        ['第二家园', 'mm2h', '签证', '身份', '移民'],
+        ['流程', '避坑', '注意', '真实', '实拍', '经验'],
+    ]
+    hits = sum(1 for group in groups if any(k in blob for k in group))
+    return max(0, min(25, hits * 5))
+
+
+def _rewrite_value_score(text: str, items: List[Dict[str, Any]]) -> int:
+    blob = (text or '').lower()
+    value = 0
+    if any(k in blob for k in ['为什么', '避坑', '真实', '成本', '流程', '对比', '经验', '适合', '不适合']):
+        value += 4
+    if any(item.get('is_pinned') or item.get('raw', {}).get('is_pinned') for item in items):
+        value += 3
+    if len(items) >= 3:
+        value += 3
+    return max(0, min(10, value))
+
+
+def _account_type_from_text(text: str) -> str:
+    blob = (text or '').lower()
+    if any(k in blob for k in ['房产', '买房', '置业', '楼盘', '租金', '回报']):
+        return '马来西亚房产/置业'
+    if any(k in blob for k in ['第二家园', 'mm2h', '签证', '身份', '移民']):
+        return '第二家园/身份政策'
+    if any(k in blob for k in ['国际学校', '陪读', '教育', '孩子', '上学']):
+        return '教育/陪读生活'
+    if any(k in blob for k in ['医疗', '养老', '医院']):
+        return '医疗/养老生活'
+    if any(k in blob for k in ['生活', '买菜', '超市', '交通', '通勤', '华人', '社区', '安全']):
+        return '马来西亚生活方式'
+    return '泛生活/待观察'
 
 
 def _normalize_openclaw_item(raw: Dict[str, Any], fallback_account: Dict[str, Any] | None = None, source_name: str = 'openclaw') -> Dict[str, Any]:
@@ -1336,6 +1380,7 @@ def _normalize_openclaw_item(raw: Dict[str, Any], fallback_account: Dict[str, An
         'keyword': ','.join(_split_keywords(raw.get('keyword') or raw.get('keywords') or tags, 8)),
         'tags': tags[:12] if isinstance(tags, list) else [],
         'thumbnail_url': str(raw.get('thumbnail_url') or raw.get('cover') or ''),
+        'is_pinned': bool(raw.get('is_pinned') or raw.get('pinned') or raw.get('is_top')),
         'source_mode': f'{source_name}_automation',
         'raw': raw,
         'warnings': [],
@@ -1379,12 +1424,15 @@ def _review_account_value(account: Dict[str, Any], items: List[Dict[str, Any]], 
         str(account.get('name') or account.get('account_name') or ''),
         str(account.get('tags') or ''),
         str(account.get('notes') or ''),
-        ' '.join(str(x.get('title') or '') for x in items[:8]),
-        ' '.join(str(x.get('description') or '') for x in items[:8]),
+        ' '.join(str(x.get('title') or '') for x in items[:10]),
+        ' '.join(str(x.get('description') or '') for x in items[:10]),
+        ' '.join(str(x.get('raw', {}).get('analysis_summary') or '') for x in items[:10]),
     ])
     latest = ''
     latest_dt: datetime | None = None
     for item in items:
+        if item.get('is_pinned') or item.get('raw', {}).get('is_pinned'):
+            continue
         dt = _parse_dt(item.get('published_at') or item.get('collected_at') or item.get('date'))
         if dt and (latest_dt is None or dt > latest_dt):
             latest_dt = dt
@@ -1395,12 +1443,35 @@ def _review_account_value(account: Dict[str, Any], items: List[Dict[str, Any]], 
             latest_dt = dt
             latest = dt.isoformat()
     days = _days_since(latest) if latest else 9999
-    freshness = _freshness_score(days, max_stale_days)
-    relevance = _relevance_score(title_blob, keywords)
+
+    relevance = _relevance_score(title_blob, keywords)                   # 35%
+    intent_part = _intent_score(title_blob)                              # 25%
+    freshness_raw = _freshness_score(days, max_stale_days)
+    freshness = max(0, min(20, int(freshness_raw * 20 / 30)))            # 20%
     top_heat = sum(sorted([int(x.get('heat_score') or heat_score(x)) for x in items], reverse=True)[:3])
-    heat_part = min(25, int(top_heat / 180)) if top_heat else 0
-    activity = min(10, len([x for x in items if _days_since(x.get('published_at') or x.get('collected_at')) <= 30]) * 3)
-    score = max(0, min(100, 25 + freshness + relevance + heat_part + activity))
+    heat_part = min(10, int(top_heat / 450)) if top_heat else 0          # 10%
+    rewrite_part = _rewrite_value_score(title_blob, items)               # 10%
+    score = max(0, min(100, relevance + intent_part + freshness + heat_part + rewrite_part))
+
+    account_type = _account_type_from_text(title_blob)
+    target_value = '能补充买房客户关心的生活、教育、医疗、交通或身份信息。' if account_type != '泛生活/待观察' else '相关性暂不稳定，需要观察是否能转成马来西亚置业内容。'
+    intents = []
+    if any(k in title_blob for k in ['生活', '买菜', '交通', '医疗', '教育', '养老', '华人']):
+        intents.append('了解马来西亚真实生活环境')
+    if any(k in title_blob for k in ['房产', '买房', '置业', '租金', '预算']):
+        intents.append('判断买房预算、区域和回报')
+    if any(k in title_blob.lower() for k in ['mm2h', '第二家园', '签证', '身份']):
+        intents.append('理解第二家园/身份政策')
+    intents = intents or ['判断账号是否适合长期观察']
+    opportunities = [
+        f'{account_type}：把账号内容转成买房前顾虑清单',
+        '从真实生活体验切入，再承接马来西亚置业资料包',
+    ]
+    risk_notes = []
+    if heat_part <= 2:
+        risk_notes.append('互动热度一般，不能只按点赞判断，要看内容是否能回答客户顾虑。')
+    if account_type == '泛生活/待观察':
+        risk_notes.append('账号不是直接房产号，先观察内容是否能稳定关联马来西亚生活/置业。')
 
     if days > max_stale_days * 2 and len(items) == 0:
         decision = 'archive'
@@ -1408,19 +1479,19 @@ def _review_account_value(account: Dict[str, Any], items: List[Dict[str, Any]], 
         next_action = '暂停自动采集；保留档案但不占用每日采集额度。'
     elif days > max_stale_days and score < 58:
         decision = 'archive'
-        reason = f'最近内容距今约 {days} 天，且相关性/热度不足。'
+        reason = f'最近内容距今约 {days} 天，且相关性/客户顾虑价值不足。'
         next_action = '移入观察/归档；以后有新视频链接再恢复。'
     elif score >= accept_min_score:
         decision = 'accept'
-        reason = '近期内容、赛道相关性和互动信号达到自动入库标准。'
-        next_action = '加入固定账号库；每天自动采集最近内容并保留 Top 3。'
+        reason = '账号与马来西亚置业/生活顾虑相关，且近期更新或置顶内容有长期参考价值。'
+        next_action = '加入固定账号库；每天采置顶视频和近期内容。'
     elif score >= 52:
         decision = 'watch'
-        reason = '有一定相关性，但近期热度或更新频率还不够稳定。'
-        next_action = '加入观察池；连续 3 次采集有高热内容后再固定。'
+        reason = '有一定目标客户参考价值，但稳定性或内容垂直度还需观察。'
+        next_action = '加入观察池；连续采集到相关视频后再固定。'
     else:
         decision = 'reject'
-        reason = '当前内容与业务关键词或高意向客户需求关联较弱。'
+        reason = '当前内容与马来西亚置业客户需求关联较弱。'
         next_action = '暂不加入固定库；换更垂直的博主或关键词。'
 
     return {
@@ -1437,6 +1508,11 @@ def _review_account_value(account: Dict[str, Any], items: List[Dict[str, Any]], 
         'recent_items_count': len(items),
         'reason': reason,
         'next_action': next_action,
+        'account_type': account_type,
+        'target_value': target_value,
+        'customer_intents': intents[:5],
+        'content_opportunities': opportunities[:5],
+        'risk_notes': risk_notes[:5],
     }
 
 
@@ -1520,7 +1596,6 @@ async def ingest_openclaw_heat_radar(settings: Settings, memory: MemoryStore, re
                 if key and key in existing:
                     continue
                 item = {
-                    'id': acc.get('id') or f'openclaw_acc_{uuid.uuid4().hex[:12]}',
                     'name': acc.get('name') or acc.get('account_name') or review.get('account_name'),
                     'platform': acc.get('platform') or review.get('platform') or '公开平台',
                     'url': acc.get('url') or acc.get('account_url') or review.get('account_url'),
@@ -1620,4 +1695,107 @@ async def audit_heat_radar_accounts(settings: Settings, memory: MemoryStore, req
             'watch 账号保留观察，连续几天无热度再移出',
             'archive 账号建议暂停采集，避免浪费采集额度',
         ],
+    }
+
+
+async def analyze_heat_radar_video_intake(settings: Settings, memory: MemoryStore, req: Any) -> Dict[str, Any]:
+    token = os.getenv('HEAT_RADAR_INGEST_TOKEN', '').strip() or os.getenv('OPENCLAW_INGEST_TOKEN', '').strip()
+    if token and str(getattr(req, 'token', '') or '') != token:
+        raise PermissionError('HEAT_RADAR_INGEST_TOKEN 不匹配。')
+
+    from app.services.collector import collect_public_video_best_effort
+    from app.services.doubao import extract_with_doubao
+    from app.services.storage import maybe_upload_to_r2
+
+    warnings: List[str] = []
+    account = {
+        'name': getattr(req, 'account_name', '') or '未命名账号',
+        'platform': getattr(req, 'platform', '') or '抖音',
+        'url': getattr(req, 'account_url', '') or '',
+        'tags': getattr(req, 'tags', []) or [],
+        'notes': getattr(req, 'notes', '') or '',
+    }
+    raw_item = {
+        'platform': account['platform'],
+        'account_name': account['name'],
+        'account_url': account['url'],
+        'title': getattr(req, 'title', '') or '未命名视频',
+        'url': getattr(req, 'video_url', '') or '',
+        'published_at': getattr(req, 'published_at', '') or '',
+        'like_count': getattr(req, 'like_count', 0) or 0,
+        'comment_count': getattr(req, 'comment_count', 0) or 0,
+        'favorite_count': getattr(req, 'favorite_count', 0) or 0,
+        'share_count': getattr(req, 'share_count', 0) or 0,
+        'view_count': getattr(req, 'view_count', 0) or 0,
+        'is_pinned': bool(getattr(req, 'is_pinned', False)),
+        'tags': getattr(req, 'tags', []) or [],
+    }
+    item = _normalize_openclaw_item(raw_item, account, 'video_intake')
+
+    r2_video_url = ''
+    extraction = {}
+    video_url = str(getattr(req, 'video_url', '') or '').strip()
+    if video_url:
+        collected, collector_warnings = await collect_public_video_best_effort(settings, video_url)
+        warnings.extend(collector_warnings)
+        if collected and collected.path.exists():
+            uploaded = maybe_upload_to_r2(settings, collected.path, prefix='heat-radar-videos')
+            r2_video_url = uploaded or f'/files/uploads/{collected.path.name}'
+            item['raw']['r2_video_url'] = r2_video_url
+            item['raw']['collector_method'] = collected.method
+            try:
+                ex = await extract_with_doubao(settings, collected.path, source_url=video_url, manual_text=getattr(req, 'title', '') or '')
+                extraction = ex.model_dump() if hasattr(ex, 'model_dump') else dict(ex)
+                item['description'] = (ex.summary or item.get('description') or '')[:800]
+                item['raw']['analysis_summary'] = ex.summary
+                item['raw']['analysis_transcript'] = ex.transcript
+                item['raw']['analysis_hooks'] = ex.hooks
+                item['raw']['analysis_structure'] = ex.structure
+                warnings.extend(ex.warnings or [])
+            except Exception as exc:
+                warnings.append(f'视频理解失败，已保留采集数据：{str(exc)[:220]}')
+        else:
+            warnings.append('未下载到视频文件，仅保存链接和标题供 AI/规则判断。')
+
+    review = _review_account_value(account, [item], _split_keywords(getattr(req, 'tags', []) or []), max_stale_days=90, accept_min_score=72)
+
+    # 有视频理解结果时，再用强推理模型补充判断；失败不阻断入库。
+    if extraction:
+        try:
+            payload = await _chat_json(
+                settings,
+                '你是马来西亚房产获客账号筛选助手。只输出 JSON。',
+                json.dumps({
+                    'task': '判断该视频/账号是否值得收录进马来西亚房产获客热度雷达',
+                    'account': account,
+                    'video': raw_item,
+                    'video_understanding': extraction,
+                    'rules': '不要只看点赞；生活、教育、医疗、交通、华人社区、陪读、养老、第二家园、预算和真实体验都可作为收录依据。',
+                    'output_schema': {'decision': 'accept/watch/reject/archive', 'score': 0, 'account_type': '', 'target_value': '', 'customer_intents': [], 'content_opportunities': [], 'risk_notes': [], 'reason': ''},
+                }, ensure_ascii=False),
+                temperature=0.2,
+                timeout=90,
+            )
+            for key in ['decision', 'score', 'account_type', 'target_value', 'customer_intents', 'content_opportunities', 'risk_notes', 'reason']:
+                if key in payload:
+                    review[key] = payload[key]
+        except Exception as exc:
+            warnings.append(f'强推理模型审核失败，已使用规则评分：{str(exc)[:220]}')
+
+    saved_item = memory.insert('heat_radar_items', item)
+    if saved_item.get('_memory_warning'):
+        warnings.append(saved_item['_memory_warning'])
+    if bool(getattr(req, 'auto_save_review', True)):
+        saved_review = memory.insert('heat_radar_account_reviews', {'run_id': f'video_intake_{today_key()}', 'source_name': 'video_intake', **review, 'raw': {'item_id': saved_item.get('id'), 'extraction': extraction}, 'created_at': now_iso()})
+        if saved_review.get('_memory_warning'):
+            warnings.append(saved_review['_memory_warning'])
+
+    return {
+        'ok': True,
+        'item': saved_item,
+        'review': review,
+        'extraction': extraction,
+        'r2_video_url': r2_video_url,
+        'warnings': warnings[:80],
+        'next_actions': ['在页面查看 AI 收录判断', 'accept 账号可手动保存进账号库', '置顶视频用于判断账号定位，近期视频用于判断活跃度'],
     }

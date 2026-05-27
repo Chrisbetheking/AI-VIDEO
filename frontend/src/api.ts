@@ -460,6 +460,11 @@ export interface HeatRadarAccountDecision {
   recent_items_count: number
   reason: string
   next_action: string
+  account_type?: string
+  target_value?: string
+  customer_intents?: string[]
+  content_opportunities?: string[]
+  risk_notes?: string[]
 }
 
 export interface HeatRadarOpenClawIngestResponse {

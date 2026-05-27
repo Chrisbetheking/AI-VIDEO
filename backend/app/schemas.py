@@ -849,6 +849,7 @@ class HeatRadarOpenClawItemInput(BaseModel):
     share_count: int = 0
     view_count: int = 0
     thumbnail_url: str = ''
+    is_pinned: bool = False
     tags: List[str] = Field(default_factory=list)
     raw: Dict[str, Any] = Field(default_factory=dict)
 
@@ -882,6 +883,11 @@ class HeatRadarAccountDecision(BaseModel):
     recent_items_count: int = 0
     reason: str = ''
     next_action: str = ''
+    account_type: str = ''
+    target_value: str = ''
+    customer_intents: List[str] = Field(default_factory=list)
+    content_opportunities: List[str] = Field(default_factory=list)
+    risk_notes: List[str] = Field(default_factory=list)
 
 
 class HeatRadarOpenClawIngestRequest(BaseModel):
@@ -910,6 +916,35 @@ class HeatRadarOpenClawIngestResponse(BaseModel):
     rejected_accounts: List[HeatRadarAccountDecision] = Field(default_factory=list)
     archived_accounts: List[HeatRadarAccountDecision] = Field(default_factory=list)
     top_items: List[Dict[str, Any]] = Field(default_factory=list)
+    warnings: List[str] = Field(default_factory=list)
+    next_actions: List[str] = Field(default_factory=list)
+
+
+class HeatRadarVideoIntakeRequest(BaseModel):
+    token: str = ''
+    account_name: str = ''
+    account_url: str = ''
+    platform: str = '抖音'
+    video_url: str = ''
+    title: str = ''
+    published_at: str = ''
+    is_pinned: bool = False
+    tags: List[str] = Field(default_factory=list)
+    notes: str = ''
+    like_count: int = 0
+    comment_count: int = 0
+    favorite_count: int = 0
+    share_count: int = 0
+    view_count: int = 0
+    auto_save_review: bool = True
+
+
+class HeatRadarVideoIntakeResponse(BaseModel):
+    ok: bool = True
+    item: Dict[str, Any] = Field(default_factory=dict)
+    review: Dict[str, Any] = Field(default_factory=dict)
+    extraction: Dict[str, Any] = Field(default_factory=dict)
+    r2_video_url: str = ''
     warnings: List[str] = Field(default_factory=list)
     next_actions: List[str] = Field(default_factory=list)
 

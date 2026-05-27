@@ -705,7 +705,7 @@ function AppInner() {
   const [leadPlan, setLeadPlan] = useState<LeadAcquisitionPlanResponse | null>(null)
   const [leadChannels, setLeadChannels] = useState<string[]>(['百度搜索关键词', '巨量搜索/抖音搜索', '抖音视频评论', '小红书笔记评论', '竞品账号监控', '微信/企微私域承接'])
   const [leadFixedOptions, setLeadFixedOptions] = useState('子女教育家庭、企业主资产配置、养老度假、海外第二居所、华人家庭、马来西亚城市、预算区间、国际学校、第二家园身份')
-  const [heatAccounts, setHeatAccounts] = useState<HeatRadarAccount[]>(() => loadLocalJson('ai_video_heat_accounts_v1', [] as HeatRadarAccount[]))
+  const [heatAccounts, setHeatAccounts] = useState<HeatRadarAccount[]>([])
   const [heatSnapshots, setHeatSnapshots] = useState<HeatRadarSnapshot[]>(() => loadLocalJson('ai_video_heat_snapshots_v1', [] as HeatRadarSnapshot[]))
   const [heatDraft, setHeatDraft] = useState<HeatRadarAccount>({ id: '', name: '', platform: '抖音', url: '', tags: '马来西亚房产,第二家园,海外置业', notes: '', pinned: true, created_at: '' })
   const [manualHeatText, setManualHeatText] = useState('')
@@ -715,6 +715,10 @@ function AppInner() {
   const [expandedHeatGroups, setExpandedHeatGroups] = useState<Record<string, boolean>>({})
   const [heatAccountAudit, setHeatAccountAudit] = useState<HeatRadarAccountAuditResponse | null>(null)
   const [heatAutomationToken, setHeatAutomationToken] = useState('')
+  const [heatAccountSearch, setHeatAccountSearch] = useState('')
+  const [heatPlatformFilter, setHeatPlatformFilter] = useState('all')
+  const [expandedHeatAccounts, setExpandedHeatAccounts] = useState<Record<string, boolean>>({})
+  const [heatAccountReviews, setHeatAccountReviews] = useState<any[]>([])
   const [activeReportIndex, setActiveReportIndex] = useState(0)
   const [reportCopyStatus, setReportCopyStatus] = useState('')
 
@@ -746,9 +750,16 @@ function AppInner() {
     .map(id => materialAssets.find(a => a.id === id))
     .filter((a): a is AssetItem => Boolean(a && a.id && a.url))
     .map((a, i) => normalizeAsset(a, i)), [materialAssets, selectedMaterialIds])
-  useEffect(() => { window.localStorage.setItem('ai_video_heat_accounts_v1', JSON.stringify(heatAccounts)) }, [heatAccounts])
   useEffect(() => { window.localStorage.setItem('ai_video_heat_snapshots_v1', JSON.stringify(heatSnapshots.slice(0, 200))) }, [heatSnapshots])
   const pinnedHeatAccounts = useMemo(() => heatAccounts.filter(x => x.pinned).concat(heatAccounts.filter(x => !x.pinned)), [heatAccounts])
+  const filteredHeatAccounts = useMemo(() => {
+    const q = heatAccountSearch.trim().toLowerCase()
+    return pinnedHeatAccounts.filter(acc => {
+      if (heatPlatformFilter !== 'all' && acc.platform !== heatPlatformFilter) return false
+      if (!q) return true
+      return `${acc.name} ${acc.url} ${acc.tags} ${acc.notes}`.toLowerCase().includes(q)
+    })
+  }, [pinnedHeatAccounts, heatAccountSearch, heatPlatformFilter])
   const todayHeatSnapshots = useMemo(() => {
     const today = todayKey()
     const realList = heatSnapshots.filter(x => {
@@ -1075,21 +1086,43 @@ function AppInner() {
   }
 
   async function addHeatAccount() {
-    const draft = { ...heatDraft, id: heatDraft.id || `heat_acc_${Date.now()}`, name: heatDraft.name.trim(), url: heatDraft.url.trim(), tags: heatDraft.tags.trim(), notes: heatDraft.notes.trim(), created_at: heatDraft.created_at || new Date().toISOString() }
-    if (!draft.name && !draft.url) return
-    setHeatAccounts(prev => [draft, ...prev.filter(x => x.id !== draft.id)])
-    await run('保存热度账号', () => apiPost('/api/heat-radar/accounts', draft)).catch(() => null)
-    setHeatDraft({ id: '', name: '', platform: '抖音', url: '', tags: '马来西亚房产,第二家园,海外置业', notes: '', pinned: true, created_at: '' })
-    setLastHandoff('竞品账号已固定。后续可点“自动采集真实热度”，系统会尝试从公开链接抓取真实热度数据并留存。')
+    const draft = {
+      ...heatDraft,
+      name: heatDraft.name.trim(),
+      url: heatDraft.url.trim(),
+      tags: heatDraft.tags.trim(),
+      notes: heatDraft.notes.trim(),
+      created_at: heatDraft.created_at || new Date().toISOString()
+    }
+    if (!draft.name && !draft.url) {
+      setLastHandoff('请至少填写账号名称或主页/视频链接。')
+      return
+    }
+    try {
+      await run('保存热度账号', () => apiPost('/api/heat-radar/accounts', draft))
+      await reloadHeatRadarData()
+      setHeatDraft({ id: '', name: '', platform: '抖音', url: '', tags: '马来西亚房产,第二家园,海外置业', notes: '', pinned: true, created_at: '' })
+      setLastHandoff('博主已保存到服务器账号库。你和你叔刷新后都能看到。')
+    } catch (err: any) {
+      setLastHandoff(`保存失败：${err?.message || err}`)
+      throw err
+    }
   }
 
   function toggleHeatAccount(id: string) {
     setHeatAccounts(prev => prev.map(x => x.id === id ? { ...x, pinned: !x.pinned } : x))
+    setLastHandoff('置顶状态仅临时调整显示顺序；要永久保存请重新保存账号或后续接更新接口。')
   }
 
   async function removeHeatAccount(id: string) {
-    setHeatAccounts(prev => prev.filter(x => x.id !== id))
-    await run('删除热度账号', () => apiDelete(`/api/heat-radar/accounts/${encodeURIComponent(id)}`)).catch(() => null)
+    try {
+      await run('删除热度账号', () => apiDelete(`/api/heat-radar/accounts/${encodeURIComponent(id)}`))
+      await reloadHeatRadarData()
+      setLastHandoff('已从服务器账号库删除/软删除。')
+    } catch (err: any) {
+      setLastHandoff(`删除失败：${err?.message || err}`)
+      throw err
+    }
   }
 
   function importManualHeatData() {
@@ -1296,23 +1329,25 @@ function AppInner() {
   }
 
   async function reloadHeatRadarData() {
-    const [accounts, items] = await Promise.all([
+    const [accounts, items, reviews] = await Promise.all([
       apiGet<any[]>('/api/heat-radar/accounts').catch(() => []),
-      apiGet<any[]>('/api/heat-radar/items').catch(() => [])
+      apiGet<any[]>('/api/heat-radar/items').catch(() => []),
+      apiGet<any[]>('/api/heat-radar/account-reviews').catch(() => [])
     ])
-    if (Array.isArray(accounts) && accounts.length) {
+    if (Array.isArray(accounts)) {
       setHeatAccounts(accounts.map((x: any) => ({
         id: String(x.id || `heat_acc_${Date.now()}_${Math.random()}`),
         name: String(x.name || x.account_name || '未命名账号'),
         platform: String(x.platform || '抖音'),
-        url: String(x.url || ''),
-        tags: String(x.tags || x.positioning || ''),
-        notes: String(x.notes || ''),
+        url: String(x.url || x.account_url || ''),
+        tags: Array.isArray(x.tags) ? x.tags.join(',') : String(x.tags || x.positioning || ''),
+        notes: String(x.notes || x.reason || ''),
         pinned: Boolean(x.pinned ?? true),
         created_at: String(x.created_at || '')
       })))
     }
-    if (Array.isArray(items) && items.length) {
+    if (Array.isArray(reviews)) setHeatAccountReviews(reviews)
+    if (Array.isArray(items)) {
       const snapshots = items
         .filter((item: any) => !String(item?.source_mode || '').match(/seed|demo|local/i))
         .slice(0, 60)
@@ -2080,6 +2115,11 @@ ${manualText || ''}`.trim()
             <strong>{heatRewrite?.chosen_target ? shortText(heatRewrite.chosen_target, 34) : '待 AI 判断'}</strong>
             <p>{heatRewrite?.lead_magnet || activeReport?.title || '根据热点自动匹配资料包'}</p>
           </div>
+          <div className="heatCommandCard">
+            <span>账号库同步</span>
+            <strong>{heatAccounts.length} 个博主</strong>
+            <p>{health?.memory_enabled ? `Supabase 已连 · ${health?.workspace_id || 'default'}` : '未连 Supabase，当前不会多人同步'}</p>
+          </div>
         </div>
 
         <div className="heatMainGridV2">
@@ -2152,8 +2192,10 @@ ${manualText || ''}`.trim()
                 <Field label="监控标签"><input value={heatDraft.tags} onChange={e => setHeatDraft({ ...heatDraft, tags: e.target.value })} placeholder="马来西亚房产,第二家园" /></Field>
               </div>
               <Field label="备注 / 备用真实数据"><textarea value={heatDraft.notes} onChange={e => setHeatDraft({ ...heatDraft, notes: e.target.value })} placeholder="可留运营备注；平台限制时也可以粘贴一行真实数据：标题 + 链接 + 点赞/评论/收藏/分享。" /></Field>
-              <div className="buttonRow"><button className="btn primary" onClick={addHeatAccount}>保存博主</button><Field label="每个博主采集"><input type="number" min={1} max={6} value={heatCrawlerLimit} onChange={e => setHeatCrawlerLimit(Math.max(1, Math.min(6, Number(e.target.value) || 3)))} /></Field></div>
-              <div className="heatAccountList">{heatAccounts.length === 0 && <Empty>还没有固定博主。先添加 3-10 个同行账号。</Empty>}{pinnedHeatAccounts.map(acc => <div className="heatAccountCard" key={acc.id}><div><strong>{acc.name}</strong><Pill tone={acc.pinned ? 'green' : 'purple'}>{acc.pinned ? '已置顶' : acc.platform}</Pill></div><p>{acc.tags || '未设置标签'}</p><small>{acc.url || '未填链接'}</small><em>{acc.notes || '暂无备注'}</em><div className="miniActions"><button onClick={() => toggleHeatAccount(acc.id)}>{acc.pinned ? '取消置顶' : '置顶'}</button><button onClick={() => removeHeatAccount(acc.id)}>删除</button></div></div>)}</div>
+              <div className="buttonRow"><button className="btn primary" onClick={addHeatAccount}>保存到服务器账号库</button><button className="btn soft" onClick={() => reloadHeatRadarData()}>同步账号库</button><Field label="每个博主采集"><input type="number" min={1} max={6} value={heatCrawlerLimit} onChange={e => setHeatCrawlerLimit(Math.max(1, Math.min(6, Number(e.target.value) || 3)))} /></Field></div>
+              <div className="syncStatusBar"><span>API：{API_BASE}</span><span>Supabase：{health?.memory_enabled ? '已连接' : '未连接'}</span><span>Workspace：{health?.workspace_id || 'default'}</span><span>R2：{health?.r2_enabled ? '已连接' : '未连接'}</span></div>
+              <div className="heatAccountFilters"><input value={heatAccountSearch} onChange={e => setHeatAccountSearch(e.target.value)} placeholder="搜索账号名 / 标签 / 链接" /><select value={heatPlatformFilter} onChange={e => setHeatPlatformFilter(e.target.value)}><option value="all">全部平台</option><option value="抖音">抖音</option><option value="小红书">小红书</option><option value="视频号">视频号</option><option value="百度">百度</option><option value="其他">其他</option></select></div>
+              <div className="heatAccountList compact">{heatAccounts.length === 0 && <Empty>服务器账号库为空。先添加博主；保存成功后你和你叔刷新都能看到。</Empty>}{filteredHeatAccounts.map(acc => { const open = Boolean(expandedHeatAccounts[acc.id]); return <div className="heatAccountRow" key={acc.id}><button className="heatAccountRowHead" onClick={() => setExpandedHeatAccounts(prev => ({ ...prev, [acc.id]: !open }))}><strong>{acc.name || '未命名账号'}</strong><span>{acc.platform}</span><em>{acc.tags || '未设置标签'}</em><b>{open ? '收起' : '展开'}</b></button>{open && <div className="heatAccountRowBody"><p>{acc.notes || '暂无备注'}</p><small>{acc.url || '未填链接'}</small><div className="miniActions"><button onClick={() => toggleHeatAccount(acc.id)}>{acc.pinned ? '取消置顶' : '置顶'}</button><button onClick={() => removeHeatAccount(acc.id)}>删除</button></div></div>}</div> })}</div>
             </div>
 
             <div className="heatPanel">
@@ -2178,7 +2220,11 @@ ${manualText || ''}`.trim()
                 <div><strong>{heatAccountAudit.archive.length}</strong><span>建议暂停</span></div>
                 {[...heatAccountAudit.keep, ...heatAccountAudit.watch, ...heatAccountAudit.archive].slice(0, 6).map(item => <p key={`${item.account_name}-${item.decision}`}>· {item.account_name}：{item.decision}｜{item.score} 分｜{item.reason}</p>)}
               </div>}
-              <div className="crawlerNotice"><strong>自动化建议</strong><p>OpenClaw 负责打开平台、拿最近视频和互动数；本站只负责入库、评分、留存 Top3 和 AI 改写。采集失败不清空旧结果。</p></div>
+              <details className="reviewDrawer" open>
+                <summary><strong>AI 收录判断记录</strong><span>最近 {heatAccountReviews.length} 条</span></summary>
+                <div className="reviewListCompact">{heatAccountReviews.length === 0 && <Empty>暂无审核记录。采集器上传或点击“审计博主价值”后会出现。</Empty>}{heatAccountReviews.slice(0, 20).map((r: any, idx: number) => <div className="reviewRow" key={`${r.id || r.account_url || r.account_name}-${idx}`}><strong>{r.account_name || '未命名账号'}</strong><Pill tone={r.decision === 'accept' ? 'green' : r.decision === 'reject' ? 'red' : r.decision === 'archive' ? 'orange' : 'purple'}>{r.decision || 'watch'} · {r.score || 0}</Pill><p>{r.reason || r.target_value || '暂无理由'}</p><small>{Array.isArray(r.content_opportunities) ? r.content_opportunities.slice(0, 2).join(' / ') : ''}</small></div>)}</div>
+              </details>
+              <div className="crawlerNotice"><strong>自动化建议</strong><p>OpenClaw/本地采集器负责打开平台、拿置顶视频和近期视频；本站负责入库、R2留存、视频理解、评分和 AI 改写。采集失败不清空旧结果。</p></div>
             </div>
           </div>
         </details>
