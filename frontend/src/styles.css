@@ -1522,3 +1522,99 @@ input:focus,textarea:focus,select:focus{
   .heatAccountRowHead { grid-template-columns: 1fr auto; }
   .heatAccountRowHead em { grid-column: 1 / -1; }
 }
+
+/* === v3 responsive fix: keep desktop layout on small screens, only shrink === */
+.pill { white-space: nowrap; }
+.miniHeader > .pill { flex: 0 0 auto; align-self: flex-start; white-space: nowrap; }
+
+/* 采集设置里最多两列，避免右侧出现巨大空白；OpenClaw 放满一行 */
+.heatControlGrid.compactControls {
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  align-items: start;
+}
+.heatControlGrid.compactControls .openClawPanel { grid-column: 1 / -1; }
+
+@media (min-width: 1680px) {
+  .heatControlGrid.compactControls { grid-template-columns: repeat(3, minmax(0, 1fr)) !important; }
+  .heatControlGrid.compactControls .openClawPanel { grid-column: auto; }
+}
+
+/* 小屏不要改成单列/大卡片，保持原桌面布局，用 zoom 直接缩小 */
+@media (max-width: 1280px) {
+  body { overflow-x: hidden; }
+  .appShell {
+    width: 1280px !important;
+    max-width: none !important;
+    margin: 0 auto !important;
+    display: grid !important;
+    grid-template-columns: 318px minmax(0, 1fr) !important;
+    gap: 24px !important;
+    padding: 22px !important;
+    transform-origin: top center;
+  }
+  .studioNav {
+    position: sticky !important;
+    top: 22px !important;
+    height: calc(100vh - 44px) !important;
+    overflow: auto !important;
+    border-radius: 30px !important;
+    padding: 20px !important;
+  }
+  .brandMark { grid-template-columns: 56px 1fr !important; }
+  .logo { width: 56px !important; height: 56px !important; border-radius: 18px !important; }
+  .studioNav nav {
+    display: flex !important;
+    flex-direction: column !important;
+    overflow: visible !important;
+    gap: 7px !important;
+    padding-bottom: 0 !important;
+  }
+  .studioNav nav button {
+    width: 100% !important;
+    min-width: 0 !important;
+    display: grid !important;
+    grid-template-columns: 36px 1fr auto !important;
+    padding: 10px !important;
+    min-height: 54px !important;
+  }
+  .studioNav nav button em { display: inline-flex !important; }
+  .miniStatus { display: block !important; }
+  .handoffBar { grid-template-columns: 1fr auto auto !important; }
+  .handoffBar button,
+  .btn,
+  .addSegment { width: auto !important; }
+  .headerActions,
+  .buttonRow,
+  .stackButtons {
+    width: auto !important;
+    display: flex !important;
+    grid-template-columns: none !important;
+    flex-wrap: wrap !important;
+  }
+  .sectionHeader { flex-direction: row !important; }
+  .workflowBoard { grid-template-columns: repeat(7, minmax(0, 1fr)) !important; }
+  .progressRail { display: grid !important; grid-template-columns: repeat(7, minmax(0, 1fr)) !important; overflow: visible !important; }
+  .opsGrid,
+  .moduleGrid { grid-template-columns: repeat(4, minmax(0, 1fr)) !important; }
+  .grid2 { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
+  .grid3 { grid-template-columns: repeat(3, minmax(0, 1fr)) !important; }
+  .grid4 { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)) !important; }
+  .splitGrid { grid-template-columns: repeat(3, minmax(0, 1fr)) !important; }
+  .videoGrid { grid-template-columns: minmax(0, 1.1fr) 320px !important; }
+  .coverPreview { grid-template-columns: 260px minmax(0, 1fr) !important; }
+  .workflowCard:hover,
+  .moduleCard:hover,
+  .btn:hover { transform: translateY(-1px); }
+  .heatAccountFilters { grid-template-columns: minmax(180px, 1fr) 160px !important; }
+  .heatAccountRowHead { grid-template-columns: minmax(120px, 1.2fr) 80px minmax(120px, 1fr) 54px !important; }
+  .heatAccountRowHead em { grid-column: auto !important; }
+}
+
+@media (max-width: 1220px) { .appShell { zoom: .94; } }
+@media (max-width: 1160px) { .appShell { zoom: .89; } }
+@media (max-width: 1080px) { .appShell { zoom: .82; } }
+@media (max-width: 1000px) { .appShell { zoom: .76; } }
+@media (max-width: 920px)  { .appShell { zoom: .70; } }
+@media (max-width: 840px)  { .appShell { zoom: .64; } }
+@media (max-width: 760px)  { .appShell { zoom: .58; } }
+@media (max-width: 680px)  { .appShell { zoom: .52; } }
