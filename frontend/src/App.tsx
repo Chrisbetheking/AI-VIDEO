@@ -1105,7 +1105,7 @@ function AppInner() {
       await run('保存热度账号', () => apiPost('/api/heat-radar/accounts', draft))
       await reloadHeatRadarData()
       setHeatDraft({ id: '', name: '', platform: '抖音', url: '', tags: '马来西亚房产,第二家园,海外置业', notes: '', pinned: true, created_at: '' })
-      setLastHandoff('博主已保存到服务器账号库。你和你叔刷新后都能看到。')
+      setLastHandoff('博主已保存到账号库。')
     } catch (err: any) {
       setLastHandoff(`保存失败：${err?.message || err}`)
       throw err
@@ -1121,7 +1121,7 @@ function AppInner() {
     try {
       await run('删除热度账号', () => apiDelete(`/api/heat-radar/accounts/${encodeURIComponent(id)}`))
       await reloadHeatRadarData()
-      setLastHandoff('已从服务器账号库删除/软删除。')
+      setLastHandoff('已从账号库移除。')
     } catch (err: any) {
       setLastHandoff(`删除失败：${err?.message || err}`)
       throw err
@@ -2130,7 +2130,7 @@ ${manualText || ''}`.trim()
           <div className="heatCommandCard">
             <span>账号库同步</span>
             <strong>{heatAccounts.length} 个博主</strong>
-            <p>{health?.memory_enabled ? `Supabase 已连 · ${health?.workspace_id || 'default'}` : '未连 Supabase，当前不会多人同步'}</p>
+            <p>{health?.memory_enabled ? `Supabase 已连接 · ${health?.workspace_id || 'default'}` : '数据服务未连接，请检查后端配置'}</p>
           </div>
         </div>
 
@@ -2204,10 +2204,10 @@ ${manualText || ''}`.trim()
                 <Field label="监控标签"><input value={heatDraft.tags} onChange={e => setHeatDraft({ ...heatDraft, tags: e.target.value })} placeholder="马来西亚房产,第二家园" /></Field>
               </div>
               <Field label="备注 / 备用真实数据"><textarea value={heatDraft.notes} onChange={e => setHeatDraft({ ...heatDraft, notes: e.target.value })} placeholder="可留运营备注；平台限制时也可以粘贴一行真实数据：标题 + 链接 + 点赞/评论/收藏/分享。" /></Field>
-              <div className="buttonRow"><button className="btn primary" onClick={addHeatAccount}>保存到服务器账号库</button><button className="btn soft" onClick={() => reloadHeatRadarData()}>同步账号库</button><Field label="每个博主采集"><input type="number" min={1} max={6} value={heatCrawlerLimit} onChange={e => setHeatCrawlerLimit(Math.max(1, Math.min(6, Number(e.target.value) || 3)))} /></Field></div>
+              <div className="buttonRow"><button className="btn primary" onClick={addHeatAccount}>保存博主</button><button className="btn soft" onClick={() => reloadHeatRadarData()}>刷新账号库</button><Field label="每个博主采集"><input type="number" min={1} max={6} value={heatCrawlerLimit} onChange={e => setHeatCrawlerLimit(Math.max(1, Math.min(6, Number(e.target.value) || 3)))} /></Field></div>
               <div className="syncStatusBar"><span>API：{API_BASE}</span><span>Supabase：{health?.memory_enabled ? '已连接' : '未连接'}</span><span>Workspace：{health?.workspace_id || 'default'}</span><span>R2：{health?.r2_enabled ? '已连接' : '未连接'}</span></div>
               <div className="heatAccountFilters"><input value={heatAccountSearch} onChange={e => setHeatAccountSearch(e.target.value)} placeholder="搜索账号名 / 标签 / 链接" /><select value={heatPlatformFilter} onChange={e => setHeatPlatformFilter(e.target.value)}><option value="all">全部平台</option><option value="抖音">抖音</option><option value="小红书">小红书</option><option value="视频号">视频号</option><option value="百度">百度</option><option value="其他">其他</option></select></div>
-              <div className="heatAccountList compact">{heatAccounts.length === 0 && <Empty>服务器账号库为空。先添加博主；保存成功后你和你叔刷新都能看到。</Empty>}{filteredHeatAccounts.map(acc => { const open = Boolean(expandedHeatAccounts[acc.id]); return <div className="heatAccountRow" key={acc.id}><button className="heatAccountRowHead" onClick={() => setExpandedHeatAccounts(prev => ({ ...prev, [acc.id]: !open }))}><strong>{acc.name || '未命名账号'}</strong><span>{acc.platform}</span><em>{acc.tags || '未设置标签'}</em><b>{open ? '收起' : '展开'}</b></button>{open && <div className="heatAccountRowBody"><p>{acc.notes || '暂无备注'}</p><small>{acc.url || '未填链接'}</small><div className="miniActions"><button onClick={() => toggleHeatAccount(acc.id)}>{acc.pinned ? '取消置顶' : '置顶'}</button><button onClick={() => removeHeatAccount(acc.id)}>删除</button></div></div>}</div> })}</div>
+              <div className="heatAccountList compact">{heatAccounts.length === 0 && <Empty>暂无已收录博主。可通过上方表单添加。</Empty>}{filteredHeatAccounts.map(acc => { const open = Boolean(expandedHeatAccounts[acc.id]); return <div className="heatAccountRow" key={acc.id}><button className="heatAccountRowHead" onClick={() => setExpandedHeatAccounts(prev => ({ ...prev, [acc.id]: !open }))}><strong>{acc.name || '未命名账号'}</strong><span>{acc.platform}</span><em>{acc.tags || '未设置标签'}</em><b>{open ? '收起' : '展开'}</b></button>{open && <div className="heatAccountRowBody"><p>{acc.notes || '暂无备注'}</p><small>{acc.url || '未填链接'}</small><div className="miniActions"><button onClick={() => toggleHeatAccount(acc.id)}>{acc.pinned ? '取消置顶' : '置顶'}</button><button onClick={() => removeHeatAccount(acc.id)}>删除</button></div></div>}</div> })}</div>
             </div>
 
             <div className="heatPanel">

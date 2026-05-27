@@ -116,7 +116,7 @@ class MemoryStore:
         }
         if not self.supabase_enabled:
             out['ok'] = not self.core_storage_strict
-            out['message'] = 'Supabase 未配置。企业数据不会多人同步。' if self.core_storage_strict else '开发模式：本地 JSON。'
+            out['message'] = '数据服务未配置，请检查 Supabase 环境变量。' if self.core_storage_strict else '开发模式：本地 JSON。'
             return out
         try:
             with httpx.Client(timeout=10) as client:
