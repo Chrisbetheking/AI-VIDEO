@@ -3,9 +3,10 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 from app.config import Settings
+from app.services.memory import MemoryStore, MemoryWriteError
 
 
 def manifest_path(settings: Settings) -> Path:
@@ -29,11 +30,11 @@ def write_manifest(settings: Settings, items: list[dict[str, Any]]) -> None:
     path = manifest_path(settings)
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix('.tmp')
-    tmp.write_text(json.dumps(items[:1000], ensure_ascii=False, indent=2), encoding='utf-8')
+    tmp.write_text(json.dumps(items[:3000], ensure_ascii=False, indent=2), encoding='utf-8')
     tmp.replace(path)
 
 
-def upsert_asset(settings: Settings, item: dict[str, Any]) -> None:
+def _manifest_upsert(settings: Settings, item: dict[str, Any]) -> dict[str, Any]:
     items = read_manifest(settings)
     asset_id = str(item.get('id') or '')
     filename = str(item.get('filename') or '')
@@ -46,9 +47,41 @@ def upsert_asset(settings: Settings, item: dict[str, Any]) -> None:
     if not replaced:
         items.insert(0, item)
     write_manifest(settings, items)
+    return item
 
 
-def remove_asset(settings: Settings, asset_id: str) -> list[dict[str, Any]]:
+def upsert_asset(settings: Settings, item: dict[str, Any], memory: Optional[MemoryStore] = None, *, require_supabase: bool = False) -> dict[str, Any]:
+    """Persist asset metadata.
+
+    Enterprise source of truth is Supabase `assets`; manifest remains a local cache/dev fallback.
+    """
+    clean = dict(item)
+    clean.setdefault('created_at', now_iso())
+    clean.setdefault('updated_at', now_iso())
+    clean.setdefault('deleted', False)
+    if memory:
+        try:
+            saved = memory.upsert('assets', clean, on_conflict='id', require_supabase=require_supabase)
+            # keep local cache for old code paths and faster local listing
+            _manifest_upsert(settings, {**clean, **saved})
+            return saved
+        except MemoryWriteError:
+            raise
+        except Exception:
+            if require_supabase:
+                raise
+    return _manifest_upsert(settings, clean)
+
+
+def read_assets(settings: Settings, memory: Optional[MemoryStore] = None, limit: int = 500) -> list[dict[str, Any]]:
+    if memory and memory.supabase_enabled:
+        rows = memory.list('assets', limit=limit, include_deleted=False)
+        if rows:
+            return rows
+    return read_manifest(settings)[:limit]
+
+
+def remove_asset(settings: Settings, asset_id: str, memory: Optional[MemoryStore] = None, *, require_supabase: bool = False) -> list[dict[str, Any]]:
     items = read_manifest(settings)
     removed: list[dict[str, Any]] = []
     kept: list[dict[str, Any]] = []
@@ -59,6 +92,21 @@ def remove_asset(settings: Settings, asset_id: str) -> list[dict[str, Any]]:
             kept.append(item)
     if removed:
         write_manifest(settings, kept)
+
+    if memory:
+        try:
+            row_candidates = removed or memory.list('assets', limit=5, extra_params={'or': f'(id.eq.{asset_id},filename.ilike.{asset_id}%)'})
+            for row in row_candidates:
+                row_id = str(row.get('id') or '')
+                if row_id:
+                    memory.update_by_id('assets', row_id, {'deleted': True}, require_supabase=require_supabase)
+                    if not any(str(x.get('id') or '') == row_id for x in removed):
+                        removed.append(row)
+        except MemoryWriteError:
+            raise
+        except Exception:
+            if require_supabase:
+                raise
     return removed
 
 

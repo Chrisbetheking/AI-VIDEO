@@ -40,7 +40,9 @@ import {
   getCollectorStatus,
   uploadCollectorCookies,
   uploadAssets,
-  deleteAsset
+  deleteAsset,
+  listJobs,
+  JobItem
 } from './api'
 
 type ModuleKey = 'dashboard' | 'monitor' | 'lead' | 'oneClick' | 'collector' | 'copy' | 'voice' | 'digitalHuman' | 'assets' | 'video' | 'subtitleCover' | 'publish' | 'strategy' | 'competitor' | 'trend' | 'shooting' | 'growth'
@@ -599,6 +601,7 @@ function AppInner() {
   const [error, setError] = useState('')
   const [health, setHealth] = useState<any>(null)
   const [modelStatus, setModelStatus] = useState<ModelStatusResponse | null>(null)
+  const [jobs, setJobs] = useState<JobItem[]>([])
   const [contentNavOpen, setContentNavOpen] = useState(true)
 
   const [industry, setIndustry] = useState(malaysiaProfilePreset.industry)
@@ -1311,6 +1314,11 @@ function AppInner() {
     setLastHandoff('关键词雷达已按“高意向/内容钩子/泛流量”自动扩展，可继续生成获客作战图或今日拍摄任务。')
   }
 
+  async function reloadJobs() {
+    const list = await listJobs(20)
+    setJobs(Array.isArray(list) ? list : [])
+  }
+
   async function reloadAssets() {
     const list = await apiGet<AssetItem[]>('/api/assets')
     setAssets(Array.isArray(list) ? list.map((item, index) => normalizeAsset(item, index)).filter(item => item.id && item.url) : [])
@@ -1389,6 +1397,7 @@ function AppInner() {
     reloadAssets().catch(() => null)
     reloadCollectorStatus().catch(() => null)
     reloadAgentStatus().catch(() => null)
+    reloadJobs().catch(() => null)
     reloadMemoryContext(true).catch(() => null)
     reloadHeatRadarData().catch(() => null)
   }, [])
@@ -2078,6 +2087,9 @@ ${manualText || ''}`.trim()
           <div className="monitorCard"><span>流程完成度</span><strong>{leadScore}%</strong><p>{nextTodo ? nextTodo.text : '当前流程已基本闭环，可以进入发布和复盘。'}</p></div>
           <div className="monitorCard"><span>数据库记忆</span><strong>{memoryStatus}</strong><p>{memoryContext?.storage || '未连接'} · 账号 {(memoryContext?.competitors || []).length} · 采集 {(memoryContext?.videos || []).length} · 文案 {(memoryContext?.scripts || []).length}</p></div>
           <div className="monitorCard"><span>API 状态</span><strong>{health?.ok ? '在线' : '未连接'}</strong><p>{health?.tts_provider || '-'} · {health?.ark_video_model || '-'}</p></div>
+          <div className="monitorCard"><span>企业存储</span><strong>{health?.memory_status?.ok ? 'Supabase 正常' : (health?.memory_enabled ? 'Supabase 异常' : '未接 Supabase')}</strong><p>{health?.workspace_id || 'default'} · 严格模式 {health?.core_storage_strict ? '开' : '关'} · {health?.memory_status?.message || ''}</p></div>
+          <div className="monitorCard"><span>R2 素材</span><strong>{health?.r2_enabled ? '已配置' : '未配置'}</strong><p>素材强制 R2：{health?.require_r2_assets ? '开' : '关'}。正式使用建议开启。</p></div>
+          <div className="monitorCard"><span>任务队列</span><strong>{jobs.filter(j => j.status === 'running' || j.status === 'queued').length} 个进行中</strong><p>最近任务 {jobs.length} 条。长任务后续统一走 jobs。</p></div>
         </div>
         <div className="pluginGrid">{pluginMatrix.map(p => <div className="pluginCard" key={p.name}><strong>{p.name}</strong><p>{p.desc}</p><em>{p.status}</em></div>)}</div>
         <div className="todoPanel"><h3>下一步待办</h3>{pipelineTodos.map(item => <button key={item.text} className={item.ok ? 'done' : ''} onClick={() => setActive(item.go)}><span>{item.ok ? '✓' : '•'}</span>{item.text}</button>)}</div>

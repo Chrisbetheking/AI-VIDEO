@@ -91,6 +91,7 @@ from app.schemas import (
     HeatRadarAccountAuditResponse,
     HeatRadarVideoIntakeRequest,
     HeatRadarVideoIntakeResponse,
+    JobCreateRequest,
 )
 from app.services.ad_analysis import analyze_ad
 from app.services.cover import create_cover
@@ -100,17 +101,18 @@ from app.services.doubao import extract_with_doubao
 from app.services.digital_human import call_external_digital_human_worker, call_jimeng_digital_human, query_jimeng_digital_human, create_static_avatar_preview
 from app.services.collector import get_collector_cookie_status, save_collector_cookie_text
 from app.services.kb import KnowledgeBase
-from app.services.memory import MemoryStore
+from app.services.memory import MemoryStore, MemoryWriteError
 from app.services.publisher import create_publish_package
 from app.services.storage import maybe_upload_to_r2, maybe_delete_from_r2, maybe_list_r2_objects, read_last_storage_error, test_r2_connection
 from app.services.tts import get_tts_voices, synthesize_tts, synthesize_tts_segments
-from app.services.assets_store import read_manifest, upsert_asset, remove_asset, now_iso
+from app.services.assets_store import read_assets, upsert_asset, remove_asset, now_iso
 from app.services.video import IMAGE_EXTS, VIDEO_EXTS, MediaClip, compose_video
 from app.services.video_edit import apply_video_edit
 from app.services.auto_collector import run_auto_collection
 from app.services.one_click import generate_one_click, revise_one_click
 from app.services.graphic_post import create_graphic_post
 from app.services.heat_radar import run_public_heat_radar, generate_heat_radar_rewrite, ingest_openclaw_heat_radar, audit_heat_radar_accounts, analyze_heat_radar_video_intake
+from app.services.jobs import create_job, get_job, list_jobs, update_job
 
 app = FastAPI(title='AI-VIDEO 正式版 API', version='1.0.0')
 settings = get_settings()
@@ -557,7 +559,8 @@ async def _resolve_compose_clip(settings: Settings, clip_req) -> Optional[MediaC
     )
 
 @app.get('/api/health')
-def health(settings: Settings = Depends(get_settings)) -> dict:
+def health(settings: Settings = Depends(get_settings), memory: MemoryStore = Depends(get_memory)) -> dict:
+    memory_status = memory.status()
     return {
         'ok': True,
         'deepseek_model': settings.deepseek_model,
@@ -572,13 +575,46 @@ def health(settings: Settings = Depends(get_settings)) -> dict:
         'ark_video_model': settings.ark_video_model,
         'tts_provider': settings.tts_provider,
         'r2_enabled': settings.r2_enabled,
+        'require_r2_assets': settings.require_r2_assets,
         'memory_enabled': bool(settings.supabase_url and settings.supabase_service_role_key),
+        'core_storage_strict': settings.core_storage_strict,
+        'memory_status': memory_status,
         'digital_human_enabled': settings.enable_digital_human,
         'workspace_id': settings.workspace_id,
         'data_dir': str(settings.data_dir),
         'time': datetime.now(timezone.utc).isoformat(),
     }
 
+
+
+@app.get('/api/jobs')
+def api_jobs(limit: int = 50, memory: MemoryStore = Depends(get_memory)) -> list[dict]:
+    return list_jobs(memory, limit=max(1, min(int(limit or 50), 100)))
+
+
+@app.post('/api/jobs')
+def api_create_job(req: JobCreateRequest, memory: MemoryStore = Depends(get_memory)) -> dict:
+    return create_job(memory, req.type, req.input, title=req.title)
+
+
+@app.get('/api/jobs/{job_id}')
+def api_get_job(job_id: str, memory: MemoryStore = Depends(get_memory)) -> dict:
+    job = get_job(memory, job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail='任务不存在。')
+    return job
+
+
+@app.post('/api/jobs/{job_id}/update')
+def api_update_job(job_id: str, payload: dict, memory: MemoryStore = Depends(get_memory)) -> dict:
+    return update_job(
+        memory,
+        job_id,
+        status=str(payload.get('status') or '') or None,
+        progress=payload.get('progress'),
+        output=payload.get('output') if isinstance(payload.get('output'), dict) else None,
+        error=str(payload.get('error') or ''),
+    )
 
 
 @app.get('/api/collector/status', response_model=CollectorCookieStatus)
@@ -796,7 +832,10 @@ def api_heat_radar_save_account(req: HeatRadarAccountInput, memory: MemoryStore 
     if not item.get('created_at'):
         item.pop('created_at', None)
     item['raw'] = {'source': 'heat_radar_account_library'}
-    saved = memory.insert('heat_radar_accounts', item)
+    try:
+        saved = memory.insert('heat_radar_accounts', item, require_supabase=True)
+    except MemoryWriteError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
     if saved.get('_memory_warning'):
         raise HTTPException(status_code=500, detail=saved['_memory_warning'])
     return saved
@@ -804,8 +843,14 @@ def api_heat_radar_save_account(req: HeatRadarAccountInput, memory: MemoryStore 
 
 @app.delete('/api/heat-radar/accounts/{account_id}')
 def api_heat_radar_delete_account(account_id: str, memory: MemoryStore = Depends(get_memory)) -> dict:
-    # Supabase 表未建 delete/upsert 时也能通过软删除事件过滤。
-    memory.insert('heat_radar_account_deletes', {'account_id': account_id, 'deleted': True})
+    try:
+        # 优先软删真实账号记录；旧版本前端也兼容删除事件表过滤。
+        memory.update_by_id('heat_radar_accounts', account_id, {'deleted': True}, require_supabase=True)
+    except Exception:
+        try:
+            memory.insert('heat_radar_account_deletes', {'account_id': account_id, 'deleted': True}, require_supabase=True)
+        except MemoryWriteError as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
     return {'ok': True, 'deleted': account_id}
 
 
@@ -1113,7 +1158,7 @@ def _asset_source_type(folder: str, filename: str = '') -> str:
 
 
 @app.post('/api/assets', response_model=List[AssetItem])
-async def api_upload_assets(request: Request, files: List[UploadFile] = File(...), folder: str = Form('self'), settings: Settings = Depends(get_settings)) -> List[AssetItem]:
+async def api_upload_assets(request: Request, files: List[UploadFile] = File(...), folder: str = Form('self'), settings: Settings = Depends(get_settings), memory: MemoryStore = Depends(get_memory)) -> List[AssetItem]:
     """Upload material assets.
 
     Fixes two common production problems:
@@ -1157,19 +1202,11 @@ async def api_upload_assets(request: Request, files: List[UploadFile] = File(...
         item_folder = _normalize_asset_folder(folder, kind=kind, filename=original)
         created_at = now_iso()
         public_url = maybe_upload_to_r2(settings, dest, prefix='uploads')
+        if settings.require_r2_assets and not public_url:
+            dest.unlink(missing_ok=True)
+            raise HTTPException(status_code=502, detail='R2 上传失败，已阻止只保存到 Render 临时盘。请检查 R2 环境变量和公开域名。')
         url = upload_url(request, dest_name, public_url)
-        item = AssetItem(
-            id=asset_id,
-            filename=dest_name,
-            original_name=original,
-            kind=kind,
-            url=url,
-            size_bytes=total,
-            created_at=created_at,
-            folder=item_folder,
-            source_type=_asset_source_type(item_folder, original),
-        )
-        upsert_asset(settings, {
+        asset_payload = {
             'id': asset_id,
             'filename': dest_name,
             'original_name': original,
@@ -1181,7 +1218,27 @@ async def api_upload_assets(request: Request, files: List[UploadFile] = File(...
             'source_type': _asset_source_type(item_folder, original),
             'r2_url': public_url or '',
             'r2_key': f'uploads/{dest_name}' if public_url else '',
-        })
+            'deleted': False,
+        }
+        try:
+            saved_asset = upsert_asset(settings, asset_payload, memory, require_supabase=settings.core_storage_strict)
+        except MemoryWriteError as exc:
+            dest.unlink(missing_ok=True)
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+        item = AssetItem(
+            id=str(saved_asset.get('id') or asset_id),
+            filename=dest_name,
+            original_name=original,
+            kind=kind,
+            url=url,
+            size_bytes=total,
+            created_at=str(saved_asset.get('created_at') or created_at),
+            folder=item_folder,
+            source_type=_asset_source_type(item_folder, original),
+            r2_url=public_url or '',
+            r2_key=f'uploads/{dest_name}' if public_url else '',
+            workspace_id=str(saved_asset.get('workspace_id') or settings.workspace_id or ''),
+        )
         results.append(item)
     return results
 
@@ -1194,6 +1251,7 @@ def api_list_assets(
     limit: int = 200,
     include_r2: bool = True,
     settings: Settings = Depends(get_settings),
+    memory: MemoryStore = Depends(get_memory),
 ) -> List[AssetItem]:
     """List material assets.
 
@@ -1218,8 +1276,8 @@ def api_list_assets(
         seen.add(item.filename)
         items.append(item)
 
-    # 1) Prefer manifest records because they preserve original filename and confirmed R2 URL.
-    for raw in read_manifest(settings):
+    # 1) Prefer Supabase assets table; manifest remains local/dev cache.
+    for raw in read_assets(settings, memory, limit=max(1, min(limit, 500))):
         try:
             filename = Path(str(raw.get('filename') or '')).name
             if not filename:
@@ -1299,14 +1357,17 @@ def api_list_assets(
 
 
 @app.delete('/api/assets/{asset_id}')
-def api_delete_asset(asset_id: str, settings: Settings = Depends(get_settings)) -> dict:
+def api_delete_asset(asset_id: str, settings: Settings = Depends(get_settings), memory: MemoryStore = Depends(get_memory)) -> dict:
     safe_id = ''.join(ch for ch in asset_id if ch.isalnum() or ch in {'_', '-'})[:128]
     if not safe_id:
         raise HTTPException(status_code=400, detail='素材 ID 无效')
     deleted: list[str] = []
     warnings: list[str] = []
 
-    removed_manifest = remove_asset(settings, safe_id)
+    try:
+        removed_manifest = remove_asset(settings, safe_id, memory, require_supabase=settings.core_storage_strict)
+    except MemoryWriteError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
     filenames: set[str] = set()
     object_keys: set[str] = set()
     for item in removed_manifest:
@@ -1341,8 +1402,8 @@ def api_delete_asset(asset_id: str, settings: Settings = Depends(get_settings)) 
 
 
 @app.get('/api/collected-videos', response_model=List[AssetItem])
-def api_list_collected_videos(request: Request, settings: Settings = Depends(get_settings)) -> List[AssetItem]:
-    items = api_list_assets(request=request, settings=settings)
+def api_list_collected_videos(request: Request, settings: Settings = Depends(get_settings), memory: MemoryStore = Depends(get_memory)) -> List[AssetItem]:
+    items = api_list_assets(request=request, settings=settings, memory=memory)
     return [item for item in items if item.kind == 'video' and item.filename.startswith('collected_')][:100]
 
 

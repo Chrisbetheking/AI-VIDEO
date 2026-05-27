@@ -114,6 +114,30 @@ class AssetItem(BaseModel):
     # 素材文件夹：self=自己拍的，provided=别人提供，image=图片素材，collected=采集视频，ai=AI生成图
     folder: str = 'self'
     source_type: str = 'upload'
+    r2_url: str = ''
+    r2_key: str = ''
+    workspace_id: str = ''
+
+
+class JobCreateRequest(BaseModel):
+    type: str = Field(..., min_length=1, max_length=80)
+    title: str = Field(default='', max_length=200)
+    input: Dict[str, Any] = Field(default_factory=dict)
+
+
+class JobItem(BaseModel):
+    id: str
+    type: str
+    title: str = ''
+    status: str = 'queued'
+    progress: int = 0
+    input: Dict[str, Any] = Field(default_factory=dict)
+    output: Dict[str, Any] = Field(default_factory=dict)
+    error: str = ''
+    created_at: str = ''
+    updated_at: str = ''
+    started_at: str | None = None
+    finished_at: str | None = None
 
 
 class ComposeAssetClip(BaseModel):

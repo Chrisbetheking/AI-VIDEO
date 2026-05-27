@@ -572,3 +572,32 @@ export interface ModelStatusResponse {
   image_model: string
   image_edit_model: string
 }
+
+export interface EnterpriseHealth {
+  ok: boolean
+  memory_enabled: boolean
+  core_storage_strict?: boolean
+  r2_enabled: boolean
+  require_r2_assets?: boolean
+  workspace_id: string
+  memory_status?: { ok?: boolean; storage?: string; message?: string; core_storage_strict?: boolean }
+}
+
+export interface JobItem {
+  id: string
+  type: string
+  title?: string
+  status: 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled' | string
+  progress: number
+  input?: Record<string, unknown>
+  output?: Record<string, unknown>
+  error?: string
+  created_at?: string
+  updated_at?: string
+  started_at?: string | null
+  finished_at?: string | null
+}
+
+export function listJobs(limit = 50): Promise<JobItem[]> {
+  return apiGet<JobItem[]>(`/api/jobs?limit=${limit}`)
+}

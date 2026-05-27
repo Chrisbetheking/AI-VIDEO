@@ -147,6 +147,10 @@ class Settings(BaseSettings):
     workspace_id: str = 'default'
     enable_learning_memory: bool = True
     industry_radar_auto_save: bool = True
+    # 企业数据保护：开启后，核心表写 Supabase 失败会直接报错，不再悄悄降级成本地 JSON。
+    core_storage_strict: bool = False
+    # 企业素材保护：开启后，素材上传必须成功进入 R2，否则返回错误，避免本地临时文件丢失。
+    require_r2_assets: bool = False
 
     @property
     def data_dir(self) -> Path:
