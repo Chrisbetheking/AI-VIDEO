@@ -1156,13 +1156,42 @@ function AppInner() {
     setLastHandoff('已清理本地演示/模拟热度数据。热度雷达只显示自动采集、历史留存或手动导入的真实内容。')
   }
 
+  function pickNextHeatAccountForCrawl() {
+    const candidates = heatAccounts.filter(acc => String(acc.url || acc.notes || '').trim())
+    if (!candidates.length) return null
+    const key = 'ai_video_heat_crawl_cursor_v1'
+    const raw = Number(window.localStorage.getItem(key) || '0')
+    const index = Number.isFinite(raw) ? Math.max(0, raw) % candidates.length : 0
+    const selected = candidates[index]
+    window.localStorage.setItem(key, String((index + 1) % candidates.length))
+    return selected
+  }
+
   async function runPublicHeatCrawler() {
+    const gapKey = 'ai_video_heat_crawl_last_run_at_v1'
+    const minGapSeconds = 60
+    const lastRun = Number(window.localStorage.getItem(gapKey) || '0')
+    const elapsed = (Date.now() - lastRun) / 1000
+    if (lastRun && elapsed < minGapSeconds) {
+      setLastHandoff(`请稍等 ${Math.ceil(minGapSeconds - elapsed)} 秒再采集下一个账号，避免连续请求过快。`)
+      return
+    }
+
+    const selectedAccount = pickNextHeatAccountForCrawl()
+    if (!selectedAccount) {
+      setLastHandoff('请先在账号库添加至少 1 个带主页/视频链接的账号。')
+      return
+    }
+
+    window.localStorage.setItem(gapKey, String(Date.now()))
+    setLastHandoff(`本轮只采集 1 个账号：${selectedAccount.name || selectedAccount.url || '未命名账号'}。`)
+
     const keywords = Array.from(new Set([...heatRadarSeedKeywords, ...trendKeywords.split(/[,，#\n\s]+/).map(x => x.trim()).filter(Boolean)])).slice(0, 60)
-    const res = await run('自动采集真实热度', () => apiPost<HeatRadarRunResponse>('/api/heat-radar/run-public-crawl', {
-      accounts: heatAccounts,
+    const res = await run('单账号采集真实热度', () => apiPost<HeatRadarRunResponse>('/api/heat-radar/run-public-crawl', {
+      accounts: [selectedAccount],
       keywords,
       limit_per_account: heatCrawlerLimit,
-      include_saved_accounts: true,
+      include_saved_accounts: false,
       save_to_memory: true,
       token: ''
     }))
@@ -1177,11 +1206,11 @@ function AppInner() {
     const topMode = String((res as any)?.top_mode || '')
     const fallbackUsed = Boolean((res as any)?.fallback_used) || topMode === 'recent_top_fallback'
     if (fallbackUsed) {
-      setLastHandoff(`今天没有采集到新内容，已自动展示最近留存的 ${snapshots.length || 0} 条高热内容。`)
+      setLastHandoff(`本轮账号：${selectedAccount.name || selectedAccount.url || '未命名账号'}。没有采集到新内容，已展示最近留存的 ${snapshots.length || 0} 条内容。`)
     } else if (res?.collected_count) {
-      setLastHandoff(`已采集到 ${res.collected_count} 条真实公开热度数据，并保存今日 Top 3。`)
+      setLastHandoff(`本轮只采集 1 个账号：${selectedAccount.name || selectedAccount.url || '未命名账号'}，采到 ${res.collected_count} 条真实内容。`)
     } else {
-      setLastHandoff('本轮没有采集到今天新内容；如果已有历史留存，会自动展示最近 3 条。请补具体视频/笔记链接，或在账号备注里粘贴真实数据行。')
+      setLastHandoff(`本轮只采集 1 个账号：${selectedAccount.name || selectedAccount.url || '未命名账号'}。没有采到新内容；可补具体视频链接或在备注里粘贴真实数据。`)
     }
   }
 
@@ -2105,7 +2134,7 @@ ${manualText || ''}`.trim()
             <p>只看真实采集到的博主内容。先按博主沉淀最近/高热视频，再让 AI 拆解热点结构、判断目标客户，并生成原创口播和图文方向。</p>
           </div>
           <div className="heatHeroActions">
-            <Button busy={busy === '自动采集真实热度' ? busy : ''} label="自动刷新热点" onClick={runPublicHeatCrawler} kind="primary" />
+            <Button busy={busy === '单账号采集真实热度' ? busy : ''} label="采集下一个账号" onClick={runPublicHeatCrawler} kind="primary" />
             <Button busy={busy === 'AI 仿写热度内容' ? busy : ''} label="AI 拆解并改写" onClick={makeHeatRewritePlan} kind="primary" disabled={!todayHeatSnapshots.length} />
             <Button label="清空旧缓存" onClick={generateDailyHeatRadar} kind="ghost" />
           </div>
@@ -2115,7 +2144,7 @@ ${manualText || ''}`.trim()
           <div className="heatCommandCard hot">
             <span>当前状态</span>
             <strong>{heatWorkbenchStatus}</strong>
-            <p>{todayHeatSnapshots.length ? `已读取 ${todayHeatSnapshots.length} 条真实内容，覆盖 ${heatAccountGroups.length} 个博主。` : '还没有真实内容。先添加博主主页并刷新热点。'}</p>
+            <p>{todayHeatSnapshots.length ? `已读取 ${todayHeatSnapshots.length} 条真实内容，覆盖 ${heatAccountGroups.length} 个博主。` : '还没有真实内容。先添加博主主页，再点“采集下一个账号”。'}</p>
           </div>
           <div className="heatCommandCard">
             <span>主热点</span>
@@ -2138,7 +2167,7 @@ ${manualText || ''}`.trim()
           <div className="heatStreamPanel bloggerHeatPanel">
             <div className="miniHeader"><div><h3>按博主折叠的真实热点</h3><p>每个博主默认展示最高热一条；展开后查看最近/高热内容，方便后面批量管理多个账号。</p></div></div>
             <div className="heatBloggerList">
-              {heatAccountGroups.length === 0 && <Empty>还没有真实内容。先在下方账号库添加博主主页，配置 Cookie 后点“自动刷新热点”。</Empty>}
+              {heatAccountGroups.length === 0 && <Empty>还没有真实内容。先在下方账号库添加博主主页，再点“采集下一个账号”。</Empty>}
               {heatAccountGroups.map((group, groupIndex) => {
                 const isOpen = expandedHeatGroups[group.key] ?? groupIndex === 0
                 const shownItems = isOpen ? group.items : group.items.slice(0, 1)
