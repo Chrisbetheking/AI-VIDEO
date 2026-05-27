@@ -458,7 +458,10 @@ def _extract_sec_uid(url: str, html_text: str = '') -> str:
     for text in [url, html_text or '']:
         candidates.extend(re.findall(r'(MS4wLjAB[0-9A-Za-z_\-\.]+)', text))
         candidates.extend(re.findall(r'"sec_uid"\s*:\s*"([^"]+)"', text))
+        candidates.extend(re.findall(r'"secUid"\s*:\s*"([^"]+)"', text))
         candidates.extend(re.findall(r'"sec_user_id"\s*:\s*"([^"]+)"', text))
+        candidates.extend(re.findall(r'"secUserId"\s*:\s*"([^"]+)"', text))
+        candidates.extend(re.findall(r"authorSecId[\"']?\s*[:=]\s*[\"']([^\"']+)", text))
     for c in candidates:
         c = unquote(str(c or '')).strip()
         if c:
@@ -478,18 +481,37 @@ def _walk_json(obj: Any) -> Iterable[Any]:
 
 def _parse_render_json(html_text: str) -> List[Any]:
     payloads: List[Any] = []
+    text = html_text or ''
     for regex in [RENDER_DATA_RE, JSON_STATE_RE]:
-        for m in regex.finditer(html_text or ''):
+        for m in regex.finditer(text):
             raw = html.unescape(m.group(1) or '').strip()
             if not raw:
                 continue
-            for candidate in [raw, unquote(raw)]:
+            candidates = [raw, unquote(raw)]
+            try:
+                candidates.append(unquote(unquote(raw)))
+            except Exception:
+                pass
+            for candidate in candidates:
                 try:
                     payloads.append(json.loads(candidate))
                     break
                 except Exception:
                     continue
-    # Generic fallback: find aweme_list JSON fragments if present.
+
+    for pattern in [
+        r'window\.__INITIAL_STATE__\s*=\s*({.*?})\s*</script>',
+        r'window\.__UNIVERSAL_DATA_FOR_REHYDRATION__\s*=\s*({.*?})\s*</script>',
+        r'window\._ROUTER_DATA\s*=\s*({.*?})\s*</script>',
+    ]:
+        for m in re.finditer(pattern, text, re.I | re.S):
+            raw = html.unescape(m.group(1) or '').strip()
+            if not raw:
+                continue
+            try:
+                payloads.append(json.loads(raw))
+            except Exception:
+                continue
     return payloads
 
 
@@ -658,28 +680,100 @@ def _items_from_render_data(account: Dict[str, Any], payloads: List[Any], limit:
     return _dedupe_items(items)[:limit]
 
 
-async def _collect_douyin_url(settings: Settings, account: Dict[str, Any], input_url: str, warnings: List[str], limit: int) -> List[Dict[str, Any]]:
-    # 先把 v.douyin.com 短链转成真实地址。直接拿短链给 yt-dlp，有时只会得到分享页/主页。
-    final_url = await _resolve_url(settings, input_url, warnings)
-    # Strongest public fallback: yt-dlp. 但如果没配置 Cookie，抖音主页常返回验证页，
-    # 这时 _normalize_ytdlp_entry 会过滤掉主页本身，不再把主页冒充最近视频。
-    ytdlp_items = await _collect_douyin_with_ytdlp(settings, account, final_url or input_url, warnings, max(3, limit))
-    if ytdlp_items:
-        return ytdlp_items[:limit]
+def _looks_like_douyin_gate(html_text: str) -> bool:
+    text = (html_text or '')[:5000].lower()
+    return any(x in text for x in ['captcha', 'verify', '验证', '登录后查看', '安全验证', '访问过于频繁'])
 
+
+def _douyin_profile_extract_urls_from_html(html_text: str, limit: int) -> List[str]:
+    ids = _extract_aweme_ids_from_text(html_text or '', max(6, limit * 2))
+    urls: List[str] = []
+    for vid in ids:
+        url = f'https://www.douyin.com/video/{vid}'
+        if url not in urls:
+            urls.append(url)
+        if len(urls) >= limit:
+            break
+    return urls
+
+
+async def _collect_douyin_profile_http(settings: Settings, account: Dict[str, Any], input_url: str, warnings: List[str], limit: int) -> List[Dict[str, Any]]:
+    final_url, html_text = await _fetch_html(settings, input_url, warnings)
+    if not html_text:
+        return []
+    if _looks_like_douyin_gate(html_text):
+        warnings.append('抖音返回登录/验证页：Cookie 可能过期，或该环境触发验证。')
+        return []
+
+    render_items = _items_from_render_data(account, _parse_render_json(html_text), max(3, limit))
+    if render_items:
+        warnings.append(f'已从抖音主页前端数据识别 {len(render_items)} 条视频。')
+        return render_items[:limit]
+
+    sec_uid = _extract_sec_uid(final_url, html_text)
+    if sec_uid:
+        api_items = await _fetch_douyin_post_api(settings, sec_uid, account, warnings, max(3, limit))
+        if api_items:
+            warnings.append(f'已通过抖音主页接口获取 {len(api_items)} 条最近视频。')
+            return api_items[:limit]
+
+    urls = _douyin_profile_extract_urls_from_html(html_text, max(3, limit))
+    html_items: List[Dict[str, Any]] = []
+    for url in urls:
+        vid = _extract_video_id(url)
+        detail_items = await _fetch_douyin_detail(settings, vid, account, warnings) if vid else []
+        if detail_items:
+            html_items.extend(detail_items)
+        else:
+            html_items.append(_make_item(account, title=f'{account.get("name") or "抖音账号"} 最近视频 {vid}', url=url, description='从抖音主页 HTML 识别到视频链接。', source_mode='douyin_profile_html_link'))
+        if len(html_items) >= limit:
+            break
+    if html_items:
+        warnings.append(f'已从抖音主页链接区域识别 {len(html_items)} 条视频。')
+        return _dedupe_items(html_items)[:limit]
+
+    if sec_uid:
+        warnings.append('已识别账号 sec_uid，但主页接口没有返回视频列表；Cookie 可能过期或触发验证。')
+    else:
+        warnings.append('已读取抖音主页，但未识别到 sec_uid 或视频链接。')
+    return []
+
+
+async def _collect_douyin_url(settings: Settings, account: Dict[str, Any], input_url: str, warnings: List[str], limit: int) -> List[Dict[str, Any]]:
+    final_url = await _resolve_url(settings, input_url, warnings)
     if final_url != input_url:
         warnings.append(f'短链已转换：{input_url} → {final_url}')
+
+    # 抖音主页：不要先走 yt-dlp。先用 Cookie 读取主页前端数据/API，等于“看页面里有哪些视频”。
+    if _is_douyin_profile_url(final_url or input_url):
+        profile_items = await _collect_douyin_profile_http(settings, account, final_url or input_url, warnings, max(3, limit))
+        if profile_items:
+            return profile_items[:limit]
+        if os.getenv('HEAT_RADAR_PROFILE_YTDLP_FALLBACK', '').strip().lower() in {'1', 'true', 'yes', 'on'}:
+            ytdlp_items = await _collect_douyin_with_ytdlp(settings, account, final_url or input_url, warnings, max(3, limit))
+            if ytdlp_items:
+                return ytdlp_items[:limit]
+        warnings.append('抖音主页本轮没有拿到视频列表；保留现有热点，不清空页面。')
+        return []
+
+    # 具体视频链接：先用轻量详情接口；失败后再用 yt-dlp/HTML 兜底。
     video_id = _extract_video_id(final_url)
     if video_id:
         items = await _fetch_douyin_detail(settings, video_id, account, warnings)
         if items:
             return items[:limit]
+
+    ytdlp_items = await _collect_douyin_with_ytdlp(settings, account, final_url or input_url, warnings, max(3, limit))
+    if ytdlp_items:
+        return ytdlp_items[:limit]
+
     final_url, html_text = await _fetch_html(settings, final_url, warnings)
     video_id = video_id or _extract_video_id(final_url) or _extract_video_id(html_text)
     if video_id:
         items = await _fetch_douyin_detail(settings, video_id, account, warnings)
         if items:
             return items[:limit]
+
     render_items = _items_from_render_data(account, _parse_render_json(html_text), limit)
     if render_items:
         return render_items[:limit]
@@ -691,64 +785,19 @@ async def _collect_douyin_url(settings: Settings, account: Dict[str, Any], input
         if detail_items:
             html_items.extend(detail_items)
         else:
-            html_items.append(_make_item(account, title=f'{account.get("name") or "抖音账号"} 最近视频 {vid}', url=f'https://www.douyin.com/video/{vid}', description='从主页 HTML 识别到视频 ID，但公开详情接口未返回热度指标。', source_mode='douyin_html_aweme_id'))
+            html_items.append(_make_item(account, title=f'{account.get("name") or "抖音账号"} 视频 {vid}', url=f'https://www.douyin.com/video/{vid}', description='从页面 HTML 识别到视频 ID，但公开详情接口未返回热度指标。', source_mode='douyin_html_aweme_id'))
     if html_items:
         return _dedupe_items(html_items)[:limit]
 
-    sec_uid = _extract_sec_uid(final_url, html_text)
-    if sec_uid:
-        items = await _fetch_douyin_post_api(settings, sec_uid, account, warnings, limit)
-        if items:
-            return items[:limit]
-        ytdlp_final_items = await _collect_douyin_with_ytdlp(settings, account, final_url, warnings, max(3, limit))
-        if ytdlp_final_items:
-            return ytdlp_final_items[:limit]
-        title, desc = _title_from_html(html_text)
-        placeholder = _make_item(
-            account,
-            title=(title or str(account.get('name') or '抖音账号主页已转换')),
-            url=final_url,
-            description='主页短链已转换，并识别到 sec_uid；但公开接口没有返回最近三条。建议在 Render 环境变量添加 DOUYIN_WEB_COOKIE，或粘贴具体视频链接。',
-            source_mode='douyin_profile_observation',
-            raw={'sec_uid': sec_uid, 'final_url': final_url, 'cookie_configured': _has_douyin_cookie()},
-        )
-        cookie_tip = '已配置 Cookie，但仍未拿到最近三条：Cookie 可能过期、账号未登录抖音网页版，或该主页触发验证。' if _has_douyin_cookie() else '未配置 DOUYIN_WEB_COOKIE / DOUYIN_COOKIE_FILE；抖音主页最近三条大概率必须登录 Cookie 才返回。'
-        placeholder['warnings'] = [f'主页已转换，但未拿到最近视频列表。{cookie_tip}']
-        # 不把主页占位卡当成 Top3 视频；只通过 warnings 告诉前端原因。
-        warnings.append(placeholder['warnings'][0])
-        return []
     title, desc = _title_from_html(html_text)
-    if _is_douyin_profile_url(final_url or input_url):
-        warnings.append(('已识别为抖音主页，但未拿到最近三条。' + ('Cookie 已配置但可能过期/触发验证。' if _has_douyin_cookie() else '请在 Render 配置 DOUYIN_WEB_COOKIE 后重试。')))
-        return []
     return [_make_item(
         account,
         title=title or str(account.get('name') or '抖音公开链接已留存'),
         url=final_url,
-        description=desc or '公开链接已留存，但没有识别到视频 ID 或 sec_uid。请确认链接不是过期短链。',
+        description=desc or '公开链接已留存，但没有识别到视频 ID。',
         source_mode='douyin_public_url_observation',
         raw={'final_url': final_url, 'cookie_configured': _has_douyin_cookie()},
     )]
-
-
-async def _fetch_html_meta(settings: Settings, url: str, account: Dict[str, Any], warnings: List[str]) -> Dict[str, Any] | None:
-    # Non-Douyin lightweight title fetch. It is safe and short-timeout; no heavy crawler.
-    if not url.startswith('http'):
-        return None
-    try:
-        async with httpx.AsyncClient(timeout=8, follow_redirects=True, headers=_douyin_headers(settings, url)) as client:
-            res = await client.get(url)
-            if res.status_code >= 400:
-                warnings.append(f'{url}: 公开页面读取失败 HTTP {res.status_code}')
-                return None
-            title, desc = _title_from_html(res.text)
-            final_url = str(res.url)
-    except Exception as exc:
-        warnings.append(f'{url}: 公开页面读取失败：{str(exc)[:160]}')
-        return None
-    if not title and not desc:
-        return None
-    return _make_item(account, title=title or desc[:80] or '公开内容', url=final_url or url, description=desc, source_mode='public_html')
 
 
 def _parse_account_notes(account: Dict[str, Any], warnings: List[str], limit: int) -> List[Dict[str, Any]]:
