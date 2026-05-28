@@ -1618,3 +1618,89 @@ input:focus,textarea:focus,select:focus{
 @media (max-width: 840px)  { .appShell { zoom: .64; } }
 @media (max-width: 760px)  { .appShell { zoom: .58; } }
 @media (max-width: 680px)  { .appShell { zoom: .52; } }
+
+/* 2026 简化生产流：参考 DESIGN.md 的深色控制台 + 卡片式工作台，但保持现有浅色品牌 */
+.productionRouteGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 12px;
+  margin: 14px 0 18px;
+}
+.productionRouteGrid button {
+  border: 1px solid rgba(86, 113, 255, .18);
+  background: linear-gradient(135deg, rgba(255,255,255,.96), rgba(244,247,255,.9));
+  border-radius: 22px;
+  padding: 16px;
+  text-align: left;
+  color: #17233d;
+  box-shadow: 0 14px 32px rgba(50, 75, 130, .08);
+  cursor: pointer;
+}
+.productionRouteGrid button strong { display: block; font-size: 16px; margin-bottom: 6px; }
+.productionRouteGrid button span { display: block; color: #667899; line-height: 1.55; font-size: 13px; }
+.productionRouteGrid button.selected {
+  border-color: rgba(72, 88, 255, .55);
+  background: linear-gradient(135deg, rgba(56, 78, 255, .98), rgba(101, 78, 255, .88));
+  color: white;
+}
+.productionRouteGrid button.selected span { color: rgba(255,255,255,.82); }
+.productionRouteGrid.compact { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+.productionRouteGrid.compact button { text-align: center; padding: 13px 14px; }
+.copyFirstPanel .sectionHeader h2,
+.shootingScriptPanel .sectionHeader h2,
+.accountLibraryPanel .sectionHeader h2 { letter-spacing: -0.03em; }
+.scriptDropZone {
+  border: 1.5px dashed rgba(86, 113, 255, .34);
+  border-radius: 26px;
+  padding: 24px;
+  background: linear-gradient(135deg, rgba(246, 249, 255, .96), rgba(255, 255, 255, .88));
+  margin-bottom: 16px;
+  transition: .2s ease;
+}
+.scriptDropZone:hover { border-color: rgba(86, 113, 255, .68); transform: translateY(-1px); }
+.scriptDropZone input { display: none; }
+.scriptDropZone label { display: grid; gap: 7px; cursor: pointer; color: #17233d; }
+.scriptDropZone label strong { font-size: 18px; }
+.scriptDropZone label span { color: #6b7a99; line-height: 1.6; }
+.videoIntakePanel {
+  display: grid;
+  grid-template-columns: minmax(240px, 1fr) minmax(280px, 1.1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 16px;
+  border: 1px solid rgba(86, 113, 255, .18);
+  border-radius: 24px;
+  background: rgba(255,255,255,.84);
+  margin: 16px 0;
+}
+.videoIntakePanel strong { display:block; font-size: 16px; margin-bottom: 4px; }
+.videoIntakePanel p { margin:0; color:#667899; line-height:1.5; }
+.videoIntakePanel input {
+  width: 100%;
+  border: 1px solid rgba(113, 136, 180, .28);
+  border-radius: 16px;
+  padding: 13px 14px;
+  background: #fff;
+  color: #17233d;
+}
+.videoIntakePanel > span { grid-column: 1 / -1; color:#4865d8; font-weight:700; }
+.accountLibraryGrid {
+  display: grid;
+  grid-template-columns: minmax(280px, 430px) minmax(360px, 1fr);
+  gap: 16px;
+}
+.accountEditorCard,
+.accountListCard {
+  border: 1px solid rgba(86, 113, 255, .16);
+  border-radius: 26px;
+  background: rgba(255,255,255,.88);
+  padding: 18px;
+  box-shadow: 0 18px 48px rgba(50, 75, 130, .08);
+}
+.accountLibraryPanel .heatAccountRowHead {
+  grid-template-columns: minmax(160px, 1fr) 84px minmax(180px, 1fr) 60px;
+}
+@media (max-width: 980px) {
+  .videoIntakePanel,
+  .accountLibraryGrid { grid-template-columns: 1fr; }
+}

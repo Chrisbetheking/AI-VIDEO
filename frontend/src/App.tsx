@@ -314,34 +314,33 @@ const defaultSegment: VoiceSegment = {
 }
 
 const modules: { key: ModuleKey; icon: string; title: string; desc: string; tag: string }[] = [
-  { key: 'dashboard', icon: '总', title: '流程总览', desc: '一条视频从采集到发布的主流程', tag: '总览' },
-  { key: 'monitor', icon: '控', title: '运营中控台', desc: '总览进度、数据库、插件和待办', tag: '监控' },
-  { key: 'lead', icon: '热', title: '热度雷达', desc: '每日查看高热话题、竞品账号内容和可承接客户需求', tag: '热度' },
-  { key: 'oneClick', icon: '生', title: '一键生成中心', desc: '基于素材、行业档案和报告钩子生成完整内容包', tag: '一键' },
-  { key: 'assets', icon: '素', title: '1. 素材选择', desc: '先选/上传素材，确定图片停留和视频截取区间', tag: '素材' },
-  { key: 'copy', icon: '文', title: '2. 文案生产', desc: '根据素材和客户目标生成口播文案', tag: '文案' },
-  { key: 'voice', icon: '声', title: '3. 配音导演', desc: '克隆音色、分段情绪、语速停顿', tag: '配音' },
-  { key: 'digitalHuman', icon: '人', title: '4. 数字人', desc: '上传本人形象，生成老板口播片段', tag: '数字人' },
-  { key: 'video', icon: '剪', title: '5. 剪辑合成', desc: '素材顺序、截取区间、字幕烧录和导出', tag: '剪辑' },
-  { key: 'collector', icon: '采', title: '同行采集', desc: '可选：采集同行视频、口令和钩子结构', tag: '采集' },
-  { key: 'subtitleCover', icon: '视', title: '6. 字幕 / 封面 / 图文', desc: '抖音风字幕、素材截图封面、AI 图文素材', tag: '视觉' },
-  { key: 'publish', icon: '发', title: '7. 平台发布', desc: '发布草稿、平台适配、开放接口预留', tag: '发布' },
-  { key: 'strategy', icon: '档', title: '行业获客档案', desc: '业务定位、关键词、客群、资料包和承接钩子', tag: '档案' },
-  { key: 'competitor', icon: '竞', title: '竞品账号库', desc: '长期沉淀同行账号和爆款特征', tag: '账号' },
-  { key: 'trend', icon: '雷', title: '行业爆点', desc: '热点关键词、截流机会和内容方向', tag: '雷达' },
-  { key: 'shooting', icon: '拍', title: '拍摄 / 口播策划', desc: '口播文案、拍摄任务单、提词器和 B-roll 清单', tag: '口播' },
-  { key: 'growth', icon: '投', title: '增长投流细节', desc: '流量数据、机器学习投流、优化动作', tag: '增长' }
+  { key: 'dashboard', icon: '总', title: '工作台总览', desc: '只保留采集、文案、素材、成片和投流复盘主链路', tag: '总览' },
+  { key: 'lead', icon: '雷', title: '热度雷达', desc: '只看真实采集/导入的视频、笔记和可改写热点', tag: '雷达' },
+  { key: 'competitor', icon: '账', title: '账号库', desc: '固定监控博主、平台、标签和采集策略', tag: '账号' },
+  { key: 'copy', icon: '文', title: '1. 文案生产', desc: '先仿写、再出标题、钩子、完整视频脚本', tag: '文案' },
+  { key: 'shooting', icon: '拍', title: '2. 脚本 / 拍摄', desc: '上传资料或脚本，生成拍摄任务、提词器和 B-roll 清单', tag: '脚本' },
+  { key: 'assets', icon: '素', title: '3. 素材选择', desc: '选择数字人、自拍素材、采集视频或图文素材', tag: '素材' },
+  { key: 'voice', icon: '声', title: '4. 配音导演', desc: '克隆音色、分段情绪、语速停顿', tag: '配音' },
+  { key: 'digitalHuman', icon: '人', title: '数字人', desc: '可选数字人口播，也可跳过改用真人拍摄素材', tag: '数字人' },
+  { key: 'video', icon: '剪', title: '5. 成片合成', desc: '素材顺序、截取区间、字幕烧录和导出', tag: '成片' },
+  { key: 'subtitleCover', icon: '图', title: '图文窗口', desc: '图文引流包、封面、字幕重点单独处理', tag: '图文' },
+  { key: 'growth', icon: '投', title: '流量监控', desc: '开放平台未接入前，先手动录入数据并让 AI 判断是否投流', tag: '投流' },
+  { key: 'collector', icon: '采', title: '采集接入', desc: 'OpenClaw、云 Worker、安卓/模拟器采集方案预留', tag: '接入' },
+  { key: 'strategy', icon: '档', title: '获客档案', desc: '业务定位、关键词、客群、资料包和承接钩子', tag: '档案' },
+  { key: 'monitor', icon: '控', title: '系统状态', desc: 'API、Supabase、R2、任务队列和诊断', tag: '状态' },
+  { key: 'oneClick', icon: '旧', title: '旧版一键生成', desc: '保留旧接口，默认不在主流程展示', tag: '隐藏' },
+  { key: 'publish', icon: '发', title: '平台发布', desc: '发布草稿、平台适配、开放接口预留', tag: '发布' },
+  { key: 'trend', icon: '爆', title: '行业爆点', desc: '旧版行业爆点页，主流程已并入热度雷达', tag: '隐藏' }
 ]
 
 const workflowSteps: { key: ModuleKey; step: string; title: string; desc: string; action: string }[] = [
-  { key: 'oneClick', step: '00', title: '一键生成中心', desc: '一个窗口统筹，但第一步仍然先确认素材，避免后面只有文字稿。', action: '开始' },
-  { key: 'assets', step: '01', title: '选择素材', desc: '先上传/选择视频和图片，排好出现顺序，图片停留和视频截取都在这里调。', action: '选素材' },
-  { key: 'copy', step: '02', title: '文案生产', desc: '根据已选素材、行业、客户和转化目标生成短视频口播稿。', action: '写文案' },
-  { key: 'voice', step: '03', title: '配音分段', desc: '分段控制情绪、语速、音量和停顿，并生成真实时间轴。', action: '去配音' },
-  { key: 'digitalHuman', step: '04', title: '数字人片段', desc: '可选：用配音生成老板数字人口播素材，或者跳过直接素材混剪。', action: '做数字人' },
-  { key: 'video', step: '05', title: '剪辑合成', desc: '按素材顺序和配音时长自动铺满，字幕直接在剪辑页调整。', action: '去剪辑' },
-  { key: 'subtitleCover', step: '06', title: '字幕/封面/图文', desc: '生成视频封面和图文引流包，字幕也可在剪辑页直接处理。', action: '做包装' },
-  { key: 'publish', step: '07', title: '平台发布', desc: '自动继承视频、封面、标题、简介和话题，生成发布草稿。', action: '去发布' }
+  { key: 'copy', step: '01', title: '文案生产', desc: '先根据同行视频/资料仿写，输出标题、钩子和完整脚本。', action: '写文案' },
+  { key: 'shooting', step: '02', title: '脚本/拍摄', desc: '上传拍摄脚本或资料，生成提词器、镜头和补拍清单。', action: '做脚本' },
+  { key: 'assets', step: '03', title: '素材/数字人', desc: '选择数字人、自拍素材、采集视频或图文素材。', action: '选素材' },
+  { key: 'voice', step: '04', title: '配音分段', desc: '分段控制情绪、语速、音量和停顿，并生成真实时间轴。', action: '去配音' },
+  { key: 'video', step: '05', title: '成片合成', desc: '按素材顺序和配音时长自动铺满，字幕直接在剪辑页调整。', action: '去剪辑' },
+  { key: 'subtitleCover', step: '06', title: '图文窗口', desc: '单独处理图文引流包、封面和字幕重点。', action: '做图文' },
+  { key: 'growth', step: '07', title: '流量监控', desc: '录入发布数据，AI 判断投多少、投多久、是否继续投。', action: '看投流' }
 ]
 
 const badWords = ['最', '第一', '保证', '包赚', '稳赚', '绝对', '唯一', '国家级', '100%', '躺赚', '无风险']
@@ -702,7 +701,7 @@ function AppInner() {
   const [ad, setAd] = useState<AdAnalysisResponse | null>(null)
   const [platform, setPlatform] = useState('douyin')
   const [publish, setPublish] = useState<PlatformPublishResponse | null>(null)
-  const [lastHandoff, setLastHandoff] = useState('每个模块会读取前面结果；点击上方流程卡可直接跳到对应步骤。')
+  const [lastHandoff, setLastHandoff] = useState('新流程：先文案，再脚本/拍摄，再选素材或数字人，最后成片和投流复盘。')
   const [knowledgeDialog, setKnowledgeDialog] = useState({ open: false, source: '', title: '', content: '', tags: '老板口播,获客,短视频' })
 
   const [leadPlan, setLeadPlan] = useState<LeadAcquisitionPlanResponse | null>(null)
@@ -715,6 +714,8 @@ function AppInner() {
   const [heatCrawlerResult, setHeatCrawlerResult] = useState<HeatRadarRunResponse | null>(null)
   const [heatRewrite, setHeatRewrite] = useState<HeatRadarRewriteResponse | null>(null)
   const [heatCrawlerLimit, setHeatCrawlerLimit] = useState(3)
+  const [videoIntakeUrl, setVideoIntakeUrl] = useState('')
+  const [videoIntakeResult, setVideoIntakeResult] = useState<any>(null)
   const [expandedHeatGroups, setExpandedHeatGroups] = useState<Record<string, boolean>>({})
   const [heatAccountAudit, setHeatAccountAudit] = useState<HeatRadarAccountAuditResponse | null>(null)
   const [heatAutomationToken, setHeatAutomationToken] = useState('')
@@ -1613,6 +1614,47 @@ ${manualText || ''}`.trim()
     setActive('trend')
   }
 
+  async function handleShootingScriptFiles(files: FileList | null) {
+    if (!files || files.length === 0) return
+    const list = Array.from(files)
+    try {
+      await run('上传脚本资料', () => uploadAssets(files, 'provided'))
+      const textFile = list.find(file => /\.(txt|md|srt|csv)$/i.test(file.name))
+      if (textFile) {
+        const text = (await textFile.text()).slice(0, 6000)
+        setCopy(prev => ({
+          ...prev,
+          script: prev.script || text,
+          hook: prev.hook || text.split(/\n+/).map(x => x.trim()).filter(Boolean)[0]?.slice(0, 120) || prev.hook,
+        }))
+        setManualText(prev => `${prev ? prev + '\n\n' : ''}[脚本资料：${textFile.name}]\n${text.slice(0, 2500)}`)
+      }
+      await reloadAssets()
+      setLastHandoff(`已上传 ${list.length} 个脚本/资料文件。TXT/MD/SRT 会自动写入文案区；PDF/Word 先入素材库，后续可由 AI 按文件内容解析。`)
+    } catch (err: any) {
+      setError(`脚本资料上传失败：${err?.message || err}`)
+    }
+  }
+
+  async function analyzeHeatVideoIntake() {
+    const url = videoIntakeUrl.trim() || primaryHeat?.source_url || ''
+    if (!url) { setError('请先粘贴一个具体视频/笔记链接，或选择一条已采集热点。'); return }
+    const res = await run('下载并分析视频', () => apiPost<any>('/api/heat-radar/video-intake', {
+      token: heatAutomationToken,
+      account_name: primaryHeat?.account_name || heatDraft.name || '',
+      account_url: heatDraft.url || '',
+      platform: primaryHeat?.platform || heatDraft.platform || '抖音',
+      video_url: url,
+      title: primaryHeat?.topic || copy.title || '',
+      tags: heatRadarSeedKeywords.slice(0, 12),
+      notes: '页面手动触发：下载视频后交给视频理解模型，再做账号价值判断',
+      auto_save_review: true
+    }))
+    setVideoIntakeResult(res || null)
+    await reloadHeatRadarData()
+    setLastHandoff('视频已进入下载/理解/审核流程。若平台限制下载，会保留链接和标题并给出规则评分。')
+  }
+
   async function makeShootingPlan() {
     const res = await run('生成运营拍摄任务', () => apiPost<ShootingPlanResponse>('/api/shooting-plan', {
       title: copy.title,
@@ -1972,19 +2014,19 @@ ${manualText || ''}`.trim()
   }
 
   const stageCards: Array<{ key: ModuleKey; label: string; done: boolean; value: string }> = [
-    { key: 'assets', label: '1 素材选择', done: selectedMaterialIds.length > 0, value: selectedMaterialIds.length ? `已选 ${selectedMaterialIds.length} 个素材` : '先选素材' },
-    { key: 'copy', label: '2 文案生产', done: Boolean(copy.hook || copy.script), value: copy.title || '待生成' },
-    { key: 'voice', label: '3 配音分段', done: Boolean(audio), value: voiceSegments.length ? `${voiceSegments.length} 段 · ${selectedVoiceName}` : '待配音' },
-    { key: 'digitalHuman', label: '4 数字人', done: Boolean(digitalHuman?.video_url), value: digitalHuman?.video_url ? `数字人 #${digitalHumanVersion}` : '可选' },
-    { key: 'video', label: '5 剪辑合成', done: Boolean(video?.video_url), value: video?.video_name || '待合成' },
-    { key: 'subtitleCover', label: '6 字幕/封面/图文', done: Boolean(cover || subtitleAI || generatedImage || graphicPost), value: graphicPost ? `${graphicPost.images.length}张图文` : cover?.cover_name || generatedImage?.image_name || (subtitleAI ? '重点字幕已生成' : '待处理') },
-    { key: 'publish', label: '7 平台发布', done: Boolean(publish), value: publish?.status || '草稿预留' }
+    { key: 'copy', label: '1 文案生产', done: Boolean(copy.hook || copy.script), value: copy.title || '先出标题/脚本' },
+    { key: 'shooting', label: '2 脚本/拍摄', done: Boolean(shootingPlan), value: shootingPlan?.summary || '上传脚本或生成任务单' },
+    { key: 'assets', label: '3 素材/数字人', done: selectedMaterialIds.length > 0 || Boolean(digitalHumanAvatarId), value: selectedMaterialIds.length ? `已选 ${selectedMaterialIds.length} 个素材` : (digitalHumanAvatarId ? '已选数字人形象' : '待选素材') },
+    { key: 'voice', label: '4 配音分段', done: Boolean(audio), value: voiceSegments.length ? `${voiceSegments.length} 段 · ${selectedVoiceName}` : '待配音' },
+    { key: 'video', label: '5 成片合成', done: Boolean(video?.video_url), value: video?.video_name || '待合成' },
+    { key: 'subtitleCover', label: '6 图文窗口', done: Boolean(cover || subtitleAI || generatedImage || graphicPost), value: graphicPost ? `${graphicPost.images.length}张图文` : cover?.cover_name || generatedImage?.image_name || (subtitleAI ? '重点字幕已生成' : '待处理') },
+    { key: 'growth', label: '7 流量监控', done: Boolean(growthDecision), value: growthDecision?.decision || '待复盘' }
   ]
 
   const digitalHumanStatus = String(digitalHuman?.status || '').toLowerCase()
   const hasRunningDigitalHumanTask = Boolean(digitalHuman?.job_id && !digitalHuman?.video_url && !['failed', 'error', 'done'].includes(digitalHumanStatus))
   const digitalHumanPrimaryLabel = hasRunningDigitalHumanTask ? '查询当前数字人任务' : '生成数字人片段'
-  const contentNavKeys: ModuleKey[] = ['shooting','oneClick','assets','copy','voice','digitalHuman','video','subtitleCover','publish','collector']
+  const contentNavKeys: ModuleKey[] = ['copy','shooting','assets','digitalHuman','voice','video','subtitleCover','growth']
 
   return <div className="appShell">
     <aside className="studioNav">
@@ -1994,7 +2036,7 @@ ${manualText || ''}`.trim()
       </div>
       <button className="startButton" onClick={() => setActive('dashboard')}>开始使用</button>
       <nav>
-        {modules.filter(item => ['dashboard','monitor','lead'].includes(item.key)).map(item => <button key={item.key} className={active === item.key ? 'active' : ''} onClick={() => setActive(item.key)}>
+        {modules.filter(item => ['dashboard','lead','competitor'].includes(item.key)).map(item => <button key={item.key} className={active === item.key ? 'active' : ''} onClick={() => setActive(item.key)}>
           <span>{item.icon}</span><b>{item.title}</b><em>{item.tag}</em>
         </button>)}
         <button className={contentNavOpen ? 'groupHeader open' : 'groupHeader'} onClick={() => setContentNavOpen(!contentNavOpen)}>
@@ -2003,7 +2045,7 @@ ${manualText || ''}`.trim()
         {contentNavOpen && contentNavKeys.map(key => modules.find(item => item.key === key)).filter(Boolean).map(item => <button key={item!.key} className={`subNav ${active === item!.key ? 'active' : ''}`} onClick={() => setActive(item!.key)}>
           <span>{item!.icon}</span><b>{item!.title}</b><em>{item!.tag}</em>
         </button>)}
-        {modules.filter(item => ['strategy','competitor','trend','growth'].includes(item.key)).map(item => <button key={item.key} className={active === item.key ? 'active' : ''} onClick={() => setActive(item.key)}>
+        {modules.filter(item => ['strategy','collector','monitor'].includes(item.key)).map(item => <button key={item.key} className={active === item.key ? 'active' : ''} onClick={() => setActive(item.key)}>
           <span>{item.icon}</span><b>{item.title}</b><em>{item.tag}</em>
         </button>)}
       </nav>
@@ -2014,8 +2056,8 @@ ${manualText || ''}`.trim()
       <header className="heroHeader">
         <div>
           <span className="eyebrow">AI Growth Studio</span>
-          <h1>从同行洞察到成片发布，一套闭环获客生产线</h1>
-          <p>把热度、文案、素材、配音和剪辑放在一条线上，少来回找文件，直接出能用的内容。</p>
+          <h1>从同行视频到原创成片，一套轻量内容生产线</h1>
+          <p>先分析真实视频和资料，再出脚本、选数字人/自拍素材、生成图文与成片。</p>
         </div>
         <div className="scoreCard"><span>当前进度</span><strong>{leadScore}%</strong><small>{leadScore >= 80 ? '可以进入发布前检查' : '继续补齐内容和素材'}</small></div>
       </header>
@@ -2101,7 +2143,7 @@ ${manualText || ''}`.trim()
           </button>)}
         </div>
         <div className="opsGrid">
-          {modules.filter(x => ['monitor','lead','strategy','competitor','trend','shooting','growth'].includes(x.key)).map(item => <button className="moduleCard compact" key={item.key} onClick={() => setActive(item.key)}>
+          {modules.filter(x => ['lead','competitor','copy','shooting','assets','subtitleCover','growth','collector'].includes(x.key)).map(item => <button className="moduleCard compact" key={item.key} onClick={() => setActive(item.key)}>
             <span className="moduleIcon">{item.icon}</span>
             <strong>{item.title}</strong>
             <p>{item.desc}</p>
@@ -2130,11 +2172,11 @@ ${manualText || ''}`.trim()
         <div className="heatHeroV2">
           <div>
             <Pill tone="green">Heat Radar OS</Pill>
-            <h2>热度雷达 · 博主热点池</h2>
-            <p>只看真实采集到的博主内容。先按博主沉淀最近/高热视频，再让 AI 拆解热点结构、判断目标客户，并生成原创口播和图文方向。</p>
+            <h2>热度雷达 · 视频分析池</h2>
+            <p>只展示真实采集、真实导入或已下载分析的视频/笔记。雷达负责判断客户意图和改写方向，不再混放账号库表单。</p>
           </div>
           <div className="heatHeroActions">
-            <Button busy={busy === '单账号采集真实热度' ? busy : ''} label="采集下一个账号" onClick={runPublicHeatCrawler} kind="primary" />
+            <Button busy={busy === '单账号采集真实热度' ? busy : ''} label="尝试采集账号" onClick={runPublicHeatCrawler} kind="primary" />
             <Button busy={busy === 'AI 仿写热度内容' ? busy : ''} label="AI 拆解并改写" onClick={makeHeatRewritePlan} kind="primary" disabled={!todayHeatSnapshots.length} />
             <Button label="清空旧缓存" onClick={generateDailyHeatRadar} kind="ghost" />
           </div>
@@ -2144,7 +2186,7 @@ ${manualText || ''}`.trim()
           <div className="heatCommandCard hot">
             <span>当前状态</span>
             <strong>{heatWorkbenchStatus}</strong>
-            <p>{todayHeatSnapshots.length ? `已读取 ${todayHeatSnapshots.length} 条真实内容，覆盖 ${heatAccountGroups.length} 个博主。` : '还没有真实内容。先添加博主主页，再点“采集下一个账号”。'}</p>
+            <p>{todayHeatSnapshots.length ? `已读取 ${todayHeatSnapshots.length} 条真实内容，覆盖 ${heatAccountGroups.length} 个博主。` : '还没有真实内容。先去「账号库」添加账号，或用上方视频分析入口导入具体视频。'}</p>
           </div>
           <div className="heatCommandCard">
             <span>主热点</span>
@@ -2163,11 +2205,18 @@ ${manualText || ''}`.trim()
           </div>
         </div>
 
+        <div className="videoIntakePanel">
+          <div><strong>同行视频分析入口</strong><p>具体视频/笔记链接会先下载到后端，再交给视频理解模型提取字幕、画面、结构和客户意图，最后写入账号审核记录。</p></div>
+          <input value={videoIntakeUrl} onChange={e => setVideoIntakeUrl(e.target.value)} placeholder="粘贴具体视频/笔记链接；留空则使用当前主热点链接" />
+          <Button busy={busy === '下载并分析视频' ? busy : ''} label="下载并分析视频" onClick={analyzeHeatVideoIntake} kind="soft" />
+          {videoIntakeResult && <span>{videoIntakeResult.r2_video_url ? '已上传 R2 并分析' : '已保存链接/标题'} · {videoIntakeResult.review?.decision || '待审核'} {videoIntakeResult.review?.score || 0}分</span>}
+        </div>
+
         <div className="heatMainGridV2">
           <div className="heatStreamPanel bloggerHeatPanel">
             <div className="miniHeader"><div><h3>按博主折叠的真实热点</h3><p>每个博主默认展示最高热一条；展开后查看最近/高热内容，方便后面批量管理多个账号。</p></div></div>
             <div className="heatBloggerList">
-              {heatAccountGroups.length === 0 && <Empty>还没有真实内容。先在下方账号库添加博主主页，再点“采集下一个账号”。</Empty>}
+              {heatAccountGroups.length === 0 && <Empty>还没有真实内容。先去「账号库」添加账号，或导入具体视频/笔记链接。</Empty>}
               {heatAccountGroups.map((group, groupIndex) => {
                 const isOpen = expandedHeatGroups[group.key] ?? groupIndex === 0
                 const shownItems = isOpen ? group.items : group.items.slice(0, 1)
@@ -2215,30 +2264,15 @@ ${manualText || ''}`.trim()
                 <em>{v.conversion_goal}</em>
                 <div className="sourceMiniList">{(v.source_evidence || []).slice(0, 2).map((x, idx) => <span key={`${x}-${idx}`}>{x}</span>)}</div>
                 <div className="scriptPreview">{v.script}</div>
-                <div className="miniActions"><button onClick={() => applyHeatRewriteVariant(v)}>同步到文案</button><button onClick={() => { setOneClickInstruction(`根据热度雷达真实热点「${v.source_topic || v.title}」生成完整视频方案，目标客户：${v.target_audience}，承接资料：${v.lead_magnet}。必须基于热度依据原创改写，不能照抄竞品。`); setActive('oneClick') }}>生成完整方案</button></div>
+                <div className="miniActions"><button onClick={() => applyHeatRewriteVariant(v)}>同步到文案</button><button onClick={() => { applyHeatRewriteVariant(v); setActive('copy') }}>进入文案生产</button></div>
               </div>)}</div>
             </div>}
           </div>
         </div>
 
         <details className="heatSourceDrawer">
-          <summary><strong>账号库 / 采集设置</strong><span>日常少改；主要用于添加博主、更新 Cookie 后刷新。</span></summary>
+          <summary><strong>采集接入 / 备用导入</strong><span>账号库已独立成页面；这里只保留手动导入、OpenClaw 和视频分析接入。</span></summary>
           <div className="heatControlGrid compactControls">
-            <div className="heatPanel">
-              <div className="miniHeader"><div><h3>博主账号库</h3><p>固定要长期观察的博主；系统按账号抓最近/高热内容，后续账号多了也能折叠管理。</p></div><Pill tone="green">账号管理</Pill></div>
-              <div className="grid4">
-                <Field label="账号名称"><input value={heatDraft.name} onChange={e => setHeatDraft({ ...heatDraft, name: e.target.value })} placeholder="例如：Justin陈皆廷" /></Field>
-                <Field label="平台"><select value={heatDraft.platform} onChange={e => setHeatDraft({ ...heatDraft, platform: e.target.value })}><option>抖音</option><option>小红书</option><option>视频号</option><option>百度</option><option>其他</option></select></Field>
-                <Field label="主页/视频链接"><input value={heatDraft.url} onChange={e => setHeatDraft({ ...heatDraft, url: e.target.value })} placeholder="粘贴账号主页或重点视频链接" /></Field>
-                <Field label="监控标签"><input value={heatDraft.tags} onChange={e => setHeatDraft({ ...heatDraft, tags: e.target.value })} placeholder="马来西亚房产,第二家园" /></Field>
-              </div>
-              <Field label="备注 / 备用真实数据"><textarea value={heatDraft.notes} onChange={e => setHeatDraft({ ...heatDraft, notes: e.target.value })} placeholder="可留运营备注；平台限制时也可以粘贴一行真实数据：标题 + 链接 + 点赞/评论/收藏/分享。" /></Field>
-              <div className="buttonRow"><button className="btn primary" onClick={addHeatAccount}>保存博主</button><button className="btn soft" onClick={() => reloadHeatRadarData()}>刷新账号库</button><Field label="每个博主采集"><input type="number" min={1} max={6} value={heatCrawlerLimit} onChange={e => setHeatCrawlerLimit(Math.max(1, Math.min(6, Number(e.target.value) || 3)))} /></Field></div>
-              <div className="syncStatusBar"><span>API：{API_BASE}</span><span>Supabase：{health?.memory_enabled ? '已连接' : '未连接'}</span><span>Workspace：{health?.workspace_id || 'default'}</span><span>R2：{health?.r2_enabled ? '已连接' : '未连接'}</span></div>
-              <div className="heatAccountFilters"><input value={heatAccountSearch} onChange={e => setHeatAccountSearch(e.target.value)} placeholder="搜索账号名 / 标签 / 链接" /><select value={heatPlatformFilter} onChange={e => setHeatPlatformFilter(e.target.value)}><option value="all">全部平台</option><option value="抖音">抖音</option><option value="小红书">小红书</option><option value="视频号">视频号</option><option value="百度">百度</option><option value="其他">其他</option></select></div>
-              <div className="heatAccountList compact">{heatAccounts.length === 0 && <Empty>暂无已收录博主。可通过上方表单添加。</Empty>}{filteredHeatAccounts.map(acc => { const open = Boolean(expandedHeatAccounts[acc.id]); return <div className="heatAccountRow" key={acc.id}><button className="heatAccountRowHead" onClick={() => setExpandedHeatAccounts(prev => ({ ...prev, [acc.id]: !open }))}><strong>{acc.name || '未命名账号'}</strong><span>{acc.platform}</span><em>{acc.tags || '未设置标签'}</em><b>{open ? '收起' : '展开'}</b></button>{open && <div className="heatAccountRowBody"><p>{acc.notes || '暂无备注'}</p><small>{acc.url || '未填链接'}</small><div className="miniActions"><button onClick={() => toggleHeatAccount(acc.id)}>{acc.pinned ? '取消置顶' : '置顶'}</button><button onClick={() => removeHeatAccount(acc.id)}>删除</button></div></div>}</div> })}</div>
-            </div>
-
             <div className="heatPanel">
               <div className="miniHeader"><div><h3>备用导入</h3><p>平台验证、Cookie 过期或第三方数据暂未接入时，用这里批量补真实热度行。</p></div><Pill tone="orange">备用</Pill></div>
               <Field label="粘贴竞品内容 / 评论 / 热词"><textarea value={manualHeatText} onChange={e => setManualHeatText(e.target.value)} placeholder="一行一条：标题 + 链接 + 赞/评论/收藏/分享" /></Field>
@@ -2291,7 +2325,7 @@ ${manualText || ''}`.trim()
         <div className="profileSection"><h3>私域承接与内容栏目</h3><div className="grid2"><Field label="私域承接物 / 报告清单"><textarea value={privateDomainAssets} onChange={e => setPrivateDomainAssets(e.target.value)} /></Field><Field label="内容栏目 / 选题方向"><textarea value={contentPillars} onChange={e => setContentPillars(e.target.value)} /></Field></div></div>
         <div className="profileSection"><h3>内容承接规则</h3><Field label="口播/拍摄风格要求（给内容生产用）"><textarea value={shootingBrief} onChange={e => setShootingBrief(e.target.value)} /></Field><Field label="报告/微信承接方式"><input value={reportDelivery} onChange={e => setReportDelivery(e.target.value)} /></Field></div>
         <div className="profileQuickActions">
-          <button onClick={() => setActive('oneClick')}>用档案生成完整视频方案</button>
+          <button onClick={() => setActive('copy')}>用档案生成视频脚本</button>
           <button onClick={generateDirectCopy}>生成短视频文案</button>
           <button onClick={makeGraphicPost}>生成图文引流包</button>
           <button onClick={makeShootingPlan}>生成拍摄方案</button>
@@ -2309,11 +2343,21 @@ ${manualText || ''}`.trim()
         {trendRadar ? <div className="resultBox"><h3>{trendRadar.summary}</h3><div className="trendGrid">{trendRadar.hot_topics?.map(item => <div className="trendCard" key={item.title}><div className="heat"><span>{item.heat}</span><em>热度</em></div><strong>{item.title}</strong><p>{item.reason}</p><small>角度：{item.angle}</small><small>钩子：{item.suggested_hook}</small>{item.risk && <div className="warn">{item.risk}</div>}</div>)}</div><div className="splitGrid"><div><h4>内容角度</h4>{trendRadar.content_angles?.map(x => <p key={x}>· {x}</p>)}</div><div><h4>拍摄建议</h4>{trendRadar.shooting_suggestions?.map(x => <p key={x}>· {x}</p>)}</div><div><h4>监控词</h4><div className="chips">{trendRadar.monitor_keywords?.map(x => <Pill key={x}>{x}</Pill>)}</div></div></div></div> : <Empty>保存客户定位、账号库和采集结果后，系统会自动读取数据库生成行业雷达。</Empty>}
       </section>}
 
-      {active === 'competitor' && <section className="card modulePanel">
-        <div className="sectionHeader"><div><h2>竞品账号库</h2><p>把同行账号、定位、爆款特点沉淀到数据库。行业雷达、仿写改写、投流决策都会读取这些信息。</p></div><div className="headerActions"><Button label="刷新账号库" onClick={() => reloadMemoryContext()} kind="ghost" /><Button busy={busy === '保存竞品账号' ? busy : ''} label="加入账号库" onClick={addCompetitor} kind="soft" /></div></div>
-        <div className="grid4"><Field label="账号名称"><input value={competitorDraft.name} onChange={e => setCompetitorDraft({ ...competitorDraft, name: e.target.value })} placeholder="例如：天诺老吴" /></Field><Field label="平台"><select value={competitorDraft.platform} onChange={e => setCompetitorDraft({ ...competitorDraft, platform: e.target.value })}><option value="douyin">抖音</option><option value="shipinhao">视频号</option><option value="kuaishou">快手</option><option value="xiaohongshu">小红书</option></select></Field><Field label="主页/视频链接"><input value={competitorDraft.url} onChange={e => setCompetitorDraft({ ...competitorDraft, url: e.target.value })} placeholder="账号主页或爆款链接" /></Field><Field label="账号定位"><input value={competitorDraft.positioning} onChange={e => setCompetitorDraft({ ...competitorDraft, positioning: e.target.value })} placeholder="同城获客/投流/电商创业" /></Field></div>
-        <Field label="爆款特点 / 观察备注"><textarea value={competitorDraft.notes} onChange={e => setCompetitorDraft({ ...competitorDraft, notes: e.target.value })} placeholder="常用钩子、客户痛点、封面风格、评论区反馈、发布时间等" /></Field>
-        <div className="competitorList">{competitors.length === 0 && <Empty>还没有竞品账号。先加 3-5 个同行账号，系统会更懂行业。</Empty>}{competitors.map((c, i) => <div className="competitorCard" key={`${c.name}-${i}`}><div><strong>{c.name || '未命名账号'}</strong><Pill tone="purple">{c.platform}</Pill></div><p>{c.positioning || '未填写定位'}</p><small>{c.url}</small><em>{c.notes}</em><button onClick={() => setCompetitors(prev => prev.filter((_, idx) => idx !== i))}>删除</button></div>)}</div>
+      {active === 'competitor' && <section className="card modulePanel accountLibraryPanel">
+        <div className="sectionHeader"><div><h2>账号库</h2><p>固定监控的博主/同行账号单独管理。热度雷达只看采集结果，这里只管账号、平台、标签和采集备注。</p></div><div className="headerActions"><Button label="刷新账号库" onClick={() => reloadHeatRadarData()} kind="ghost" /><Button busy={busy === '保存热度账号' ? busy : ''} label="保存账号" onClick={addHeatAccount} kind="soft" /></div></div>
+        <div className="accountLibraryGrid">
+          <div className="accountEditorCard">
+            <div className="grid2"><Field label="账号名称"><input value={heatDraft.name} onChange={e => setHeatDraft({ ...heatDraft, name: e.target.value })} placeholder="例如：Justin陈皆廷" /></Field><Field label="平台"><select value={heatDraft.platform} onChange={e => setHeatDraft({ ...heatDraft, platform: e.target.value })}><option>抖音</option><option>小红书</option><option>视频号</option><option>快手</option><option>其他</option></select></Field></div>
+            <Field label="主页/视频链接"><input value={heatDraft.url} onChange={e => setHeatDraft({ ...heatDraft, url: e.target.value })} placeholder="账号主页或重点视频链接" /></Field>
+            <Field label="监控标签"><input value={heatDraft.tags} onChange={e => setHeatDraft({ ...heatDraft, tags: e.target.value })} placeholder="马来西亚房产,第二家园,生活方式" /></Field>
+            <Field label="备注 / 采集策略"><textarea value={heatDraft.notes} onChange={e => setHeatDraft({ ...heatDraft, notes: e.target.value })} placeholder="例如：优先看置顶视频、近 3 天视频；生活类内容也可作为买房客户顾虑素材。" /></Field>
+            <div className="syncStatusBar"><span>API：{API_BASE}</span><span>Supabase：{health?.memory_enabled ? '已连接' : '未连接'}</span><span>Workspace：{health?.workspace_id || 'default'}</span><span>R2：{health?.r2_enabled ? '已连接' : '未连接'}</span></div>
+          </div>
+          <div className="accountListCard">
+            <div className="heatAccountFilters"><input value={heatAccountSearch} onChange={e => setHeatAccountSearch(e.target.value)} placeholder="搜索账号名 / 标签 / 链接" /><select value={heatPlatformFilter} onChange={e => setHeatPlatformFilter(e.target.value)}><option value="all">全部平台</option><option value="抖音">抖音</option><option value="小红书">小红书</option><option value="视频号">视频号</option><option value="快手">快手</option><option value="其他">其他</option></select></div>
+            <div className="heatAccountList compact">{filteredHeatAccounts.length === 0 && <Empty>暂无账号。先在左侧添加账号，保存后会进入统一账号库。</Empty>}{filteredHeatAccounts.map(acc => { const open = Boolean(expandedHeatAccounts[acc.id]); return <div className="heatAccountRow" key={acc.id}><button className="heatAccountRowHead" onClick={() => setExpandedHeatAccounts(prev => ({ ...prev, [acc.id]: !open }))}><strong>{acc.name || '未命名账号'}</strong><span>{acc.platform}</span><em>{acc.tags || '未设置标签'}</em><b>{open ? '收起' : '展开'}</b></button>{open && <div className="heatAccountRowBody"><p>{acc.notes || '暂无备注'}</p><small>{acc.url || '未填链接'}</small><div className="miniActions"><button onClick={() => { setVideoIntakeUrl(acc.url); setActive('lead') }}>去雷达分析</button><button onClick={() => toggleHeatAccount(acc.id)}>{acc.pinned ? '取消置顶' : '置顶'}</button><button onClick={() => removeHeatAccount(acc.id)}>删除</button></div></div>}</div> })}</div>
+          </div>
+        </div>
       </section>}
 
       {active === 'collector' && <section className="card modulePanel">
@@ -2367,12 +2411,20 @@ https://www.douyin.com/user/..." /></Field>
         <div className="memoryList"><h3>自动学习到的博主打法</h3>{(memoryContext?.events || []).filter((e: any) => e.event_type === 'auto_creator_learning').slice(0, 5).map((e: any) => <div className="memoryItem" key={e.id || e.created_at}><strong>{e.payload?.learning?.summary || e.title || '自动学习记录'}</strong><p>{(e.payload?.learning?.creator_methods || []).slice(0, 3).join('；')}</p><small>只学习结构方法，不照抄文案 · {e.created_at}</small></div>)}{!(memoryContext?.events || []).filter((e: any) => e.event_type === 'auto_creator_learning').length && <Empty>自动智能体跑过后，会把钩子公式、情绪推进和迁移规则沉淀到这里。</Empty>}</div>
       </section>}
 
-      {active === 'copy' && <section className="card modulePanel">
-        <div className="sectionHeader"><div><h2>第二步：文案生产</h2><p>文案不再手填时长，不用再填时长。这里只改标题、开头、口播稿和发布文案。</p></div></div>
-        <div className="grid4"><Field label="素材状态"><input value={selectedMaterialIds.length ? `已选 ${selectedMaterialIds.length} 个素材` : '未选素材，建议先去素材选择'} readOnly /></Field><Field label="标题字数方向"><input value="短、狠、直给" readOnly /></Field><Field label="开头策略"><input value="痛点/反差/警告/结果" readOnly /></Field><Field label="当前风险"><input value={matchedBadWords.length ? `${matchedBadWords.length} 个敏感词` : '暂无明显风险'} readOnly /></Field></div>
-        <div className="buttonRow"><Button busy={busy === '原创改写' ? busy : ''} label="第二步：仿写改写" onClick={rewrite} /><Button busy={busy === '生成文案' ? busy : ''} label="直接生成新文案" onClick={generateDirectCopy} kind="ghost" /><Button busy={busy === '文案细改' ? busy : ''} label="细改/优化文案" onClick={refineCopy} kind="soft" disabled={!currentScript} /><Button label="把当前文案放进知识库" onClick={() => openKnowledgeSave('手动保存当前文案', copy)} kind="ghost" disabled={!currentScript} /><Button label="继续去配音分段" onClick={() => setActive('voice')} kind="soft" disabled={!currentScript} /></div>
+      {active === 'copy' && <section className="card modulePanel copyFirstPanel">
+        <div className="sectionHeader"><div><h2>第一步：文案生产</h2><p>先根据同行视频、资料脚本或客户目标做原创仿写，输出标题、前三秒钩子和完整视频脚本。这里不再走旧版“一键生成”。</p></div><div className="headerActions"><Button busy={busy === 'AI 仿写热度内容' ? busy : ''} label="读取热度并仿写" onClick={makeHeatRewritePlan} disabled={!todayHeatSnapshots.length} kind="soft" /><Button busy={busy === '生成文案' ? busy : ''} label="直接生成文案" onClick={generateDirectCopy} /></div></div>
+        <div className="productionRouteGrid">
+          {[
+            ['digital_human','数字人口播','适合老板不出镜，脚本 + 配音 + 数字人自动成片'],
+            ['self_shoot','真人拍摄','适合自己随手拍，系统给提词器、镜头和补拍清单'],
+            ['mixed_assets','素材混剪','适合项目、学校、生活 B-roll 和资料截图混剪'],
+            ['graphic_post','图文引流','适合小红书/朋友圈收藏型内容']
+          ].map(([value,title,desc]) => <button key={value} className={oneClickOutputType === value ? 'selected' : ''} onClick={() => setOneClickOutputType(value)}><strong>{title}</strong><span>{desc}</span></button>)}
+        </div>
+        <div className="grid4"><Field label="当前生产方式"><input value={oneClickOutputType === 'digital_human' ? '数字人' : oneClickOutputType === 'self_shoot' ? '真人拍摄' : oneClickOutputType === 'graphic_post' ? '图文' : '素材混剪'} readOnly /></Field><Field label="素材状态"><input value={selectedMaterialIds.length ? `已选 ${selectedMaterialIds.length} 个素材` : '未选素材，可后面再选'} readOnly /></Field><Field label="开头策略"><input value="痛点/反差/警告/结果" readOnly /></Field><Field label="当前风险"><input value={matchedBadWords.length ? `${matchedBadWords.length} 个敏感词` : '暂无明显风险'} readOnly /></Field></div>
+        <div className="buttonRow"><Button busy={busy === '原创改写' ? busy : ''} label="仿写改写" onClick={rewrite} kind="soft" /><Button busy={busy === '文案细改' ? busy : ''} label="AI 细改" onClick={refineCopy} disabled={!currentScript} kind="soft" /><Button label="生成拍摄脚本" onClick={makeShootingPlan} disabled={!currentScript} kind="ghost" /><Button label="加入配音分段" onClick={() => { setVoiceSegments(currentScript.split(/\n+/).map(x => x.trim()).filter(Boolean).slice(0, 8).map(text => ({ ...defaultSegment, text }))); setActive('voice') }} kind="ghost" /><Button label="保存到知识库" onClick={() => openKnowledgeSave('手动保存当前文案', copy)} kind="ghost" disabled={!currentScript} /></div>
         <div className="flowSource"><strong>当前参考</strong><span>{industry} · {audience}</span><span>热点/同行：{extract?.summary ? shortText(extract.summary) : '暂无'}</span><span>记忆库：{memoryContext?.memory_enabled ? '已连接' : '本地模式'}</span></div>
-        <div className="copyEditor"><Field label="标题"><input value={copy.title} onChange={e => setCopy({ ...copy, title: e.target.value })} /></Field><Field label="黄金三秒钩子"><textarea value={copy.hook} onChange={e => setCopy({ ...copy, hook: e.target.value })} /></Field><Field label="完整口播稿"><textarea className="scriptArea" value={copy.script} onChange={e => setCopy({ ...copy, script: e.target.value })} placeholder="这里可以精修口播稿；选中文本后点“加入分段”。" /></Field><Field label="发布简介"><textarea value={copy.description} onChange={e => setCopy({ ...copy, description: e.target.value })} /></Field><Field label="细改要求"><input value={refineInstruction} onChange={e => setRefineInstruction(e.target.value)} /></Field></div>
+        <div className="copyEditor"><Field label="标题"><input value={copy.title} onChange={e => setCopy({ ...copy, title: e.target.value })} /></Field><Field label="黄金三秒钩子"><textarea value={copy.hook} onChange={e => setCopy({ ...copy, hook: e.target.value })} /></Field><Field label="完整视频脚本"><textarea className="scriptArea" value={copy.script} onChange={e => setCopy({ ...copy, script: e.target.value })} placeholder="这里精修完整脚本；可以来自热度仿写、PDF资料、拍摄稿或手动输入。" /></Field><Field label="发布简介"><textarea value={copy.description} onChange={e => setCopy({ ...copy, description: e.target.value })} /></Field><Field label="细改要求"><input value={refineInstruction} onChange={e => setRefineInstruction(e.target.value)} /></Field></div>
         <div className="chips">{matchedBadWords.length ? matchedBadWords.map(x => <Pill key={x} tone="red">风险词：{x}</Pill>) : <Pill tone="green">违禁词初筛通过</Pill>}</div>
       </section>}
 
@@ -2439,9 +2491,16 @@ https://www.douyin.com/user/..." /></Field>
         <div className="resultBox"><h3>素材匹配建议</h3><p>图片：每张建议 2-4 秒；视频：每段截 2-5 秒。人物口播主体在画面中间时，字幕建议放底部安全区，避免挡脸。</p></div>
       </section>}
 
-      {active === 'shooting' && <section className="card modulePanel">
-        <div className="sectionHeader"><div><h2>拍摄 / 口播文案策划</h2><p>这里专门管“拍什么、怎么说、需要什么画面”。截流获客雷达只负责真实数据和线索机会，不混在一起。</p></div><Button busy={busy === '生成运营拍摄任务' ? busy : ''} label="生成拍摄/口播任务单" onClick={makeShootingPlan} disabled={!currentScript} /></div>
-        {shootingPlan ? <div className="resultBox"><h3>{shootingPlan.summary}</h3><div className="shotTable">{shootingPlan.shot_tasks?.map((task, i) => <div className="shotRow" key={`${task.scene}-${i}`}><span>{task.priority}</span><strong>{task.scene}</strong><em>{task.duration}</em><p>{task.content}</p><small>{task.camera}</small><small>{task.props}</small></div>)}</div><div className="splitGrid"><div><h4>B-roll 补拍</h4>{shootingPlan.broll_list?.map(x => <p key={x}>· {x}</p>)}</div><div><h4>提词器短句</h4>{shootingPlan.teleprompter?.map(x => <p key={x}>· {x}</p>)}</div><div><h4>拍摄检查</h4>{shootingPlan.checklist?.map(x => <p key={x}>· {x}</p>)}</div></div></div> : <Empty>先生成文案，再生成拍摄任务单。</Empty>}
+      {active === 'shooting' && <section className="card modulePanel shootingScriptPanel">
+        <div className="sectionHeader"><div><h2>第二步：脚本 / 拍摄工作台</h2><p>这里处理“上传脚本/资料 → AI 解析 → 生成拍摄任务、提词器、B-roll 和素材需求”。用户可选数字人，也可自己拍摄。</p></div><Button busy={busy === '生成运营拍摄任务' ? busy : ''} label="分析脚本并生成拍摄清单" onClick={makeShootingPlan} disabled={!currentScript} /></div>
+        <div className="scriptDropZone" onDragOver={e => e.preventDefault()} onDrop={e => { e.preventDefault(); handleShootingScriptFiles(e.dataTransfer.files) }}>
+          <input id="shooting-script-upload" type="file" multiple accept=".pdf,.doc,.docx,.txt,.md,.srt,.csv,video/*,image/*" onChange={e => handleShootingScriptFiles(e.target.files)} />
+          <label htmlFor="shooting-script-upload"><strong>拖动上传脚本 / PDF / 拍摄素材</strong><span>TXT/MD/SRT 会自动写入文案区；PDF/Word 先进入素材库，后续可由 AI 解析或作为拍摄资料。</span></label>
+        </div>
+        <div className="productionRouteGrid compact">
+          {[['digital_human','用数字人出镜'],['self_shoot','自己拍摄'],['mixed_assets','素材混剪'],['graphic_post','图文窗口']].map(([value,label]) => <button key={value} className={oneClickOutputType === value ? 'selected' : ''} onClick={() => setOneClickOutputType(value)}>{label}</button>)}
+        </div>
+        {shootingPlan ? <div className="resultBox"><h3>{shootingPlan.summary}</h3><div className="shotTable">{shootingPlan.shot_tasks?.map((task, i) => <div className="shotRow" key={`${task.scene}-${i}`}><span>{task.priority}</span><strong>{task.scene}</strong><em>{task.duration}</em><p>{task.content}</p><small>{task.camera}</small><small>{task.props}</small></div>)}</div><div className="splitGrid"><div><h4>B-roll 补拍</h4>{shootingPlan.broll_list?.map(x => <p key={x}>· {x}</p>)}</div><div><h4>提词器短句</h4>{shootingPlan.teleprompter?.map(x => <p key={x}>· {x}</p>)}</div><div><h4>拍摄检查</h4>{shootingPlan.checklist?.map(x => <p key={x}>· {x}</p>)}</div></div></div> : <Empty>先在文案生产里生成/粘贴脚本，或把脚本文件拖到上方上传区。</Empty>}
       </section>}
 
       {active === 'video' && <section className="card modulePanel">
