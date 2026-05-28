@@ -1895,3 +1895,68 @@ input:focus,textarea:focus,select:focus{border-color:#111827!important;box-shado
   .headerActions,.buttonRow{width:auto!important;display:flex!important;}
 }
 @media (max-width:760px){.appShell{grid-template-columns:210px minmax(900px,1fr)!important;}}
+
+/* === 2026 workflow simplification pass: calmer nav + Top5 radar + account-level details === */
+:root{
+  --nav-bg:#111827;
+  --nav-bg-2:#172033;
+  --nav-line:rgba(255,255,255,.09);
+  --nav-text:#e5edf8;
+  --nav-muted:#91a0b7;
+  --accent:#2dd4bf;
+  --accent-2:#60a5fa;
+}
+body{
+  background:
+    radial-gradient(circle at 4% 0%,rgba(45,212,191,.08),transparent 26%),
+    radial-gradient(circle at 100% 18%,rgba(96,165,250,.10),transparent 26%),
+    linear-gradient(180deg,#f7fafc 0%,#eef3f8 100%);
+}
+.studioNav{
+  background:linear-gradient(180deg,var(--nav-bg) 0%,#0d111a 100%) !important;
+  border-color:rgba(255,255,255,.10) !important;
+  box-shadow:0 24px 70px rgba(2,6,23,.28) !important;
+  color:var(--nav-text);
+  scrollbar-color:rgba(148,163,184,.55) transparent;
+}
+.brandMark{border-color:var(--nav-line)}
+.logo{background:linear-gradient(135deg,#2dd4bf,#60a5fa 70%,#818cf8) !important;box-shadow:0 18px 40px rgba(45,212,191,.22)}
+.brandMark strong{color:#fff}.brandMark span{color:var(--nav-muted)}
+.startButton{background:linear-gradient(135deg,#18243a,#0f172a) !important;border:1px solid rgba(255,255,255,.08);color:#f8fafc !important}
+.studioNav nav button{
+  color:var(--nav-text) !important;
+  background:transparent !important;
+  border-color:transparent !important;
+  transition:transform .16s ease, background .16s ease, border-color .16s ease, box-shadow .16s ease;
+}
+.studioNav nav button span{background:rgba(255,255,255,.08) !important;border-color:rgba(255,255,255,.08) !important;color:#dbeafe !important}
+.studioNav nav button b{color:inherit}.studioNav nav button em{background:rgba(255,255,255,.08) !important;border-color:rgba(255,255,255,.08) !important;color:#c7d2fe !important}
+.studioNav nav button:hover{transform:translateX(4px) scale(1.015);background:rgba(255,255,255,.065) !important;border-color:rgba(255,255,255,.10) !important}
+.studioNav nav button.active{background:linear-gradient(135deg,rgba(45,212,191,.18),rgba(96,165,250,.13)) !important;border-color:rgba(45,212,191,.45) !important;box-shadow:0 18px 36px rgba(45,212,191,.10) !important}
+.studioNav nav button.active span{background:linear-gradient(135deg,#2dd4bf,#60a5fa) !important;color:#06111f !important}
+.miniStatus{background:rgba(255,255,255,.06) !important;border-color:rgba(255,255,255,.10) !important}.miniStatus span,.miniStatus small{color:var(--nav-muted)}
+.heroHeader{
+  min-height:150px !important;
+  border-radius:28px !important;
+  padding:26px 30px !important;
+  background:linear-gradient(135deg,#0f172a 0%,#172554 58%,#0f766e 100%) !important;
+}
+.heroHeader h1{font-size:34px !important;max-width:980px}.scoreCard{border-radius:22px}.scoreCard strong{font-size:44px !important}
+.progressRail{grid-template-columns:repeat(7,minmax(140px,1fr))}.stage{min-height:86px !important;padding:12px 14px !important;border-radius:18px}.stage span{width:28px;height:28px}.stage strong{margin:8px 0 2px}.stage em{-webkit-line-clamp:1}
+.handoffBar{margin-top:14px}.globalError{font-size:13px;line-height:1.55;padding:10px 14px;border-radius:16px}
+.card{border-radius:28px;background:rgba(255,255,255,.96)}
+.sectionHeader{border-bottom-color:#eef2f7}.btn,.addSegment,.headerActions button,.buttonRow button{transition:transform .16s ease,box-shadow .16s ease,filter .16s ease}.btn:hover,.addSegment:hover,.headerActions button:hover,.buttonRow button:hover{transform:translateY(-2px) scale(1.01)}
+
+/* Radar v3 */
+.heatRadarV3{padding:24px}.radarHeaderV3{display:flex;align-items:flex-start;justify-content:space-between;gap:18px;margin-bottom:16px;padding-bottom:18px;border-bottom:1px solid #eef2f7}.radarHeaderV3 h2{font-size:30px;margin:8px 0 6px;letter-spacing:-.04em}.radarHeaderV3 p{margin:0;color:#607089;line-height:1.68;max-width:860px}.radarMetricStrip{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin:12px 0 18px}.radarMetricStrip>div{border:1px solid #dbe5f0;border-radius:20px;background:linear-gradient(180deg,#fff,#f8fbff);padding:14px 16px;box-shadow:0 8px 24px rgba(15,23,42,.04)}.radarMetricStrip span{display:block;color:#64748b;font-size:12px;font-weight:850}.radarMetricStrip strong{display:block;font-size:24px;letter-spacing:-.04em;margin:4px 0;color:#0f172a}.radarMetricStrip em{font-style:normal;color:#64748b;font-size:12px}
+.radarWorkbenchGrid{display:grid;grid-template-columns:minmax(0,1.05fr) minmax(360px,.95fr);gap:18px;align-items:start}.radarTopPanel,.radarRewriteDock{border:1px solid #dbe5f0;border-radius:26px;background:linear-gradient(180deg,#fff,#f9fbff);padding:18px;box-shadow:0 12px 34px rgba(15,23,42,.055)}.radarTopList{display:grid;gap:12px;margin-top:12px}.radarTopItem{display:grid;grid-template-columns:42px 1fr;gap:14px;border:1px solid #e2e8f0;background:#fff;border-radius:22px;padding:14px;transition:transform .16s ease,box-shadow .16s ease,border-color .16s ease}.radarTopItem:hover{transform:translateY(-2px) scale(1.006);box-shadow:0 18px 42px rgba(15,23,42,.08);border-color:#b9ccff}.radarRank{width:42px;height:42px;border-radius:15px;background:linear-gradient(135deg,#2dd4bf,#335cff);color:#fff;display:grid;place-items:center;font-weight:950}.radarTopBody h4{font-size:18px;line-height:1.48;margin:8px 0;color:#0f172a}.radarTopBody p{margin:0;color:#475569;line-height:1.62}.radarTopBody em{display:block;margin-top:6px;font-style:normal;color:#64748b;line-height:1.55}.compactActions{margin-top:10px}.compactActions a,.compactActions button{border:1px solid #cbd8e7;background:#f8fbff;border-radius:999px;padding:7px 11px;color:#1d4ed8;font-weight:850}.compactActions button:hover,.compactActions a:hover{background:#eef4ff}
+.radarRewriteDock .rewriteEmptyState.compact{min-height:220px}.compactRewrite .targetStrip{grid-template-columns:1fr}.compactRewrite .rewriteVariantGrid{grid-template-columns:1fr}.compactRewrite .rewriteVariantCard{min-height:auto}.radarIngestDock{margin-top:18px;border:1px solid #dbe5f0;border-radius:24px;background:#fff;overflow:hidden}.radarIngestDock>summary{display:flex;justify-content:space-between;gap:12px;align-items:center;padding:16px 18px;cursor:pointer;font-weight:950}.radarIngestDock>summary span{font-weight:700;color:#64748b}.radarIngestGrid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;padding:0 18px 18px}.videoIngestMini input{height:48px}.openClawMini .endpointBox code{font-size:12px}.compactWarn{font-size:12px;padding:8px 10px;border-radius:12px;margin-top:8px}
+
+/* Account library details */
+.accountLibraryPanel .sectionHeader p{max-width:820px}.heatAccountRowHead{grid-template-columns:minmax(140px,1.1fr) 70px minmax(120px,1fr) 80px auto !important;transition:transform .16s ease,background .16s ease}.heatAccountRowHead:hover{transform:translateX(2px);background:#f8fbff}.heatAccountRowHead small{font-size:12px;color:#64748b;font-weight:850}.accountHeatMiniList{display:grid;gap:8px;margin:12px 0}.accountHeatMini{display:grid;grid-template-columns:28px 1fr auto;gap:10px;align-items:start;border:1px solid #e2e8f0;background:#fff;border-radius:16px;padding:10px}.accountHeatMini span{width:28px;height:28px;border-radius:10px;background:#eef4ff;color:#1d4ed8;display:grid;place-items:center;font-weight:950}.accountHeatMini strong{font-size:14px}.accountHeatMini p{margin:3px 0 0;color:#64748b;font-size:12px;line-height:1.5}.accountHeatMini em{font-style:normal;color:#16a34a;font-weight:950;font-size:12px}.accountEditorCard,.accountListCard{border-radius:24px}
+
+/* Collector page becomes status-only, because action entry is inside radar */
+body:has(.heatRadarV3) .collectorAssist{border-color:#dbeafe}
+
+@media (max-width:1280px){.radarWorkbenchGrid{grid-template-columns:1fr}.radarIngestGrid{grid-template-columns:1fr}.radarMetricStrip{grid-template-columns:repeat(2,minmax(0,1fr))}.heroHeader{grid-template-columns:1fr}.scoreCard{max-width:280px}.progressRail{overflow-x:auto}}
+@media (max-width:820px){.studioNav{background:#111827!important}.heroHeader h1{font-size:26px!important}.radarHeaderV3{flex-direction:column}.radarMetricStrip{grid-template-columns:1fr}.radarTopItem{grid-template-columns:34px 1fr}.radarRank{width:34px;height:34px}.heatAccountRowHead{grid-template-columns:1fr auto!important}.heatAccountRowHead span,.heatAccountRowHead em,.heatAccountRowHead small{display:none}.progressRail{display:flex}.stage{min-width:150px}}

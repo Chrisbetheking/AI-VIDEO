@@ -314,18 +314,18 @@ const defaultSegment: VoiceSegment = {
 }
 
 const modules: { key: ModuleKey; icon: string; title: string; desc: string; tag: string }[] = [
-  { key: 'dashboard', icon: '总', title: '工作台总览', desc: '只保留采集、文案、素材、成片和投流复盘主链路', tag: '总览' },
-  { key: 'lead', icon: '雷', title: '热度雷达', desc: '只看真实采集/导入的视频、笔记和可改写热点', tag: '雷达' },
-  { key: 'competitor', icon: '账', title: '账号库', desc: '固定监控博主、平台、标签和采集策略', tag: '账号' },
-  { key: 'copy', icon: '文', title: '1. 文案生产', desc: '先仿写、再出标题、钩子、完整视频脚本', tag: '文案' },
-  { key: 'shooting', icon: '拍', title: '2. 脚本 / 拍摄', desc: '上传资料或脚本，生成拍摄任务、提词器和 B-roll 清单', tag: '脚本' },
-  { key: 'assets', icon: '素', title: '3. 素材选择', desc: '选择数字人、自拍素材、采集视频或图文素材', tag: '素材' },
-  { key: 'voice', icon: '声', title: '4. 配音导演', desc: '克隆音色、分段情绪、语速停顿', tag: '配音' },
+  { key: 'dashboard', icon: '总', title: '工作台总览', desc: '看今天采集、待产出和投流复盘', tag: '总览' },
+  { key: 'lead', icon: '雷', title: '热度雷达', desc: '今日 Top5、视频分析、导入入口和 AI 改写', tag: '雷达' },
+  { key: 'competitor', icon: '账', title: '账号库', desc: '固定监控博主；点开账号再看对应热点', tag: '账号' },
+  { key: 'copy', icon: '文', title: '文案生产', desc: '先仿写，再出标题、钩子和完整视频脚本', tag: '文案' },
+  { key: 'shooting', icon: '拍', title: '脚本 / 拍摄', desc: '上传资料或脚本，生成拍摄任务、提词器和 B-roll 清单', tag: '脚本' },
+  { key: 'assets', icon: '素', title: '素材选择', desc: '选择数字人、自拍素材、采集视频或图文素材', tag: '素材' },
   { key: 'digitalHuman', icon: '人', title: '数字人', desc: '可选数字人口播，也可跳过改用真人拍摄素材', tag: '数字人' },
-  { key: 'video', icon: '剪', title: '5. 成片合成', desc: '素材顺序、截取区间、字幕烧录和导出', tag: '成片' },
+  { key: 'voice', icon: '声', title: '配音导演', desc: '克隆音色、分段情绪、语速停顿', tag: '配音' },
+  { key: 'video', icon: '剪', title: '成片合成', desc: '素材顺序、截取区间、字幕烧录和导出', tag: '成片' },
   { key: 'subtitleCover', icon: '图', title: '图文窗口', desc: '图文引流包、封面、字幕重点单独处理', tag: '图文' },
-  { key: 'growth', icon: '投', title: '流量监控', desc: '开放平台未接入前，先手动录入数据并让 AI 判断是否投流', tag: '投流' },
-  { key: 'collector', icon: '采', title: '采集接入', desc: 'OpenClaw、云 Worker、安卓/模拟器采集方案预留', tag: '接入' },
+  { key: 'growth', icon: '投', title: '流量监控', desc: '手动录入数据，AI 判断投多少、投多久、是否继续投', tag: '投流' },
+  { key: 'collector', icon: '采', title: '采集状态', desc: '云 Worker、OpenClaw、安卓/模拟器采集状态预留', tag: '采集' },
   { key: 'strategy', icon: '档', title: '获客档案', desc: '业务定位、关键词、客群、资料包和承接钩子', tag: '档案' },
   { key: 'monitor', icon: '控', title: '系统状态', desc: 'API、Supabase、R2、任务队列和诊断', tag: '状态' },
   { key: 'oneClick', icon: '旧', title: '旧版一键生成', desc: '保留旧接口，默认不在主流程展示', tag: '隐藏' },
@@ -773,7 +773,7 @@ function AppInner() {
       return !id.startsWith('seed_') && !signal.includes('本地关键词模拟') && !topic.includes('本地关键词模拟')
     })
     const todayList = realList.filter(x => x.date === today)
-    return (todayList.length ? todayList : realList).slice(0, 3)
+    return (todayList.length ? todayList : realList).slice(0, 5)
   }, [heatSnapshots])
 
   const primaryHeat = todayHeatSnapshots[0] || null
@@ -2056,8 +2056,8 @@ ${manualText || ''}`.trim()
       <header className="heroHeader">
         <div>
           <span className="eyebrow">AI Growth Studio</span>
-          <h1>从同行视频到原创成片，一套轻量内容生产线</h1>
-          <p>先分析真实视频和资料，再出脚本、选数字人/自拍素材、生成图文与成片。</p>
+          <h1>同行洞察、脚本生产、素材成片一体化</h1>
+          <p>先看真实热点，再做脚本、素材、数字人或真人拍摄，最后复盘投流。</p>
         </div>
         <div className="scoreCard"><span>当前进度</span><strong>{leadScore}%</strong><small>{leadScore >= 80 ? '可以进入发布前检查' : '继续补齐内容和素材'}</small></div>
       </header>
@@ -2168,143 +2168,88 @@ ${manualText || ''}`.trim()
       </section>}
 
 
-      {active === 'lead' && <section className="card modulePanel leadRadarPanel heatRadarPanel heatRadarV2">
-        <div className="heatHeroV2">
+      {active === 'lead' && <section className="card modulePanel leadRadarPanel heatRadarPanel heatRadarV3">
+        <div className="radarHeaderV3">
           <div>
-            <Pill tone="green">Heat Radar OS</Pill>
-            <h2>热度雷达 · 视频分析池</h2>
-            <p>只展示真实采集、真实导入或已下载分析的视频/笔记。雷达负责判断客户意图和改写方向，不再混放账号库表单。</p>
+            <Pill tone="green">Heat Radar</Pill>
+            <h2>热度雷达 · 今日重点 Top5</h2>
+            <p>这里不展开每个博主的全部内容，只展示今日/最近最值得跟进的 5 条真实热点。账号详情和对应历史热点放到「账号库」里点开查看。</p>
           </div>
           <div className="heatHeroActions">
-            <Button busy={busy === '单账号采集真实热度' ? busy : ''} label="尝试采集账号" onClick={runPublicHeatCrawler} kind="primary" />
-            <Button busy={busy === 'AI 仿写热度内容' ? busy : ''} label="AI 拆解并改写" onClick={makeHeatRewritePlan} kind="primary" disabled={!todayHeatSnapshots.length} />
-            <Button label="清空旧缓存" onClick={generateDailyHeatRadar} kind="ghost" />
+            <Button busy={busy === '单账号采集真实热度' ? busy : ''} label="尝试云端采集" onClick={runPublicHeatCrawler} kind="ghost" />
+            <Button busy={busy === 'AI 仿写热度内容' ? busy : ''} label="AI 读 Top5 并改写" onClick={makeHeatRewritePlan} kind="primary" disabled={!todayHeatSnapshots.length} />
           </div>
         </div>
 
-        <div className="heatCommandGrid">
-          <div className="heatCommandCard hot">
-            <span>当前状态</span>
-            <strong>{heatWorkbenchStatus}</strong>
-            <p>{todayHeatSnapshots.length ? `已读取 ${todayHeatSnapshots.length} 条真实内容，覆盖 ${heatAccountGroups.length} 个博主。` : '还没有真实内容。先去「账号库」添加账号，或用上方视频分析入口导入具体视频。'}</p>
-          </div>
-          <div className="heatCommandCard">
-            <span>主热点</span>
-            <strong>{primaryHeat ? shortText(primaryHeat.topic, 38) : '暂无'}</strong>
-            <p>{primaryHeat ? `${primaryHeat.platform} · ${primaryHeat.account_name} · ${primaryHeat.score} 分` : '刷新后这里显示最值得跟的博主内容。'}</p>
-          </div>
-          <div className="heatCommandCard">
-            <span>目标承接</span>
-            <strong>{heatRewrite?.chosen_target ? shortText(heatRewrite.chosen_target, 34) : '待 AI 判断'}</strong>
-            <p>{heatRewrite?.lead_magnet || activeReport?.title || '根据热点自动匹配资料包'}</p>
-          </div>
-          <div className="heatCommandCard">
-            <span>账号库同步</span>
-            <strong>{heatAccounts.length} 个博主</strong>
-            <p>{health?.memory_enabled ? `Supabase 已连接 · ${health?.workspace_id || 'default'}` : '数据服务未连接，请检查后端配置'}</p>
-          </div>
+        <div className="radarMetricStrip">
+          <div><span>热点池</span><strong>{todayHeatSnapshots.length}</strong><em>今日/最近入库</em></div>
+          <div><span>真实指标</span><strong>{realHeatCount}</strong><em>含点赞/评论/收藏/分享</em></div>
+          <div><span>账号库</span><strong>{heatAccounts.length}</strong><em>{health?.workspace_id || 'default'}</em></div>
+          <div><span>AI 状态</span><strong>{heatRewrite ? '已改写' : '待分析'}</strong><em>{heatWorkbenchStatus}</em></div>
         </div>
 
-        <div className="videoIntakePanel">
-          <div><strong>同行视频分析入口</strong><p>具体视频/笔记链接会先下载到后端，再交给视频理解模型提取字幕、画面、结构和客户意图，最后写入账号审核记录。</p></div>
-          <input value={videoIntakeUrl} onChange={e => setVideoIntakeUrl(e.target.value)} placeholder="粘贴具体视频/笔记链接；留空则使用当前主热点链接" />
-          <Button busy={busy === '下载并分析视频' ? busy : ''} label="下载并分析视频" onClick={analyzeHeatVideoIntake} kind="soft" />
-          {videoIntakeResult && <span>{videoIntakeResult.r2_video_url ? '已上传 R2 并分析' : '已保存链接/标题'} · {videoIntakeResult.review?.decision || '待审核'} {videoIntakeResult.review?.score || 0}分</span>}
-        </div>
-
-        <div className="heatMainGridV2">
-          <div className="heatStreamPanel bloggerHeatPanel">
-            <div className="miniHeader"><div><h3>按博主折叠的真实热点</h3><p>每个博主默认展示最高热一条；展开后查看最近/高热内容，方便后面批量管理多个账号。</p></div></div>
-            <div className="heatBloggerList">
-              {heatAccountGroups.length === 0 && <Empty>还没有真实内容。先去「账号库」添加账号，或导入具体视频/笔记链接。</Empty>}
-              {heatAccountGroups.map((group, groupIndex) => {
-                const isOpen = expandedHeatGroups[group.key] ?? groupIndex === 0
-                const shownItems = isOpen ? group.items : group.items.slice(0, 1)
-                return <div className="heatBloggerGroup" key={group.key}>
-                  <button className="heatBloggerHead" onClick={() => setExpandedHeatGroups(prev => ({ ...prev, [group.key]: !isOpen }))}>
-                    <div>
-                      <span>{group.platform}</span>
-                      <strong>{group.name}</strong>
-                      <em>{group.items.length} 条内容 · 最高 {group.bestScore} 分</em>
-                    </div>
-                    <b>{isOpen ? '收起' : '展开'}</b>
-                  </button>
-                  <div className="heatTimeline grouped">
-                    {shownItems.map((item, index) => <div className="heatTimelineItem compact" key={item.id}>
-                      <div className="timelineRank">{index + 1}</div>
-                      <div className="timelineBody">
-                        <div className="timelineMeta"><span>{item.platform}</span><span>{item.account_name}</span><strong>{item.score} 分</strong></div>
-                        <h4>{item.topic}</h4>
-                        <p>{item.intent}</p>
-                        <em>{item.signal}</em>
-                        <div className="timelineActions">
-                          {item.source_url && <a href={item.source_url} target="_blank" rel="noreferrer">打开原链接</a>}
-                          <button onClick={makeHeatRewritePlan}>基于这批热点改写</button>
-                        </div>
-                      </div>
-                    </div>)}
+        <div className="radarWorkbenchGrid">
+          <div className="radarTopPanel">
+            <div className="miniHeader">
+              <div><h3>今日重点 Top5</h3><p>按分数和真实互动信号排序；不在这里展开博主全集，避免页面越来越长。</p></div>
+              <Pill tone="blue">只看重点</Pill>
+            </div>
+            <div className="radarTopList">
+              {todayHeatSnapshots.length === 0 && <Empty>暂无真实热点。可以在下方粘贴具体视频/笔记链接，或让云采集 Worker 推送数据。</Empty>}
+              {todayHeatSnapshots.map((item, index) => <article className="radarTopItem" key={item.id}>
+                <div className="radarRank">{index + 1}</div>
+                <div className="radarTopBody">
+                  <div className="timelineMeta"><span>{item.platform || '平台'}</span><span>{item.account_name || '未命名账号'}</span><strong>{item.score || 0} 分</strong></div>
+                  <h4>{item.topic || '未命名热点'}</h4>
+                  <p>{item.intent || item.recommended_action || '等待 AI 判断客户意图。'}</p>
+                  <em>{item.signal || '暂无真实互动指标'}</em>
+                  <div className="timelineActions compactActions">
+                    {item.source_url && <a href={item.source_url} target="_blank" rel="noreferrer">打开原链接</a>}
+                    <button onClick={() => { setVideoIntakeUrl(item.source_url || ''); setLastHandoff('已选中这条热点，可在下方继续做视频理解或 AI 改写。') }}>选中分析</button>
+                    <button onClick={makeHeatRewritePlan}>基于 Top5 改写</button>
                   </div>
                 </div>
-              })}
+              </article>)}
             </div>
           </div>
 
-          <div className="heatRewriteStudio">
-            <div className="miniHeader"><div><h3>AI 热点改写工作台</h3><p>AI 会读取左侧真实热点的标题、账号、链接和互动信号，先拆结构，再输出目标客户、原创角度和脚本。</p></div><Pill tone="purple">热点 → 目标 → 脚本</Pill></div>
-            {!heatRewrite && <div className="rewriteEmptyState"><strong>等待 AI 改写</strong><p>{heatSourceLines.length ? `已锁定真实热点依据：${shortText(heatSourceLines[0], 88)}` : '采集成功后，点“AI 读热点改写”。'}</p><Button busy={busy === 'AI 仿写热度内容' ? busy : ''} label="AI 拆解热点并改写" onClick={makeHeatRewritePlan} kind="primary" disabled={!todayHeatSnapshots.length} /></div>}
-            {heatRewrite && <div className="heatRewriteV2">
-              <div className="sourceEvidenceBox"><h4>AI 使用的热点依据</h4>{(heatRewrite.source_evidence?.length ? heatRewrite.source_evidence : heatSourceLines).slice(0, 5).map((x, i) => <p key={`${x}-${i}`}>· {x}</p>)}</div>
+          <div className="radarRewriteDock">
+            <div className="miniHeader"><div><h3>AI 热点改写</h3><p>读取 Top5 的标题、账号、链接和互动信号，先判断客户意图，再生成原创角度和脚本。</p></div><Pill tone="purple">热点 → 脚本</Pill></div>
+            {!heatRewrite && <div className="rewriteEmptyState compact"><strong>等待 AI 改写</strong><p>{heatSourceLines.length ? `已锁定热点依据：${shortText(heatSourceLines[0], 96)}` : '有真实热点后，点“AI 读 Top5 并改写”。'}</p><Button busy={busy === 'AI 仿写热度内容' ? busy : ''} label="AI 拆解 Top5" onClick={makeHeatRewritePlan} kind="primary" disabled={!todayHeatSnapshots.length} /></div>}
+            {heatRewrite && <div className="heatRewriteV2 compactRewrite">
               <div className="targetStrip compact"><div><span>目标人群</span><strong>{heatRewrite.chosen_target}</strong><p>{heatRewrite.target_reason}</p></div><div><span>内容目标</span><strong>{heatRewrite.content_objective}</strong><p>{heatRewrite.primary_intent}</p></div><div><span>承接资料</span><strong>{heatRewrite.lead_magnet}</strong><p>{heatRewrite.rewrite_strategy?.slice(0, 2).join(' / ')}</p></div></div>
-              <div className="rewriteVariantGrid v2">{heatRewrite.variants?.map((v, i) => <div className="rewriteVariantCard" key={`${v.title}-${i}`}>
+              <div className="rewriteVariantGrid v2">{heatRewrite.variants?.slice(0, 3).map((v, i) => <div className="rewriteVariantCard" key={`${v.title}-${i}`}>
                 <Pill tone={i === 0 ? 'green' : 'purple'}>{i === 0 ? '推荐主推' : `备选 ${i + 1}`}</Pill>
-                <strong>{v.title}</strong>
-                <p>{v.hook}</p>
-                <small>来源热点：{v.source_topic}</small>
-                <small>打谁：{v.target_audience}</small>
-                <em>{v.conversion_goal}</em>
-                <div className="sourceMiniList">{(v.source_evidence || []).slice(0, 2).map((x, idx) => <span key={`${x}-${idx}`}>{x}</span>)}</div>
-                <div className="scriptPreview">{v.script}</div>
+                <strong>{v.title}</strong><p>{v.hook}</p><small>来源：{v.source_topic}</small><div className="scriptPreview">{v.script}</div>
                 <div className="miniActions"><button onClick={() => applyHeatRewriteVariant(v)}>同步到文案</button><button onClick={() => { applyHeatRewriteVariant(v); setActive('copy') }}>进入文案生产</button></div>
               </div>)}</div>
             </div>}
           </div>
         </div>
 
-        <details className="heatSourceDrawer">
-          <summary><strong>采集接入 / 备用导入</strong><span>账号库已独立成页面；这里只保留手动导入、OpenClaw 和视频分析接入。</span></summary>
-          <div className="heatControlGrid compactControls">
-            <div className="heatPanel">
-              <div className="miniHeader"><div><h3>备用导入</h3><p>平台验证、Cookie 过期或第三方数据暂未接入时，用这里批量补真实热度行。</p></div><Pill tone="orange">备用</Pill></div>
-              <Field label="粘贴竞品内容 / 评论 / 热词"><textarea value={manualHeatText} onChange={e => setManualHeatText(e.target.value)} placeholder="一行一条：标题 + 链接 + 赞/评论/收藏/分享" /></Field>
-              <div className="buttonRow"><button className="btn soft" onClick={importManualHeatData}>导入真实数据</button><button className="btn ghost" onClick={generateDailyHeatRadar}>清空旧缓存</button></div>
-              <div className="heatKeywordBox"><h4>内置社媒关键词池</h4><p>{heatRadarSeedKeywords.join(' / ')}</p></div>
-              <div className="crawlerNotice"><strong>采集边界</strong><p>只采集公开视频/账号页能公开返回的数据；不自动私信、不自动评论、不绕验证码。</p></div>
+        <details className="radarIngestDock" open>
+          <summary><strong>采集 / 视频分析 / 备用导入</strong><span>原「采集接入」已合并到雷达；云 Worker、OpenClaw、手动真实数据都从这里进入。</span></summary>
+          <div className="radarIngestGrid">
+            <div className="heatPanel videoIngestMini">
+              <div className="miniHeader"><div><h3>具体视频分析</h3><p>粘贴具体视频/笔记链接，后端下载后交给视频理解模型；如果平台限制下载，也会保留标题和链接入库。</p></div></div>
+              <input value={videoIntakeUrl} onChange={e => setVideoIntakeUrl(e.target.value)} placeholder="粘贴具体视频/笔记链接；也可以先点上方某条热点的“选中分析”" />
+              <div className="buttonRow"><Button busy={busy === '下载并分析视频' ? busy : ''} label="下载并分析视频" onClick={analyzeHeatVideoIntake} kind="soft" />{videoIntakeResult && <Pill tone={videoIntakeResult.r2_video_url ? 'green' : 'orange'}>{videoIntakeResult.review?.decision || '待审核'} · {videoIntakeResult.review?.score || 0}分</Pill>}</div>
             </div>
-
-            <div className="heatPanel openClawPanel">
-              <div className="miniHeader"><div><h3>OpenClaw 自动采集接入</h3><p>让外部采集器每天把博主最近内容推到这里；系统会自动判断账号值不值得加入固定库，太久不更新的账号会建议暂停。</p></div><Pill tone="purple">自动化接口</Pill></div>
-              <div className="endpointBox"><span>POST 接口</span><code>{API_BASE}/api/heat-radar/openclaw/ingest</code></div>
-              <div className="grid2">
-                <Field label="接口 Token，可选"><input value={heatAutomationToken} onChange={e => setHeatAutomationToken(e.target.value)} placeholder="和 Render 的 HEAT_RADAR_INGEST_TOKEN 保持一致" /></Field>
-                <Field label="账号时间规则"><input value="90 天无有效更新 → 建议暂停采集" readOnly /></Field>
-              </div>
-              <div className="buttonRow"><button className="btn soft" onClick={copyOpenClawExample}>复制接入 JSON 示例</button><button className="btn primary" onClick={auditHeatAccountValue}>审计博主价值</button></div>
-              {heatAccountAudit && <div className="auditBoard">
-                <div><strong>{heatAccountAudit.keep.length}</strong><span>继续固定</span></div>
-                <div><strong>{heatAccountAudit.watch.length}</strong><span>观察</span></div>
-                <div><strong>{heatAccountAudit.archive.length}</strong><span>建议暂停</span></div>
-                {[...heatAccountAudit.keep, ...heatAccountAudit.watch, ...heatAccountAudit.archive].slice(0, 6).map(item => <p key={`${item.account_name}-${item.decision}`}>· {item.account_name}：{item.decision}｜{item.score} 分｜{item.reason}</p>)}
-              </div>}
-              <details className="reviewDrawer" open>
-                <summary><strong>AI 收录判断记录</strong><span>最近 {heatAccountReviews.length} 条</span></summary>
-                <div className="reviewListCompact">{heatAccountReviews.length === 0 && <Empty>暂无审核记录。采集器上传或点击“审计博主价值”后会出现。</Empty>}{heatAccountReviews.slice(0, 20).map((r: any, idx: number) => <div className="reviewRow" key={`${r.id || r.account_url || r.account_name}-${idx}`}><strong>{r.account_name || '未命名账号'}</strong><Pill tone={r.decision === 'accept' ? 'green' : r.decision === 'reject' ? 'red' : r.decision === 'archive' ? 'orange' : 'purple'}>{r.decision || 'watch'} · {r.score || 0}</Pill><p>{r.reason || r.target_value || '暂无理由'}</p><small>{Array.isArray(r.content_opportunities) ? r.content_opportunities.slice(0, 2).join(' / ') : ''}</small></div>)}</div>
-              </details>
-              <div className="crawlerNotice"><strong>自动化建议</strong><p>OpenClaw/本地采集器负责打开平台、拿置顶视频和近期视频；本站负责入库、R2留存、视频理解、评分和 AI 改写。采集失败不清空旧结果。</p></div>
+            <div className="heatPanel">
+              <div className="miniHeader"><div><h3>备用导入</h3><p>采集器暂不可用时，粘贴真实标题、链接和互动指标，先跑 AI 判断和改写流程。</p></div><Pill tone="orange">备用</Pill></div>
+              <Field label="粘贴竞品内容 / 评论 / 热词"><textarea value={manualHeatText} onChange={e => setManualHeatText(e.target.value)} placeholder="一行一条：标题 + 链接 + 赞/评论/收藏/分享" /></Field>
+              <div className="buttonRow"><button className="btn soft" onClick={importManualHeatData}>导入真实数据</button><button className="btn ghost" onClick={generateDailyHeatRadar}>清理演示缓存</button></div>
+            </div>
+            <div className="heatPanel openClawMini">
+              <div className="miniHeader"><div><h3>OpenClaw / 云 Worker</h3><p>外部采集器每天把结果 POST 到这里。网站只负责入库、评分、R2 留存和 AI 改写。</p></div><Pill tone="purple">接口</Pill></div>
+              <div className="endpointBox"><span>POST</span><code>{API_BASE}/api/heat-radar/openclaw/ingest</code></div>
+              <Field label="接口 Token"><input value={heatAutomationToken} onChange={e => setHeatAutomationToken(e.target.value)} placeholder="和 HEAT_RADAR_INGEST_TOKEN 保持一致" /></Field>
+              <div className="buttonRow"><button className="btn soft" onClick={copyOpenClawExample}>复制 JSON 示例</button><button className="btn ghost" onClick={auditHeatAccountValue}>审计账号价值</button></div>
             </div>
           </div>
         </details>
 
-        {heatCrawlerResult && <div className="resultBox heatCrawlerResult slim"><h3>{heatCrawlerResult.analysis?.summary || '真实热度采集完成'}</h3><div className="splitGrid"><div><h4>跟进选题</h4>{(heatCrawlerResult.analysis?.content_angles || []).map((x: string) => <p key={x}>· {x}</p>)}</div><div><h4>客户意图</h4>{(heatCrawlerResult.analysis?.customer_intents || []).map((x: string) => <p key={x}>· {x}</p>)}</div><div><h4>资料承接</h4>{(heatCrawlerResult.analysis?.lead_magnets || []).map((x: string) => <p key={x}>· {x}</p>)}</div></div>{heatCrawlerResult.warnings?.slice(0, 5).map(w => <div className="warn" key={w}>{w}</div>)}</div>}
+        {heatCrawlerResult && <div className="resultBox heatCrawlerResult slim"><h3>{heatCrawlerResult.analysis?.summary || '真实热度采集完成'}</h3><div className="splitGrid"><div><h4>跟进选题</h4>{(heatCrawlerResult.analysis?.content_angles || []).map((x: string) => <p key={x}>· {x}</p>)}</div><div><h4>客户意图</h4>{(heatCrawlerResult.analysis?.customer_intents || []).map((x: string) => <p key={x}>· {x}</p>)}</div><div><h4>资料承接</h4>{(heatCrawlerResult.analysis?.lead_magnets || []).map((x: string) => <p key={x}>· {x}</p>)}</div></div>{heatCrawlerResult.warnings?.slice(0, 3).map(w => <div className="warn compactWarn" key={w}>{w}</div>)}</div>}
       </section>}
 
       {active === 'strategy' && <section className="card modulePanel industryProfilePanel">
@@ -2355,7 +2300,7 @@ ${manualText || ''}`.trim()
           </div>
           <div className="accountListCard">
             <div className="heatAccountFilters"><input value={heatAccountSearch} onChange={e => setHeatAccountSearch(e.target.value)} placeholder="搜索账号名 / 标签 / 链接" /><select value={heatPlatformFilter} onChange={e => setHeatPlatformFilter(e.target.value)}><option value="all">全部平台</option><option value="抖音">抖音</option><option value="小红书">小红书</option><option value="视频号">视频号</option><option value="快手">快手</option><option value="其他">其他</option></select></div>
-            <div className="heatAccountList compact">{filteredHeatAccounts.length === 0 && <Empty>暂无账号。先在左侧添加账号，保存后会进入统一账号库。</Empty>}{filteredHeatAccounts.map(acc => { const open = Boolean(expandedHeatAccounts[acc.id]); return <div className="heatAccountRow" key={acc.id}><button className="heatAccountRowHead" onClick={() => setExpandedHeatAccounts(prev => ({ ...prev, [acc.id]: !open }))}><strong>{acc.name || '未命名账号'}</strong><span>{acc.platform}</span><em>{acc.tags || '未设置标签'}</em><b>{open ? '收起' : '展开'}</b></button>{open && <div className="heatAccountRowBody"><p>{acc.notes || '暂无备注'}</p><small>{acc.url || '未填链接'}</small><div className="miniActions"><button onClick={() => { setVideoIntakeUrl(acc.url); setActive('lead') }}>去雷达分析</button><button onClick={() => toggleHeatAccount(acc.id)}>{acc.pinned ? '取消置顶' : '置顶'}</button><button onClick={() => removeHeatAccount(acc.id)}>删除</button></div></div>}</div> })}</div>
+            <div className="heatAccountList compact">{filteredHeatAccounts.length === 0 && <Empty>暂无账号。先在左侧添加账号，保存后会进入统一账号库。</Empty>}{filteredHeatAccounts.map(acc => { const open = Boolean(expandedHeatAccounts[acc.id]); const relatedHeat = heatSnapshots.filter(item => { const a = `${item.account_id || ''} ${item.account_name || ''}`.toLowerCase(); const n = `${acc.id || ''} ${acc.name || ''}`.toLowerCase(); return Boolean(acc.name && a.includes(acc.name.toLowerCase())) || Boolean(acc.id && a.includes(acc.id.toLowerCase())) || Boolean(acc.url && String(item.source_url || '').includes(acc.url)); }).slice(0, 8); return <div className="heatAccountRow" key={acc.id}><button className="heatAccountRowHead" onClick={() => setExpandedHeatAccounts(prev => ({ ...prev, [acc.id]: !open }))}><strong>{acc.name || '未命名账号'}</strong><span>{acc.platform}</span><em>{acc.tags || '未设置标签'}</em><small>{relatedHeat.length ? `${relatedHeat.length} 条热点` : '无热点'}</small><b>{open ? '收起' : '展开'}</b></button>{open && <div className="heatAccountRowBody"><p>{acc.notes || '暂无备注'}</p><small>{acc.url || '未填链接'}</small><div className="accountHeatMiniList">{relatedHeat.length === 0 ? <Empty>这个账号还没有对应热点；采集完成后会显示在这里。</Empty> : relatedHeat.map((item, idx) => <div className="accountHeatMini" key={item.id}><span>{idx + 1}</span><div><strong>{item.topic}</strong><p>{item.signal || item.intent}</p></div><em>{item.score || 0}分</em></div>)}</div><div className="miniActions"><button onClick={() => { setVideoIntakeUrl(acc.url); setActive('lead') }}>去雷达分析</button><button onClick={() => toggleHeatAccount(acc.id)}>{acc.pinned ? '取消置顶' : '置顶'}</button><button onClick={() => removeHeatAccount(acc.id)}>删除</button></div></div>}</div> })}</div>
           </div>
         </div>
       </section>}
