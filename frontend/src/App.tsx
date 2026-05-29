@@ -662,6 +662,11 @@ function AppInner() {
   const [modelStatus, setModelStatus] = useState<ModelStatusResponse | null>(null)
   const [jobs, setJobs] = useState<JobItem[]>([])
   const [contentNavOpen, setContentNavOpen] = useState(true)
+  const [navCollapsed, setNavCollapsed] = useState(() => window.localStorage.getItem('ai_video_nav_collapsed_v1') === '1')
+
+  useEffect(() => {
+    window.localStorage.setItem('ai_video_nav_collapsed_v1', navCollapsed ? '1' : '0')
+  }, [navCollapsed])
 
   const [industry, setIndustry] = useState(malaysiaProfilePreset.industry)
   const [audience, setAudience] = useState(malaysiaProfilePreset.audience)
@@ -2184,24 +2189,33 @@ ${manualText || ''}`.trim()
   const digitalHumanPrimaryLabel = hasRunningDigitalHumanTask ? '查询当前数字人任务' : '生成数字人片段'
   const contentNavKeys: ModuleKey[] = ['copy','shooting','assets','digitalHuman','voice','video','subtitleCover','growth']
 
-  return <div className="appShell">
-    <aside className="studioNav">
+  return <div className={`appShell ${navCollapsed ? 'navCollapsed' : ''}`}>
+    <aside className={`studioNav ${navCollapsed ? 'collapsed' : ''}`} aria-label="主导航">
       <div className="brandMark">
         <div className="logo">AI</div>
-        <div><strong>AI 视频增长中枢</strong><span>采集 · 创作 · 合成 · 转化</span></div>
+        <div className="brandText"><strong>AI 视频增长中枢</strong><span>采集 · 创作 · 合成 · 转化</span></div>
       </div>
-      <button className="startButton" onClick={() => setActive('dashboard')}>开始使用</button>
+      <button
+        type="button"
+        className="navCollapseButton"
+        aria-label={navCollapsed ? '展开左侧菜单' : '折叠左侧菜单'}
+        title={navCollapsed ? '展开左侧菜单' : '折叠左侧菜单'}
+        onClick={() => setNavCollapsed(v => !v)}
+      >
+        <span>{navCollapsed ? '›' : '‹'}</span><b>{navCollapsed ? '展开菜单' : '折叠菜单'}</b>
+      </button>
+      <button className="startButton" title="开始使用" onClick={() => setActive('dashboard')}>开始使用</button>
       <nav>
-        {modules.filter(item => ['dashboard','lead','competitor'].includes(item.key)).map(item => <button key={item.key} className={active === item.key ? 'active' : ''} onClick={() => setActive(item.key)}>
+        {modules.filter(item => ['dashboard','lead','competitor'].includes(item.key)).map(item => <button key={item.key} title={item.title} className={active === item.key ? 'active' : ''} onClick={() => setActive(item.key)}>
           <span>{item.icon}</span><b>{item.title}</b><em>{item.tag}</em>
         </button>)}
-        <button className={contentNavOpen ? 'groupHeader open' : 'groupHeader'} onClick={() => setContentNavOpen(!contentNavOpen)}>
+        <button title="内容生产" className={contentNavOpen ? 'groupHeader open' : 'groupHeader'} onClick={() => setContentNavOpen(!contentNavOpen)}>
           <span>生</span><b>内容生产</b><em>{contentNavOpen ? '收起' : '展开'}</em>
         </button>
-        {contentNavOpen && contentNavKeys.map(key => modules.find(item => item.key === key)).filter(Boolean).map(item => <button key={item!.key} className={`subNav ${active === item!.key ? 'active' : ''}`} onClick={() => setActive(item!.key)}>
+        {contentNavOpen && contentNavKeys.map(key => modules.find(item => item.key === key)).filter(Boolean).map(item => <button key={item!.key} title={item!.title} className={`subNav ${active === item!.key ? 'active' : ''}`} onClick={() => setActive(item!.key)}>
           <span>{item!.icon}</span><b>{item!.title}</b><em>{item!.tag}</em>
         </button>)}
-        {modules.filter(item => ['strategy','collector','monitor'].includes(item.key)).map(item => <button key={item.key} className={active === item.key ? 'active' : ''} onClick={() => setActive(item.key)}>
+        {modules.filter(item => ['strategy','collector','monitor'].includes(item.key)).map(item => <button key={item.key} title={item.title} className={active === item.key ? 'active' : ''} onClick={() => setActive(item.key)}>
           <span>{item.icon}</span><b>{item.title}</b><em>{item.tag}</em>
         </button>)}
       </nav>
