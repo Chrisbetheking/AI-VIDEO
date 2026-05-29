@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, List, Optional
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -965,9 +965,9 @@ class HeatRadarVideoIntakeRequest(BaseModel):
 
 class HeatRadarVideoIntakeResponse(BaseModel):
     ok: bool = True
-    item: Dict[str, Any] = Field(default_factory=dict)
-    review: Dict[str, Any] = Field(default_factory=dict)
-    extraction: Dict[str, Any] = Field(default_factory=dict)
+    item: dict[str, Any] = Field(default_factory=dict)
+    review: dict[str, Any] = Field(default_factory=dict)
+    extraction: dict[str, Any] = Field(default_factory=dict)
     r2_video_url: str = ''
     warnings: List[str] = Field(default_factory=list)
     next_actions: List[str] = Field(default_factory=list)

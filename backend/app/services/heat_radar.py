@@ -1831,13 +1831,27 @@ async def analyze_heat_radar_video_intake(settings: Settings, memory: MemoryStor
         except Exception as exc:
             warnings.append(f'强推理模型审核失败，已使用规则评分：{str(exc)[:220]}')
 
-    saved_item = memory.insert('heat_radar_items', item)
-    if saved_item.get('_memory_warning'):
+    # 兼容不同阶段 Supabase 表结构：先尝试完整字段；失败时给出明确提示，避免接口直接 500。
+    saved_item: Dict[str, Any] = {}
+    try:
+        saved_item = memory.insert('heat_radar_items', item)
+        if saved_item.get('_memory_warning'):
+            warnings.append(saved_item['_memory_warning'])
+    except Exception as exc:
+        # 不阻断 ECS 采集链路。通常原因是 Supabase heat_radar_items 表缺字段。
+        # 运行 backend/supabase_video_intake_fix.sql 后再重试即可真正入库。
+        saved_item = item
+        saved_item['_memory_warning'] = f'heat_radar_items 入库失败：{str(exc)[:300]}'
         warnings.append(saved_item['_memory_warning'])
+        warnings.append('请在 Supabase SQL Editor 运行 backend/supabase_video_intake_fix.sql。')
+
     if bool(getattr(req, 'auto_save_review', True)):
-        saved_review = memory.insert('heat_radar_account_reviews', {'run_id': f'video_intake_{today_key()}', 'source_name': 'video_intake', **review, 'raw': {'item_id': saved_item.get('id'), 'extraction': extraction}, 'created_at': now_iso()})
-        if saved_review.get('_memory_warning'):
-            warnings.append(saved_review['_memory_warning'])
+        try:
+            saved_review = memory.insert('heat_radar_account_reviews', {'run_id': f'video_intake_{today_key()}', 'source_name': 'video_intake', **review, 'raw': {'item_id': saved_item.get('id'), 'extraction': extraction}, 'created_at': now_iso()})
+            if saved_review.get('_memory_warning'):
+                warnings.append(saved_review['_memory_warning'])
+        except Exception as exc:
+            warnings.append(f'账号审核记录入库失败：{str(exc)[:220]}')
 
     return {
         'ok': True,
