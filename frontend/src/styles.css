@@ -2025,3 +2025,49 @@ body:has(.heatRadarV3) .collectorAssist{border-color:#dbeafe}
   .collectorEvent { grid-template-columns: 1fr; }
   .collectorEvent small { grid-column: 1; }
 }
+
+/* Collector live one-line rolling report */
+.collectorTickerBox{
+  margin-top:14px;
+  border:1px solid rgba(20,184,166,.28);
+  border-radius:18px;
+  background:linear-gradient(90deg,rgba(15,23,42,.96),rgba(15,118,110,.92));
+  color:#eafffb;
+  overflow:hidden;
+  display:grid;
+  grid-template-columns:auto minmax(0,1fr);
+  align-items:center;
+  box-shadow:0 16px 40px rgba(15,23,42,.12);
+}
+.collectorTickerLabel{
+  padding:12px 14px;
+  font-weight:950;
+  color:#99f6e4;
+  border-right:1px solid rgba(255,255,255,.14);
+  white-space:nowrap;
+}
+.collectorTickerTrack{
+  overflow:hidden;
+  white-space:nowrap;
+  min-width:0;
+}
+.collectorTickerTrack span{
+  display:inline-block;
+  padding:12px 16px;
+  min-width:100%;
+  animation:collectorTickerMove 38s linear infinite;
+}
+.collectorTickerBox:hover .collectorTickerTrack span{animation-play-state:paused;}
+@keyframes collectorTickerMove{
+  0%{transform:translateX(0)}
+  100%{transform:translateX(-55%)}
+}
+.collectorEventList.compactReport{max-height:360px;overflow:auto;padding-right:4px;}
+.collectorEventList.compactReport .collectorEvent{grid-template-columns:112px minmax(0,1fr);}
+.collectorEventList.compactReport .collectorEvent strong{font-size:13px;line-height:1.55;}
+.collectorEventList.compactReport .collectorEvent small{font-size:11px;}
+@media (max-width:820px){
+  .collectorTickerBox{grid-template-columns:1fr;}
+  .collectorTickerLabel{border-right:0;border-bottom:1px solid rgba(255,255,255,.14);}
+  .collectorTickerTrack span{animation-duration:26s;}
+}

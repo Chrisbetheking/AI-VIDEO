@@ -105,6 +105,7 @@ type CollectorProgressEvent = {
   error_detail?: string
   created_at?: string
   progress?: Record<string, any>
+  raw?: Record<string, any>
 }
 
 type CollectorProgressState = {
@@ -220,6 +221,30 @@ function safeText(value: unknown, fallback = '') {
 function safeNumber(value: unknown, fallback = 0) {
   const n = Number(value)
   return Number.isFinite(n) ? n : fallback
+}
+
+function formatCollectorEventLine(ev: CollectorProgressEvent, index = 0) {
+  const stage = safeText(ev.stage, 'event').toUpperCase()
+  const title = safeText(ev.video_title || ev.message || ev.account_name, '-')
+  const account = safeText(ev.account_name, '')
+  const detail = safeText(ev.error_detail || ev.message || ev.video_url || ev.created_at, '')
+  const response = (ev.raw as any)?.response || {}
+  const review = response?.review || (ev.raw as any)?.review || {}
+  const decision = safeText(review?.decision || response?.decision, '')
+  const score = review?.score ?? response?.score
+  const reason = safeText(review?.reason || response?.reason || response?.summary, '')
+  const warnings = Array.isArray(response?.warnings) ? response.warnings.filter(Boolean).slice(0, 2).join('；') : ''
+  const prefix = `${index + 1}. ${stage}`
+  if (ev.level === 'error') return `${prefix}｜失败：${title}｜${detail}`
+  if (stage.includes('VIDEO_ANALYZED') || stage.includes('VIDEO_SELECTED') || stage.includes('VIDEO_ARCHIVED')) {
+    const verdict = decision ? `${decision}${score !== undefined && score !== null ? ` / ${score}分` : ''}` : '已返回分析'
+    return `${prefix}｜${account ? account + '｜' : ''}${title}｜${verdict}${reason ? `｜原因：${reason}` : ''}${warnings ? `｜提醒：${warnings}` : ''}`
+  }
+  if (stage.includes('VIDEOS_FOUND')) return `${prefix}｜${detail || title}`
+  if (stage.includes('ACCOUNT')) return `${prefix}｜${account || title}｜${detail}`
+  if (stage.includes('DELAY')) return `${prefix}｜${detail || title}`
+  if (stage.includes('RUN_FINISHED')) return `${prefix}｜本轮完成｜${detail || title}`
+  return `${prefix}｜${account ? account + '｜' : ''}${title}${detail && detail !== title ? `｜${detail}` : ''}`
 }
 
 function safeProjectDuration(...values: unknown[]) {
@@ -765,17 +790,26 @@ function AppInner() {
   const [ecsCollectorTime, setEcsCollectorTime] = useState('02:00')
   const [ecsCollectorAccount, setEcsCollectorAccount] = useState('')
   const [ecsDryRunMode, setEcsDryRunMode] = useState(false)
+  const [ecsNoDelayMode, setEcsNoDelayMode] = useState(true)
   const [collectorProgress, setCollectorProgress] = useState<CollectorProgressState | null>(null)
   const [digitalHumanProviders, setDigitalHumanProviders] = useState<DigitalHumanProviderOption[]>([])
 
   const ecsLimit = Math.max(1, Number(ecsCollectorCount) || 1)
   const ecsDailyCommand = `powershell -ExecutionPolicy Bypass -File .\install_daily_task.ps1 -Time "${ecsCollectorTime || '02:00'}" -Limit ${ecsLimit}`
+  const ecsNoDelayArg = ecsNoDelayMode ? ' --no-delay' : ''
   const ecsRunCommand = ecsCollectorAccount.trim()
     ? `python run_all.py --headful --account "${ecsCollectorAccount.trim()}" --limit 1 --no-delay`
-    : `python run_all.py --headful --limit ${ecsLimit}`
+    : `python run_all.py --headful --limit ${ecsLimit}${ecsNoDelayArg}`
   const ecsDryRunCommand = ecsCollectorAccount.trim()
     ? `python run_all.py --headful --dry-run --account "${ecsCollectorAccount.trim()}" --limit 1 --no-delay`
-    : `python run_all.py --headful --dry-run --limit ${ecsLimit} --no-delay`
+    : `python run_all.py --headful --dry-run --limit ${ecsLimit}${ecsNoDelayArg}`
+
+  const collectorEventsForReport = useMemo(() => (collectorProgress?.events || []).slice(0, 18), [collectorProgress])
+  const collectorReportLine = useMemo(() => {
+    const events = collectorEventsForReport
+    if (!events.length) return '等待采集报告：网页下发命令后，ECS 会实时回传打开账号、提取视频、提交分析、入选/未入选原因。'
+    return events.map((ev, idx) => formatCollectorEventLine(ev, idx)).join('    ｜    ')
+  }, [collectorEventsForReport])
 
   const materialAssets = useMemo(() => assets.map((a, i) => normalizeAsset(a, i)).filter(a => Boolean(a.id && a.url) && !safeText(a.filename).startsWith('collected_')), [assets])
   const collectedVideos = useMemo(() => assets.map((a, i) => normalizeAsset(a, i)).filter(a => Boolean(a.id && a.url) && a.kind === 'video' && safeText(a.filename).startsWith('collected_')), [assets])
@@ -1487,9 +1521,9 @@ function AppInner() {
       account: ecsCollectorAccount.trim(),
       dry_run: ecsDryRunMode,
       headful: true,
-      no_delay: limit <= 1,
+      no_delay: ecsNoDelayMode || limit <= 1,
       mode: ecsDryRunMode ? 'dry_run' : 'manual',
-      message: `网页触发采集：${ecsCollectorAccount.trim() || '账号库顺序'} / ${limit} 个账号`
+      message: `网页触发采集：${ecsCollectorAccount.trim() || '账号库顺序'} / ${limit} 个账号${ecsNoDelayMode || limit <= 1 ? ' / 快速模式不等待' : ' / 正常限速'}`
     }))
     setLastHandoff(`已创建采集命令：${command?.command_id || command?.id || 'queued'}。ECS 上运行 command_worker.py 后会自动领取。`)
     await reloadCollectorProgress()
@@ -2311,11 +2345,16 @@ ${manualText || ''}`.trim()
             <Field label="每日自动时间"><input value={ecsCollectorTime} onChange={e => setEcsCollectorTime(e.target.value)} placeholder="02:00" /></Field>
             <Field label="单独跑某个账号，可选"><input value={ecsCollectorAccount} onChange={e => setEcsCollectorAccount(e.target.value)} placeholder="例如：房产马来小哥" /></Field>
             <label className="checkline compact"><input type="checkbox" checked={ecsDryRunMode} onChange={e => setEcsDryRunMode(e.target.checked)} /> 仅测试，不上传</label>
+            <label className="checkline compact"><input type="checkbox" checked={ecsNoDelayMode} onChange={e => setEcsNoDelayMode(e.target.checked)} /> 快速模式：账号间不等待</label>
           </div>
           <div className="buttonRow">
             <Button busy={busy === '创建 ECS 采集命令' ? busy : ''} label="网页下发采集命令" onClick={createEcsCollectorCommand} kind="primary" />
             <Button label="刷新进度" onClick={() => reloadCollectorProgress()} kind="ghost" />
             <button className="btn ghost" onClick={() => navigator.clipboard?.writeText(ecsRunCommand)}>复制手动命令</button>
+          </div>
+          <div className="collectorTickerBox">
+            <div className="collectorTickerLabel">滚动报告</div>
+            <div className="collectorTickerTrack"><span>{collectorReportLine}</span></div>
           </div>
           <div className="collectorLiveGrid">
             <div className="collectorRunCard">
@@ -2331,11 +2370,11 @@ ${manualText || ''}`.trim()
               <p>当前账号：{collectorProgress?.run?.current_account || '暂无'}<br />当前视频：{collectorProgress?.run?.current_video || '暂无'}</p>
             </div>
           </div>
-          <div className="collectorEventList">
-            {(collectorProgress?.events || []).slice(0, 8).map((ev, idx) => <div className={`collectorEvent ${ev.level === 'error' ? 'error' : ''}`} key={ev.id || `${ev.stage}-${idx}`}>
+          <div className="collectorEventList compactReport">
+            {collectorEventsForReport.slice(0, 12).map((ev, idx) => <div className={`collectorEvent ${ev.level === 'error' ? 'error' : ''}`} key={ev.id || `${ev.stage}-${idx}`}>
               <span>{ev.stage || 'event'}</span>
-              <strong>{ev.message || ev.video_title || ev.account_name || '-'}</strong>
-              <small>{ev.account_name || ev.video_url || ev.error_detail || ev.created_at}</small>
+              <strong>{formatCollectorEventLine(ev, idx)}</strong>
+              <small>{ev.video_url || ev.account_url || ev.created_at}</small>
             </div>)}
             {!(collectorProgress?.events || []).length && <Empty>暂无采集事件。先在 ECS 启动命令监听，或手动运行一次采集。</Empty>}
           </div>
