@@ -2029,7 +2029,23 @@ async def analyze_heat_radar_video_intake(settings: Settings, memory: MemoryStor
 
     r2_video_url = ''
     extraction = {}
-    video_url = str(getattr(req, 'video_url', '') or '').strip()
+    analysis_mode = str(getattr(req, 'analysis_mode', '') or '').strip() or 'text_fallback'
+    video_download_status = str(getattr(req, 'video_download_status', '') or '').strip() or 'pending'
+    video_download_error = str(getattr(req, 'video_download_error', '') or '').strip()
+    download_method = str(getattr(req, 'download_method', '') or '').strip()
+    original_video_url = str(getattr(req, 'video_url', '') or '').strip()
+    resolved_video_url = str(getattr(req, 'resolved_video_url', '') or getattr(req, 'direct_video_url', '') or '').strip()
+    video_url = resolved_video_url or original_video_url
+    if resolved_video_url:
+        warnings.append(f'ECS 已提供解析视频源，method={download_method or "resolver"}，后端优先尝试下载解析源。')
+    if video_download_status and video_download_status not in {'resolved', 'pending'}:
+        warnings.append(f'ECS 视频解析状态：{video_download_status}；{video_download_error[:220]}')
+    item.setdefault('raw', {})['original_video_url'] = original_video_url
+    item.setdefault('raw', {})['resolved_video_url'] = resolved_video_url
+    item.setdefault('raw', {})['ecs_analysis_mode'] = analysis_mode
+    item.setdefault('raw', {})['video_download_status'] = video_download_status
+    item.setdefault('raw', {})['video_download_error'] = video_download_error
+    item.setdefault('raw', {})['download_method'] = download_method
     if video_url:
         collected, collector_warnings = await collect_public_video_best_effort(settings, video_url)
         warnings.extend(collector_warnings)
@@ -2038,6 +2054,8 @@ async def analyze_heat_radar_video_intake(settings: Settings, memory: MemoryStor
             r2_video_url = uploaded or f'/files/uploads/{collected.path.name}'
             item['raw']['r2_video_url'] = r2_video_url
             item['raw']['collector_method'] = collected.method
+            analysis_mode = 'video_collected'
+            video_download_status = 'downloaded'
             try:
                 ex = await extract_with_doubao(settings, collected.path, source_url=video_url, manual_text=getattr(req, 'title', '') or '')
                 extraction = ex.model_dump() if hasattr(ex, 'model_dump') else dict(ex)
@@ -2047,9 +2065,14 @@ async def analyze_heat_radar_video_intake(settings: Settings, memory: MemoryStor
                 item['raw']['analysis_hooks'] = ex.hooks
                 item['raw']['analysis_structure'] = ex.structure
                 warnings.extend(ex.warnings or [])
+                analysis_mode = 'video'
+                video_download_status = 'downloaded'
             except Exception as exc:
                 warnings.append(f'视频理解失败，已保留采集数据：{str(exc)[:220]}')
         else:
+            if analysis_mode == 'video':
+                analysis_mode = 'text_fallback'
+            video_download_status = video_download_status if video_download_status not in {'pending', ''} else 'text_fallback'
             warnings.append('未下载到视频文件，仅保存链接和标题供 AI/规则判断。')
 
     review = _review_account_value(account, [item], _split_keywords(getattr(req, 'tags', []) or []), max_stale_days=90, accept_min_score=int(os.getenv('HEAT_RADAR_ACCEPT_MIN_SCORE', '55') or 60))
@@ -2090,6 +2113,10 @@ async def analyze_heat_radar_video_intake(settings: Settings, memory: MemoryStor
     dim_label = ' / '.join([str(x.get('label') if isinstance(x, dict) else x) for x in (item.get('buyer_dimensions') or [])[:3]])
     item['intent'] = f"AI判断：{review.get('decision', 'watch')} / {review.get('score', 0)}｜{dim_label + '｜' if dim_label else ''}{review.get('reason', '')}"
     item['recommended_action'] = review.get('next_action') or review.get('rewrite_angle') or '转成原创口播/图文，并用资料包承接。'
+    item['analysis_mode'] = analysis_mode
+    item['video_download_status'] = video_download_status
+    item['video_download_error'] = video_download_error
+    item['download_method'] = download_method or item.get('raw', {}).get('collector_method', '')
     item['date_basis'] = 'recent_or_collected'
 
     # 兼容不同阶段 Supabase 表结构：先尝试完整字段；失败时给出明确提示，避免接口直接 500。
@@ -2120,6 +2147,9 @@ async def analyze_heat_radar_video_intake(settings: Settings, memory: MemoryStor
         'review': review,
         'extraction': extraction,
         'r2_video_url': r2_video_url,
+        'analysis_mode': analysis_mode,
+        'video_download_status': video_download_status,
+        'download_method': download_method or item.get('raw', {}).get('collector_method', ''),
         'warnings': warnings[:80],
         'next_actions': ['在页面查看 AI 收录判断', 'accept 账号可手动保存进账号库', '置顶视频用于判断账号定位，近期视频用于判断活跃度'],
     }

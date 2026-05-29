@@ -370,7 +370,50 @@ def _collect_with_ytdlp(settings: Settings, source_url: str, warnings: list[str]
 
     title = str((info or {}).get('title') or '')[:200]
     desc = str((info or {}).get('description') or '')[:1000]
+
     return CollectedVideo(path=path, source_url=source_url, final_url=str((info or {}).get('webpage_url') or source_url), title=title, description=desc, method='ytdlp', warnings=warnings)
+
+
+async def _collect_with_cobalt(settings: Settings, source_url: str, warnings: list[str]) -> Optional[CollectedVideo]:
+    """Try a self-hosted Cobalt-compatible API as an optional fallback.
+
+    Do not depend on public/free parser sites in production. Configure your own
+    COBALT_API_URL, e.g. https://your-cobalt-api.example.com/ .
+    """
+    api = (os.getenv('COBALT_API_URL') or '').strip().rstrip('/')
+    if not api:
+        warnings.append('COBALT_API_URL 未配置，跳过自建下载代理。')
+        return None
+    warnings.append('正在尝试自建 Cobalt 下载代理。')
+    try:
+        async with httpx.AsyncClient(timeout=settings.collector_timeout_seconds, follow_redirects=True) as client:
+            resp = await client.post(
+                api,
+                json={'url': source_url, 'downloadMode': 'auto', 'videoQuality': '1080'},
+                headers={'Accept': 'application/json', 'Content-Type': 'application/json'},
+            )
+            text = resp.text[:800]
+            if resp.status_code >= 400:
+                warnings.append(f'Cobalt 解析失败：HTTP {resp.status_code} {text}')
+                return None
+            try:
+                data = resp.json()
+            except Exception:
+                warnings.append(f'Cobalt 未返回 JSON：{text}')
+                return None
+            direct_url = str(data.get('url') or data.get('videoUrl') or data.get('downloadUrl') or '').strip()
+            if not direct_url.startswith('http'):
+                warnings.append(f'Cobalt 未返回下载 URL：{str(data)[:500]}')
+                return None
+    except Exception as exc:
+        warnings.append(f'Cobalt 请求异常：{str(exc)[:500]}')
+        return None
+
+    collected = await _download_direct(settings, direct_url, 'cobalt', warnings)
+    if collected:
+        collected.source_url = source_url
+        collected.final_url = direct_url
+    return collected
 
 
 async def collect_public_video_best_effort(settings: Settings, source_url: str) -> tuple[Optional[CollectedVideo], list[str]]:
@@ -395,6 +438,15 @@ async def collect_public_video_best_effort(settings: Settings, source_url: str) 
             return collected, warnings
 
     collected = await asyncio.to_thread(_collect_with_ytdlp, settings, source_url, warnings)
+    if collected:
+        if not collected.title:
+            collected.title = title
+        if not collected.description:
+            collected.description = desc
+        collected.final_url = final_url or collected.final_url
+        return collected, warnings
+
+    collected = await _collect_with_cobalt(settings, source_url, warnings)
     if collected:
         if not collected.title:
             collected.title = title

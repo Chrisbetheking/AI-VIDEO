@@ -950,6 +950,13 @@ class HeatRadarVideoIntakeRequest(BaseModel):
     account_url: str = ''
     platform: str = '抖音'
     video_url: str = ''
+    # ECS 解析层可传入临时直连/解析结果；后端优先尝试它，不成功再回退 video_url。
+    resolved_video_url: str = ''
+    direct_video_url: str = ''
+    analysis_mode: str = 'text_fallback'
+    video_download_status: str = 'pending'
+    video_download_error: str = ''
+    download_method: str = ''
     title: str = ''
     published_at: str = ''
     is_pinned: bool = False
