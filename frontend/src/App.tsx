@@ -726,6 +726,19 @@ function AppInner() {
   const [activeReportIndex, setActiveReportIndex] = useState(0)
   const [reportCopyStatus, setReportCopyStatus] = useState('')
 
+  const [ecsCollectorCount, setEcsCollectorCount] = useState('1')
+  const [ecsCollectorTime, setEcsCollectorTime] = useState('02:00')
+  const [ecsCollectorAccount, setEcsCollectorAccount] = useState('')
+
+  const ecsLimit = Math.max(1, Number(ecsCollectorCount) || 1)
+  const ecsDailyCommand = `powershell -ExecutionPolicy Bypass -File .\install_daily_task.ps1 -Time "${ecsCollectorTime || '02:00'}" -Limit ${ecsLimit}`
+  const ecsRunCommand = ecsCollectorAccount.trim()
+    ? `python run_all.py --headful --account "${ecsCollectorAccount.trim()}" --limit 1 --no-delay`
+    : `python run_all.py --headful --limit ${ecsLimit}`
+  const ecsDryRunCommand = ecsCollectorAccount.trim()
+    ? `python run_all.py --headful --dry-run --account "${ecsCollectorAccount.trim()}" --limit 1 --no-delay`
+    : `python run_all.py --headful --dry-run --limit ${ecsLimit} --no-delay`
+
   const materialAssets = useMemo(() => assets.map((a, i) => normalizeAsset(a, i)).filter(a => Boolean(a.id && a.url) && !safeText(a.filename).startsWith('collected_')), [assets])
   const collectedVideos = useMemo(() => assets.map((a, i) => normalizeAsset(a, i)).filter(a => Boolean(a.id && a.url) && a.kind === 'video' && safeText(a.filename).startsWith('collected_')), [assets])
   const filteredMaterialAssets = useMemo(() => {
@@ -2186,6 +2199,35 @@ ${manualText || ''}`.trim()
           <div><span>真实指标</span><strong>{realHeatCount}</strong><em>含点赞/评论/收藏/分享</em></div>
           <div><span>账号库</span><strong>{heatAccounts.length}</strong><em>{health?.workspace_id || 'default'}</em></div>
           <div><span>AI 状态</span><strong>{heatRewrite ? '已改写' : '待分析'}</strong><em>{heatWorkbenchStatus}</em></div>
+        </div>
+        <div className="ecsCollectorPanel">
+          <div className="ecsCollectorHead">
+            <div>
+              <Pill tone="green">ECS Worker</Pill>
+              <h3>云采集控制台</h3>
+              <p>账号从主网站账号库读取；ECS 只负责打开抖音、提取近三天/置顶/最近视频，提交给主网站 video-intake，再由豆包分析并汇总到热度雷达排名。</p>
+            </div>
+            <div className="ecsStatusMini">
+              <span>账号库 {heatAccounts.length}</span>
+              <span>建议先跑 1-3 个</span>
+            </div>
+          </div>
+          <div className="ecsControlGrid">
+            <Field label="本次采集账号数"><input type="number" min="1" max="120" value={ecsCollectorCount} onChange={e => setEcsCollectorCount(e.target.value)} /></Field>
+            <Field label="每日自动时间"><input value={ecsCollectorTime} onChange={e => setEcsCollectorTime(e.target.value)} placeholder="02:00" /></Field>
+            <Field label="单独跑某个账号，可选"><input value={ecsCollectorAccount} onChange={e => setEcsCollectorAccount(e.target.value)} placeholder="例如：房产马来小哥" /></Field>
+          </div>
+          <div className="ecsCommandGrid">
+            <div><strong>先测试不上传</strong><code>{ecsDryRunCommand}</code><button onClick={() => navigator.clipboard?.writeText(ecsDryRunCommand)}>复制</button></div>
+            <div><strong>正式跑并上传</strong><code>{ecsRunCommand}</code><button onClick={() => navigator.clipboard?.writeText(ecsRunCommand)}>复制</button></div>
+            <div><strong>设置每日自动跑</strong><code>{ecsDailyCommand}</code><button onClick={() => navigator.clipboard?.writeText(ecsDailyCommand)}>复制</button></div>
+          </div>
+          <div className="ecsChecklist">
+            <span>1. dry-run 看到 Excel 有 video_url</span>
+            <span>2. 正式跑不带 --dry-run</span>
+            <span>3. Render 日志无 500</span>
+            <span>4. 热度雷达出现 Top5</span>
+          </div>
         </div>
 
         <div className="radarWorkbenchGrid">
