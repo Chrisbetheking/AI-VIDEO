@@ -443,26 +443,6 @@ const heatRadarSeedKeywords = [
   'Mont Kiara 国际学校附近公寓', '新山 RTS 附近房产', '吉隆坡和新山哪里更值得买', '中国人可以买马来西亚房产吗'
 ]
 
-const malaysiaRadarRequiredTerms = [
-  '马来西亚', '大马', '吉隆坡', '新山', '柔佛', '槟城', '雪兰莪', '沙巴', '沙捞越',
-  'MM2H', 'mm2h', '第二家园', '马来生活', '马来西亚生活', '马来西亚房产', '马来西亚买房', '海外置业',
-  'Mont Kiara', '国际学校', '陪读', '华人社区'
-]
-
-const nonTargetRadarTerms = [
-  '雅安', '名山', '成都', '四川', '重庆', '郑州', '西安', '北京', '上海', '广州', '深圳',
-  '杭州', '苏州', '南京', '厦门', '合肥', '武汉', '长沙', '昆明', '海口', '三亚', '售楼部', '电梯房', '本地房源'
-]
-
-function isMalaysiaRadarSnapshot(item: HeatRadarSnapshot) {
-  const blob = `${item.topic || ''} ${item.account_name || ''} ${item.platform || ''} ${item.intent || ''} ${item.signal || ''} ${item.recommended_action || ''} ${item.lead_magnet || ''} ${item.source_url || ''}`.toLowerCase()
-  const hit = malaysiaRadarRequiredTerms.some(k => blob.includes(k.toLowerCase()))
-  if (!hit) return false
-  const strong = ['马来西亚', '大马', '吉隆坡', '新山', '柔佛', '槟城', '雪兰莪', 'mm2h', '第二家园'].some(k => blob.includes(k.toLowerCase()))
-  const blocked = nonTargetRadarTerms.some(k => blob.includes(k.toLowerCase()))
-  return strong || !blocked
-}
-
 const heatRadarDataLoop = [
   '每日固定查看竞品账号和关键词热度，不再叫“截流”，改成“热度雷达”',
   '每个竞品账号只保留当日热度前 3 条内容/话题，避免信息太乱',
@@ -843,18 +823,9 @@ function AppInner() {
       const topic = String(x.topic || '')
       return !id.startsWith('seed_') && !signal.includes('本地关键词模拟') && !topic.includes('本地关键词模拟')
     })
-    const targetList = realList.filter(isMalaysiaRadarSnapshot)
-    const todayList = targetList.filter(x => x.date === today)
-    return (todayList.length ? todayList : targetList).slice(0, 5)
+    const todayList = realList.filter(x => x.date === today)
+    return (todayList.length ? todayList : realList).slice(0, 5)
   }, [heatSnapshots])
-
-  const hiddenNonTargetHeatCount = useMemo(() => heatSnapshots.filter(x => {
-    const id = String(x.id || '')
-    const signal = String(x.signal || '')
-    const topic = String(x.topic || '')
-    if (id.startsWith('seed_') || signal.includes('本地关键词模拟') || topic.includes('本地关键词模拟')) return false
-    return !isMalaysiaRadarSnapshot(x)
-  }).length, [heatSnapshots])
 
   const primaryHeat = todayHeatSnapshots[0] || null
   const realHeatCount = todayHeatSnapshots.filter(hasRealHeatSignal).length
@@ -1211,12 +1182,17 @@ function AppInner() {
 
   async function removeHeatItem(id: string) {
     if (!id) return
-    if (!window.confirm('确定从热度雷达删除这条热点？不会删除原平台内容。')) return
+    const snapshotBefore = heatSnapshots
+    const sourceLinesBefore = heatSourceLines
+    setHeatSnapshots(prev => prev.filter(x => String(x.id) !== String(id)))
+    setHeatSourceLines(prev => prev.filter(line => !line.includes(String(id))))
     try {
       await run('删除热度热点', () => apiDelete(`/api/heat-radar/items/${encodeURIComponent(id)}`))
       await reloadHeatRadarData()
-      setLastHandoff('已从热度雷达移除这条热点。')
+      setLastHandoff('已从热度雷达删除，不会再进入 Top5。')
     } catch (err: any) {
+      setHeatSnapshots(snapshotBefore)
+      setHeatSourceLines(sourceLinesBefore)
       setLastHandoff(`删除热点失败：${err?.message || err}`)
       throw err
     }
@@ -1480,13 +1456,14 @@ function AppInner() {
     if (Array.isArray(reviews)) setHeatAccountReviews(reviews)
     if (Array.isArray(items)) {
       const snapshots = items
-        .filter((item: any) => !String(item?.source_mode || '').match(/seed|demo|local/i))
-        .slice(0, 60)
+        .filter((item: any) => !item?.deleted && !String(item?.source_mode || '').match(/seed|demo|local/i))
+        .slice(0, 80)
         .map((item, idx) => heatItemToSnapshot(item, idx))
       setHeatSnapshots(prev => {
-        const cleanedPrev = prev.filter(x => !String(x.id || '').startsWith('seed_') && !String(x.signal || '').includes('本地关键词模拟'))
-        const seen = new Set(cleanedPrev.map(x => x.id))
-        return [...snapshots.filter(x => !seen.has(x.id)), ...cleanedPrev].slice(0, 200)
+        // 后端热度项以 Supabase 为准；只保留手动导入内容，避免软删后旧 state 又被合并回来。
+        const manual = prev.filter(x => String(x.id || '').startsWith('manual_heat_'))
+        const seen = new Set(snapshots.map(x => x.id))
+        return [...snapshots, ...manual.filter(x => !seen.has(x.id))].slice(0, 200)
       })
     }
   }
@@ -2317,12 +2294,11 @@ ${manualText || ''}`.trim()
         </div>
 
         <div className="radarMetricStrip">
-          <div><span>热点池</span><strong>{todayHeatSnapshots.length}</strong><em>只显示目标方向</em></div>
+          <div><span>热点池</span><strong>{todayHeatSnapshots.length}</strong><em>今日/最近入库</em></div>
           <div><span>真实指标</span><strong>{realHeatCount}</strong><em>含点赞/评论/收藏/分享</em></div>
           <div><span>账号库</span><strong>{heatAccounts.length}</strong><em>{health?.workspace_id || 'default'}</em></div>
           <div><span>AI 状态</span><strong>{heatRewrite ? '已改写' : '待分析'}</strong><em>{heatWorkbenchStatus}</em></div>
         </div>
-        {hiddenNonTargetHeatCount > 0 && <div className="warn compactWarn">已自动隐藏 {hiddenNonTargetHeatCount} 条非马来西亚/第二家园/海外置业方向内容。国内城市房产内容不会进入 Top5。</div>}
         <div className="ecsCollectorPanel liveCollectorPanel">
           <div className="ecsCollectorHead">
             <div>

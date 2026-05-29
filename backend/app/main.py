@@ -868,14 +868,16 @@ def api_heat_radar_items(memory: MemoryStore = Depends(get_memory)) -> list[dict
 
 @app.delete('/api/heat-radar/items/{item_id}')
 def api_heat_radar_delete_item(item_id: str, memory: MemoryStore = Depends(get_memory)) -> dict:
+    if not item_id:
+        raise HTTPException(status_code=400, detail='缺少热点 ID。')
     try:
-        memory.update_by_id('heat_radar_items', item_id, {'deleted': True}, require_supabase=True)
+        # 软删除：保留审计记录，但不再被 /api/heat-radar/items 返回，也不进入 Top5。
+        saved = memory.update_by_id('heat_radar_items', item_id, {'deleted': True}, require_supabase=True)
     except MemoryWriteError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f'删除热点失败：{exc}') from exc
-    return {'ok': True, 'deleted': item_id}
-
+    return {'ok': True, 'deleted': item_id, 'item': saved}
 
 @app.get('/api/heat-radar/daily-top3')
 def api_heat_radar_daily_top3(memory: MemoryStore = Depends(get_memory)) -> list[dict]:

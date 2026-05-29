@@ -2025,13 +2025,3 @@ body:has(.heatRadarV3) .collectorAssist{border-color:#dbeafe}
   .collectorEvent { grid-template-columns: 1fr; }
   .collectorEvent small { grid-column: 1; }
 }
-
-.dangerTextBtn {
-  color: #b42318 !important;
-  border-color: rgba(180, 35, 24, .24) !important;
-  background: #fff7f5 !important;
-}
-.dangerTextBtn:hover {
-  background: #fee4df !important;
-  transform: translateY(-1px) scale(1.01);
-}
