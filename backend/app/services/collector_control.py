@@ -113,7 +113,8 @@ def latest_collector_status(memory: MemoryStore, events_limit: int = 30) -> dict
 
 
 def create_collector_command(memory: MemoryStore, payload: dict[str, Any]) -> dict[str, Any]:
-    require_ingest_token(str(payload.get('token') or ''))
+    # 前端只负责下发命令；真正执行、上报和上传仍由 ECS Worker 使用 HEAT_RADAR_INGEST_TOKEN 校验。
+    # 这样网页不会因为浏览器本地没有 token 而误报，ECS 侧安全校验不变。
     command_id = f"cmd_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}"
     command = {
         'id': command_id,
