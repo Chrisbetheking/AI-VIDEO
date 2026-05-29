@@ -92,6 +92,12 @@ from app.schemas import (
     HeatRadarVideoIntakeRequest,
     HeatRadarVideoIntakeResponse,
     JobCreateRequest,
+    CollectorRunStartRequest,
+    CollectorRunEventRequest,
+    CollectorCommandCreateRequest,
+    CollectorCommandCompleteRequest,
+    CollectorStatusResponse,
+    DigitalHumanProviderOption,
 )
 from app.services.ad_analysis import analyze_ad
 from app.services.cover import create_cover
@@ -112,6 +118,7 @@ from app.services.auto_collector import run_auto_collection
 from app.services.one_click import generate_one_click, revise_one_click
 from app.services.graphic_post import create_graphic_post
 from app.services.heat_radar import run_public_heat_radar, generate_heat_radar_rewrite, ingest_openclaw_heat_radar, audit_heat_radar_accounts, analyze_heat_radar_video_intake
+from app.services.collector_control import create_collector_run, append_collector_event, latest_collector_status, create_collector_command, next_collector_command, complete_collector_command, recommended_digital_human_providers
 from app.services.jobs import create_job, get_job, list_jobs, update_job
 
 app = FastAPI(title='AI-VIDEO 正式版 API', version='1.0.0')
@@ -867,6 +874,66 @@ def api_heat_radar_daily_top3(memory: MemoryStore = Depends(get_memory)) -> list
 @app.get('/api/heat-radar/account-reviews')
 def api_heat_radar_account_reviews(memory: MemoryStore = Depends(get_memory)) -> list[dict]:
     return memory.list('heat_radar_account_reviews', limit=120)
+
+@app.post('/api/collector/runs/start')
+def api_collector_run_start(req: CollectorRunStartRequest, memory: MemoryStore = Depends(get_memory)) -> dict:
+    try:
+        return create_collector_run(memory, req.model_dump())
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except MemoryWriteError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.post('/api/collector/runs/{run_id}/event')
+def api_collector_run_event(run_id: str, req: CollectorRunEventRequest, memory: MemoryStore = Depends(get_memory)) -> dict:
+    try:
+        return append_collector_event(memory, run_id, req.model_dump())
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except MemoryWriteError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.get('/api/collector/runs/latest', response_model=CollectorStatusResponse)
+def api_collector_latest(events_limit: int = 30, memory: MemoryStore = Depends(get_memory)) -> CollectorStatusResponse:
+    return CollectorStatusResponse(**latest_collector_status(memory, events_limit=events_limit))
+
+
+@app.post('/api/collector/commands')
+def api_collector_command_create(req: CollectorCommandCreateRequest, memory: MemoryStore = Depends(get_memory)) -> dict:
+    try:
+        return create_collector_command(memory, req.model_dump())
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except MemoryWriteError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.get('/api/collector/commands/next')
+def api_collector_command_next(token: str = '', memory: MemoryStore = Depends(get_memory)) -> dict:
+    try:
+        return next_collector_command(memory, token)
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except MemoryWriteError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.post('/api/collector/commands/{command_id}/complete')
+def api_collector_command_complete(command_id: str, req: CollectorCommandCompleteRequest, memory: MemoryStore = Depends(get_memory)) -> dict:
+    try:
+        return complete_collector_command(memory, command_id, req.model_dump())
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except MemoryWriteError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.get('/api/digital-human/providers', response_model=list[DigitalHumanProviderOption])
+def api_digital_human_providers() -> list[DigitalHumanProviderOption]:
+    return [DigitalHumanProviderOption(**x) for x in recommended_digital_human_providers()]
+
 
 
 @app.post('/api/heat-radar/run-public-crawl')

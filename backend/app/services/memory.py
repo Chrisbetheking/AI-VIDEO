@@ -27,6 +27,10 @@ CORE_TABLES = {
     'assets',
     'jobs',
     'operation_logs',
+    'collector_runs',
+    'collector_events',
+    'collector_commands',
+    'digital_human_provider_configs',
 }
 
 

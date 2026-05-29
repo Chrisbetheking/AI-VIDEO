@@ -91,6 +91,41 @@ type HeatRadarSnapshot = {
   lead_magnet: string
 }
 
+
+type CollectorProgressEvent = {
+  id?: string
+  run_id?: string
+  stage?: string
+  level?: string
+  message?: string
+  account_name?: string
+  account_url?: string
+  video_title?: string
+  video_url?: string
+  error_detail?: string
+  created_at?: string
+  progress?: Record<string, any>
+}
+
+type CollectorProgressState = {
+  ok: boolean
+  run: Record<string, any>
+  events: CollectorProgressEvent[]
+  commands: Record<string, any>[]
+}
+
+type DigitalHumanProviderOption = {
+  id: string
+  name: string
+  priority: number
+  stage: string
+  cost_note: string
+  best_for: string
+  integration: string
+  risk: string
+  enabled: boolean
+}
+
 function Field({ label, children, hint }: { label: string; children: ReactNode; hint?: string }) {
   return <label className="field"><span>{label}</span>{children}{hint && <em>{hint}</em>}</label>
 }
@@ -729,6 +764,9 @@ function AppInner() {
   const [ecsCollectorCount, setEcsCollectorCount] = useState('1')
   const [ecsCollectorTime, setEcsCollectorTime] = useState('02:00')
   const [ecsCollectorAccount, setEcsCollectorAccount] = useState('')
+  const [ecsDryRunMode, setEcsDryRunMode] = useState(false)
+  const [collectorProgress, setCollectorProgress] = useState<CollectorProgressState | null>(null)
+  const [digitalHumanProviders, setDigitalHumanProviders] = useState<DigitalHumanProviderOption[]>([])
 
   const ecsLimit = Math.max(1, Number(ecsCollectorCount) || 1)
   const ecsDailyCommand = `powershell -ExecutionPolicy Bypass -File .\install_daily_task.ps1 -Time "${ecsCollectorTime || '02:00'}" -Limit ${ecsLimit}`
@@ -1411,6 +1449,38 @@ function AppInner() {
     }
   }
 
+
+  async function reloadCollectorProgress() {
+    const status = await apiGet<CollectorProgressState>('/api/collector/runs/latest?events_limit=40').catch(() => null)
+    if (status) setCollectorProgress(status)
+    return status
+  }
+
+  async function reloadDigitalHumanProviders() {
+    const list = await apiGet<DigitalHumanProviderOption[]>('/api/digital-human/providers').catch(() => [])
+    setDigitalHumanProviders(Array.isArray(list) ? list : [])
+  }
+
+  async function createEcsCollectorCommand() {
+    if (!heatAutomationToken.trim()) {
+      setError('请先填写接口 Token，必须和 Render 的 HEAT_RADAR_INGEST_TOKEN 一致。')
+      return
+    }
+    const limit = Math.max(1, Math.min(120, Number(ecsCollectorCount) || 1))
+    const command = await run('创建 ECS 采集命令', () => apiPost<any>('/api/collector/commands', {
+      token: heatAutomationToken.trim(),
+      limit,
+      account: ecsCollectorAccount.trim(),
+      dry_run: ecsDryRunMode,
+      headful: true,
+      no_delay: limit <= 1,
+      mode: ecsDryRunMode ? 'dry_run' : 'manual',
+      message: `网页触发采集：${ecsCollectorAccount.trim() || '账号库顺序'} / ${limit} 个账号`
+    }))
+    setLastHandoff(`已创建采集命令：${command?.command_id || command?.id || 'queued'}。ECS 上运行 command_worker.py 后会自动领取。`)
+    await reloadCollectorProgress()
+  }
+
   async function runAutoAgent() {
     const res = await run('自动采集/学习同行打法', () => apiPost<AutoCollectorRunResponse>('/api/agent/run-now', {
       seed_links: agentSeedLinks,
@@ -1443,6 +1513,8 @@ function AppInner() {
     reloadJobs().catch(() => null)
     reloadMemoryContext(true).catch(() => null)
     reloadHeatRadarData().catch(() => null)
+    reloadCollectorProgress().catch(() => null)
+    reloadDigitalHumanProviders().catch(() => null)
   }, [])
 
   useEffect(() => {
@@ -1484,6 +1556,14 @@ function AppInner() {
       return next
     })
   }, [voiceSegments])
+
+
+  useEffect(() => {
+    if (active !== 'lead') return
+    reloadCollectorProgress().catch(() => null)
+    const timer = window.setInterval(() => reloadCollectorProgress().catch(() => null), 3000)
+    return () => window.clearInterval(timer)
+  }, [active])
 
   useEffect(() => {
     const status = String(digitalHuman?.status || '').toLowerCase()
@@ -2200,34 +2280,60 @@ ${manualText || ''}`.trim()
           <div><span>账号库</span><strong>{heatAccounts.length}</strong><em>{health?.workspace_id || 'default'}</em></div>
           <div><span>AI 状态</span><strong>{heatRewrite ? '已改写' : '待分析'}</strong><em>{heatWorkbenchStatus}</em></div>
         </div>
-        <div className="ecsCollectorPanel">
+        <div className="ecsCollectorPanel liveCollectorPanel">
           <div className="ecsCollectorHead">
             <div>
               <Pill tone="green">ECS Worker</Pill>
-              <h3>云采集控制台</h3>
-              <p>账号从主网站账号库读取；ECS 只负责打开抖音、提取近三天/置顶/最近视频，提交给主网站 video-intake，再由豆包分析并汇总到热度雷达排名。</p>
+              <h3>采集任务进度</h3>
+              <p>网页负责下发采集命令、看进度和错误；ECS 负责打开抖音、提取视频，再提交主网站豆包分析并汇总到热度雷达。</p>
             </div>
             <div className="ecsStatusMini">
               <span>账号库 {heatAccounts.length}</span>
-              <span>建议先跑 1-3 个</span>
+              <span>{collectorProgress?.run?.status || '等待任务'}</span>
             </div>
           </div>
           <div className="ecsControlGrid">
             <Field label="本次采集账号数"><input type="number" min="1" max="120" value={ecsCollectorCount} onChange={e => setEcsCollectorCount(e.target.value)} /></Field>
             <Field label="每日自动时间"><input value={ecsCollectorTime} onChange={e => setEcsCollectorTime(e.target.value)} placeholder="02:00" /></Field>
             <Field label="单独跑某个账号，可选"><input value={ecsCollectorAccount} onChange={e => setEcsCollectorAccount(e.target.value)} placeholder="例如：房产马来小哥" /></Field>
+            <label className="checkline compact"><input type="checkbox" checked={ecsDryRunMode} onChange={e => setEcsDryRunMode(e.target.checked)} /> 仅测试，不上传</label>
           </div>
-          <div className="ecsCommandGrid">
-            <div><strong>先测试不上传</strong><code>{ecsDryRunCommand}</code><button onClick={() => navigator.clipboard?.writeText(ecsDryRunCommand)}>复制</button></div>
-            <div><strong>正式跑并上传</strong><code>{ecsRunCommand}</code><button onClick={() => navigator.clipboard?.writeText(ecsRunCommand)}>复制</button></div>
-            <div><strong>设置每日自动跑</strong><code>{ecsDailyCommand}</code><button onClick={() => navigator.clipboard?.writeText(ecsDailyCommand)}>复制</button></div>
+          <div className="buttonRow">
+            <Button busy={busy === '创建 ECS 采集命令' ? busy : ''} label="网页下发采集命令" onClick={createEcsCollectorCommand} kind="primary" />
+            <Button label="刷新进度" onClick={() => reloadCollectorProgress()} kind="ghost" />
+            <button className="btn ghost" onClick={() => navigator.clipboard?.writeText(ecsRunCommand)}>复制手动命令</button>
           </div>
-          <div className="ecsChecklist">
-            <span>1. dry-run 看到 Excel 有 video_url</span>
-            <span>2. 正式跑不带 --dry-run</span>
-            <span>3. Render 日志无 500</span>
-            <span>4. 热度雷达出现 Top5</span>
+          <div className="collectorLiveGrid">
+            <div className="collectorRunCard">
+              <span>当前任务</span>
+              <strong>{collectorProgress?.run?.stage || '未开始'}</strong>
+              <p>{collectorProgress?.run?.message || 'ECS 上运行 command_worker.py 后，可从这里点按钮触发采集。'}</p>
+              <div className="collectorStats"><b>{Number(collectorProgress?.run?.completed_accounts || 0)} / {Number(collectorProgress?.run?.total_accounts || 0)}</b><em>账号进度</em></div>
+              {collectorProgress?.run?.last_error && <div className="warn compactWarn">{collectorProgress.run.last_error}</div>}
+            </div>
+            <div className="collectorRunCard">
+              <span>视频结果</span>
+              <strong>{Number(collectorProgress?.run?.success_videos || 0)} 成功 / {Number(collectorProgress?.run?.failed_videos || 0)} 失败</strong>
+              <p>当前账号：{collectorProgress?.run?.current_account || '暂无'}<br />当前视频：{collectorProgress?.run?.current_video || '暂无'}</p>
+            </div>
           </div>
+          <div className="collectorEventList">
+            {(collectorProgress?.events || []).slice(0, 8).map((ev, idx) => <div className={`collectorEvent ${ev.level === 'error' ? 'error' : ''}`} key={ev.id || `${ev.stage}-${idx}`}>
+              <span>{ev.stage || 'event'}</span>
+              <strong>{ev.message || ev.video_title || ev.account_name || '-'}</strong>
+              <small>{ev.account_name || ev.video_url || ev.error_detail || ev.created_at}</small>
+            </div>)}
+            {!(collectorProgress?.events || []).length && <Empty>暂无采集事件。先在 ECS 启动命令监听，或手动运行一次采集。</Empty>}
+          </div>
+          <details className="ecsCommandDetails">
+            <summary>手动命令 / 自动化设置</summary>
+            <div className="ecsCommandGrid">
+              <div><strong>先测试不上传</strong><code>{ecsDryRunCommand}</code><button onClick={() => navigator.clipboard?.writeText(ecsDryRunCommand)}>复制</button></div>
+              <div><strong>正式跑并上传</strong><code>{ecsRunCommand}</code><button onClick={() => navigator.clipboard?.writeText(ecsRunCommand)}>复制</button></div>
+              <div><strong>设置每日自动跑</strong><code>{ecsDailyCommand}</code><button onClick={() => navigator.clipboard?.writeText(ecsDailyCommand)}>复制</button></div>
+              <div><strong>网页按钮触发前提</strong><code>python command_worker.py</code><button onClick={() => navigator.clipboard?.writeText('python command_worker.py')}>复制</button></div>
+            </div>
+          </details>
         </div>
 
         <div className="radarWorkbenchGrid">
@@ -2430,10 +2536,21 @@ https://www.douyin.com/user/..." /></Field>
         <div className="grid3">
           <Field label="数字人形象素材" hint="建议上传本人授权的正脸/半身照片，或 5-15 秒自然说话视频。"><select value={digitalHumanAvatarId} onChange={e => setDigitalHumanAvatarId(e.target.value)}><option value="">选择已上传照片/视频</option>{assets.map(a => <option key={a.id} value={a.id}>{a.kind} · {a.original_name || a.filename}</option>)}</select></Field>
           <Field label="动作参考视频（可选）" hint="后续接 LivePortrait/MuseTalk 时可参考表情和头部动作。"><select value={digitalHumanDriverId} onChange={e => setDigitalHumanDriverId(e.target.value)}><option value="">不用动作参考</option>{assets.filter(a => a.kind === 'video').map(a => <option key={a.id} value={a.id}>{a.original_name || a.filename}</option>)}</select></Field>
-          <Field label="数字人引擎" hint="可选火山即梦/OmniHuman，或使用上传素材直接合成。"><select value={digitalHumanEngine} onChange={e => setDigitalHumanEngine(e.target.value)}><option value="auto">自动</option><option value="preview">静态预览/素材合成</option><option value="jimeng">火山即梦/OmniHuman</option><option value="webhook">外部 Webhook/API</option><option value="sadtalker">SadTalker</option><option value="musetalk">MuseTalk</option><option value="wav2lip">Wav2Lip</option><option value="liveportrait">LivePortrait</option></select></Field>
+          <Field label="数字人引擎" hint="暂不接阿里；先低成本测试百度/腾讯照片数字人，后期设备接本地开源。"><select value={digitalHumanEngine} onChange={e => setDigitalHumanEngine(e.target.value)}><option value="auto">自动：优先低成本方案</option><option value="preview">静态预览/素材合成</option><option value="baidu_xiling_photo">百度曦灵照片数字人</option><option value="tencent_ivh_photo">腾讯云 2D 小样本照片</option><option value="heygen_api">HeyGen API 海外备用</option><option value="webhook">外部 Webhook/API</option><option value="jimeng">火山即梦/OmniHuman（备用）</option><option value="musetalk">本地 MuseTalk</option><option value="liveportrait">本地 LivePortrait</option><option value="sadtalker">SadTalker</option><option value="wav2lip">Wav2Lip</option></select></Field>
           {digitalHumanEngine === 'jimeng' && <Field label="即梦模型" hint="模拟真人优先选 OmniHuman1.5；普通视频生成可用视频3.0。"><select value={digitalHumanJimengModel} onChange={e => setDigitalHumanJimengModel(e.target.value)}><option value="omnihuman15">OmniHuman1.5（单图+音频真人口播）</option><option value="quick">数字人快速模式</option><option value="video30">即梦视频生成3.0（图生视频）</option></select></Field>}
         </div>
         <label className="checkline"><input type="checkbox" checked={digitalHumanConsent} onChange={e => setDigitalHumanConsent(e.target.checked)} /> 我确认已获得本人形象和声音授权，仅用于合法商业内容。</label>
+
+        <div className="providerGrid">
+          {(digitalHumanProviders.length ? digitalHumanProviders : []).slice(0, 4).map(p => <div className={`providerCard ${p.enabled ? 'active' : ''}`} key={p.id}>
+            <div><strong>{p.name}</strong><Pill tone={p.enabled ? 'green' : 'orange'}>{p.stage}</Pill></div>
+            <p>{p.cost_note}</p>
+            <small>{p.best_for}</small>
+            <em>{p.risk}</em>
+            <button className="btn ghost" onClick={() => setDigitalHumanEngine(p.id)}>选择这个引擎</button>
+          </div>)}
+          {!digitalHumanProviders.length && <Empty>正在读取推荐数字人平台。当前先保留“静态预览/外部 Webhook”。</Empty>}
+        </div>
         <div className="infoGrid"><div><strong>当前输入</strong><p>数字人版本：#{digitalHumanVersion}<br />形象素材：{digitalHumanAvatarId || '未选择'}<br />配音音频：{audio?.file_name || '未生成'}<br />脚本：{shortText(currentScript || '', 90) || '未生成'}</p></div><div><strong>接入建议</strong><p>需要真人口型同步时选择“火山即梦/OmniHuman”；旧素材如果存在 R2，刷新素材库后也能选择使用。</p></div></div>
         {hasRunningDigitalHumanTask && <div className="warn strongWarn">已有任务正在火山侧排队/生成中。请不要再次点击提交，否则会触发 429 并发限制；等待当前任务完成或点击“查询当前数字人任务”。</div>}
         {digitalHuman && <div className="resultBox"><h3>数字人 #{digitalHumanVersion} 结果</h3><p>{digitalHuman.message}</p><div className="resultMeta"><Pill tone={digitalHuman.video_url ? 'green' : digitalHuman.status === 'failed' ? 'red' : 'orange'}>状态：{digitalHuman.status || 'running'}</Pill>{digitalHumanLastChecked && <Pill tone="blue">最近查询：{digitalHumanLastChecked}</Pill>}{digitalHumanPollCount > 0 && <Pill tone="purple">已查询 {digitalHumanPollCount} 次</Pill>}</div>{digitalHuman.job_id && <p className="muted">任务 ID：{digitalHuman.job_id}<br />查询模型：{getDigitalHumanTaskModel(digitalHuman, digitalHumanJimengModel)}</p>}{digitalHuman.job_id && !digitalHuman.video_url && <div className="warn">OmniHuman1.5 是排队生成任务，不是实时接口。系统会每 20 秒自动查一次；如果超过 20-30 分钟仍无结果，请去火山控制台 / API Explorer 用这个 task_id 查询任务详情。</div>}{digitalHuman.warnings?.map(w => <div className="warn" key={w}>{w}</div>)}{digitalHuman.job_id && !digitalHuman.video_url && <div className="buttonRow"><button className="btn soft" onClick={() => checkDigitalHumanStatus(false)} disabled={busy === '查询数字人结果'}>{busy === '查询数字人结果' ? '查询中…' : '立即查询数字人结果'}</button><button className="btn ghost danger" onClick={clearDigitalHumanTask}>清除当前任务</button></div>}{digitalHuman.raw && <details className="rawBox"><summary>查看火山原始返回</summary><pre>{JSON.stringify(digitalHuman.raw, null, 2).slice(0, 2600)}</pre></details>}{digitalHuman.video_url && <video controls src={digitalHuman.video_url} className="previewVideo" />}{digitalHuman.video_url && <a className="download" href={digitalHuman.video_url} target="_blank">下载/打开数字人 #{digitalHumanVersion} 片段</a>}</div>}

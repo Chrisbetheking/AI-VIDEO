@@ -989,3 +989,68 @@ class HeatRadarAccountAuditResponse(BaseModel):
     archive: List[HeatRadarAccountDecision] = Field(default_factory=list)
     warnings: List[str] = Field(default_factory=list)
     next_actions: List[str] = Field(default_factory=list)
+
+
+class CollectorRunStartRequest(BaseModel):
+    token: str = ''
+    run_id: str = ''
+    command_id: str = ''
+    mode: str = 'ecs_worker'
+    dry_run: bool = False
+    total_accounts: int = 0
+    current_account: str = ''
+    message: str = ''
+    raw: Dict[str, Any] = Field(default_factory=dict)
+
+
+class CollectorRunEventRequest(BaseModel):
+    token: str = ''
+    stage: str = 'event'
+    level: str = 'info'
+    message: str = ''
+    account_name: str = ''
+    account_url: str = ''
+    video_title: str = ''
+    video_url: str = ''
+    progress: Dict[str, Any] = Field(default_factory=dict)
+    error_detail: str = ''
+    raw: Dict[str, Any] = Field(default_factory=dict)
+
+
+class CollectorCommandCreateRequest(BaseModel):
+    token: str = ''
+    limit: int = Field(default=1, ge=1, le=120)
+    account: str = ''
+    dry_run: bool = False
+    headful: bool = True
+    no_delay: bool = False
+    mode: str = 'manual'
+    message: str = ''
+    raw: Dict[str, Any] = Field(default_factory=dict)
+
+
+class CollectorCommandCompleteRequest(BaseModel):
+    token: str = ''
+    status: str = 'finished'
+    message: str = ''
+    error: str = ''
+    raw: Dict[str, Any] = Field(default_factory=dict)
+
+
+class CollectorStatusResponse(BaseModel):
+    ok: bool = True
+    run: Dict[str, Any] = Field(default_factory=dict)
+    events: List[Dict[str, Any]] = Field(default_factory=list)
+    commands: List[Dict[str, Any]] = Field(default_factory=list)
+
+
+class DigitalHumanProviderOption(BaseModel):
+    id: str = ''
+    name: str = ''
+    priority: int = 0
+    stage: str = ''
+    cost_note: str = ''
+    best_for: str = ''
+    integration: str = ''
+    risk: str = ''
+    enabled: bool = False
