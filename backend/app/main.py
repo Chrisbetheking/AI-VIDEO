@@ -117,7 +117,7 @@ from app.services.video_edit import apply_video_edit
 from app.services.auto_collector import run_auto_collection
 from app.services.one_click import generate_one_click, revise_one_click
 from app.services.graphic_post import create_graphic_post
-from app.services.heat_radar import run_public_heat_radar, generate_heat_radar_rewrite, ingest_openclaw_heat_radar, audit_heat_radar_accounts, analyze_heat_radar_video_intake, is_malaysia_direction_item
+from app.services.heat_radar import run_public_heat_radar, generate_heat_radar_rewrite, ingest_openclaw_heat_radar, audit_heat_radar_accounts, analyze_heat_radar_video_intake
 from app.services.collector_control import create_collector_run, append_collector_event, latest_collector_status, create_collector_command, next_collector_command, complete_collector_command, recommended_digital_human_providers
 from app.services.jobs import create_job, get_job, list_jobs, update_job
 
@@ -454,6 +454,66 @@ def _find_r2_public_url_by_name(settings: Settings, prefixes: list[str], name: s
             continue
     return ''
 
+
+
+def read_manifest(settings):
+    """
+    Read local/static asset manifest for compose-video.
+
+    This function is intentionally defensive: compose-video should not crash
+    just because a manifest file is missing or temporarily unreadable. It
+    returns an empty list when no manifest exists.
+    """
+    import json
+    from pathlib import Path
+
+    candidate_paths = []
+
+    for attr in (
+        "ASSETS_MANIFEST_PATH",
+        "assets_manifest_path",
+        "MATERIALS_MANIFEST_PATH",
+        "materials_manifest_path",
+    ):
+        value = getattr(settings, attr, None)
+        if value:
+            candidate_paths.append(str(value))
+
+    candidate_paths.extend([
+        "assets_manifest.json",
+        "data/assets_manifest.json",
+        "storage/assets_manifest.json",
+        "materials_manifest.json",
+        "data/materials_manifest.json",
+        "/tmp/assets_manifest.json",
+    ])
+
+    seen_paths = set()
+    for path_value in candidate_paths:
+        if not path_value or path_value in seen_paths:
+            continue
+        seen_paths.add(path_value)
+        try:
+            path = Path(path_value)
+            if not path.exists() or not path.is_file():
+                continue
+
+            data = json.loads(path.read_text(encoding="utf-8"))
+
+            if isinstance(data, list):
+                return data
+
+            if isinstance(data, dict):
+                for key in ("items", "assets", "files", "data", "materials"):
+                    value = data.get(key)
+                    if isinstance(value, list):
+                        return value
+                return [data]
+
+        except Exception as exc:
+            print(f"[compose] read_manifest failed: {path_value} {exc}")
+
+    return []
 
 def _asset_remote_url(settings: Settings, asset_id: str | None, filename: str | None = None) -> str:
     """Resolve an asset selected from the UI even when it only exists in R2."""
@@ -863,8 +923,7 @@ def api_heat_radar_delete_account(account_id: str, memory: MemoryStore = Depends
 
 @app.get('/api/heat-radar/items')
 def api_heat_radar_items(memory: MemoryStore = Depends(get_memory)) -> list[dict]:
-    items = memory.list('heat_radar_items', limit=200)
-    return [x for x in items if is_malaysia_direction_item(x)][:120]
+    return memory.list('heat_radar_items', limit=120)
 
 
 @app.delete('/api/heat-radar/items/{item_id}')
