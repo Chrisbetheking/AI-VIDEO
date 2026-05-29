@@ -858,7 +858,9 @@ function AppInner() {
       return !id.startsWith('seed_') && !signal.includes('本地关键词模拟') && !topic.includes('本地关键词模拟')
     })
     const todayList = realList.filter(x => x.date === today)
-    return (todayList.length ? todayList : realList).slice(0, 5)
+    const source = todayList.length ? todayList : realList
+    // Top5 是“可跟进候选池”，不是只看点赞；按 AI 分数优先，再看真实互动。
+    return [...source].sort((a, b) => Number(b.score || 0) - Number(a.score || 0)).slice(0, 5)
   }, [heatSnapshots])
 
   const primaryHeat = todayHeatSnapshots[0] || null
@@ -1157,7 +1159,11 @@ function AppInner() {
 
   function heatItemToSnapshot(item: any, index = 0): HeatRadarSnapshot {
     const topic = String(item?.title || item?.topic || '未命名热度内容').trim()
-    const score = Number(item?.heat_score ?? item?.score ?? 0)
+    const review = item?.raw?.ai_review || item?.raw?.review || {}
+    const score = Number(review?.score ?? item?.score ?? item?.heat_score ?? 0)
+    const decision = String(review?.decision || item?.decision || '').trim()
+    const reason = String(review?.reason || '').trim()
+    const nextAction = String(review?.next_action || item?.recommended_action || '把这个热度话题转成原创口播/图文，并用资料包承接。')
     return {
       id: String(item?.id || `heat_${Date.now()}_${index}`),
       date: String(item?.date || todayKey()),
@@ -1167,9 +1173,9 @@ function AppInner() {
       topic,
       signal: `${String(item?.date_basis || '').includes('recent') ? '最近留存' : '真实采集'}：赞${Number(item?.like_count || 0)} / 评${Number(item?.comment_count || 0)} / 藏${Number(item?.favorite_count || 0)} / 分享${Number(item?.share_count || 0)}`,
       score,
-      intent: String(item?.intent || (item?.matched_keywords?.length ? `匹配关键词：${item.matched_keywords.join('、')}` : '待 AI 判断客户意图')),
+      intent: String(item?.intent || (decision ? `AI判断：${decision} / ${score}${reason ? `｜${reason}` : ''}` : (item?.matched_keywords?.length ? `匹配关键词：${item.matched_keywords.join('、')}` : '待 AI 判断客户意图'))),
       source_url: String(item?.url || item?.source_url || ''),
-      recommended_action: String(item?.recommended_action || '把这个热度话题转成原创口播/图文，并用资料包承接。'),
+      recommended_action: nextAction,
       lead_magnet: String(item?.lead_magnet || activeReport?.title || '网页资料包')
     }
   }
@@ -1488,6 +1494,15 @@ function AppInner() {
     if (Array.isArray(items)) {
       const snapshots = items
         .filter((item: any) => !item?.deleted && !String(item?.source_mode || '').match(/seed|demo|local/i))
+        .filter((item: any) => {
+          const review = item?.raw?.ai_review || item?.raw?.review || {}
+          const decision = String(review?.decision || item?.decision || '').toLowerCase()
+          const score = Number(review?.score ?? item?.score ?? item?.heat_score ?? 0)
+          // Top5 展示 accept/watch/高分候选；archive/reject 仍保留在滚动报告和审核记录里解释原因，不进入 Top5。
+          if (decision === 'archive' || decision === 'reject') return score >= 58
+          return decision === 'accept' || decision === 'watch' || score >= 45
+        })
+        .sort((a: any, b: any) => Number((b?.raw?.ai_review || b?.raw?.review || {})?.score ?? b?.score ?? b?.heat_score ?? 0) - Number((a?.raw?.ai_review || a?.raw?.review || {})?.score ?? a?.score ?? a?.heat_score ?? 0))
         .slice(0, 80)
         .map((item, idx) => heatItemToSnapshot(item, idx))
       setHeatSnapshots(prev => {
@@ -2392,11 +2407,11 @@ ${manualText || ''}`.trim()
         <div className="radarWorkbenchGrid">
           <div className="radarTopPanel">
             <div className="miniHeader">
-              <div><h3>今日重点 Top5</h3><p>按分数和真实互动信号排序；不在这里展开博主全集，避免页面越来越长。</p></div>
+              <div><h3>今日重点 Top5</h3><p>按 AI 分数、客户顾虑价值和真实互动排序；archive/reject 不进这里，原因放在滚动报告。</p></div>
               <Pill tone="blue">只看重点</Pill>
             </div>
             <div className="radarTopList">
-              {todayHeatSnapshots.length === 0 && <Empty>暂无真实热点。可以在下方粘贴具体视频/笔记链接，或让云采集 Worker 推送数据。</Empty>}
+              {todayHeatSnapshots.length === 0 && <Empty>暂无入选候选。上方滚动报告会说明每条视频为什么没入选；也可以降低阈值或换更垂直的马来西亚账号。</Empty>}
               {todayHeatSnapshots.map((item, index) => <article className="radarTopItem" key={item.id}>
                 <div className="radarRank">{index + 1}</div>
                 <div className="radarTopBody">

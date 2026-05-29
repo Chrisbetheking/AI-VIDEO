@@ -1540,7 +1540,7 @@ def _account_items_for_review(memory: MemoryStore, account: Dict[str, Any], extr
     return _dedupe_items(rows)
 
 
-def _review_account_value(account: Dict[str, Any], items: List[Dict[str, Any]], keywords: List[str], max_stale_days: int = 90, accept_min_score: int = 72) -> Dict[str, Any]:
+def _review_account_value(account: Dict[str, Any], items: List[Dict[str, Any]], keywords: List[str], max_stale_days: int = 90, accept_min_score: int = 60) -> Dict[str, Any]:
     title_blob = ' '.join([
         str(account.get('name') or account.get('account_name') or ''),
         str(account.get('tags') or ''),
@@ -1551,26 +1551,47 @@ def _review_account_value(account: Dict[str, Any], items: List[Dict[str, Any]], 
     ])
     latest = ''
     latest_dt: datetime | None = None
+    fallback_latest = ''
+    fallback_latest_dt: datetime | None = None
+    date_basis = 'published_at'
+
+    # 先看非置顶内容的发布时间；如果公开页不暴露发布时间，不能直接按 9999 天惩罚，
+    # 否则很多“刚采到但无日期”的有效视频会全部被 archive。
     for item in items:
+        dt_any = _parse_dt(item.get('published_at') or item.get('collected_at') or item.get('date'))
+        if dt_any and (fallback_latest_dt is None or dt_any > fallback_latest_dt):
+            fallback_latest_dt = dt_any
+            fallback_latest = dt_any.isoformat()
         if item.get('is_pinned') or item.get('raw', {}).get('is_pinned'):
             continue
-        dt = _parse_dt(item.get('published_at') or item.get('collected_at') or item.get('date'))
-        if dt and (latest_dt is None or dt > latest_dt):
-            latest_dt = dt
-            latest = dt.isoformat()
+        if dt_any and (latest_dt is None or dt_any > latest_dt):
+            latest_dt = dt_any
+            latest = dt_any.isoformat()
+
     if not latest and account.get('last_post_at'):
         dt = _parse_dt(account.get('last_post_at'))
         if dt:
             latest_dt = dt
             latest = dt.isoformat()
-    days = _days_since(latest) if latest else 9999
+            date_basis = 'account_last_post_at'
+
+    if not latest and fallback_latest:
+        latest = fallback_latest
+        latest_dt = fallback_latest_dt
+        date_basis = 'collected_or_pinned_fallback'
+
+    # 如果本轮确实提取到了视频，但平台没有给发布时间，按“本轮采集内容”处理，
+    # 只降低一点可信度，不再打成 9999 天未更新。
+    days = _days_since(latest) if latest else (0 if items else 9999)
+    if not latest and items:
+        date_basis = 'no_public_date_but_collected_now'
 
     relevance = _relevance_score(title_blob, keywords)                   # 35%
     intent_part = _intent_score(title_blob)                              # 25%
     freshness_raw = _freshness_score(days, max_stale_days)
     freshness = max(0, min(20, int(freshness_raw * 20 / 30)))            # 20%
     top_heat = sum(sorted([int(x.get('heat_score') or heat_score(x)) for x in items], reverse=True)[:3])
-    heat_part = min(10, int(top_heat / 450)) if top_heat else 0          # 10%
+    heat_part = min(10, max(1, int(top_heat / 40))) if top_heat else (1 if items else 0)  # 10%
     rewrite_part = _rewrite_value_score(title_blob, items)               # 10%
     score = max(0, min(100, relevance + intent_part + freshness + heat_part + rewrite_part))
 
@@ -1591,6 +1612,8 @@ def _review_account_value(account: Dict[str, Any], items: List[Dict[str, Any]], 
     risk_notes = []
     if heat_part <= 2:
         risk_notes.append('互动热度一般，不能只按点赞判断，要看内容是否能回答客户顾虑。')
+    if date_basis in {'collected_or_pinned_fallback', 'no_public_date_but_collected_now'}:
+        risk_notes.append('公开页未稳定暴露发布时间，已按本轮采集内容处理，不再用 9999 天惩罚。')
     if account_type == '泛生活/待观察':
         risk_notes.append('账号不是直接房产号，先观察内容是否能稳定关联马来西亚生活/置业。')
 
@@ -1606,7 +1629,7 @@ def _review_account_value(account: Dict[str, Any], items: List[Dict[str, Any]], 
         decision = 'accept'
         reason = '账号与马来西亚置业/生活顾虑相关，且近期更新或置顶内容有长期参考价值。'
         next_action = '加入固定账号库；每天采置顶视频和近期内容。'
-    elif score >= 52:
+    elif score >= 48:
         decision = 'watch'
         reason = '有一定目标客户参考价值，但稳定性或内容垂直度还需观察。'
         next_action = '加入观察池；连续采集到相关视频后再固定。'
@@ -1658,7 +1681,7 @@ async def ingest_openclaw_heat_radar(settings: Settings, memory: MemoryStore, re
     run_id = str(getattr(req, 'run_id', '') or f'{source_name}_{datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")}')
     keywords = _split_keywords(getattr(req, 'keywords', []), 80)
     max_stale_days = int(getattr(req, 'max_stale_days', 90) or 90)
-    accept_min = int(getattr(req, 'auto_accept_min_score', 72) or 72)
+    accept_min = int(getattr(req, 'auto_accept_min_score', 0) or os.getenv('HEAT_RADAR_ACCEPT_MIN_SCORE', '60') or 60)
     warnings: List[str] = []
 
     account_payloads: List[Dict[str, Any]] = []
@@ -1929,7 +1952,7 @@ async def analyze_heat_radar_video_intake(settings: Settings, memory: MemoryStor
         else:
             warnings.append('未下载到视频文件，仅保存链接和标题供 AI/规则判断。')
 
-    review = _review_account_value(account, [item], _split_keywords(getattr(req, 'tags', []) or []), max_stale_days=90, accept_min_score=72)
+    review = _review_account_value(account, [item], _split_keywords(getattr(req, 'tags', []) or []), max_stale_days=90, accept_min_score=int(os.getenv('HEAT_RADAR_ACCEPT_MIN_SCORE', '60') or 60))
 
     # 有视频理解结果时，再用强推理模型补充判断；失败不阻断入库。
     if extraction:
@@ -1953,6 +1976,12 @@ async def analyze_heat_radar_video_intake(settings: Settings, memory: MemoryStor
                     review[key] = payload[key]
         except Exception as exc:
             warnings.append(f'强推理模型审核失败，已使用规则评分：{str(exc)[:220]}')
+
+    # 把 AI 判断写回热点 item。Top5 页面会用这个字段解释“为什么入选/为什么没入选”。
+    item.setdefault('raw', {})['ai_review'] = review
+    item['intent'] = f"AI判断：{review.get('decision', 'watch')} / {review.get('score', 0)}｜{review.get('reason', '')}"
+    item['recommended_action'] = review.get('next_action') or '转成原创口播/图文，并用资料包承接。'
+    item['date_basis'] = 'recent_or_collected'
 
     # 兼容不同阶段 Supabase 表结构：先尝试完整字段；失败时给出明确提示，避免接口直接 500。
     saved_item: Dict[str, Any] = {}
