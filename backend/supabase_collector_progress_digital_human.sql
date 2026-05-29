@@ -55,7 +55,7 @@ create table if not exists public.collector_commands (
   workspace_id text not null default 'default',
   command_id text not null unique,
   status text not null default 'queued',
-  limit integer default 1,
+  "limit" integer default 1,
   account text default '',
   dry_run boolean default false,
   headful boolean default true,
@@ -84,3 +84,60 @@ create table if not exists public.digital_human_provider_configs (
   created_at timestamptz default now(),
   updated_at timestamptz default now()
 );
+
+
+insert into public.digital_human_provider_configs
+  (id, workspace_id, provider, enabled, display_name, cost_note, raw)
+values
+  (
+    'default-preview-no-avatar',
+    'default',
+    'preview_no_avatar',
+    true,
+    '默认：无训练费素材成片',
+    '0 训练费；今天优先跑通采集、豆包分析、文案、配音和素材视频。',
+    '{"recommend_level":"first","stage":"today","note":"不依赖数字人平台"}'::jsonb
+  ),
+  (
+    'default-heygen-api',
+    'default',
+    'heygen_api',
+    false,
+    'HeyGen 公共 Avatar API',
+    '优先公共/模板 Avatar，不做专属训练；先小额测试。',
+    '{"recommend_level":"api_test","stage":"no_training","note":"海外 API，中文效果需实测"}'::jsonb
+  ),
+  (
+    'default-did-api',
+    'default',
+    'did_api',
+    false,
+    'D-ID 公共 Presenter API',
+    '优先公共 Presenter/Trial，不做 Custom Avatar 训练。',
+    '{"recommend_level":"backup","stage":"no_training","note":"数字人口播备用 API"}'::jsonb
+  ),
+  (
+    'default-akool-api',
+    'default',
+    'akool_talking_photo',
+    false,
+    'AKOOL Talking Photo',
+    'Talking Photo/Avatar 方向，先小样测试，不做定制训练。',
+    '{"recommend_level":"backup","stage":"no_training","note":"海外备用"}'::jsonb
+  ),
+  (
+    'default-local-musetalk-liveportrait',
+    'default',
+    'local_musetalk_liveportrait',
+    false,
+    '后期本地 MuseTalk / LivePortrait',
+    '后期买 GPU 设备后接入，无平台训练费。',
+    '{"recommend_level":"future","stage":"local_gpu","note":"长期降低数字人成本"}'::jsonb
+  )
+on conflict (id) do update set
+  provider = excluded.provider,
+  enabled = excluded.enabled,
+  display_name = excluded.display_name,
+  cost_note = excluded.cost_note,
+  raw = excluded.raw,
+  updated_at = now();
