@@ -1347,6 +1347,50 @@ function AppInner() {
     setLastHandoff(`已审计 ${res?.reviewed_count || 0} 个博主：保留 ${res?.keep?.length || 0}，观察 ${res?.watch?.length || 0}，建议暂停 ${res?.archive?.length || 0}。`)
   }
 
+
+  function cleanupCandidateReviews() {
+    return ((heatAccountAudit?.archive || []) as any[]).filter(Boolean)
+  }
+
+  function findHeatAccountForReview(review: any) {
+    const reviewUrl = String(review?.account_url || review?.url || '').trim().toLowerCase()
+    const reviewName = String(review?.account_name || review?.name || '').trim().toLowerCase()
+    return heatAccounts.find(acc => {
+      const accUrl = String(acc.url || '').trim().toLowerCase()
+      const accName = String(acc.name || '').trim().toLowerCase()
+      return Boolean(reviewUrl && accUrl && (accUrl === reviewUrl || accUrl.includes(reviewUrl) || reviewUrl.includes(accUrl))) || Boolean(reviewName && accName && accName === reviewName)
+    })
+  }
+
+  async function removeSuggestedHeatAccount(review: any) {
+    const acc = findHeatAccountForReview(review)
+    if (!acc?.id) {
+      setLastHandoff(`没有在账号库找到「${review?.account_name || '未命名账号'}」的可删除记录；可能已经删除或 URL 不一致。`)
+      return
+    }
+    if (!confirm(`确认删除账号「${acc.name || review?.account_name || '未命名账号'}」？删除后 ECS 后续不会再采这个账号。`)) return
+    await removeHeatAccount(acc.id)
+    setHeatAccountAudit(prev => prev ? { ...prev, archive: (prev.archive || []).filter((x: any) => x !== review) } : prev)
+  }
+
+  async function removeAllSuggestedHeatAccounts() {
+    const candidates = cleanupCandidateReviews()
+    const matched = candidates.map(r => ({ review: r, account: findHeatAccountForReview(r) })).filter(x => x.account?.id)
+    if (!matched.length) {
+      setLastHandoff('当前没有可直接删除的建议账号。可以先点“生成清理建议”。')
+      return
+    }
+    if (!confirm(`确认批量删除 ${matched.length} 个建议删除账号？建议只在确认这些账号长期无价值后操作。`)) return
+    await run('批量删除建议账号', async () => {
+      for (const item of matched) {
+        await apiDelete(`/api/heat-radar/accounts/${encodeURIComponent(String(item.account!.id))}`)
+      }
+    })
+    await reloadHeatRadarData()
+    setHeatAccountAudit(prev => prev ? { ...prev, archive: [] } : prev)
+    setLastHandoff(`已删除 ${matched.length} 个建议删除账号。`)
+  }
+
   async function copyOpenClawExample() {
     const example = {
       token: heatAutomationToken || '如果 Render 设置了 HEAT_RADAR_INGEST_TOKEN，这里填同一个 token',
@@ -2419,6 +2463,47 @@ ${manualText || ''}`.trim()
               <div><strong>网页按钮触发前提</strong><code>python command_worker.py</code><button onClick={() => navigator.clipboard?.writeText('python command_worker.py')}>复制</button></div>
             </div>
           </details>
+        </div>
+
+        <div className="accountCleanupPanel">
+          <div className="cleanupHead">
+            <div>
+              <Pill tone="orange">账号清理建议</Pill>
+              <h3>建议删除 / 暂停采集账号</h3>
+              <p>AI 会按最近采集结果、成交顾虑价值和内容垂直度判断账号；只把长期无价值账号列为建议删除，不会自动删。</p>
+            </div>
+            <div className="buttonRow mini">
+              <Button busy={busy === '审计博主价值' ? busy : ''} label="生成清理建议" onClick={auditHeatAccountValue} kind="ghost" />
+              <button className="btn dangerGhost" onClick={removeAllSuggestedHeatAccounts}>批量删除建议项</button>
+            </div>
+          </div>
+          {heatAccountAudit ? <>
+            <div className="cleanupStats">
+              <span>保留 <b>{heatAccountAudit.keep?.length || 0}</b></span>
+              <span>观察 <b>{heatAccountAudit.watch?.length || 0}</b></span>
+              <span>建议删除 <b>{cleanupCandidateReviews().length}</b></span>
+            </div>
+            {cleanupCandidateReviews().length === 0 ? <Empty>暂无建议删除账号。watch 账号先保留观察，避免误删。</Empty> : <div className="cleanupList">
+              {cleanupCandidateReviews().slice(0, 1).map((r: any, idx: number) => {
+                const matched = findHeatAccountForReview(r)
+                return <div className="cleanupItem" key={`${r.account_url || r.account_name || idx}`}>
+                  <div><strong>{r.account_name || matched?.name || '未命名账号'}</strong><p>{r.reason || r.next_action || '近期内容没有明显成交价值，建议暂停或删除。'}</p><small>{r.account_url || matched?.url || '无链接'}</small></div>
+                  <div className="cleanupScore"><b>{Number(r.score || 0)}</b><em>{r.decision || 'archive'}</em></div>
+                  <button className="btn dangerGhost" onClick={() => removeSuggestedHeatAccount(r)}>{matched ? '删除账号' : '未匹配'}</button>
+                </div>
+              })}
+              {cleanupCandidateReviews().length > 1 && <details className="cleanupMore"><summary>展开剩余 {cleanupCandidateReviews().length - 1} 个建议</summary>
+                {cleanupCandidateReviews().slice(1).map((r: any, idx: number) => {
+                  const matched = findHeatAccountForReview(r)
+                  return <div className="cleanupItem compact" key={`${r.account_url || r.account_name || idx}-more`}>
+                    <div><strong>{r.account_name || matched?.name || '未命名账号'}</strong><p>{r.reason || r.next_action || '建议暂停采集。'}</p></div>
+                    <div className="cleanupScore"><b>{Number(r.score || 0)}</b><em>{r.decision || 'archive'}</em></div>
+                    <button className="btn dangerGhost" onClick={() => removeSuggestedHeatAccount(r)}>{matched ? '删除账号' : '未匹配'}</button>
+                  </div>
+                })}
+              </details>}
+            </div>}
+          </> : <Empty>还没生成清理建议。先让采集跑一轮，再点“生成清理建议”。</Empty>}
         </div>
 
         <div className="radarWorkbenchGrid">
