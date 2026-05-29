@@ -17,7 +17,7 @@ CORE_TABLES = {
     'competitor_accounts',
     'competitor_videos',
     'trend_radar_records',
-    'script_versions',
+    # script_versions 是文案历史，不能因为 Supabase 字段/缓存问题阻断文案生成。
     'learning_events',
     'heat_radar_accounts',
     'heat_radar_account_deletes',
@@ -307,7 +307,16 @@ class MemoryStore:
         return self.insert('trend_radar_records', payload)
 
     def save_script_version(self, payload: Dict[str, Any]) -> Dict[str, Any]:
-        return self.insert('script_versions', payload)
+        # 文案历史只作为审计/回看，不允许因为 Supabase 400/字段缓存/RLS 问题阻断主流程。
+        # 如果 Supabase 写入失败，insert 会自动降级写本地 memory.json；再失败也只返回 warning。
+        try:
+            return self.insert('script_versions', payload, require_supabase=False)
+        except Exception as exc:
+            return {
+                'ok': False,
+                '_memory_warning': f'script_versions 保存失败但已放行文案生成：{type(exc).__name__}: {exc}',
+                **(_strip_none(_clean(payload)) if isinstance(payload, dict) else {}),
+            }
 
     def save_learning_event(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         return self.insert('learning_events', payload)
