@@ -2072,502 +2072,65 @@ body:has(.heatRadarV3) .collectorAssist{border-color:#dbeafe}
   .collectorTickerTrack span{animation-duration:26s;}
 }
 
-/* === left sidebar collapsible rail: final override === */
-.appShell,
-.studioNav,
-.studioMain,
-.studioNav nav button,
-.brandMark,
-.navCollapseButton{
-  transition:grid-template-columns .22s ease,width .22s ease,padding .22s ease,background .16s ease,border-color .16s ease,transform .16s ease,box-shadow .16s ease!important;
+/* === Buyer-intent scoring + compact report UI patch === */
+.collectorTickerTrack span{
+  animation:none!important;
+  white-space:normal;
+  line-height:1.55;
 }
-.navCollapseButton{
-  min-height:38px!important;
-  display:grid!important;
-  grid-template-columns:30px 1fr!important;
-  align-items:center!important;
-  gap:8px!important;
-  width:100%!important;
-  border:1px solid rgba(255,255,255,.08)!important;
-  border-radius:14px!important;
-  background:rgba(255,255,255,.045)!important;
-  color:rgba(255,255,255,.76)!important;
-  cursor:pointer!important;
-  font-weight:850!important;
-  padding:5px 8px!important;
+.collectorTickerTrack{
+  white-space:normal!important;
+  max-height:74px;
+  overflow:auto;
 }
-.navCollapseButton:hover{
-  background:rgba(45,212,191,.12)!important;
-  border-color:rgba(45,212,191,.30)!important;
-  color:#fff!important;
-  transform:translateX(2px)!important;
+.collectorEventList.onePreviewReport{
+  max-height:none!important;
+  overflow:visible!important;
 }
-.navCollapseButton span{
-  width:28px!important;
-  height:28px!important;
-  border-radius:10px!important;
-  display:grid!important;
-  place-items:center!important;
-  background:rgba(255,255,255,.08)!important;
-  font-size:22px!important;
-  line-height:1!important;
+.collectorHistoryDetails{
+  margin-top:10px;
+  border-top:1px dashed rgba(15,118,110,.18);
+  padding-top:8px;
 }
-.navCollapseButton b{font-size:12px!important;letter-spacing:.02em!important;white-space:nowrap!important;}
-.appShell.navCollapsed{
-  grid-template-columns:78px minmax(0,1fr)!important;
+.collectorHistoryDetails summary,
+.topMoreDetails summary{
+  cursor:pointer;
+  color:#2563eb;
+  font-weight:850;
+  padding:10px 12px;
+  border-radius:14px;
+  background:rgba(239,246,255,.72);
+  border:1px solid rgba(59,130,246,.16);
+  list-style:none;
 }
-.appShell.navCollapsed .studioNav{
-  width:78px!important;
-  padding:12px 9px!important;
-  overflow-x:hidden!important;
-  align-items:center!important;
+.collectorHistoryDetails summary::-webkit-details-marker,
+.topMoreDetails summary::-webkit-details-marker{display:none;}
+.topMoreDetails{
+  margin-top:12px;
 }
-.appShell.navCollapsed .brandMark{
-  grid-template-columns:1fr!important;
-  justify-items:center!important;
-  gap:0!important;
-  width:100%!important;
-  padding-bottom:10px!important;
+.topMoreDetails[open] summary{margin-bottom:12px;}
+.dimensionChips{
+  display:flex;
+  flex-wrap:wrap;
+  gap:6px;
+  margin:8px 0 4px;
 }
-.appShell.navCollapsed .brandText,
-.appShell.navCollapsed .brandMark strong,
-.appShell.navCollapsed .brandMark span,
-.appShell.navCollapsed .startButton,
-.appShell.navCollapsed .miniStatus,
-.appShell.navCollapsed .studioNav nav button b,
-.appShell.navCollapsed .studioNav nav button em,
-.appShell.navCollapsed .navCollapseButton b{
-  display:none!important;
+.dimensionChips em{
+  font-style:normal;
+  font-size:11px;
+  font-weight:850;
+  color:#065f46;
+  background:#ecfdf5;
+  border:1px solid #a7f3d0;
+  border-radius:999px;
+  padding:4px 8px;
 }
-.appShell.navCollapsed .logo{
-  width:42px!important;
-  height:42px!important;
-  border-radius:14px!important;
+.radarTopList .radarTopItem h4{
+  line-height:1.42;
 }
-.appShell.navCollapsed .navCollapseButton{
-  grid-template-columns:1fr!important;
-  justify-items:center!important;
-  width:50px!important;
-  padding:5px!important;
-  min-height:40px!important;
+.radarIngestDock:not([open]){
+  padding:14px 18px;
 }
-.appShell.navCollapsed .navCollapseButton span{
-  width:30px!important;
-  height:30px!important;
-}
-.appShell.navCollapsed .studioNav nav{
-  width:100%!important;
-  align-items:center!important;
-  gap:7px!important;
-}
-.appShell.navCollapsed .studioNav nav button{
-  width:50px!important;
-  min-width:50px!important;
-  min-height:48px!important;
-  grid-template-columns:1fr!important;
-  justify-items:center!important;
-  padding:8px 6px!important;
-  border-radius:16px!important;
-  margin-left:0!important;
-}
-.appShell.navCollapsed .studioNav nav button.subNav{
-  width:50px!important;
-  margin-left:0!important;
-  opacity:.9!important;
-}
-.appShell.navCollapsed .studioNav nav button.groupHeader{
-  margin-top:8px!important;
-}
-.appShell.navCollapsed .studioNav nav button span{
-  width:32px!important;
-  height:32px!important;
-  border-radius:12px!important;
-}
-.appShell.navCollapsed .studioNav nav button:hover{
-  transform:translateY(-1px) scale(1.06)!important;
-}
-.appShell.navCollapsed .studioNav nav button.active{
-  box-shadow:0 0 0 1px rgba(45,212,191,.35),0 14px 34px rgba(45,212,191,.12)!important;
-}
-@media (max-width:1280px){
-  .appShell.navCollapsed{grid-template-columns:78px minmax(980px,1fr)!important;}
-}
-@media (max-width:900px){
-  .appShell.navCollapsed{grid-template-columns:74px minmax(940px,1fr)!important;}
-  .appShell.navCollapsed .studioNav{width:74px!important;}
-}
-@media (max-width:760px){
-  .appShell.navCollapsed{grid-template-columns:72px minmax(900px,1fr)!important;}
-  .appShell.navCollapsed .studioNav{width:72px!important;}
-}
-
-/* === FINAL SMALL SCREEN RESPONSIVE FIX ===
-   Fixes collapsed-sidebar pages being clipped on laptop / RDP small windows.
-   This block must stay at the very end of styles.css so it overrides older min-width / zoom rules.
-*/
-html, body, #root {
-  max-width: 100%;
-  overflow-x: hidden !important;
-}
-
-.appShell,
-.appShell.navCollapsed {
-  zoom: 1 !important;
-  transform: none !important;
-  max-width: 100vw !important;
-  width: 100% !important;
-  min-width: 0 !important;
-  overflow-x: hidden !important;
-}
-
-.studioMain,
-.studioMain > *,
-.heroHeader,
-.card,
-.sectionCard,
-.panel,
-.radarPanel,
-.radarWorkbench,
-.radarWorkbenchGrid,
-.radarIngestGrid,
-.collectorAssist,
-.monitorGrid,
-.moduleGrid,
-.opsGrid,
-.splitGrid,
-.grid2,
-.grid3,
-.grid4 {
-  min-width: 0 !important;
-  max-width: 100% !important;
-  box-sizing: border-box !important;
-}
-
-.heroHeader h1,
-.heroHeader p,
-.card h2,
-.sectionHeader h2,
-.radarTopTitle,
-.radarTopItem,
-.radarTopItem * {
-  overflow-wrap: anywhere !important;
-  word-break: break-word !important;
-}
-
-.progressRail,
-.workflowBoard,
-.radarMetricStrip,
-.headerActions,
-.buttonRow,
-.stackButtons {
-  min-width: 0 !important;
-  max-width: 100% !important;
-}
-
-/* Laptop / half-screen mode: keep sidebar as icons and let content actually shrink. */
-@media (max-width: 1280px) {
-  .appShell,
-  .appShell.navCollapsed {
-    grid-template-columns: 78px minmax(0, 1fr) !important;
-    gap: 12px !important;
-    padding: 12px !important;
-    max-width: 100vw !important;
-    overflow-x: hidden !important;
-  }
-
-  .studioNav,
-  .appShell.navCollapsed .studioNav {
-    width: 78px !important;
-    min-width: 78px !important;
-    max-width: 78px !important;
-    height: calc(100vh - 24px) !important;
-    position: sticky !important;
-    top: 12px !important;
-    padding: 12px 8px !important;
-    border-radius: 26px !important;
-    overflow-x: hidden !important;
-  }
-
-  .brandMark,
-  .appShell.navCollapsed .brandMark {
-    grid-template-columns: 1fr !important;
-    justify-items: center !important;
-    gap: 0 !important;
-    padding-bottom: 8px !important;
-  }
-
-  .brandText,
-  .brandMark strong,
-  .brandMark span,
-  .startButton,
-  .miniStatus,
-  .studioNav nav button b,
-  .studioNav nav button em,
-  .navCollapseButton b {
-    display: none !important;
-  }
-
-  .logo,
-  .appShell.navCollapsed .logo {
-    width: 44px !important;
-    height: 44px !important;
-    border-radius: 15px !important;
-  }
-
-  .navCollapseButton,
-  .appShell.navCollapsed .navCollapseButton,
-  .studioNav nav button,
-  .studioNav nav button.subNav,
-  .appShell.navCollapsed .studioNav nav button,
-  .appShell.navCollapsed .studioNav nav button.subNav {
-    width: 52px !important;
-    min-width: 52px !important;
-    max-width: 52px !important;
-    min-height: 48px !important;
-    grid-template-columns: 1fr !important;
-    justify-items: center !important;
-    padding: 8px 6px !important;
-    margin-left: 0 !important;
-    border-radius: 16px !important;
-  }
-
-  .studioNav nav,
-  .appShell.navCollapsed .studioNav nav {
-    width: 100% !important;
-    display: flex !important;
-    flex-direction: column !important;
-    align-items: center !important;
-    gap: 7px !important;
-    overflow: visible !important;
-  }
-
-  .studioNav nav button span,
-  .appShell.navCollapsed .studioNav nav button span,
-  .navCollapseButton span,
-  .appShell.navCollapsed .navCollapseButton span {
-    width: 32px !important;
-    height: 32px !important;
-    border-radius: 12px !important;
-  }
-
-  .heroHeader {
-    grid-template-columns: minmax(0, 1fr) !important;
-    min-height: auto !important;
-    padding: 24px !important;
-    border-radius: 26px !important;
-  }
-
-  .heroHeader h1 {
-    font-size: clamp(28px, 4vw, 38px) !important;
-    line-height: 1.08 !important;
-    max-width: 100% !important;
-  }
-
-  .heroHeader p {
-    max-width: 100% !important;
-  }
-
-  .scoreCard {
-    width: 100% !important;
-    max-width: 260px !important;
-    justify-self: start !important;
-  }
-
-  .progressRail {
-    display: flex !important;
-    gap: 10px !important;
-    overflow-x: auto !important;
-    overflow-y: hidden !important;
-    padding-bottom: 8px !important;
-    scroll-snap-type: x proximity !important;
-  }
-
-  .stage {
-    flex: 0 0 clamp(156px, 28vw, 190px) !important;
-    min-width: 0 !important;
-    scroll-snap-align: start !important;
-  }
-
-  .radarWorkbenchGrid,
-  .radarIngestGrid,
-  .collectorAssist,
-  .monitorGrid,
-  .splitGrid,
-  .leadBlueprint,
-  .copyEditor,
-  .editChatBox,
-  .downloadPanel,
-  .videoGrid {
-    grid-template-columns: 1fr !important;
-  }
-
-  .radarMetricStrip,
-  .grid4 {
-    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
-  }
-
-  .workflowBoard,
-  .opsGrid,
-  .moduleGrid,
-  .grid3 {
-    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
-  }
-}
-
-/* Narrow browser / RDP window: one-column content, no horizontal clipping. */
-@media (max-width: 900px) {
-  .appShell,
-  .appShell.navCollapsed {
-    grid-template-columns: 70px minmax(0, 1fr) !important;
-    gap: 8px !important;
-    padding: 8px !important;
-  }
-
-  .studioNav,
-  .appShell.navCollapsed .studioNav {
-    width: 70px !important;
-    min-width: 70px !important;
-    max-width: 70px !important;
-    height: calc(100vh - 16px) !important;
-    top: 8px !important;
-    padding: 10px 6px !important;
-    border-radius: 22px !important;
-  }
-
-  .logo,
-  .appShell.navCollapsed .logo {
-    width: 40px !important;
-    height: 40px !important;
-    border-radius: 14px !important;
-  }
-
-  .navCollapseButton,
-  .appShell.navCollapsed .navCollapseButton,
-  .studioNav nav button,
-  .studioNav nav button.subNav,
-  .appShell.navCollapsed .studioNav nav button,
-  .appShell.navCollapsed .studioNav nav button.subNav {
-    width: 48px !important;
-    min-width: 48px !important;
-    max-width: 48px !important;
-    min-height: 46px !important;
-    padding: 7px 5px !important;
-  }
-
-  .heroHeader {
-    padding: 20px !important;
-    border-radius: 22px !important;
-  }
-
-  .heroHeader h1 {
-    font-size: clamp(25px, 5.8vw, 32px) !important;
-  }
-
-  .card,
-  .sectionCard,
-  .radarPanel,
-  .collectorAssist,
-  .agentPanel,
-  .cookiePanel,
-  .resultBox,
-  .memoryList {
-    padding: 16px !important;
-    border-radius: 22px !important;
-  }
-
-  .workflowBoard,
-  .opsGrid,
-  .moduleGrid,
-  .grid2,
-  .grid3,
-  .grid4,
-  .radarMetricStrip,
-  .collectorCommandGrid,
-  .collectorStatusGrid {
-    grid-template-columns: 1fr !important;
-  }
-
-  .headerActions,
-  .buttonRow,
-  .stackButtons {
-    display: grid !important;
-    grid-template-columns: 1fr !important;
-    width: 100% !important;
-    gap: 10px !important;
-  }
-
-  .btn,
-  .headerActions .btn,
-  .buttonRow .btn,
-  .addSegment,
-  button.primary,
-  button.secondary {
-    width: 100% !important;
-    max-width: 100% !important;
-  }
-
-  .radarTopItem,
-  .heatItem,
-  .accountRow,
-  .collectorEventRow {
-    grid-template-columns: 1fr !important;
-  }
-}
-
-@media (max-width: 620px) {
-  .appShell,
-  .appShell.navCollapsed {
-    grid-template-columns: 64px minmax(0, 1fr) !important;
-    padding: 6px !important;
-    gap: 6px !important;
-  }
-
-  .studioNav,
-  .appShell.navCollapsed .studioNav {
-    width: 64px !important;
-    min-width: 64px !important;
-    max-width: 64px !important;
-    padding: 8px 5px !important;
-    border-radius: 20px !important;
-  }
-
-  .navCollapseButton,
-  .appShell.navCollapsed .navCollapseButton,
-  .studioNav nav button,
-  .studioNav nav button.subNav,
-  .appShell.navCollapsed .studioNav nav button,
-  .appShell.navCollapsed .studioNav nav button.subNav {
-    width: 44px !important;
-    min-width: 44px !important;
-    max-width: 44px !important;
-    min-height: 44px !important;
-  }
-
-  .studioNav nav button span,
-  .appShell.navCollapsed .studioNav nav button span,
-  .navCollapseButton span,
-  .appShell.navCollapsed .navCollapseButton span {
-    width: 30px !important;
-    height: 30px !important;
-  }
-
-  .heroHeader {
-    padding: 18px !important;
-    border-radius: 20px !important;
-  }
-
-  .heroHeader h1 {
-    font-size: 24px !important;
-  }
-
-  .heroHeader p,
-  .currentStatus,
-  .sectionHeader p {
-    font-size: 13px !important;
-    line-height: 1.55 !important;
-  }
-
-  .stage {
-    flex-basis: 148px !important;
-  }
+.radarIngestDock:not([open]) summary{
+  margin-bottom:0;
 }

@@ -1364,18 +1364,94 @@ def _relevance_score(text: str, keywords: List[str]) -> int:
     return max(0, min(35, score))
 
 
-def _intent_score(text: str) -> int:
+BUYER_INTENT_DIMENSIONS = [
+    {
+        'key': 'children_education',
+        'label': '孩子教育/陪读/留学',
+        'weight': 18,
+        'keywords': ['孩子', '小孩', '子女', '教育', '学校', '国际学校', '陪读', '留学', '升学', '成绩单', '学签', '就业指导', '毕业', '规划'],
+        'rewrite_angle': '用“孩子能不能适应、学校怎么选、毕业后路径怎么规划”做开头，承接教育/陪读资料。',
+    },
+    {
+        'key': 'living_chinese_community',
+        'label': '生活适应/华人多/可讲华语',
+        'weight': 16,
+        'keywords': ['生活', '生活成本', '买菜', '超市', '交通', '通勤', '安全', '华人', '华语', '中文', '社区', '医院', '医疗', '养老', '适应', '饮食'],
+        'rewrite_angle': '用“来了以后生活能不能过得顺、语言和社区能不能适应”承接生活顾虑。',
+    },
+    {
+        'key': 'property_budget',
+        'label': '买房预算/区域/回报',
+        'weight': 15,
+        'keywords': ['房产', '买房', '置业', '楼盘', '租金', '预算', '房价', '税费', '贷款', '回报', '区域', '公寓', '别墅'],
+        'rewrite_angle': '把内容转成“预算、区域、税费、回报、避坑”的买房判断框架。',
+    },
+    {
+        'key': 'mm2h_identity',
+        'label': 'MM2H/第二家园/稳定身份',
+        'weight': 18,
+        'keywords': ['mm2h', '第二家园', '身份', '签证', '移居', '移民', '长期居留', '居留', '养老签', '退休', '稳定身份'],
+        'rewrite_angle': '围绕“能不能拿到稳定身份、身份和买房/孩子/养老怎么联动”设计脚本。',
+    },
+    {
+        'key': 'business_relocation',
+        'label': '企业/生意/老板落地',
+        'weight': 14,
+        'keywords': ['企业', '公司', '老板', '创业', '生意', '注册公司', '税务', '办公室', '业务', '开店', '出海', '落地', '投资'],
+        'rewrite_angle': '用“企业能不能过来、老板家庭和业务怎么一起落地”做高净值客户角度。',
+    },
+    {
+        'key': 'trust_real_case',
+        'label': '真实案例/避坑/流程信任',
+        'weight': 12,
+        'keywords': ['真实', '案例', '实拍', '亲身', '经验', '流程', '避坑', '踩坑', '对比', '注意', '攻略', '清单'],
+        'rewrite_angle': '把内容做成“真实案例 + 避坑清单 + 顾问判断”的信任型口播。',
+    },
+]
+
+
+def _buyer_intent_dimensions(text: str) -> List[Dict[str, Any]]:
     blob = (text or '').lower()
-    groups = [
-        ['预算', '价格', '房价', '税费', '贷款', '租金', '回报'],
-        ['教育', '国际学校', '陪读', '孩子', '上学'],
-        ['医疗', '养老', '医院', '保险'],
-        ['生活成本', '买菜', '超市', '交通', '通勤', '安全', '华人区', '社区'],
-        ['第二家园', 'mm2h', '签证', '身份', '移民'],
-        ['流程', '避坑', '注意', '真实', '实拍', '经验'],
-    ]
-    hits = sum(1 for group in groups if any(k in blob for k in group))
-    return max(0, min(25, hits * 5))
+    dims: List[Dict[str, Any]] = []
+    for dim in BUYER_INTENT_DIMENSIONS:
+        hits = [kw for kw in dim['keywords'] if kw.lower() in blob]
+        if not hits:
+            continue
+        # 命中多个词才给满分，避免只因为一个泛词就过高。
+        strength = min(1.0, 0.55 + 0.18 * min(len(hits), 3))
+        score = max(4, int(dim['weight'] * strength))
+        dims.append({
+            'key': dim['key'],
+            'label': dim['label'],
+            'score': score,
+            'weight': dim['weight'],
+            'matched_keywords': hits[:8],
+            'rewrite_angle': dim['rewrite_angle'],
+        })
+    return sorted(dims, key=lambda x: int(x.get('score') or 0), reverse=True)
+
+
+def _dimension_score(text: str) -> int:
+    dims = _buyer_intent_dimensions(text)
+    if not dims:
+        return 0
+    raw = sum(int(x.get('score') or 0) for x in dims[:4])
+    # 多维联动加分：例如孩子教育 + 生活适应 + 身份/买房，比单一泛热点更值得收录。
+    combo_bonus = 0
+    keys = {x.get('key') for x in dims}
+    if {'children_education', 'living_chinese_community'} <= keys:
+        combo_bonus += 5
+    if {'mm2h_identity', 'property_budget'} <= keys:
+        combo_bonus += 5
+    if {'business_relocation', 'property_budget'} <= keys:
+        combo_bonus += 4
+    if len(dims) >= 3:
+        combo_bonus += 4
+    return max(0, min(45, raw + combo_bonus))
+
+
+def _intent_score(text: str) -> int:
+    return max(0, min(25, int(_dimension_score(text) * 25 / 45)))
 
 
 MALAYSIA_TARGET_TERMS = [
@@ -1540,7 +1616,7 @@ def _account_items_for_review(memory: MemoryStore, account: Dict[str, Any], extr
     return _dedupe_items(rows)
 
 
-def _review_account_value(account: Dict[str, Any], items: List[Dict[str, Any]], keywords: List[str], max_stale_days: int = 90, accept_min_score: int = 60) -> Dict[str, Any]:
+def _review_account_value(account: Dict[str, Any], items: List[Dict[str, Any]], keywords: List[str], max_stale_days: int = 90, accept_min_score: int = 58) -> Dict[str, Any]:
     title_blob = ' '.join([
         str(account.get('name') or account.get('account_name') or ''),
         str(account.get('tags') or ''),
@@ -1548,6 +1624,7 @@ def _review_account_value(account: Dict[str, Any], items: List[Dict[str, Any]], 
         ' '.join(str(x.get('title') or '') for x in items[:10]),
         ' '.join(str(x.get('description') or '') for x in items[:10]),
         ' '.join(str(x.get('raw', {}).get('analysis_summary') or '') for x in items[:10]),
+        ' '.join(str(x.get('raw', {}).get('analysis_transcript') or '')[:600] for x in items[:3]),
     ])
     latest = ''
     latest_dt: datetime | None = None
@@ -1555,8 +1632,7 @@ def _review_account_value(account: Dict[str, Any], items: List[Dict[str, Any]], 
     fallback_latest_dt: datetime | None = None
     date_basis = 'published_at'
 
-    # 先看非置顶内容的发布时间；如果公开页不暴露发布时间，不能直接按 9999 天惩罚，
-    # 否则很多“刚采到但无日期”的有效视频会全部被 archive。
+    # 先看非置顶内容的发布时间；如果公开页不暴露发布时间，不能直接按 9999 天惩罚。
     for item in items:
         dt_any = _parse_dt(item.get('published_at') or item.get('collected_at') or item.get('date'))
         if dt_any and (fallback_latest_dt is None or dt_any > fallback_latest_dt):
@@ -1580,59 +1656,79 @@ def _review_account_value(account: Dict[str, Any], items: List[Dict[str, Any]], 
         latest_dt = fallback_latest_dt
         date_basis = 'collected_or_pinned_fallback'
 
-    # 如果本轮确实提取到了视频，但平台没有给发布时间，按“本轮采集内容”处理，
-    # 只降低一点可信度，不再打成 9999 天未更新。
     days = _days_since(latest) if latest else (0 if items else 9999)
     if not latest and items:
         date_basis = 'no_public_date_but_collected_now'
 
-    relevance = _relevance_score(title_blob, keywords)                   # 35%
-    intent_part = _intent_score(title_blob)                              # 25%
+    dimensions = _buyer_intent_dimensions(title_blob)
+    dimension_part = _dimension_score(title_blob)                         # 45%
+    relevance = min(20, int(_relevance_score(title_blob, keywords) * 20 / 35))  # 20%
     freshness_raw = _freshness_score(days, max_stale_days)
-    freshness = max(0, min(20, int(freshness_raw * 20 / 30)))            # 20%
+    freshness = max(0, min(12, int(freshness_raw * 12 / 30)))              # 12%
     top_heat = sum(sorted([int(x.get('heat_score') or heat_score(x)) for x in items], reverse=True)[:3])
-    heat_part = min(10, max(1, int(top_heat / 40))) if top_heat else (1 if items else 0)  # 10%
-    rewrite_part = _rewrite_value_score(title_blob, items)               # 10%
-    score = max(0, min(100, relevance + intent_part + freshness + heat_part + rewrite_part))
+    heat_part = min(10, max(1, int(top_heat / 120))) if top_heat else (1 if items else 0)  # 10%
+    rewrite_part = _rewrite_value_score(title_blob, items)                # 10%
+    multi_dimension_bonus = 3 if len(dimensions) >= 2 else 0
+    score = max(0, min(100, relevance + dimension_part + freshness + heat_part + rewrite_part + multi_dimension_bonus))
 
     account_type = _account_type_from_text(title_blob)
-    target_value = '能补充买房客户关心的生活、教育、医疗、交通或身份信息。' if account_type != '泛生活/待观察' else '相关性暂不稳定，需要观察是否能转成马来西亚置业内容。'
-    intents = []
-    if any(k in title_blob for k in ['生活', '买菜', '交通', '医疗', '教育', '养老', '华人']):
-        intents.append('了解马来西亚真实生活环境')
-    if any(k in title_blob for k in ['房产', '买房', '置业', '租金', '预算']):
-        intents.append('判断买房预算、区域和回报')
-    if any(k in title_blob.lower() for k in ['mm2h', '第二家园', '签证', '身份']):
-        intents.append('理解第二家园/身份政策')
+    if dimensions:
+        account_type = ' / '.join([d['label'] for d in dimensions[:2]])
+    dimension_labels = [str(d.get('label')) for d in dimensions]
+    dimension_keywords = sorted({kw for d in dimensions for kw in d.get('matched_keywords', [])})[:12]
+
+    if dimensions:
+        target_value = '；'.join([d.get('rewrite_angle', '') for d in dimensions[:3] if d.get('rewrite_angle')])
+    else:
+        target_value = '暂未命中孩子教育、生活适应、身份、企业落地、买房预算等核心成交顾虑，需要观察。'
+
+    intent_map = {
+        'children_education': '孩子能不能过来、学校/陪读/留学路径是否清楚',
+        'living_chinese_community': '来马后生活是否能适应：华人多、能讲华语、医疗交通生活成本',
+        'property_budget': '买房预算、区域选择、租金回报和交易避坑',
+        'mm2h_identity': 'MM2H/第二家园能否带来稳定身份和长期安排',
+        'business_relocation': '企业、老板、生意和家庭能否一起落地马来西亚',
+        'trust_real_case': '真实案例、流程、避坑能否建立顾问信任',
+    }
+    intents = [intent_map.get(str(d.get('key')), str(d.get('label'))) for d in dimensions]
     intents = intents or ['判断账号是否适合长期观察']
+
     opportunities = [
-        f'{account_type}：把账号内容转成买房前顾虑清单',
-        '从真实生活体验切入，再承接马来西亚置业资料包',
-    ]
+        f'{label}：转成客户顾虑型口播/图文' for label in dimension_labels[:3]
+    ] or [f'{account_type}：先做观察，不直接主推']
+    opportunities.append('文案改写要先讲客户问题，再给判断框架，最后承接资料包/顾问私聊。')
+
     risk_notes = []
     if heat_part <= 2:
         risk_notes.append('互动热度一般，不能只按点赞判断，要看内容是否能回答客户顾虑。')
     if date_basis in {'collected_or_pinned_fallback', 'no_public_date_but_collected_now'}:
         risk_notes.append('公开页未稳定暴露发布时间，已按本轮采集内容处理，不再用 9999 天惩罚。')
+    if not dimensions:
+        risk_notes.append('没有命中核心成交顾虑维度，不建议进 Top5。')
     if account_type == '泛生活/待观察':
         risk_notes.append('账号不是直接房产号，先观察内容是否能稳定关联马来西亚生活/置业。')
 
+    # 入选逻辑：不是只看点赞。只要命中孩子/生活/身份/企业/预算等成交维度，分数达到阈值即可入选。
     if days > max_stale_days * 2 and len(items) == 0:
         decision = 'archive'
         reason = f'超过 {max_stale_days * 2} 天没有可用新内容，也没有历史热度记录。'
         next_action = '暂停自动采集；保留档案但不占用每日采集额度。'
-    elif days > max_stale_days and score < 58:
+    elif not dimensions and score < 52:
         decision = 'archive'
-        reason = f'最近内容距今约 {days} 天，且相关性/客户顾虑价值不足。'
+        reason = '未命中孩子教育、生活适应、华人/华语、企业落地、MM2H、买房预算等成交顾虑维度。'
+        next_action = '归档或换更垂直的马来西亚账号。'
+    elif days > max_stale_days and score < 55:
+        decision = 'archive'
+        reason = f'最近内容距今约 {days} 天，且成交顾虑价值不足。'
         next_action = '移入观察/归档；以后有新视频链接再恢复。'
-    elif score >= accept_min_score:
+    elif score >= accept_min_score and dimensions:
         decision = 'accept'
-        reason = '账号与马来西亚置业/生活顾虑相关，且近期更新或置顶内容有长期参考价值。'
-        next_action = '加入固定账号库；每天采置顶视频和近期内容。'
-    elif score >= 48:
+        reason = f"命中成交顾虑：{'、'.join(dimension_labels[:3])}。适合进入 Top5 并联动生成脚本。"
+        next_action = '进入 Top5；按命中维度生成标题、脚本、资料承接和分镜。'
+    elif score >= 45 and dimensions:
         decision = 'watch'
-        reason = '有一定目标客户参考价值，但稳定性或内容垂直度还需观察。'
-        next_action = '加入观察池；连续采集到相关视频后再固定。'
+        reason = f"有可用客户顾虑：{'、'.join(dimension_labels[:2])}，但热度/垂直度还需观察。"
+        next_action = '进入观察候选；可用于文案灵感，但不要作为主推热点。'
     else:
         decision = 'reject'
         reason = '当前内容与马来西亚置业客户需求关联较弱。'
@@ -1647,6 +1743,10 @@ def _review_account_value(account: Dict[str, Any], items: List[Dict[str, Any]], 
         'freshness_score': int(freshness),
         'relevance_score': int(relevance),
         'heat_score': int(heat_part),
+        'dimension_score': int(dimension_part),
+        'buyer_dimensions': dimensions[:6],
+        'dimension_labels': dimension_labels[:6],
+        'matched_keywords': dimension_keywords,
         'latest_post_at': latest,
         'days_since_latest': int(days),
         'recent_items_count': len(items),
@@ -1654,9 +1754,9 @@ def _review_account_value(account: Dict[str, Any], items: List[Dict[str, Any]], 
         'next_action': next_action,
         'account_type': account_type,
         'target_value': target_value,
-        'customer_intents': intents[:5],
-        'content_opportunities': opportunities[:5],
-        'risk_notes': risk_notes[:5],
+        'customer_intents': intents[:6],
+        'content_opportunities': opportunities[:6],
+        'risk_notes': risk_notes[:6],
     }
 
 
@@ -1681,7 +1781,7 @@ async def ingest_openclaw_heat_radar(settings: Settings, memory: MemoryStore, re
     run_id = str(getattr(req, 'run_id', '') or f'{source_name}_{datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")}')
     keywords = _split_keywords(getattr(req, 'keywords', []), 80)
     max_stale_days = int(getattr(req, 'max_stale_days', 90) or 90)
-    accept_min = int(getattr(req, 'auto_accept_min_score', 0) or os.getenv('HEAT_RADAR_ACCEPT_MIN_SCORE', '60') or 60)
+    accept_min = int(getattr(req, 'auto_accept_min_score', 0) or os.getenv('HEAT_RADAR_ACCEPT_MIN_SCORE', '55') or 60)
     warnings: List[str] = []
 
     account_payloads: List[Dict[str, Any]] = []
@@ -1952,7 +2052,7 @@ async def analyze_heat_radar_video_intake(settings: Settings, memory: MemoryStor
         else:
             warnings.append('未下载到视频文件，仅保存链接和标题供 AI/规则判断。')
 
-    review = _review_account_value(account, [item], _split_keywords(getattr(req, 'tags', []) or []), max_stale_days=90, accept_min_score=int(os.getenv('HEAT_RADAR_ACCEPT_MIN_SCORE', '60') or 60))
+    review = _review_account_value(account, [item], _split_keywords(getattr(req, 'tags', []) or []), max_stale_days=90, accept_min_score=int(os.getenv('HEAT_RADAR_ACCEPT_MIN_SCORE', '55') or 60))
 
     # 有视频理解结果时，再用强推理模型补充判断；失败不阻断入库。
     if extraction:
@@ -1965,13 +2065,13 @@ async def analyze_heat_radar_video_intake(settings: Settings, memory: MemoryStor
                     'account': account,
                     'video': raw_item,
                     'video_understanding': extraction,
-                    'rules': '不要只看点赞；生活、教育、医疗、交通、华人社区、陪读、养老、第二家园、预算和真实体验都可作为收录依据。',
-                    'output_schema': {'decision': 'accept/watch/reject/archive', 'score': 0, 'account_type': '', 'target_value': '', 'customer_intents': [], 'content_opportunities': [], 'risk_notes': [], 'reason': ''},
+                    'rules': '按多个成交维度评分，不要只看点赞。重点看：孩子教育/陪读/留学、生活适应/华人多/能讲华语、买房预算/区域/回报、MM2H/第二家园稳定身份、企业/老板落地、真实案例/避坑流程。能回答客户顾虑的内容应进入 accept/watch；无关国内楼盘或泛娱乐应 archive/reject。',
+                    'output_schema': {'decision': 'accept/watch/reject/archive', 'score': 0, 'account_type': '', 'target_value': '', 'customer_intents': [], 'content_opportunities': [], 'risk_notes': [], 'buyer_dimensions': [], 'matched_keywords': [], 'reason': '', 'rewrite_angle': ''},
                 }, ensure_ascii=False),
                 temperature=0.2,
                 timeout=90,
             )
-            for key in ['decision', 'score', 'account_type', 'target_value', 'customer_intents', 'content_opportunities', 'risk_notes', 'reason']:
+            for key in ['decision', 'score', 'account_type', 'target_value', 'customer_intents', 'content_opportunities', 'risk_notes', 'buyer_dimensions', 'matched_keywords', 'reason', 'rewrite_angle']:
                 if key in payload:
                     review[key] = payload[key]
         except Exception as exc:
@@ -1979,8 +2079,17 @@ async def analyze_heat_radar_video_intake(settings: Settings, memory: MemoryStor
 
     # 把 AI 判断写回热点 item。Top5 页面会用这个字段解释“为什么入选/为什么没入选”。
     item.setdefault('raw', {})['ai_review'] = review
-    item['intent'] = f"AI判断：{review.get('decision', 'watch')} / {review.get('score', 0)}｜{review.get('reason', '')}"
-    item['recommended_action'] = review.get('next_action') or '转成原创口播/图文，并用资料包承接。'
+    # 把审核结果写到顶层，前端 Top5 不再误用点赞热度分当 AI 分数。
+    item['decision'] = str(review.get('decision') or 'watch')
+    item['score'] = int(review.get('score') or 0)
+    item['reason'] = str(review.get('reason') or '')
+    item['buyer_dimensions'] = review.get('buyer_dimensions') or review.get('dimension_labels') or []
+    item['customer_intents'] = review.get('customer_intents') or []
+    item['content_opportunities'] = review.get('content_opportunities') or []
+    item['matched_keywords'] = review.get('matched_keywords') or []
+    dim_label = ' / '.join([str(x.get('label') if isinstance(x, dict) else x) for x in (item.get('buyer_dimensions') or [])[:3]])
+    item['intent'] = f"AI判断：{review.get('decision', 'watch')} / {review.get('score', 0)}｜{dim_label + '｜' if dim_label else ''}{review.get('reason', '')}"
+    item['recommended_action'] = review.get('next_action') or review.get('rewrite_angle') or '转成原创口播/图文，并用资料包承接。'
     item['date_basis'] = 'recent_or_collected'
 
     # 兼容不同阶段 Supabase 表结构：先尝试完整字段；失败时给出明确提示，避免接口直接 500。

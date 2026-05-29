@@ -89,6 +89,9 @@ type HeatRadarSnapshot = {
   source_url: string
   recommended_action: string
   lead_magnet: string
+  buyer_dimensions?: string[]
+  reason?: string
+  decision?: string
 }
 
 
@@ -662,11 +665,6 @@ function AppInner() {
   const [modelStatus, setModelStatus] = useState<ModelStatusResponse | null>(null)
   const [jobs, setJobs] = useState<JobItem[]>([])
   const [contentNavOpen, setContentNavOpen] = useState(true)
-  const [navCollapsed, setNavCollapsed] = useState(() => window.localStorage.getItem('ai_video_nav_collapsed_v1') === '1')
-
-  useEffect(() => {
-    window.localStorage.setItem('ai_video_nav_collapsed_v1', navCollapsed ? '1' : '0')
-  }, [navCollapsed])
 
   const [industry, setIndustry] = useState(malaysiaProfilePreset.industry)
   const [audience, setAudience] = useState(malaysiaProfilePreset.audience)
@@ -810,10 +808,11 @@ function AppInner() {
     : `python run_all.py --headful --dry-run --limit ${ecsLimit}${ecsNoDelayArg}`
 
   const collectorEventsForReport = useMemo(() => (collectorProgress?.events || []).slice(0, 18), [collectorProgress])
+  const latestCollectorEvent = collectorEventsForReport[0]
   const collectorReportLine = useMemo(() => {
     const events = collectorEventsForReport
     if (!events.length) return '等待采集报告：网页下发命令后，ECS 会实时回传打开账号、提取视频、提交分析、入选/未入选原因。'
-    return events.map((ev, idx) => formatCollectorEventLine(ev, idx)).join('    ｜    ')
+    return formatCollectorEventLine(events[0], 0)
   }, [collectorEventsForReport])
 
   const materialAssets = useMemo(() => assets.map((a, i) => normalizeAsset(a, i)).filter(a => Boolean(a.id && a.url) && !safeText(a.filename).startsWith('collected_')), [assets])
@@ -1165,9 +1164,12 @@ function AppInner() {
   function heatItemToSnapshot(item: any, index = 0): HeatRadarSnapshot {
     const topic = String(item?.title || item?.topic || '未命名热度内容').trim()
     const review = item?.raw?.ai_review || item?.raw?.review || {}
-    const score = Number(review?.score ?? item?.score ?? item?.heat_score ?? 0)
+    // 优先显示 AI 业务评分，避免把点赞/评论累加的热度分误当成业务价值分。
+    const score = Number(review?.score ?? item?.score ?? 0)
     const decision = String(review?.decision || item?.decision || '').trim()
-    const reason = String(review?.reason || '').trim()
+    const reason = String(review?.reason || item?.reason || '').trim()
+    const dimsRaw = review?.buyer_dimensions || review?.dimension_labels || item?.buyer_dimensions || []
+    const buyerDimensions = Array.isArray(dimsRaw) ? dimsRaw.map((x: any) => typeof x === 'string' ? x : String(x?.label || x?.key || '')).filter(Boolean).slice(0, 4) : []
     const nextAction = String(review?.next_action || item?.recommended_action || '把这个热度话题转成原创口播/图文，并用资料包承接。')
     return {
       id: String(item?.id || `heat_${Date.now()}_${index}`),
@@ -1178,10 +1180,13 @@ function AppInner() {
       topic,
       signal: `${String(item?.date_basis || '').includes('recent') ? '最近留存' : '真实采集'}：赞${Number(item?.like_count || 0)} / 评${Number(item?.comment_count || 0)} / 藏${Number(item?.favorite_count || 0)} / 分享${Number(item?.share_count || 0)}`,
       score,
-      intent: String(item?.intent || (decision ? `AI判断：${decision} / ${score}${reason ? `｜${reason}` : ''}` : (item?.matched_keywords?.length ? `匹配关键词：${item.matched_keywords.join('、')}` : '待 AI 判断客户意图'))),
+      intent: String(item?.intent || (decision ? `AI判断：${decision} / ${score}${buyerDimensions.length ? `｜${buyerDimensions.join(' / ')}` : ''}${reason ? `｜${reason}` : ''}` : (item?.matched_keywords?.length ? `匹配关键词：${item.matched_keywords.join('、')}` : '待 AI 判断客户意图'))),
       source_url: String(item?.url || item?.source_url || ''),
       recommended_action: nextAction,
-      lead_magnet: String(item?.lead_magnet || activeReport?.title || '网页资料包')
+      lead_magnet: String(item?.lead_magnet || activeReport?.title || '网页资料包'),
+      buyer_dimensions: buyerDimensions,
+      reason,
+      decision
     }
   }
 
@@ -2189,33 +2194,24 @@ ${manualText || ''}`.trim()
   const digitalHumanPrimaryLabel = hasRunningDigitalHumanTask ? '查询当前数字人任务' : '生成数字人片段'
   const contentNavKeys: ModuleKey[] = ['copy','shooting','assets','digitalHuman','voice','video','subtitleCover','growth']
 
-  return <div className={`appShell ${navCollapsed ? 'navCollapsed' : ''}`}>
-    <aside className={`studioNav ${navCollapsed ? 'collapsed' : ''}`} aria-label="主导航">
+  return <div className="appShell">
+    <aside className="studioNav">
       <div className="brandMark">
         <div className="logo">AI</div>
-        <div className="brandText"><strong>AI 视频增长中枢</strong><span>采集 · 创作 · 合成 · 转化</span></div>
+        <div><strong>AI 视频增长中枢</strong><span>采集 · 创作 · 合成 · 转化</span></div>
       </div>
-      <button
-        type="button"
-        className="navCollapseButton"
-        aria-label={navCollapsed ? '展开左侧菜单' : '折叠左侧菜单'}
-        title={navCollapsed ? '展开左侧菜单' : '折叠左侧菜单'}
-        onClick={() => setNavCollapsed(v => !v)}
-      >
-        <span>{navCollapsed ? '›' : '‹'}</span><b>{navCollapsed ? '展开菜单' : '折叠菜单'}</b>
-      </button>
-      <button className="startButton" title="开始使用" onClick={() => setActive('dashboard')}>开始使用</button>
+      <button className="startButton" onClick={() => setActive('dashboard')}>开始使用</button>
       <nav>
-        {modules.filter(item => ['dashboard','lead','competitor'].includes(item.key)).map(item => <button key={item.key} title={item.title} className={active === item.key ? 'active' : ''} onClick={() => setActive(item.key)}>
+        {modules.filter(item => ['dashboard','lead','competitor'].includes(item.key)).map(item => <button key={item.key} className={active === item.key ? 'active' : ''} onClick={() => setActive(item.key)}>
           <span>{item.icon}</span><b>{item.title}</b><em>{item.tag}</em>
         </button>)}
-        <button title="内容生产" className={contentNavOpen ? 'groupHeader open' : 'groupHeader'} onClick={() => setContentNavOpen(!contentNavOpen)}>
+        <button className={contentNavOpen ? 'groupHeader open' : 'groupHeader'} onClick={() => setContentNavOpen(!contentNavOpen)}>
           <span>生</span><b>内容生产</b><em>{contentNavOpen ? '收起' : '展开'}</em>
         </button>
-        {contentNavOpen && contentNavKeys.map(key => modules.find(item => item.key === key)).filter(Boolean).map(item => <button key={item!.key} title={item!.title} className={`subNav ${active === item!.key ? 'active' : ''}`} onClick={() => setActive(item!.key)}>
+        {contentNavOpen && contentNavKeys.map(key => modules.find(item => item.key === key)).filter(Boolean).map(item => <button key={item!.key} className={`subNav ${active === item!.key ? 'active' : ''}`} onClick={() => setActive(item!.key)}>
           <span>{item!.icon}</span><b>{item!.title}</b><em>{item!.tag}</em>
         </button>)}
-        {modules.filter(item => ['strategy','collector','monitor'].includes(item.key)).map(item => <button key={item.key} title={item.title} className={active === item.key ? 'active' : ''} onClick={() => setActive(item.key)}>
+        {modules.filter(item => ['strategy','collector','monitor'].includes(item.key)).map(item => <button key={item.key} className={active === item.key ? 'active' : ''} onClick={() => setActive(item.key)}>
           <span>{item.icon}</span><b>{item.title}</b><em>{item.tag}</em>
         </button>)}
       </nav>
@@ -2399,13 +2395,20 @@ ${manualText || ''}`.trim()
               <p>当前账号：{collectorProgress?.run?.current_account || '暂无'}<br />当前视频：{collectorProgress?.run?.current_video || '暂无'}</p>
             </div>
           </div>
-          <div className="collectorEventList compactReport">
-            {collectorEventsForReport.slice(0, 12).map((ev, idx) => <div className={`collectorEvent ${ev.level === 'error' ? 'error' : ''}`} key={ev.id || `${ev.stage}-${idx}`}>
-              <span>{ev.stage || 'event'}</span>
-              <strong>{formatCollectorEventLine(ev, idx)}</strong>
-              <small>{ev.video_url || ev.account_url || ev.created_at}</small>
-            </div>)}
-            {!(collectorProgress?.events || []).length && <Empty>暂无采集事件。先在 ECS 启动命令监听，或手动运行一次采集。</Empty>}
+          <div className="collectorEventList compactReport onePreviewReport">
+            {latestCollectorEvent ? <div className={`collectorEvent ${latestCollectorEvent.level === 'error' ? 'error' : ''}`}>
+              <span>{latestCollectorEvent.stage || 'event'}</span>
+              <strong>{formatCollectorEventLine(latestCollectorEvent, 0)}</strong>
+              <small>{latestCollectorEvent.video_url || latestCollectorEvent.account_url || latestCollectorEvent.created_at}</small>
+            </div> : <Empty>暂无采集事件。先在 ECS 启动命令监听，或手动运行一次采集。</Empty>}
+            {collectorEventsForReport.length > 1 && <details className="collectorHistoryDetails">
+              <summary>展开完整采集报告（{collectorEventsForReport.length} 条）</summary>
+              {collectorEventsForReport.slice(1, 18).map((ev, idx) => <div className={`collectorEvent ${ev.level === 'error' ? 'error' : ''}`} key={ev.id || `${ev.stage}-${idx}`}>
+                <span>{ev.stage || 'event'}</span>
+                <strong>{formatCollectorEventLine(ev, idx + 1)}</strong>
+                <small>{ev.video_url || ev.account_url || ev.created_at}</small>
+              </div>)}
+            </details>}
           </div>
           <details className="ecsCommandDetails">
             <summary>手动命令 / 自动化设置</summary>
@@ -2426,11 +2429,12 @@ ${manualText || ''}`.trim()
             </div>
             <div className="radarTopList">
               {todayHeatSnapshots.length === 0 && <Empty>暂无入选候选。上方滚动报告会说明每条视频为什么没入选；也可以降低阈值或换更垂直的马来西亚账号。</Empty>}
-              {todayHeatSnapshots.map((item, index) => <article className="radarTopItem" key={item.id}>
+              {todayHeatSnapshots.slice(0, 1).map((item, index) => <article className="radarTopItem" key={item.id}>
                 <div className="radarRank">{index + 1}</div>
                 <div className="radarTopBody">
                   <div className="timelineMeta"><span>{item.platform || '平台'}</span><span>{item.account_name || '未命名账号'}</span><strong>{item.score || 0} 分</strong></div>
                   <h4>{item.topic || '未命名热点'}</h4>
+                  {!!item.buyer_dimensions?.length && <div className="dimensionChips">{item.buyer_dimensions.map(dim => <em key={dim}>{dim}</em>)}</div>}
                   <p>{item.intent || item.recommended_action || '等待 AI 判断客户意图。'}</p>
                   <em>{item.signal || '暂无真实互动指标'}</em>
                   <div className="timelineActions compactActions">
@@ -2440,7 +2444,26 @@ ${manualText || ''}`.trim()
                     <button className="dangerTextBtn" onClick={() => removeHeatItem(item.id)}>删除热点</button>
                   </div>
                 </div>
-              </article>)}
+              </article> )}
+              {todayHeatSnapshots.length > 1 && <details className="topMoreDetails">
+                <summary>展开剩余 {todayHeatSnapshots.length - 1} 条候选</summary>
+                {todayHeatSnapshots.slice(1).map((item, restIndex) => { const index = restIndex + 1; return <article className="radarTopItem" key={item.id}>
+                <div className="radarRank">{index + 1}</div>
+                <div className="radarTopBody">
+                  <div className="timelineMeta"><span>{item.platform || '平台'}</span><span>{item.account_name || '未命名账号'}</span><strong>{item.score || 0} 分</strong></div>
+                  <h4>{item.topic || '未命名热点'}</h4>
+                  {!!item.buyer_dimensions?.length && <div className="dimensionChips">{item.buyer_dimensions.map(dim => <em key={dim}>{dim}</em>)}</div>}
+                  <p>{item.intent || item.recommended_action || '等待 AI 判断客户意图。'}</p>
+                  <em>{item.signal || '暂无真实互动指标'}</em>
+                  <div className="timelineActions compactActions">
+                    {item.source_url && <a href={item.source_url} target="_blank" rel="noreferrer">打开原链接</a>}
+                    <button onClick={() => { setVideoIntakeUrl(item.source_url || ''); setLastHandoff('已选中这条热点，可在下方继续做视频理解或 AI 改写。') }}>选中分析</button>
+                    <button onClick={makeHeatRewritePlan}>基于 Top5 改写</button>
+                    <button className="dangerTextBtn" onClick={() => removeHeatItem(item.id)}>删除热点</button>
+                  </div>
+                </div>
+              </article> })}
+              </details>}
             </div>
           </div>
 
@@ -2458,7 +2481,7 @@ ${manualText || ''}`.trim()
           </div>
         </div>
 
-        <details className="radarIngestDock" open>
+        <details className="radarIngestDock">
           <summary><strong>采集 / 视频分析 / 备用导入</strong><span>原「采集接入」已合并到雷达；云 Worker、OpenClaw、手动真实数据都从这里进入。</span></summary>
           <div className="radarIngestGrid">
             <div className="heatPanel videoIngestMini">
