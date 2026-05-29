@@ -5,7 +5,7 @@ if not APP.exists():
     raise SystemExit('找不到 frontend/src/App.tsx。请在项目根目录运行：python fix_frontend_token_banner.py')
 
 s = APP.read_text(encoding='utf-8')
-original = s
+original = s 
 
 # 1) Remove common hard-blocking token warning banners by replacing exact Chinese text block conditions conservatively.
 # This script intentionally does not touch API/ECS logic; it only prevents frontend from claiming token is missing
