@@ -1379,15 +1379,16 @@ def _intent_score(text: str) -> int:
 
 
 MALAYSIA_TARGET_TERMS = [
+    # 必须是马来西亚/海外置业强相关词；不要用“房产/买房/置业”这种泛词，否则国内楼盘会误入库。
     '马来西亚', '马来', '大马', '吉隆坡', '新山', '柔佛', '槟城', '雪兰莪', '沙巴', '沙捞越',
-    'mm2h', '第二家园', '海外置业', '马来生活', '马来西亚房产', '马来西亚买房', '吉隆坡房产',
-    '国际学校', '陪读', '华人社区', '马来西亚生活', '马来西亚投资', '马来西亚移居'
+    'kl', 'kuala lumpur', 'johor', 'penang', 'selangor', 'mm2h', '第二家园', '海外置业', '海外房产',
+    '马来生活', '马来西亚房产', '马来西亚买房', '吉隆坡房产', '马来西亚生活', '马来西亚投资', '马来西亚移居',
 ]
 
 NON_TARGET_TERMS = [
     '雅安', '名山', '成都', '四川', '重庆', '郑州', '西安', '北京', '上海', '广州', '深圳',
     '杭州', '苏州', '南京', '厦门', '合肥', '武汉', '长沙', '昆明', '海口', '三亚', '国内房产',
-    '售楼部', '电梯房', '别墅区', '本地房源'
+    '售楼部', '电梯房', '别墅区', '本地房源', '县城房', '二手房', '本地楼盘'
 ]
 
 
@@ -1403,9 +1404,33 @@ def _is_malaysia_target_relevant(*parts: Any) -> bool:
     has_target = any(term.lower() in blob for term in MALAYSIA_TARGET_TERMS)
     if not has_target:
         return False
-    has_strong_malaysia = any(term.lower() in blob for term in ['马来西亚', '大马', '吉隆坡', '新山', '柔佛', '槟城', '雪兰莪', 'mm2h', '第二家园'])
+    has_strong_malaysia = any(term.lower() in blob for term in ['马来西亚', '大马', '吉隆坡', '新山', '柔佛', '槟城', '雪兰莪', 'mm2h', '第二家园', '海外置业', '海外房产'])
     has_non_target = any(term.lower() in blob for term in NON_TARGET_TERMS)
     return bool(has_strong_malaysia or not has_non_target)
+
+
+def _title_is_non_target(title: str) -> bool:
+    title_blob = _malaysia_text(title)
+    if not title_blob.strip():
+        return False
+    has_domestic = any(term.lower() in title_blob for term in NON_TARGET_TERMS)
+    has_strong = any(term.lower() in title_blob for term in ['马来西亚', '大马', '吉隆坡', '新山', '柔佛', '槟城', '雪兰莪', 'mm2h', '第二家园', '海外置业', '海外房产'])
+    return bool(has_domestic and not has_strong)
+
+
+def is_malaysia_direction_item(item: Dict[str, Any]) -> bool:
+    title = str(item.get('title') or item.get('topic') or '')
+    if _title_is_non_target(title):
+        return False
+    return _is_malaysia_target_relevant(
+        title,
+        item.get('description'),
+        item.get('account_name'),
+        item.get('platform'),
+        item.get('url') or item.get('source_url'),
+        ' '.join(_safe_list(item.get('tags'), [], 12)),
+        json.dumps(item.get('raw') or {}, ensure_ascii=False)[:1000],
+    )
 
 
 def _non_target_review(account: Dict[str, Any], item: Dict[str, Any]) -> Dict[str, Any]:
@@ -1827,6 +1852,30 @@ async def analyze_heat_radar_video_intake(settings: Settings, memory: MemoryStor
         'tags': getattr(req, 'tags', []) or [],
     }
     item = _normalize_openclaw_item(raw_item, account, 'video_intake')
+
+    # 先看视频标题本身：如果标题明显是雅安/名山/成都等国内楼盘，哪怕账号标签里有“马来西亚房产”，也不能进入雷达。
+    if _title_is_non_target(str(item.get('title') or item.get('topic') or '')):
+        review = _non_target_review(account, item)
+        try:
+            memory.insert('heat_radar_account_reviews', {
+                'run_id': f'video_intake_{today_key()}',
+                'source_name': 'video_intake_filter',
+                **review,
+                'raw': {'item': item, 'filter': 'non_target_title'},
+                'created_at': now_iso(),
+            })
+        except Exception:
+            pass
+        return {
+            'ok': True,
+            'skipped': True,
+            'item': item,
+            'review': review,
+            'extraction': {},
+            'r2_video_url': '',
+            'warnings': ['非马来西亚/第二家园/海外置业方向，已跳过，不进入热度雷达 Top5。'],
+            'next_actions': ['如账号方向错误，请在账号库删除或暂停该账号。'],
+        }
 
     relevance_blob = _malaysia_text(
         account.get('name'), account.get('url'), ' '.join(account.get('tags') or []), account.get('notes'),

@@ -484,6 +484,19 @@ function hasRealHeatSignal(item: HeatRadarSnapshot) {
   return Boolean(item.source_url) || /(赞|评|评论|藏|收藏|分享|转发|播放|浏览)\s*\d/i.test(text)
 }
 
+const malaysiaStrongTerms = ['马来西亚', '大马', '吉隆坡', '新山', '柔佛', '槟城', '雪兰莪', '沙巴', '沙捞越', 'mm2h', '第二家园', '海外置业', '海外房产']
+const nonTargetChinaTerms = ['雅安', '名山', '成都', '四川', '重庆', '郑州', '西安', '北京', '上海', '广州', '深圳', '杭州', '苏州', '南京', '厦门', '合肥', '武汉', '长沙', '昆明', '海口', '三亚', '售楼部', '电梯房', '本地房源', '国内房产']
+
+function isMalaysiaHeatDirection(item: HeatRadarSnapshot) {
+  const topic = `${item.topic || ''} ${item.signal || ''}`.toLowerCase()
+  const all = `${item.topic || ''} ${item.signal || ''} ${item.account_name || ''} ${item.platform || ''} ${item.intent || ''} ${item.recommended_action || ''} ${item.source_url || ''}`.toLowerCase()
+  const hasStrong = malaysiaStrongTerms.some(term => all.includes(term.toLowerCase()))
+  const topicHasStrong = malaysiaStrongTerms.some(term => topic.includes(term.toLowerCase()))
+  const topicHasDomestic = nonTargetChinaTerms.some(term => topic.includes(term.toLowerCase()))
+  if (topicHasDomestic && !topicHasStrong) return false
+  return hasStrong
+}
+
 type HeatAccountGroup = {
   key: string
   name: string
@@ -753,7 +766,7 @@ function AppInner() {
   const [videoIntakeResult, setVideoIntakeResult] = useState<any>(null)
   const [expandedHeatGroups, setExpandedHeatGroups] = useState<Record<string, boolean>>({})
   const [heatAccountAudit, setHeatAccountAudit] = useState<HeatRadarAccountAuditResponse | null>(null)
-  const [heatAutomationToken, setHeatAutomationToken] = useState('')
+  const [heatAutomationToken, setHeatAutomationTokenState] = useState(() => window.localStorage.getItem('ai_video_heat_automation_token_v1') || window.localStorage.getItem('heatRadarIngestToken') || window.localStorage.getItem('collectorToken') || '')
   const [heatAccountSearch, setHeatAccountSearch] = useState('')
   const [heatPlatformFilter, setHeatPlatformFilter] = useState('all')
   const [expandedHeatAccounts, setExpandedHeatAccounts] = useState<Record<string, boolean>>({})
@@ -776,6 +789,17 @@ function AppInner() {
   const ecsDryRunCommand = ecsCollectorAccount.trim()
     ? `python run_all.py --headful --dry-run --account "${ecsCollectorAccount.trim()}" --limit 1 --no-delay`
     : `python run_all.py --headful --dry-run --limit ${ecsLimit} --no-delay`
+
+  function setHeatAutomationToken(value: string) {
+    setHeatAutomationTokenState(value)
+    try {
+      window.localStorage.setItem('ai_video_heat_automation_token_v1', value)
+      window.localStorage.setItem('heatRadarIngestToken', value)
+      window.localStorage.setItem('collectorToken', value)
+    } catch {
+      // ignore private-mode/localStorage errors
+    }
+  }
 
   const materialAssets = useMemo(() => assets.map((a, i) => normalizeAsset(a, i)).filter(a => Boolean(a.id && a.url) && !safeText(a.filename).startsWith('collected_')), [assets])
   const collectedVideos = useMemo(() => assets.map((a, i) => normalizeAsset(a, i)).filter(a => Boolean(a.id && a.url) && a.kind === 'video' && safeText(a.filename).startsWith('collected_')), [assets])
@@ -821,7 +845,7 @@ function AppInner() {
       const id = String(x.id || '')
       const signal = String(x.signal || '')
       const topic = String(x.topic || '')
-      return !id.startsWith('seed_') && !signal.includes('本地关键词模拟') && !topic.includes('本地关键词模拟')
+      return !id.startsWith('seed_') && !signal.includes('本地关键词模拟') && !topic.includes('本地关键词模拟') && isMalaysiaHeatDirection(x)
     })
     const todayList = realList.filter(x => x.date === today)
     return (todayList.length ? todayList : realList).slice(0, 5)
@@ -1183,16 +1207,13 @@ function AppInner() {
   async function removeHeatItem(id: string) {
     if (!id) return
     const snapshotBefore = heatSnapshots
-    const sourceLinesBefore = heatSourceLines
     setHeatSnapshots(prev => prev.filter(x => String(x.id) !== String(id)))
-    setHeatSourceLines(prev => prev.filter(line => !line.includes(String(id))))
     try {
       await run('删除热度热点', () => apiDelete(`/api/heat-radar/items/${encodeURIComponent(id)}`))
       await reloadHeatRadarData()
       setLastHandoff('已从热度雷达删除，不会再进入 Top5。')
     } catch (err: any) {
       setHeatSnapshots(snapshotBefore)
-      setHeatSourceLines(sourceLinesBefore)
       setLastHandoff(`删除热点失败：${err?.message || err}`)
       throw err
     }
@@ -1481,13 +1502,10 @@ function AppInner() {
   }
 
   async function createEcsCollectorCommand() {
-    if (!heatAutomationToken.trim()) {
-      setError('请先填写接口 Token，必须和 Render 的 HEAT_RADAR_INGEST_TOKEN 一致。')
-      return
-    }
+    const token = heatAutomationToken.trim()
     const limit = Math.max(1, Math.min(120, Number(ecsCollectorCount) || 1))
     const command = await run('创建 ECS 采集命令', () => apiPost<any>('/api/collector/commands', {
-      token: heatAutomationToken.trim(),
+      token,
       limit,
       account: ecsCollectorAccount.trim(),
       dry_run: ecsDryRunMode,
@@ -2411,7 +2429,7 @@ ${manualText || ''}`.trim()
             <div className="heatPanel openClawMini">
               <div className="miniHeader"><div><h3>OpenClaw / 云 Worker</h3><p>外部采集器每天把结果 POST 到这里。网站只负责入库、评分、R2 留存和 AI 改写。</p></div><Pill tone="purple">接口</Pill></div>
               <div className="endpointBox"><span>POST</span><code>{API_BASE}/api/heat-radar/openclaw/ingest</code></div>
-              <Field label="接口 Token"><input value={heatAutomationToken} onChange={e => setHeatAutomationToken(e.target.value)} placeholder="和 HEAT_RADAR_INGEST_TOKEN 保持一致" /></Field>
+              <Field label="接口 Token（网页下发采集命令用，可留空由后端提示）"><input value={heatAutomationToken} onChange={e => setHeatAutomationToken(e.target.value)} placeholder="需要网页触发 ECS 时再填；必须和 Render HEAT_RADAR_INGEST_TOKEN 一致" /></Field>
               <div className="buttonRow"><button className="btn soft" onClick={copyOpenClawExample}>复制 JSON 示例</button><button className="btn ghost" onClick={auditHeatAccountValue}>审计账号价值</button></div>
             </div>
           </div>

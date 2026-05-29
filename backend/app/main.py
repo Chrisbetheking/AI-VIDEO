@@ -117,7 +117,7 @@ from app.services.video_edit import apply_video_edit
 from app.services.auto_collector import run_auto_collection
 from app.services.one_click import generate_one_click, revise_one_click
 from app.services.graphic_post import create_graphic_post
-from app.services.heat_radar import run_public_heat_radar, generate_heat_radar_rewrite, ingest_openclaw_heat_radar, audit_heat_radar_accounts, analyze_heat_radar_video_intake
+from app.services.heat_radar import run_public_heat_radar, generate_heat_radar_rewrite, ingest_openclaw_heat_radar, audit_heat_radar_accounts, analyze_heat_radar_video_intake, is_malaysia_direction_item
 from app.services.collector_control import create_collector_run, append_collector_event, latest_collector_status, create_collector_command, next_collector_command, complete_collector_command, recommended_digital_human_providers
 from app.services.jobs import create_job, get_job, list_jobs, update_job
 
@@ -863,7 +863,8 @@ def api_heat_radar_delete_account(account_id: str, memory: MemoryStore = Depends
 
 @app.get('/api/heat-radar/items')
 def api_heat_radar_items(memory: MemoryStore = Depends(get_memory)) -> list[dict]:
-    return memory.list('heat_radar_items', limit=120)
+    items = memory.list('heat_radar_items', limit=200)
+    return [x for x in items if is_malaysia_direction_item(x)][:120]
 
 
 @app.delete('/api/heat-radar/items/{item_id}')
