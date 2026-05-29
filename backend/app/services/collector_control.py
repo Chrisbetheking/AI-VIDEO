@@ -124,9 +124,9 @@ def create_collector_command(memory: MemoryStore, payload: dict[str, Any]) -> di
         'account': payload.get('account') or '',
         'dry_run': bool(payload.get('dry_run')),
         'headful': bool(payload.get('headful', True)),
-        'no_delay': bool(payload.get('no_delay')) or max(1, min(_safe_int(payload.get('limit'), 1), 120)) <= 3,
+        'no_delay': bool(payload.get('no_delay')),
         'mode': payload.get('mode') or 'manual',
-        'message': payload.get('message') or f"等待 ECS Worker 领取命令：{max(1, min(_safe_int(payload.get('limit'), 1), 120))} 个账号",
+        'message': payload.get('message') or '等待 ECS Worker 领取命令',
         'raw': payload.get('raw') or {},
     }
     return memory.insert('collector_commands', command, require_supabase=True)
