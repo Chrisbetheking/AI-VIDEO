@@ -1378,6 +1378,53 @@ def _intent_score(text: str) -> int:
     return max(0, min(25, hits * 5))
 
 
+MALAYSIA_TARGET_TERMS = [
+    '马来西亚', '马来', '大马', '吉隆坡', '新山', '柔佛', '槟城', '雪兰莪', '沙巴', '沙捞越',
+    'mm2h', '第二家园', '海外置业', '马来生活', '马来西亚房产', '马来西亚买房', '吉隆坡房产',
+    '国际学校', '陪读', '华人社区', '马来西亚生活', '马来西亚投资', '马来西亚移居'
+]
+
+NON_TARGET_TERMS = [
+    '雅安', '名山', '成都', '四川', '重庆', '郑州', '西安', '北京', '上海', '广州', '深圳',
+    '杭州', '苏州', '南京', '厦门', '合肥', '武汉', '长沙', '昆明', '海口', '三亚', '国内房产',
+    '售楼部', '电梯房', '别墅区', '本地房源'
+]
+
+
+def _malaysia_text(*parts: Any) -> str:
+    return ' '.join(str(x or '') for x in parts if x is not None).lower()
+
+
+def _is_malaysia_target_relevant(*parts: Any) -> bool:
+    # Strict target filter: the radar is for Malaysia / MM2H / overseas living-property leads.
+    blob = _malaysia_text(*parts)
+    if not blob.strip():
+        return False
+    has_target = any(term.lower() in blob for term in MALAYSIA_TARGET_TERMS)
+    if not has_target:
+        return False
+    has_strong_malaysia = any(term.lower() in blob for term in ['马来西亚', '大马', '吉隆坡', '新山', '柔佛', '槟城', '雪兰莪', 'mm2h', '第二家园'])
+    has_non_target = any(term.lower() in blob for term in NON_TARGET_TERMS)
+    return bool(has_strong_malaysia or not has_non_target)
+
+
+def _non_target_review(account: Dict[str, Any], item: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        'account_name': account.get('name') or '未命名账号',
+        'platform': account.get('platform') or '抖音',
+        'account_url': account.get('url') or '',
+        'decision': 'archive',
+        'score': 0,
+        'account_type': '非目标方向',
+        'target_value': '不进入马来西亚房产/第二家园热度雷达',
+        'customer_intents': [],
+        'content_opportunities': [],
+        'risk_notes': ['内容与马来西亚/第二家园/海外置业方向不匹配'],
+        'reason': f"已自动过滤：{item.get('title') or item.get('topic') or '该内容'} 不属于当前业务方向。",
+        'raw': {'filter': 'malaysia_target_only'},
+    }
+
+
 def _rewrite_value_score(text: str, items: List[Dict[str, Any]]) -> int:
     blob = (text or '').lower()
     value = 0
@@ -1780,6 +1827,33 @@ async def analyze_heat_radar_video_intake(settings: Settings, memory: MemoryStor
         'tags': getattr(req, 'tags', []) or [],
     }
     item = _normalize_openclaw_item(raw_item, account, 'video_intake')
+
+    relevance_blob = _malaysia_text(
+        account.get('name'), account.get('url'), ' '.join(account.get('tags') or []), account.get('notes'),
+        item.get('title'), item.get('description'), item.get('url'), ' '.join(item.get('tags') or []),
+    )
+    if not _is_malaysia_target_relevant(relevance_blob):
+        review = _non_target_review(account, item)
+        try:
+            memory.insert('heat_radar_account_reviews', {
+                'run_id': f'video_intake_{today_key()}',
+                'source_name': 'video_intake_filter',
+                **review,
+                'raw': {'item': item, 'filter': 'malaysia_target_only'},
+                'created_at': now_iso(),
+            })
+        except Exception:
+            pass
+        return {
+            'ok': True,
+            'skipped': True,
+            'item': item,
+            'review': review,
+            'extraction': {},
+            'r2_video_url': '',
+            'warnings': ['非马来西亚/第二家园/海外置业方向，已跳过，不进入热度雷达 Top5。'],
+            'next_actions': ['如账号方向错误，请在账号库删除或暂停该账号。'],
+        }
 
     r2_video_url = ''
     extraction = {}
