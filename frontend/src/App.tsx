@@ -2429,21 +2429,11 @@ ${manualText || ''}`.trim()
           </div>
         </div>
 
-        <div className="radarMetricStrip">
-          <div><span>热点池</span><strong>{todayHeatSnapshots.length}</strong><em>今日/最近入库</em></div>
-          <div><span>真实指标</span><strong>{realHeatCount}</strong><em>含点赞/评论/收藏/分享</em></div>
+        <div className="radarMetricStrip compactRadarMetrics">
+          <div><span>热点池</span><strong>{todayHeatSnapshots.length}</strong><em>真实指标 {realHeatCount} 条</em></div>
+          <div><span>采集状态</span><strong>{collectorProgress?.run?.status || '等待'}</strong><em>{collectorProgress?.events?.length ?? 0} 条事件 · 命令 {collectorProgress?.commands?.length ?? 0} 条</em></div>
           <div><span>账号库</span><strong>{heatAccounts.length}</strong><em>{health?.workspace_id || 'default'}</em></div>
           <div><span>AI 状态</span><strong>{heatRewrite ? '已改写' : '待分析'}</strong><em>{heatWorkbenchStatus}</em></div>
-        </div>
-        <div className="monitorGrid">
-          <div className="monitorCard"><span>采集状态</span><strong>{collectorProgress?.run?.status || '等待任务'}</strong><p>最近事件 {collectorProgress?.events?.length ?? 0} 条。热度雷达只看结果，采集控制统一收敛到「采集状态」。</p></div>
-          <div className="monitorCard"><span>最近命令</span><strong>{collectorProgress?.commands?.[0]?.command_id ? shortText(String(collectorProgress?.commands?.[0]?.command_id), 18) : '暂无'}</strong><p>每天自动时间：{ecsCollectorTime || '02:00'} · 账号库 {heatAccounts.length} 个。</p></div>
-          <div className="monitorCard"><span>AI 改写状态</span><strong>{heatRewrite ? '已改写' : '待改写'}</strong><p>{heatWorkbenchStatus}。确认热点后再进入文案生产，避免页面里采集和改写功能重复出现。</p></div>
-        </div>
-        <div className="buttonRow mini">
-          <Button label="进入采集状态" onClick={() => setActive('collector')} kind="soft" />
-          <Button label="刷新采集进度" onClick={() => reloadCollectorProgress()} kind="ghost" />
-          <Button label="查看系统状态" onClick={() => setActive('monitor')} kind="ghost" />
         </div>
 
 
