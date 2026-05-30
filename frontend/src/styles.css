@@ -2171,9 +2171,9 @@ body:has(.heatRadarV3) .collectorAssist{border-color:#dbeafe}
   .cleanupScore{display:flex;justify-content:flex-start;border:0;border-top:1px solid #e2e8f0;border-bottom:1px solid #e2e8f0;padding:8px 0}
 }
 
-/* ===== responsive navigation / small-screen optimization ===== */
+/* ===== UI v4: only responsive shell + collapsible sidebar. Business panels stay unchanged. ===== */
 .appShell.responsiveShell{
-  --nav-width: 292px;
+  --nav-width: 318px;
   grid-template-columns: var(--nav-width) minmax(0,1fr) !important;
   max-width: none !important;
   width: 100%;
@@ -2183,33 +2183,11 @@ body:has(.heatRadarV3) .collectorAssist{border-color:#dbeafe}
   zoom: 1 !important;
 }
 .appShell.responsiveShell.navCollapsed{ --nav-width: 96px; }
-.appShell.responsiveShell .studioMain{ min-width: 0 !important; }
-.appShell.responsiveShell .progressRail,
-.appShell.responsiveShell .workflowBoard{
-  grid-template-columns: repeat(auto-fit,minmax(140px,1fr)) !important;
-  overflow: visible !important;
-}
-.appShell.responsiveShell .workflowBoard{ grid-template-columns: repeat(auto-fit,minmax(180px,1fr)) !important; }
-.appShell.responsiveShell .opsGrid,
-.appShell.responsiveShell .moduleGrid,
-.appShell.responsiveShell .monitorGrid,
-.appShell.responsiveShell .pluginGrid,
-.appShell.responsiveShell .grid2,
-.appShell.responsiveShell .grid3,
-.appShell.responsiveShell .grid4,
-.appShell.responsiveShell .splitGrid,
-.appShell.responsiveShell .infoGrid,
-.appShell.responsiveShell .leadBlueprint,
-.appShell.responsiveShell .growthResult,
-.appShell.responsiveShell .radarMetricStrip{
-  grid-template-columns: repeat(auto-fit,minmax(240px,1fr)) !important;
-}
-.appShell.responsiveShell .heroHeader{
-  grid-template-columns: minmax(0,1fr) minmax(160px,220px) !important;
-  min-height: auto !important;
-}
-.appShell.responsiveShell .heroToolbar{ display:flex; align-items:center; gap:10px; margin-bottom:6px; }
+.appShell.responsiveShell .studioMain{ min-width:0 !important; }
 .appShell.responsiveShell .navTopRow{ display:flex; align-items:center; justify-content:space-between; gap:12px; }
+.appShell.responsiveShell .heroToolbar{ display:flex; align-items:center; gap:10px; margin-bottom:6px; }
+.appShell.responsiveShell .desktopOnly{ display:inline-flex; }
+.appShell.responsiveShell .mobileOnly{ display:none; }
 .appShell.responsiveShell .navIconBtn{
   border:1px solid rgba(255,255,255,.12);
   background:rgba(255,255,255,.08);
@@ -2224,60 +2202,56 @@ body:has(.heatRadarV3) .collectorAssist{border-color:#dbeafe}
   font-size:18px;
   font-weight:900;
   transition:.18s ease;
+  flex:0 0 auto;
 }
 .appShell.responsiveShell .navIconBtn:hover{ transform:translateY(-1px); background:rgba(255,255,255,.14); }
-.appShell.responsiveShell .mobileOnly{ display:none; }
-.appShell.responsiveShell .desktopOnly{ display:inline-flex; }
-.appShell.responsiveShell .navBackdrop{
-  display:none;
+.appShell.responsiveShell .navBackdrop{ display:none; }
+.appShell.responsiveShell .progressRail,
+.appShell.responsiveShell .workflowBoard{
+  grid-template-columns:repeat(auto-fit,minmax(140px,1fr)) !important;
+  overflow:visible !important;
 }
-.appShell.responsiveShell .responsiveNav{
-  width:100% !important;
-  min-width: 0 !important;
-  overflow-x:hidden !important;
+.appShell.responsiveShell .workflowBoard{ grid-template-columns:repeat(auto-fit,minmax(180px,1fr)) !important; }
+.appShell.responsiveShell .opsGrid,
+.appShell.responsiveShell .moduleGrid,
+.appShell.responsiveShell .monitorGrid,
+.appShell.responsiveShell .pluginGrid,
+.appShell.responsiveShell .grid2,
+.appShell.responsiveShell .grid3,
+.appShell.responsiveShell .grid4,
+.appShell.responsiveShell .splitGrid,
+.appShell.responsiveShell .infoGrid,
+.appShell.responsiveShell .leadBlueprint,
+.appShell.responsiveShell .growthResult,
+.appShell.responsiveShell .radarMetricStrip{
+  grid-template-columns:repeat(auto-fit,minmax(240px,1fr)) !important;
 }
-.appShell.responsiveShell .responsiveNav.collapsed{
-  padding:14px 10px !important;
+.appShell.responsiveShell .heroHeader{
+  grid-template-columns:minmax(0,1fr) minmax(160px,220px) !important;
+  min-height:auto !important;
 }
-.appShell.responsiveShell .responsiveNav.collapsed .brandMark{
-  grid-template-columns: 1fr !important;
-  justify-items:center;
-}
+.appShell.responsiveShell .responsiveNav.collapsed{ padding:14px 10px !important; }
+.appShell.responsiveShell .responsiveNav.collapsed .startButton,
 .appShell.responsiveShell .responsiveNav.collapsed .brandMark > div:last-child,
 .appShell.responsiveShell .responsiveNav.collapsed .miniStatus,
 .appShell.responsiveShell .responsiveNav.collapsed nav button b,
-.appShell.responsiveShell .responsiveNav.collapsed nav button em{
-  display:none !important;
-}
+.appShell.responsiveShell .responsiveNav.collapsed nav button em{ display:none !important; }
+.appShell.responsiveShell .responsiveNav.collapsed .brandMark{ grid-template-columns:1fr !important; justify-items:center; }
 .appShell.responsiveShell .responsiveNav.collapsed nav button,
 .appShell.responsiveShell .responsiveNav.collapsed nav button.subNav,
 .appShell.responsiveShell .responsiveNav.collapsed nav button.groupHeader{
   width:100% !important;
   min-width:0 !important;
-  grid-template-columns: 1fr !important;
+  grid-template-columns:1fr !important;
   justify-items:center;
   padding:10px 8px !important;
   margin-left:0 !important;
 }
-.appShell.responsiveShell .responsiveNav.collapsed nav button span{
-  margin:0 auto;
-}
-.appShell.responsiveShell .responsiveNav.collapsed nav{
-  align-items:stretch;
-}
-.appShell.responsiveShell .responsiveNav.collapsed .navTopRow{
-  justify-content:center;
-}
-.appShell.responsiveShell .responsiveNav.collapsed .navTopRow .desktopOnly{
-  position:absolute;
-  top:14px;
-  right:10px;
-}
-@media (max-width: 1100px){
-  .appShell.responsiveShell{
-    grid-template-columns: minmax(0,1fr) !important;
-    padding: 12px !important;
-  }
+.appShell.responsiveShell .responsiveNav.collapsed nav button span{ margin:0 auto; }
+.appShell.responsiveShell .responsiveNav.collapsed .navTopRow{ justify-content:center; position:relative; }
+.appShell.responsiveShell .responsiveNav.collapsed .navTopRow .desktopOnly{ position:absolute; top:0; right:0; }
+@media (max-width:1100px){
+  .appShell.responsiveShell{ grid-template-columns:minmax(0,1fr) !important; padding:12px !important; }
   .appShell.responsiveShell .desktopOnly{ display:none !important; }
   .appShell.responsiveShell .mobileOnly{ display:inline-flex !important; }
   .appShell.responsiveShell .navBackdrop{
@@ -2294,37 +2268,21 @@ body:has(.heatRadarV3) .collectorAssist{border-color:#dbeafe}
     left:12px;
     top:12px !important;
     bottom:12px;
-    width:min(300px, calc(100vw - 24px)) !important;
+    width:min(318px,calc(100vw - 24px)) !important;
     height:auto !important;
     z-index:50;
     transform:translateX(calc(-100% - 20px));
     transition:transform .22s ease;
     box-shadow:0 30px 80px rgba(15,23,42,.34) !important;
   }
-  .appShell.responsiveShell.navMobileOpen .responsiveNav{
-    transform:translateX(0);
-  }
-  .appShell.responsiveShell .heroHeader{
-    grid-template-columns: 1fr !important;
-    padding:22px !important;
-  }
-  .appShell.responsiveShell .scoreCard{
-    max-width:220px;
-  }
+  .appShell.responsiveShell.navMobileOpen .responsiveNav{ transform:translateX(0); }
+  .appShell.responsiveShell .heroHeader{ grid-template-columns:1fr !important; padding:22px !important; }
+  .appShell.responsiveShell .scoreCard{ max-width:220px; }
 }
-@media (max-width: 820px){
-  .appShell.responsiveShell{
-    padding:10px !important;
-    gap:12px !important;
-  }
-  .appShell.responsiveShell .heroHeader h1{
-    font-size:26px !important;
-    line-height:1.08 !important;
-  }
-  .appShell.responsiveShell .heroHeader p{
-    font-size:13px !important;
-    line-height:1.55 !important;
-  }
+@media (max-width:820px){
+  .appShell.responsiveShell{ padding:10px !important; gap:12px !important; }
+  .appShell.responsiveShell .heroHeader h1{ font-size:26px !important; line-height:1.08 !important; }
+  .appShell.responsiveShell .heroHeader p{ font-size:13px !important; line-height:1.55 !important; }
   .appShell.responsiveShell .progressRail,
   .appShell.responsiveShell .workflowBoard,
   .appShell.responsiveShell .opsGrid,
@@ -2338,16 +2296,9 @@ body:has(.heatRadarV3) .collectorAssist{border-color:#dbeafe}
   .appShell.responsiveShell .infoGrid,
   .appShell.responsiveShell .leadBlueprint,
   .appShell.responsiveShell .growthResult,
-  .appShell.responsiveShell .radarMetricStrip{
-    grid-template-columns: 1fr !important;
-  }
-  .appShell.responsiveShell .card{
-    padding:16px !important;
-  }
+  .appShell.responsiveShell .radarMetricStrip{ grid-template-columns:1fr !important; }
+  .appShell.responsiveShell .card{ padding:16px !important; }
   .appShell.responsiveShell .buttonRow,
   .appShell.responsiveShell .headerActions,
-  .appShell.responsiveShell .stackButtons{
-    grid-template-columns:1fr !important;
-    display:grid !important;
-  }
+  .appShell.responsiveShell .stackButtons{ grid-template-columns:1fr !important; display:grid !important; }
 }
