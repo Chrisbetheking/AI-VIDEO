@@ -665,6 +665,8 @@ function AppInner() {
   const [modelStatus, setModelStatus] = useState<ModelStatusResponse | null>(null)
   const [jobs, setJobs] = useState<JobItem[]>([])
   const [contentNavOpen, setContentNavOpen] = useState(true)
+  const [navCollapsed, setNavCollapsed] = useState(false)
+  const [navMobileOpen, setNavMobileOpen] = useState(false)
 
   const [industry, setIndustry] = useState(malaysiaProfilePreset.industry)
   const [audience, setAudience] = useState(malaysiaProfilePreset.audience)
@@ -2238,13 +2240,31 @@ ${manualText || ''}`.trim()
   const digitalHumanPrimaryLabel = hasRunningDigitalHumanTask ? '查询当前数字人任务' : '生成数字人片段'
   const contentNavKeys: ModuleKey[] = ['copy','shooting','assets','digitalHuman','voice','video','subtitleCover','growth']
 
-  return <div className="appShell">
-    <aside className="studioNav">
-      <div className="brandMark">
-        <div className="logo">AI</div>
-        <div><strong>AI 视频增长中枢</strong><span>采集 · 创作 · 合成 · 转化</span></div>
+  useEffect(() => {
+    setNavMobileOpen(false)
+  }, [active])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const syncLayout = () => {
+      if (window.innerWidth > 1100) setNavMobileOpen(false)
+      if (window.innerWidth <= 1280) setNavCollapsed(false)
+    }
+    syncLayout()
+    window.addEventListener('resize', syncLayout)
+    return () => window.removeEventListener('resize', syncLayout)
+  }, [])
+
+  return <div className={`appShell responsiveShell ${navCollapsed ? 'navCollapsed' : ''} ${navMobileOpen ? 'navMobileOpen' : ''}`}>
+    {navMobileOpen && <button className="navBackdrop" aria-label="关闭菜单" onClick={() => setNavMobileOpen(false)} />}
+    <aside className={`studioNav responsiveNav ${navCollapsed ? 'collapsed' : ''}`}>
+      <div className="navTopRow">
+        <div className="brandMark">
+          <div className="logo">AI</div>
+          <div><strong>AI 视频增长中枢</strong><span>采集 · 创作 · 合成 · 转化</span></div>
+        </div>
+        <button className="navIconBtn desktopOnly" onClick={() => setNavCollapsed(v => !v)} title={navCollapsed ? '展开左侧菜单' : '收起左侧菜单'}>{navCollapsed ? '»' : '«'}</button>
       </div>
-      <button className="startButton" onClick={() => setActive('dashboard')}>开始使用</button>
       <nav>
         {modules.filter(item => ['dashboard','lead','competitor'].includes(item.key)).map(item => <button key={item.key} className={active === item.key ? 'active' : ''} onClick={() => setActive(item.key)}>
           <span>{item.icon}</span><b>{item.title}</b><em>{item.tag}</em>
@@ -2265,7 +2285,10 @@ ${manualText || ''}`.trim()
     <main className="studioMain">
       <header className="heroHeader">
         <div>
-          <span className="eyebrow">AI Growth Studio</span>
+          <div className="heroToolbar">
+            <button className="navIconBtn mobileOnly" onClick={() => setNavMobileOpen(true)} aria-label="打开菜单">☰</button>
+            <span className="eyebrow">AI Growth Studio</span>
+          </div>
           <h1>同行洞察、脚本生产、素材成片一体化</h1>
           <p>先看真实热点，再做脚本、素材、数字人或真人拍摄，最后复盘投流。</p>
         </div>
@@ -2352,15 +2375,30 @@ ${manualText || ''}`.trim()
             {idx < workflowSteps.length - 1 && <b>→</b>}
           </button>)}
         </div>
-        <div className="opsGrid">
-          {modules.filter(x => ['lead','competitor','copy','shooting','assets','subtitleCover','growth','collector'].includes(x.key)).map(item => <button className="moduleCard compact" key={item.key} onClick={() => setActive(item.key)}>
-            <span className="moduleIcon">{item.icon}</span>
-            <strong>{item.title}</strong>
-            <p>{item.desc}</p>
-            <em>进入</em>
-          </button>)}
+        <div className="monitorGrid">
+          <div className="monitorCard"><span>今日热点</span><strong>{todayHeatSnapshots.length}</strong><p>{realHeatCount} 条带真实互动。热点判断和改写统一去「热度雷达」，不再在总览页重复展开。</p></div>
+          <div className="monitorCard"><span>账号库</span><strong>{heatAccounts.length}</strong><p>固定监控账号都在「账号库」维护；热点详情统一在「热度雷达」查看。</p></div>
+          <div className="monitorCard"><span>采集进度</span><strong>{collectorProgress?.run?.status || '等待任务'}</strong><p>最近事件 {collectorProgress?.events?.length ?? 0} 条 · 命令 {collectorProgress?.commands?.length ?? 0} 条。详细控制已收敛到「采集状态」。</p></div>
+          <div className="monitorCard"><span>系统任务</span><strong>{jobs.filter(j => j.status === 'running' || j.status === 'queued').length} 个进行中</strong><p>{health?.ok ? '后端已连接' : '后端未连接'} · {health?.workspace_id || 'default'} · 详细诊断统一去「系统状态」。</p></div>
         </div>
+        <section className="card modulePanel">
+          <div className="sectionHeader compact">
+            <div>
+              <h3>今日待办</h3>
+              <p>总览页只保留流程和关键摘要，不再重复展示所有功能入口。左侧导航负责跳转，下面只给你最值得继续做的事。</p>
+            </div>
+            <div className="buttonRow mini">
+              <Button label="去热度雷达" onClick={() => setActive('lead')} kind="ghost" />
+              <Button label="去采集状态" onClick={() => setActive('collector')} kind="soft" />
+              <Button label="去系统状态" onClick={() => setActive('monitor')} kind="ghost" />
+            </div>
+          </div>
+          <div className="todoPanel">
+            {pipelineTodos.map(item => <button key={item.text} className={item.ok ? 'done' : ''} onClick={() => setActive(item.go)}><span>{item.ok ? '✓' : '•'}</span>{item.text}</button>)}
+          </div>
+        </section>
       </section>}
+
 
       {active === 'monitor' && <section className="card modulePanel">
         <div className="sectionHeader"><div><h2>运营中控台</h2><p>这里是总览监控：看流程进度、数据库记忆、插件状态和下一步待办。详细数据和投流判断放在最后的增长模块。</p></div><div className="headerActions"><Button label="刷新数据库记忆" onClick={() => reloadMemoryContext(true)} kind="ghost" /><Button busy={busy === '生成行业爆点雷达' ? busy : ''} label="自动跑一次行业雷达" onClick={makeTrendRadar} kind="soft" /></div></div>
@@ -2397,73 +2435,17 @@ ${manualText || ''}`.trim()
           <div><span>账号库</span><strong>{heatAccounts.length}</strong><em>{health?.workspace_id || 'default'}</em></div>
           <div><span>AI 状态</span><strong>{heatRewrite ? '已改写' : '待分析'}</strong><em>{heatWorkbenchStatus}</em></div>
         </div>
-        <div className="ecsCollectorPanel liveCollectorPanel">
-          <div className="ecsCollectorHead">
-            <div>
-              <Pill tone="green">ECS Worker</Pill>
-              <h3>采集任务进度</h3>
-              <p>网页负责下发采集命令、看进度和错误；ECS 负责打开抖音、提取视频，再提交主网站豆包分析并汇总到热度雷达。</p>
-            </div>
-            <div className="ecsStatusMini">
-              <span>账号库 {heatAccounts.length}</span>
-              <span>{collectorProgress?.run?.status || '等待任务'}</span>
-            </div>
-          </div>
-          <div className="ecsControlGrid">
-            <Field label="本次采集账号数"><input type="number" min="1" max="120" value={ecsCollectorCount} onChange={e => setEcsCollectorCount(e.target.value)} /></Field>
-            <Field label="每日自动时间"><input value={ecsCollectorTime} onChange={e => setEcsCollectorTime(e.target.value)} placeholder="02:00" /></Field>
-            <Field label="单独跑某个账号，可选"><input value={ecsCollectorAccount} onChange={e => setEcsCollectorAccount(e.target.value)} placeholder="例如：房产马来小哥" /></Field>
-            <label className="checkline compact"><input type="checkbox" checked={ecsDryRunMode} onChange={e => setEcsDryRunMode(e.target.checked)} /> 仅测试，不上传</label>
-            <label className="checkline compact"><input type="checkbox" checked={ecsNoDelayMode} onChange={e => setEcsNoDelayMode(e.target.checked)} /> 快速模式：账号间不等待</label>
-          </div>
-          <div className="buttonRow">
-            <Button busy={busy === '创建 ECS 采集命令' ? busy : ''} label="网页下发采集命令" onClick={createEcsCollectorCommand} kind="primary" />
-            <Button label="刷新进度" onClick={() => reloadCollectorProgress()} kind="ghost" />
-            <button className="btn ghost" onClick={() => navigator.clipboard?.writeText(ecsRunCommand)}>复制手动命令</button>
-          </div>
-          <div className="collectorTickerBox">
-            <div className="collectorTickerLabel">滚动报告</div>
-            <div className="collectorTickerTrack"><span>{collectorReportLine}</span></div>
-          </div>
-          <div className="collectorLiveGrid">
-            <div className="collectorRunCard">
-              <span>当前任务</span>
-              <strong>{collectorProgress?.run?.stage || '未开始'}</strong>
-              <p>{collectorProgress?.run?.message || 'ECS 上运行 command_worker.py 后，可从这里点按钮触发采集。'}</p>
-              <div className="collectorStats"><b>{Number(collectorProgress?.run?.completed_accounts || 0)} / {Number(collectorProgress?.run?.total_accounts || 0)}</b><em>账号进度</em></div>
-              {collectorProgress?.run?.last_error && <div className="warn compactWarn">{collectorProgress.run.last_error}</div>}
-            </div>
-            <div className="collectorRunCard">
-              <span>视频结果</span>
-              <strong>{Number(collectorProgress?.run?.success_videos || 0)} 成功 / {Number(collectorProgress?.run?.failed_videos || 0)} 失败</strong>
-              <p>当前账号：{collectorProgress?.run?.current_account || '暂无'}<br />当前视频：{collectorProgress?.run?.current_video || '暂无'}</p>
-            </div>
-          </div>
-          <div className="collectorEventList compactReport onePreviewReport">
-            {latestCollectorEvent ? <div className={`collectorEvent ${latestCollectorEvent.level === 'error' ? 'error' : ''}`}>
-              <span>{latestCollectorEvent.stage || 'event'}</span>
-              <strong>{formatCollectorEventLine(latestCollectorEvent, 0)}</strong>
-              <small>{latestCollectorEvent.video_url || latestCollectorEvent.account_url || latestCollectorEvent.created_at}</small>
-            </div> : <Empty>暂无采集事件。先在 ECS 启动命令监听，或手动运行一次采集。</Empty>}
-            {collectorEventsForReport.length > 1 && <details className="collectorHistoryDetails">
-              <summary>展开完整采集报告（{collectorEventsForReport.length} 条）</summary>
-              {collectorEventsForReport.slice(1, 18).map((ev, idx) => <div className={`collectorEvent ${ev.level === 'error' ? 'error' : ''}`} key={ev.id || `${ev.stage}-${idx}`}>
-                <span>{ev.stage || 'event'}</span>
-                <strong>{formatCollectorEventLine(ev, idx + 1)}</strong>
-                <small>{ev.video_url || ev.account_url || ev.created_at}</small>
-              </div>)}
-            </details>}
-          </div>
-          <details className="ecsCommandDetails">
-            <summary>手动命令 / 自动化设置</summary>
-            <div className="ecsCommandGrid">
-              <div><strong>先测试不上传</strong><code>{ecsDryRunCommand}</code><button onClick={() => navigator.clipboard?.writeText(ecsDryRunCommand)}>复制</button></div>
-              <div><strong>正式跑并上传</strong><code>{ecsRunCommand}</code><button onClick={() => navigator.clipboard?.writeText(ecsRunCommand)}>复制</button></div>
-              <div><strong>设置每日自动跑</strong><code>{ecsDailyCommand}</code><button onClick={() => navigator.clipboard?.writeText(ecsDailyCommand)}>复制</button></div>
-              <div><strong>网页按钮触发前提</strong><code>python command_worker.py</code><button onClick={() => navigator.clipboard?.writeText('python command_worker.py')}>复制</button></div>
-            </div>
-          </details>
+        <div className="monitorGrid">
+          <div className="monitorCard"><span>采集状态</span><strong>{collectorProgress?.run?.status || '等待任务'}</strong><p>最近事件 {collectorProgress?.events?.length ?? 0} 条。热度雷达只看结果，采集控制统一收敛到「采集状态」。</p></div>
+          <div className="monitorCard"><span>最近命令</span><strong>{collectorProgress?.commands?.[0]?.command_id ? shortText(String(collectorProgress?.commands?.[0]?.command_id), 18) : '暂无'}</strong><p>每天自动时间：{ecsCollectorTime || '02:00'} · 账号库 {heatAccounts.length} 个。</p></div>
+          <div className="monitorCard"><span>AI 改写状态</span><strong>{heatRewrite ? '已改写' : '待改写'}</strong><p>{heatWorkbenchStatus}。确认热点后再进入文案生产，避免页面里采集和改写功能重复出现。</p></div>
         </div>
+        <div className="buttonRow mini">
+          <Button label="进入采集状态" onClick={() => setActive('collector')} kind="soft" />
+          <Button label="刷新采集进度" onClick={() => reloadCollectorProgress()} kind="ghost" />
+          <Button label="查看系统状态" onClick={() => setActive('monitor')} kind="ghost" />
+        </div>
+
 
         <div className="accountCleanupPanel">
           <div className="cleanupHead">
