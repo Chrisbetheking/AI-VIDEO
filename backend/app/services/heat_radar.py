@@ -1821,6 +1821,41 @@ async def ingest_openclaw_heat_radar(settings: Settings, memory: MemoryStore, re
     rejected = [d for d in decisions if d['decision'] == 'reject']
     archived = [d for d in decisions if d['decision'] == 'archive']
 
+    # 重要：把账号审核分数同步到每一条 heat_radar_items。
+    # 旧版只把评分写进 heat_radar_account_reviews，热点项本身没有 score/decision，
+    # 前端 Top5 只能显示 0 分；这里改成每条视频入库前都带业务评分。
+    def _account_for_item(item: Dict[str, Any]) -> Dict[str, Any]:
+        item_name = str(item.get('account_name') or '').strip()
+        item_url = str(item.get('account_url') or item.get('raw', {}).get('account_url') or '').strip()
+        for acc in account_payloads:
+            if item_name and item_name == str(acc.get('name') or acc.get('account_name') or '').strip():
+                return acc
+            if item_url and item_url == str(acc.get('url') or acc.get('account_url') or '').strip():
+                return acc
+        return {
+            'name': item_name or item.get('account_name') or '未命名账号',
+            'platform': item.get('platform') or '公开平台',
+            'url': item_url,
+            'tags': item.get('tags') or keywords,
+            'notes': item.get('description') or '',
+        }
+
+    for item in normalized_items:
+        review = _review_account_value(_account_for_item(item), [item], keywords, max_stale_days, accept_min)
+        item.setdefault('raw', {})['ai_review'] = review
+        item['decision'] = str(review.get('decision') or 'watch')
+        item['score'] = int(review.get('score') or item.get('heat_score') or 0)
+        item['reason'] = str(review.get('reason') or '')
+        item['buyer_dimensions'] = review.get('buyer_dimensions') or review.get('dimension_labels') or []
+        item['customer_intents'] = review.get('customer_intents') or []
+        item['content_opportunities'] = review.get('content_opportunities') or []
+        item['matched_keywords'] = review.get('matched_keywords') or []
+        dim_label = ' / '.join([str(x.get('label') if isinstance(x, dict) else x) for x in (item.get('buyer_dimensions') or [])[:3]])
+        item['intent'] = f"AI判断：{item['decision']} / {item['score']}｜{dim_label + '｜' if dim_label else ''}{item['reason']}"
+        item['recommended_action'] = review.get('next_action') or '转成原创口播/图文，并用资料包承接。'
+        # 防止历史清理/默认值把新采集热点直接隐藏。
+        item['deleted'] = False
+
     saved_items = 0
     saved_accounts = 0
     if bool(getattr(req, 'save_to_memory', True)):
@@ -2118,6 +2153,8 @@ async def analyze_heat_radar_video_intake(settings: Settings, memory: MemoryStor
     item['video_download_error'] = video_download_error
     item['download_method'] = download_method or item.get('raw', {}).get('collector_method', '')
     item['date_basis'] = 'recent_or_collected'
+    # 视频采集通过 AI 审核后，必须显式设为未删除；否则前端 /api/heat-radar/items 会被 deleted=is.false 过滤掉。
+    item['deleted'] = False
 
     # 兼容不同阶段 Supabase 表结构：先尝试完整字段；失败时给出明确提示，避免接口直接 500。
     saved_item: Dict[str, Any] = {}
