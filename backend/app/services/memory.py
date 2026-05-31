@@ -319,7 +319,29 @@ class MemoryStore:
             }
 
     def save_learning_event(self, payload: Dict[str, Any]) -> Dict[str, Any]:
-        return self.insert('learning_events', payload)
+        # learning_events 是“学习记忆/流程日志”，不能因为 Supabase RLS、service key、
+        # JWT 过期或字段缓存问题阻断数字人、配音、成片等主流程。
+        # 之前 CORE_STORAGE_STRICT=true 时，learning_events 401 会直接让
+        # /api/digital-human/create 变成 500/弹红条。这里强制降级：
+        # 1) 优先尝试写 Supabase；
+        # 2) 失败则写本地 memory.json；
+        # 3) 本地也失败则只返回 warning，不再抛异常。
+        try:
+            return self.insert('learning_events', payload, require_supabase=False)
+        except Exception as exc:
+            item = _strip_none(_clean(payload)) if isinstance(payload, dict) else {'payload': payload}
+            item.setdefault('id', str(uuid.uuid4()))
+            item.setdefault('workspace_id', self.workspace_id)
+            item.setdefault('created_at', now_iso())
+            item.setdefault('updated_at', now_iso())
+            item['_memory_warning'] = f'learning_events 保存失败但已放行主流程：{type(exc).__name__}: {exc}'
+            try:
+                data = self._read_local()
+                data.setdefault('learning_events', []).insert(0, item)
+                self._write_local(data)
+            except Exception as local_exc:
+                item['_memory_warning'] += f'；本地降级也失败：{type(local_exc).__name__}: {local_exc}'
+            return item
 
     def log_operation(self, event_type: str, title: str, payload: Dict[str, Any] | None = None, level: str = 'info') -> Dict[str, Any]:
         try:
