@@ -228,9 +228,37 @@ def _safe_suffix_from_url(url: str, default: str = '.mp4') -> str:
         suffix = Path(urlparse(url).path).suffix.lower()
     except Exception:
         suffix = ''
-    if suffix in {'.mp4', '.mov', '.webm', '.m4v'}:
+    known_exts = VIDEO_EXTS | IMAGE_EXTS | {'.mp3', '.wav', '.m4a', '.aac', '.ogg'}
+    if suffix in known_exts:
         return suffix
     return default
+
+
+def _safe_media_ext_from_name(name: str | None, default: str = '.mp4') -> str:
+    try:
+        suffix = Path(name or '').suffix.lower()
+    except Exception:
+        suffix = ''
+    known_exts = VIDEO_EXTS | IMAGE_EXTS | {'.mp3', '.wav', '.m4a', '.aac', '.ogg'}
+    return suffix if suffix in known_exts else default
+
+
+def _compose_max_assets() -> int:
+    """How many selected materials a single Render compose job may use.
+
+    Older deployments sometimes had COMPOSE_MAX_ASSETS=2 for demos. Treat that
+    as a legacy safety value unless COMPOSE_ALLOW_TINY_ASSETS=true is explicitly
+    set, so user-selected timelines no longer silently collapse to two clips.
+    """
+    raw = os.getenv('COMPOSE_MAX_ASSETS', '8')
+    try:
+        value = int(raw)
+    except Exception:
+        value = 8
+    allow_tiny = str(os.getenv('COMPOSE_ALLOW_TINY_ASSETS', '')).strip().lower() in {'1', 'true', 'yes', 'on'}
+    if value < 3 and not allow_tiny:
+        value = 8
+    return max(1, min(12, value))
 
 
 async def _download_remote_video_with_resume(
@@ -568,18 +596,18 @@ async def _download_remote_media_for_compose(settings: Settings, url: str, fallb
     if not url or not url.startswith(('http://', 'https://')):
         return None
     suffix = _safe_suffix_from_url(url, fallback_ext)
-    allowed_media_exts = IMAGE_EXTS | VIDEO_EXTS | {'.mp3', '.wav', '.m4a', '.aac'}
+    allowed_media_exts = IMAGE_EXTS | VIDEO_EXTS | {'.mp3', '.wav', '.m4a', '.aac', '.ogg'}
     if suffix not in allowed_media_exts:
         suffix = fallback_ext if fallback_ext in allowed_media_exts else '.mp4'
     dest = settings.tmp_dir / f'compose_asset_{hashlib.sha256(url.encode("utf-8")).hexdigest()[:24]}{suffix}'
     if dest.exists() and dest.stat().st_size > 2048:
         return dest
-    # Compose runs on a small Render instance. Never download huge remote materials for one demo render;
-    # huge R2 videos were the main reason the backend restarted and the browser showed Failed to fetch.
+    # Compose runs on a small Render instance. Keep a per-file limit, but do not
+    # silently drop all R2-only material just because Render restarted.
     try:
-        compose_remote_mb = int(os.getenv('COMPOSE_MAX_REMOTE_MB', '60'))
+        compose_remote_mb = int(os.getenv('COMPOSE_MAX_REMOTE_MB', '120'))
     except Exception:
-        compose_remote_mb = 60
+        compose_remote_mb = 120
     max_bytes = max(8, min(max(8, settings.max_upload_mb), compose_remote_mb)) * 1024 * 1024
     try:
         headers = {'User-Agent': settings.collector_user_agent or 'Mozilla/5.0', 'Accept': '*/*'}
@@ -594,7 +622,7 @@ async def _download_remote_media_for_compose(settings: Settings, url: str, fallb
                         total += len(chunk)
                         if total > max_bytes:
                             dest.unlink(missing_ok=True)
-                            raise RuntimeError(f'远端素材超过 {settings.max_upload_mb}MB')
+                            raise RuntimeError(f'远端素材超过 {compose_remote_mb}MB')
                         f.write(chunk)
         if dest.exists() and dest.stat().st_size > 2048:
             return dest
@@ -604,6 +632,30 @@ async def _download_remote_media_for_compose(settings: Settings, url: str, fallb
         except Exception:
             pass
     return None
+
+
+async def _ensure_local_media_from_remote(
+    settings: Settings,
+    local: Optional[Path],
+    remote_url: str,
+    *,
+    fallback_ext: str,
+    warnings: list[str],
+    label: str,
+) -> Optional[Path]:
+    """Return a local file path for preview/FFmpeg.
+
+    Assets uploaded before a Render restart may exist only in R2. Static preview
+    and FFmpeg need local files, so cache the remote R2 object into /tmp first.
+    """
+    if local is not None and local.exists() and local.is_file():
+        return local
+    if not remote_url:
+        return local
+    cached = await _download_remote_media_for_compose(settings, remote_url, fallback_ext=fallback_ext)
+    if cached is not None:
+        warnings.append(f'{label}只在 R2，已自动下载到 Render 临时目录后继续生成。')
+    return cached
 
 
 async def _resolve_compose_clip(settings: Settings, clip_req) -> Optional[MediaClip]:
@@ -1561,14 +1613,10 @@ async def api_compose_video(req: ComposeRequest, request: Request, settings: Set
     missing_asset_ids: list[str] = []
 
     if req.asset_plan:
-        try:
-            compose_max_assets = int(os.getenv('COMPOSE_MAX_ASSETS', '8'))
-        except Exception:
-            compose_max_assets = 3
-        compose_max_assets = max(1, min(12, compose_max_assets))
+        compose_max_assets = _compose_max_assets()
         sorted_plan = sorted(req.asset_plan, key=lambda x: x.order)
         if len(sorted_plan) > compose_max_assets:
-            pre_warnings.append(f'当前 Render 免费实例为稳定演示，剪辑合成先使用前 {compose_max_assets} 个素材；其余素材不会下载，避免后端重启。')
+            pre_warnings.append(f'本次后端最多合成前 {compose_max_assets} 个素材；如需更多，可把 COMPOSE_MAX_ASSETS 调到 12 内，并建议改由 ECS/Worker 合成。')
         for clip_req in sorted_plan[:compose_max_assets]:
             clip = await _resolve_compose_clip(settings, clip_req)
             if clip:
@@ -1576,13 +1624,9 @@ async def api_compose_video(req: ComposeRequest, request: Request, settings: Set
             else:
                 missing_asset_ids.append(str(clip_req.asset_id))
     elif req.asset_ids:
-        try:
-            compose_max_assets = int(os.getenv('COMPOSE_MAX_ASSETS', '8'))
-        except Exception:
-            compose_max_assets = 3
-        compose_max_assets = max(1, min(12, compose_max_assets))
+        compose_max_assets = _compose_max_assets()
         if len(req.asset_ids) > compose_max_assets:
-            pre_warnings.append(f'当前 Render 免费实例为稳定演示，剪辑合成先使用前 {compose_max_assets} 个素材；其余素材不会下载，避免后端重启。')
+            pre_warnings.append(f'本次后端最多合成前 {compose_max_assets} 个素材；如需更多，可把 COMPOSE_MAX_ASSETS 调到 12 内，并建议改由 ECS/Worker 合成。')
         for order, asset_id in enumerate(req.asset_ids[:compose_max_assets]):
             class _Tmp:
                 pass
@@ -1926,8 +1970,26 @@ async def api_digital_human_create(
                 raw=raw,
             )
 
+        # Static preview / no-training fallback needs local files for FFmpeg.
+        # If the selected avatar/audio only exists in R2, cache it back to /tmp automatically.
+        avatar_path = await _ensure_local_media_from_remote(
+            settings,
+            avatar_path,
+            avatar_remote_url,
+            fallback_ext=_safe_media_ext_from_name(req.avatar_file_name, '.jpg'),
+            warnings=warnings,
+            label='数字人形象素材',
+        )
+        audio_path = await _ensure_local_media_from_remote(
+            settings,
+            audio_path,
+            audio_remote_url,
+            fallback_ext=_safe_media_ext_from_name(req.audio_file_name, '.mp3'),
+            warnings=warnings,
+            label='配音音频',
+        )
         if avatar_path is None or audio_path is None:
-            raise HTTPException(status_code=400, detail='静态预览需要本地素材文件。当前素材只在 R2；请选择“火山即梦/OmniHuman”真实数字人引擎，或重新上传素材。')
+            raise HTTPException(status_code=400, detail='静态预览无法读取素材：本地文件不存在，且 R2 自动回源下载失败。请确认 R2 公共访问已开启，或重新上传素材/重新生成配音。')
         preview = create_static_avatar_preview(settings, avatar_path, audio_path, title=req.title)
         public_url = maybe_upload_to_r2(settings, preview, prefix='digital-human/preview')
         warnings.append('当前未配置真实数字人 GPU/API 引擎，已生成静态头像预览视频。要真实口型同步，请配置 DIGITAL_HUMAN_WEBHOOK_URL。')
@@ -1945,6 +2007,8 @@ async def api_digital_human_create(
             video_name=preview.name,
             warnings=warnings,
         )
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 

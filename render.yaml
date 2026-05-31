@@ -6,3 +6,8 @@ services:
     plan: free
     autoDeploy: true
     healthCheckPath: /api/health
+    envVars:
+      - key: COMPOSE_MAX_ASSETS
+        value: "8"
+      - key: COMPOSE_MAX_REMOTE_MB
+        value: "120"

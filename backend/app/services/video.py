@@ -40,6 +40,13 @@ def _env_int(name: str, default: int, low: int, high: int) -> int:
         value = int(os.getenv(name, str(default)))
     except Exception:
         value = default
+    # Older Render demos sometimes set COMPOSE_MAX_ASSETS=2. That made user
+    # timelines look broken because only two clips survived. Keep the escape
+    # hatch COMPOSE_ALLOW_TINY_ASSETS=true for true low-memory demos.
+    if name == "COMPOSE_MAX_ASSETS" and value < 3:
+        allow_tiny = str(os.getenv("COMPOSE_ALLOW_TINY_ASSETS", "")).strip().lower() in {"1", "true", "yes", "on"}
+        if not allow_tiny:
+            value = default
     return max(low, min(high, value))
 
 
