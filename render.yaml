@@ -7,6 +7,19 @@ services:
     autoDeploy: true
     healthCheckPath: /api/health
     envVars:
+      - key: FAL_KEY
+        sync: false
+      - key: DIGITAL_HUMAN_ENGINE
+        value: fal_lipsync
+      - key: FAL_LIPSYNC_ENDPOINT
+        value: fal-ai/sync-lipsync
+      - key: FAL_LIPSYNC_MODEL
+        value: lipsync-1.9.0-beta
+      - key: FAL_LIPSYNC_SYNC_MODE
+        value: cut_off
+      - key: FAL_LIPSYNC_INITIAL_WAIT_SECONDS
+        value: 75
+
       - key: COMPOSE_MAX_ASSETS
         value: "8"
       - key: COMPOSE_MAX_REMOTE_MB

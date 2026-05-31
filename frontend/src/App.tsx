@@ -731,7 +731,7 @@ function AppInner() {
   const [voiceNotes, setVoiceNotes] = useState<string[]>([])
   const [audio, setAudio] = useState<TTSResponse | null>(null)
 
-  const [digitalHumanEngine, setDigitalHumanEngine] = useState('auto')
+  const [digitalHumanEngine, setDigitalHumanEngine] = useState('fal_lipsync')
   const [digitalHumanJimengModel, setDigitalHumanJimengModel] = useState('omnihuman15')
   const [digitalHumanAvatarId, setDigitalHumanAvatarId] = useState('')
   const [digitalHumanDriverId, setDigitalHumanDriverId] = useState('')
@@ -2034,7 +2034,8 @@ ${manualText || ''}`.trim()
     setDigitalHumanPollCount(0)
     setDigitalHumanLastChecked(new Date().toLocaleTimeString())
     if (res?.video_url) {
-      setLastHandoff('数字人片段已生成。可以把它作为素材进入素材选择和剪辑合成。')
+      await reloadAssets().catch(() => null)
+      setLastHandoff('数字人片段已生成并保存到素材库。可以把它作为开场素材，再选择楼盘/风光素材进行剪辑合成。')
     } else {
       setLastHandoff('火山即梦任务已提交。不要重复提交；系统会自动查询，通常需要 5-30 分钟。')
     }
@@ -2064,7 +2065,8 @@ ${manualText || ''}`.trim()
     setDigitalHumanLastChecked(new Date().toLocaleTimeString())
     setDigitalHumanPollCount(prev => prev + 1)
     if (res.video_url) {
-      setLastHandoff('数字人片段已生成。可以把它作为素材进入素材选择和剪辑合成。')
+      await reloadAssets().catch(() => null)
+      setLastHandoff('数字人片段已生成并保存到素材库。可以把它作为开场素材，再选择楼盘/风光素材进行剪辑合成。')
     } else if (String(res.status || '').toLowerCase() === 'failed') {
       setLastHandoff('当前数字人任务不可继续查询。请查看火山原始返回，必要时清除当前任务后重新提交。')
     } else {
@@ -2747,11 +2749,11 @@ https://www.douyin.com/user/..." /></Field>
       </section>}
 
       {active === 'digitalHuman' && <section className="card modulePanel">
-        <div className="sectionHeader"><div><h2>数字人工作台</h2><p>每次生成都会有版本号，方便区分文案/配音修改后的不同数字人片段。旧素材只在 R2 时，也会尽量直接用 R2 链接提交。</p></div><Button busy={busy === '生成数字人片段' || busy === '查询数字人结果' ? busy : ''} label={digitalHumanPrimaryLabel} onClick={hasRunningDigitalHumanTask ? () => checkDigitalHumanStatus(false) : makeDigitalHuman} disabled={!hasRunningDigitalHumanTask && (!audio?.file_name || !digitalHumanAvatarId || !digitalHumanConsent)} /></div>
+        <div className="sectionHeader"><div><h2>数字人工作台</h2><p>先生成真人模板口型同步开场片段，自动保存到素材库；后面再选择楼盘/马来西亚风光素材混剪成完整视频。</p></div><Button busy={busy === '生成数字人片段' || busy === '查询数字人结果' ? busy : ''} label={digitalHumanPrimaryLabel} onClick={hasRunningDigitalHumanTask ? () => checkDigitalHumanStatus(false) : makeDigitalHuman} disabled={!hasRunningDigitalHumanTask && (!audio?.file_name || !digitalHumanAvatarId || !digitalHumanConsent)} /></div>
         <div className="grid3">
-          <Field label="数字人形象素材" hint="建议上传本人授权的正脸/半身照片，或 5-15 秒自然说话视频。"><select value={digitalHumanAvatarId} onChange={e => setDigitalHumanAvatarId(e.target.value)}><option value="">选择已上传照片/视频</option>{assets.map(a => <option key={a.id} value={a.id}>{a.kind} · {a.original_name || a.filename}</option>)}</select></Field>
+          <Field label="数字人形象素材" hint="fal 推荐上传本人授权的 5-20 秒正面半身说话视频；静态预览可用照片。"><select value={digitalHumanAvatarId} onChange={e => setDigitalHumanAvatarId(e.target.value)}><option value="">选择已上传照片/视频</option>{assets.map(a => <option key={a.id} value={a.id}>{a.kind} · {a.original_name || a.filename}</option>)}</select></Field>
           <Field label="动作参考视频（可选）" hint="后续接 LivePortrait/MuseTalk 时可参考表情和头部动作。"><select value={digitalHumanDriverId} onChange={e => setDigitalHumanDriverId(e.target.value)}><option value="">不用动作参考</option>{assets.filter(a => a.kind === 'video').map(a => <option key={a.id} value={a.id}>{a.original_name || a.filename}</option>)}</select></Field>
-          <Field label="数字人引擎" hint="暂不接阿里/百度/腾讯训练；先用无训练费方案或静态素材成片。"><select value={digitalHumanEngine} onChange={e => setDigitalHumanEngine(e.target.value)}><option value="preview_no_avatar">默认：无训练费素材成片</option><option value="preview">静态预览/素材合成</option><option value="heygen_api">HeyGen 公共 Avatar API</option><option value="did_api">D-ID 公共 Presenter API</option><option value="akool_talking_photo">AKOOL Talking Photo</option><option value="webhook">外部 Webhook/API</option><option value="musetalk">本地 MuseTalk</option><option value="liveportrait">本地 LivePortrait</option><option value="sadtalker">SadTalker</option><option value="wav2lip">Wav2Lip</option><option value="jimeng">火山即梦/OmniHuman（备用）</option></select></Field>
+          <Field label="数字人引擎" hint="当前推荐：真人模板视频 + 配音做口型同步，先生成 5-20 秒开场。"><select value={digitalHumanEngine} onChange={e => setDigitalHumanEngine(e.target.value)}><option value="fal_lipsync">推荐：fal.ai 真人模板口型同步</option><option value="preview_no_avatar">无训练费素材成片</option><option value="preview">静态预览/素材合成</option><option value="webhook">外部 Webhook/API</option><option value="jimeng">火山即梦/OmniHuman（备用）</option><option value="sadtalker">SadTalker 图片口播</option><option value="wav2lip">Wav2Lip</option><option value="musetalk">本地 MuseTalk</option><option value="liveportrait">本地 LivePortrait</option><option value="heygen_api">HeyGen 公共 Avatar API</option><option value="did_api">D-ID 公共 Presenter API</option><option value="akool_talking_photo">AKOOL Talking Photo</option></select></Field>
           {digitalHumanEngine === 'jimeng' && <Field label="即梦模型" hint="模拟真人优先选 OmniHuman1.5；普通视频生成可用视频3.0。"><select value={digitalHumanJimengModel} onChange={e => setDigitalHumanJimengModel(e.target.value)}><option value="omnihuman15">OmniHuman1.5（单图+音频真人口播）</option><option value="quick">数字人快速模式</option><option value="video30">即梦视频生成3.0（图生视频）</option></select></Field>}
         </div>
         <label className="checkline"><input type="checkbox" checked={digitalHumanConsent} onChange={e => setDigitalHumanConsent(e.target.checked)} /> 我确认已获得本人形象和声音授权，仅用于合法商业内容。</label>
@@ -2766,7 +2768,7 @@ https://www.douyin.com/user/..." /></Field>
           </div>)}
           {!digitalHumanProviders.length && <Empty>正在读取推荐数字人平台。当前默认使用“无训练费素材成片/外部 Webhook”。</Empty>}
         </div>
-        <div className="infoGrid"><div><strong>当前输入</strong><p>数字人版本：#{digitalHumanVersion}<br />形象素材：{digitalHumanAvatarId || '未选择'}<br />配音音频：{audio?.file_name || '未生成'}<br />脚本：{shortText(currentScript || '', 90) || '未生成'}</p></div><div><strong>接入建议</strong><p>今天不要选择需要训练费的平台。默认先用“无训练费素材成片”；要测 API 就选 HeyGen/D-ID/AKOOL 的公共 Avatar；后期设备再接本地 MuseTalk/LivePortrait。</p></div></div>
+        <div className="infoGrid"><div><strong>当前输入</strong><p>数字人版本：#{digitalHumanVersion}<br />形象素材：{digitalHumanAvatarId || '未选择'}<br />配音音频：{audio?.file_name || '未生成'}<br />脚本：{shortText(currentScript || '', 90) || '未生成'}</p></div><div><strong>接入建议</strong><p>当前推荐先用 fal.ai：真人模板视频 + 配音做口型同步，生成 5-20 秒数字人开场；生成后会自动保存到素材库，再接楼盘/风光素材混剪。</p></div></div>
         {hasRunningDigitalHumanTask && <div className="warn strongWarn">已有任务正在火山侧排队/生成中。请不要再次点击提交，否则会触发 429 并发限制；等待当前任务完成或点击“查询当前数字人任务”。</div>}
         {digitalHuman && <div className="resultBox"><h3>数字人 #{digitalHumanVersion} 结果</h3><p>{digitalHuman.message}</p><div className="resultMeta"><Pill tone={digitalHuman.video_url ? 'green' : digitalHuman.status === 'failed' ? 'red' : 'orange'}>状态：{digitalHuman.status || 'running'}</Pill>{digitalHumanLastChecked && <Pill tone="blue">最近查询：{digitalHumanLastChecked}</Pill>}{digitalHumanPollCount > 0 && <Pill tone="purple">已查询 {digitalHumanPollCount} 次</Pill>}</div>{digitalHuman.job_id && <p className="muted">任务 ID：{digitalHuman.job_id}<br />查询模型：{getDigitalHumanTaskModel(digitalHuman, digitalHumanJimengModel)}</p>}{digitalHuman.job_id && !digitalHuman.video_url && <div className="warn">OmniHuman1.5 是排队生成任务，不是实时接口。系统会每 20 秒自动查一次；如果超过 20-30 分钟仍无结果，请去火山控制台 / API Explorer 用这个 task_id 查询任务详情。</div>}{digitalHuman.warnings?.map(w => <div className="warn" key={w}>{w}</div>)}{digitalHuman.job_id && !digitalHuman.video_url && <div className="buttonRow"><button className="btn soft" onClick={() => checkDigitalHumanStatus(false)} disabled={busy === '查询数字人结果'}>{busy === '查询数字人结果' ? '查询中…' : '立即查询数字人结果'}</button><button className="btn ghost danger" onClick={clearDigitalHumanTask}>清除当前任务</button></div>}{digitalHuman.raw && <details className="rawBox"><summary>查看火山原始返回</summary><pre>{JSON.stringify(digitalHuman.raw, null, 2).slice(0, 2600)}</pre></details>}{digitalHuman.video_url && <video controls src={digitalHuman.video_url} className="previewVideo" />}{digitalHuman.video_url && <a className="download" href={digitalHuman.video_url} target="_blank">下载/打开数字人 #{digitalHumanVersion} 片段</a>}</div>}
       </section>}

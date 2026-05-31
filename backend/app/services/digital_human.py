@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import base64
 import hashlib
 import hmac
@@ -142,6 +143,179 @@ async def call_external_digital_human_worker(
         job_id=str(data.get('job_id') or data.get('task_id') or data.get('id') or ''),
         warnings=list(data.get('warnings') or []),
         raw=data,
+    )
+
+
+def _fal_headers(settings: Settings) -> dict[str, str]:
+    key = (settings.fal_key or '').strip()
+    if not key:
+        raise RuntimeError('未配置 FAL_KEY，无法调用 fal.ai Lipsync。请把 fal API Key 放到 Render 环境变量，不要写在前端代码里。')
+    return {
+        'Authorization': f'Key {key}',
+        'Content-Type': 'application/json',
+    }
+
+
+def _fal_endpoint(settings: Settings) -> str:
+    endpoint = (settings.fal_lipsync_endpoint or 'fal-ai/sync-lipsync').strip().strip('/')
+    return endpoint or 'fal-ai/sync-lipsync'
+
+
+def _extract_fal_video_url(data: Any) -> str:
+    if isinstance(data, dict):
+        # fal queue result may be {video:{url}} or SDK-like {data:{video:{url}}}.
+        for path in [
+            ('video', 'url'), ('data', 'video', 'url'), ('output', 'video', 'url'),
+            ('video_url',), ('output_url',), ('result_url',), ('url',),
+        ]:
+            cur: Any = data
+            ok = True
+            for key in path:
+                if isinstance(cur, dict) and key in cur:
+                    cur = cur[key]
+                else:
+                    ok = False
+                    break
+            if ok and isinstance(cur, str) and cur.startswith(('http://', 'https://')):
+                return cur
+        for v in data.values():
+            found = _extract_fal_video_url(v)
+            if found:
+                return found
+    elif isinstance(data, list):
+        for item in data:
+            found = _extract_fal_video_url(item)
+            if found:
+                return found
+    elif isinstance(data, str) and data.startswith(('http://', 'https://')):
+        low = data.lower()
+        if any(x in low for x in ('.mp4', '.mov', '.webm', 'video', 'fal.media')):
+            return data
+    return ''
+
+
+async def _fal_get_json(client: httpx.AsyncClient, url: str, headers: dict[str, str]) -> dict[str, Any]:
+    res = await client.get(url, headers=headers)
+    text = res.text
+    if res.status_code >= 400:
+        raise RuntimeError(f'fal.ai 请求失败 HTTP {res.status_code}: {text[:1200]}')
+    try:
+        data = res.json()
+    except Exception:
+        raise RuntimeError(f'fal.ai 没有返回 JSON：{text[:1200]}')
+    return data if isinstance(data, dict) else {'data': data}
+
+
+async def query_fal_lipsync(settings: Settings, *, request_id: str) -> DigitalHumanResult:
+    """Query a queued fal.ai lipsync request and return a normalized result."""
+    request_id = (request_id or '').strip()
+    if not request_id:
+        raise RuntimeError('缺少 fal request_id，无法查询数字人任务。')
+    endpoint = _fal_endpoint(settings)
+    headers = _fal_headers(settings)
+    base = f'https://queue.fal.run/{endpoint}/requests/{request_id}'
+    async with httpx.AsyncClient(timeout=max(30, min(settings.digital_human_timeout_seconds, 120))) as client:
+        status_data = await _fal_get_json(client, f'{base}/status?logs=1', headers)
+        status = str(status_data.get('status') or '').upper()
+        if status != 'COMPLETED':
+            if status_data.get('error'):
+                return DigitalHumanResult(
+                    status='failed', engine=f'fal:{endpoint}', message=f"fal.ai 任务失败：{status_data.get('error')}",
+                    job_id=f'fal:{request_id}', warnings=[str(status_data.get('error_type') or '')], raw=status_data,
+                )
+            message = 'fal.ai 正在排队/生成中。'
+            if status == 'IN_QUEUE' and status_data.get('queue_position') is not None:
+                message += f" 当前队列位置：{status_data.get('queue_position')}。"
+            elif status == 'IN_PROGRESS':
+                message += ' 模型正在处理视频口型。'
+            return DigitalHumanResult(
+                status='running', engine=f'fal:{endpoint}', message=message,
+                job_id=f'fal:{request_id}', warnings=[], raw=status_data,
+            )
+
+        result_data = await _fal_get_json(client, f'{base}/response', headers)
+    video_url = _extract_fal_video_url(result_data)
+    if not video_url:
+        return DigitalHumanResult(
+            status='failed', engine=f'fal:{endpoint}', message='fal.ai 已完成，但响应里没有找到 video.url。请展开 raw 检查返回结构。',
+            job_id=f'fal:{request_id}', warnings=['未识别到 fal 输出视频 URL。'], raw=result_data,
+        )
+    return DigitalHumanResult(
+        status='done', engine=f'fal:{endpoint}', message='fal.ai 真人模板口型同步已生成。',
+        video_url=video_url, job_id=f'fal:{request_id}', warnings=[], raw=result_data,
+    )
+
+
+async def call_fal_lipsync(
+    settings: Settings,
+    *,
+    video_url: str,
+    audio_url: str,
+    script: str = '',
+    title: str = '',
+    sync_mode: str = '',
+) -> DigitalHumanResult:
+    """Submit a fal.ai video-to-video lip-sync job.
+
+    fal-ai/sync-lipsync expects a public `video_url` and `audio_url`.
+    It is best used with a 5-20s real presenter template video plus generated TTS audio.
+    """
+    if not video_url or not video_url.startswith(('http://', 'https://')):
+        raise RuntimeError('fal Lipsync 需要公网可访问的真人模板视频 URL。请确认素材已上传到 R2 或 Render 可公开访问。')
+    if not audio_url or not audio_url.startswith(('http://', 'https://')):
+        raise RuntimeError('fal Lipsync 需要公网可访问的配音音频 URL。请先生成配音，并确认音频可访问。')
+
+    endpoint = _fal_endpoint(settings)
+    headers = _fal_headers(settings)
+    payload: dict[str, Any] = {
+        'video_url': video_url,
+        'audio_url': audio_url,
+        'sync_mode': sync_mode or settings.fal_lipsync_sync_mode or 'cut_off',
+    }
+    # fal-ai/sync-lipsync supports model=lipsync-1.9.0-beta / 1.8.0 / 1.7.1.
+    if endpoint == 'fal-ai/sync-lipsync' and (settings.fal_lipsync_model or '').strip():
+        payload['model'] = settings.fal_lipsync_model.strip()
+    if title or script:
+        payload['metadata'] = {'title': title[:120], 'script_preview': script[:300]}
+
+    submit_url = f'https://queue.fal.run/{endpoint}'
+    async with httpx.AsyncClient(timeout=max(30, min(settings.digital_human_timeout_seconds, 120))) as client:
+        res = await client.post(submit_url, headers=headers, json=payload)
+        text = res.text
+        if res.status_code >= 400:
+            raise RuntimeError(f'fal.ai 提交失败 HTTP {res.status_code}: {text[:1200]}')
+        try:
+            data = res.json()
+        except Exception:
+            raise RuntimeError(f'fal.ai 提交接口没有返回 JSON：{text[:1200]}')
+        if not isinstance(data, dict):
+            data = {'data': data}
+
+        # Some fal endpoints may return the result directly; queue endpoints return request_id/status_url/response_url.
+        direct_video_url = _extract_fal_video_url(data)
+        if direct_video_url:
+            return DigitalHumanResult(
+                status='done', engine=f'fal:{endpoint}', message='fal.ai 真人模板口型同步已生成。',
+                video_url=direct_video_url, job_id=str(data.get('request_id') or ''), warnings=[], raw=data,
+            )
+
+        request_id = str(data.get('request_id') or '').strip()
+        if not request_id:
+            raise RuntimeError(f'fal.ai 提交成功，但未返回 request_id：{json.dumps(data, ensure_ascii=False)[:1000]}')
+
+        deadline = time.time() + max(0, min(settings.fal_lipsync_initial_wait_seconds, settings.digital_human_timeout_seconds - 5))
+        last_status: dict[str, Any] = data
+        while time.time() < deadline:
+            await asyncio.sleep(max(2, min(settings.fal_lipsync_poll_seconds, 15)))
+            result = await query_fal_lipsync(settings, request_id=request_id)
+            last_status = result.raw or {}
+            if result.video_url or result.status in {'failed', 'error'}:
+                return result
+
+    return DigitalHumanResult(
+        status='running', engine=f'fal:{endpoint}',
+        message='fal.ai 任务已提交，仍在排队/生成中。请稍后点击“查询当前数字人任务”。',
+        job_id=f'fal:{request_id}', warnings=['为避免 Render/浏览器长时间等待，已切换为异步查询。'], raw=last_status,
     )
 
 

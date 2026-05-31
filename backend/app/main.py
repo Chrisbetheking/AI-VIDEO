@@ -104,7 +104,7 @@ from app.services.cover import create_cover
 from app.services.image_generation import generate_image_to_file
 from app.services.deepseek import DeepSeekError, generate_copy, generate_edit_plan, generate_growth_decision, generate_lead_acquisition_plan, generate_shooting_plan, generate_subtitle_emphasis, generate_trend_radar, generate_voice_director, refine_copy_with_instruction, rewrite_from_inspiration, test_deepseek, video_edit_chat_advice
 from app.services.doubao import extract_with_doubao
-from app.services.digital_human import call_external_digital_human_worker, call_jimeng_digital_human, query_jimeng_digital_human, create_static_avatar_preview
+from app.services.digital_human import call_external_digital_human_worker, call_fal_lipsync, query_fal_lipsync, call_jimeng_digital_human, query_jimeng_digital_human, create_static_avatar_preview
 from app.services.collector import get_collector_cookie_status, save_collector_cookie_text
 from app.services.kb import KnowledgeBase
 from app.services.memory import MemoryStore, MemoryWriteError
@@ -411,6 +411,53 @@ async def finalize_digital_human_video_url(
         result.video_url,
         job_id=getattr(result, 'job_id', '') or '',
     )
+
+
+def _save_digital_human_asset(
+    settings: Settings,
+    memory: MemoryStore,
+    *,
+    video_name: str,
+    video_url: str,
+    engine: str,
+    title: str = '',
+) -> None:
+    """Put generated digital-human video back into the asset library for later mixing."""
+    safe_name = Path(video_name or '').name
+    if not safe_name or not video_url:
+        return
+    r2_base = settings.r2_public_base_url.strip().rstrip('/')
+    r2_url = video_url if (r2_base and video_url.startswith(r2_base + '/')) else ''
+    r2_key = ''
+    if r2_url:
+        try:
+            r2_key = urlparse(r2_url).path.strip('/')
+        except Exception:
+            r2_key = ''
+    local_path = settings.outputs_dir / safe_name
+    size_bytes = local_path.stat().st_size if local_path.exists() else 0
+    asset_id = Path(safe_name).stem
+    asset_payload = {
+        'id': asset_id,
+        'filename': safe_name,
+        'original_name': title or f'数字人开场_{safe_name}',
+        'kind': 'video',
+        'url': video_url,
+        'size_bytes': size_bytes,
+        'created_at': now_iso(),
+        'folder': 'self',
+        'source_type': 'digital_human_intro',
+        'r2_url': r2_url,
+        'r2_key': r2_key,
+        'workspace_id': settings.workspace_id,
+        'deleted': False,
+        'engine': engine,
+    }
+    try:
+        upsert_asset(settings, asset_payload, memory, require_supabase=settings.core_storage_strict)
+    except Exception:
+        # Do not fail generation just because the asset index write failed.
+        pass
 
 
 def safe_output_path(settings: Settings, name: str) -> Path:
@@ -1934,6 +1981,52 @@ async def api_digital_human_create(
                 raw=raw,
             )
 
+        if engine in {'fal_lipsync', 'fal', 'sync_lipsync', 'fal-ai/sync-lipsync'}:
+            # fal.ai sync-lipsync is video-to-video. It needs a real presenter/template MP4, not a still photo.
+            avatar_ext = ''
+            if avatar_path:
+                avatar_ext = avatar_path.suffix.lower()
+            else:
+                avatar_ext = _safe_suffix_from_url(avatar_url_value, '')
+            if avatar_ext in IMAGE_EXTS:
+                raise HTTPException(status_code=400, detail='fal.ai 真人模板口型同步需要 5-20 秒本人授权 MP4 视频；你当前选择的是图片。图片口播请先用静态预览/SadTalker，真人感方案请上传顾问正面半身说话视频。')
+            result = await call_fal_lipsync(
+                settings,
+                video_url=avatar_url_value,
+                audio_url=audio_url_value,
+                script=req.script,
+                title=req.title,
+            )
+            stable_video_url, stable_video_name, cache_warnings = await finalize_digital_human_video_url(settings, request, result)
+            final_url = stable_video_url or result.video_url
+            final_name = stable_video_name or None
+            if final_url and final_name:
+                _save_digital_human_asset(settings, memory, video_name=final_name, video_url=final_url, engine=result.engine, title=req.title or '数字人开场片段')
+            memory.save_learning_event({
+                'event_type': 'digital_human_fal_lipsync',
+                'title': req.title or 'fal.ai 真人模板口型同步',
+                'payload': {
+                    'engine': result.engine,
+                    'status': result.status,
+                    'video_url': final_url,
+                    'source_video_url': result.video_url,
+                    'job_id': result.job_id,
+                },
+            })
+            raw = result.raw or {}
+            if stable_video_url and stable_video_url != result.video_url:
+                raw = {**raw, '_cached_video_url': stable_video_url, '_source_video_url': result.video_url}
+            return DigitalHumanCreateResponse(
+                status=result.status,
+                engine=result.engine,
+                message=result.message,
+                video_url=final_url,
+                video_name=final_name,
+                job_id=result.job_id,
+                warnings=[*(result.warnings or []), *cache_warnings, '已自动保存到素材库，可在素材选择/成片合成里继续使用。'] if final_url else [*(result.warnings or []), *cache_warnings],
+                raw=raw,
+            )
+
         if engine in {'webhook', 'sadtalker', 'wav2lip', 'musetalk', 'liveportrait'} and settings.digital_human_webhook_url:
             result = await call_external_digital_human_worker(
                 settings,
@@ -2023,7 +2116,11 @@ async def api_digital_human_status(
     if not settings.enable_digital_human:
         raise HTTPException(status_code=400, detail='数字人功能未启用。')
     try:
-        result = await query_jimeng_digital_human(settings, task_id=job_id, model=model or 'omnihuman15')
+        if job_id.startswith('fal:') or (model or '').startswith('fal'):
+            fal_request_id = job_id.split(':', 1)[1] if job_id.startswith('fal:') else job_id
+            result = await query_fal_lipsync(settings, request_id=fal_request_id)
+        else:
+            result = await query_jimeng_digital_human(settings, task_id=job_id, model=model or 'omnihuman15')
         stable_video_url, stable_video_name, cache_warnings = await finalize_digital_human_video_url(settings, request, result)
         raw = result.raw or {}
         if stable_video_url and stable_video_url != result.video_url:

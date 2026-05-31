@@ -115,6 +115,16 @@ class Settings(BaseSettings):
     digital_human_webhook_token: str = ''
     digital_human_timeout_seconds: int = 900
 
+    # fal.ai Lipsync：真人模板视频 + 新配音 → 口型同步。
+    # 适合先用 5-20 秒真人顾问模板视频生成“数字人开场”。
+    fal_key: str = ''
+    fal_lipsync_endpoint: str = 'fal-ai/sync-lipsync'
+    fal_lipsync_model: str = 'lipsync-1.9.0-beta'
+    fal_lipsync_sync_mode: str = 'cut_off'
+    fal_lipsync_poll_seconds: int = 4
+    fal_lipsync_initial_wait_seconds: int = 75
+    fal_lipsync_max_wait_seconds: int = 900
+
     # 火山即梦 / OmniHuman 数字人 API（可选，正式口型同步用）
     # 一个火山账号 AK/SK 通常可调用已开通的多个即梦模型；调用时用 DIGITAL_HUMAN_ENGINE / 前端选择决定模型。
     jimeng_enabled: bool = False
