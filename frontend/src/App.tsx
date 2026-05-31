@@ -725,6 +725,8 @@ function AppInner() {
   const [assetUploadFolder, setAssetUploadFolder] = useState<AssetFolderKey>('self')
   const [assetTimeFilter, setAssetTimeFilter] = useState<'all' | 'today' | '7d' | '30d'>('all')
   const [assetSort, setAssetSort] = useState<'new' | 'old' | 'size_desc' | 'size_asc' | 'name'>('new')
+  const [assetVisibleCount, setAssetVisibleCount] = useState(24)
+  const [collectedVisibleCount, setCollectedVisibleCount] = useState(40)
   const [isDraggingAssets, setIsDraggingAssets] = useState(false)
   const [sourceUrl, setSourceUrl] = useState('')
   const [manualText, setManualText] = useState('')
@@ -867,11 +869,14 @@ function AppInner() {
       return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
     })
   }, [materialAssets, assetKindFilter, assetFolderFilter, assetSearch, assetSort, assetTimeFilter])
+  const visibleMaterialAssets = useMemo(() => filteredMaterialAssets.slice(0, assetVisibleCount), [filteredMaterialAssets, assetVisibleCount])
+  const visibleCollectedVideos = useMemo(() => collectedVideos.slice(0, collectedVisibleCount), [collectedVideos, collectedVisibleCount])
   const selectedMaterialAssets = useMemo(() => selectedMaterialIds
     .map(id => materialAssets.find(a => a.id === id))
     .filter((a): a is AssetItem => Boolean(a && a.id && a.url))
     .map((a, i) => normalizeAsset(a, i)), [materialAssets, selectedMaterialIds])
 
+  useEffect(() => { setAssetVisibleCount(24); setCollectedVisibleCount(40) }, [assetKindFilter, assetFolderFilter, assetSearch, assetSort, assetTimeFilter])
   useEffect(() => { window.localStorage.setItem('ai_video_heat_snapshots_v1', JSON.stringify(heatSnapshots.slice(0, 200))) }, [heatSnapshots])
   const pinnedHeatAccounts = useMemo(() => heatAccounts.filter(x => x.pinned).concat(heatAccounts.filter(x => !x.pinned)), [heatAccounts])
   const filteredHeatAccounts = useMemo(() => {
@@ -1612,7 +1617,8 @@ ${selectedAssetScriptContext || '暂未选择素材，先给出通用画面建�
   }
 
   async function reloadAssets() {
-    const list = await apiGet<AssetItem[]>('/api/assets')
+    // 素材库只拉取元数据，不一次性渲染全部视频预览；避免 Chrome 因大量 MP4 标签 OOM。
+    const list = await apiGet<AssetItem[]>('/api/assets?limit=160&include_r2=true')
     const normalized = Array.isArray(list) ? list.map((item, index) => normalizeAsset(item, index)).filter(item => item.id && item.url) : []
     setAssets(normalized)
     return normalized
@@ -3100,7 +3106,32 @@ https://www.douyin.com/user/..." /></Field>
           ['all','全部素材'], ['digital_human','数字人片段'], ['self','自己拍的'], ['provided','别人提供'], ['image','图片素材'], ['collected','采集视频'], ['ai','AI生成图']
         ].map(([key,label]) => <button key={key} className={assetFolderFilter === key ? 'active' : ''} onClick={() => setAssetFolderFilter(key as AssetFolderKey)}>{label}</button>)}</div>
 
-        <div className="grid2 assetGridWrap"><div><h3>自有素材库</h3><div className="assetCards">{filteredMaterialAssets.length === 0 && <Empty>没有匹配的素材。可以拖动上传或调整筛选条件。</Empty>}{filteredMaterialAssets.map(a => <div key={a.id} className={`assetCard ${selectedMaterialIds.includes(a.id) ? 'selected' : ''}`}><button className="assetPreview" onClick={() => window.open(a.url, '_blank')}>{a.kind === 'video' ? <video src={a.url} muted onLoadedMetadata={e => setAssetDurations(prev => ({ ...prev, [a.id]: readMediaDuration(e, 0) }))} /> : <img src={a.url} alt={a.original_name || a.filename} />}</button><div className="assetMeta"><strong title={a.original_name || a.filename}>{a.original_name || a.filename}</strong><span>{assetFolderLabel((a as any).folder, a.kind)} · {a.kind === 'video' ? '视频' : '图片'} · {formatBytes(a.size_bytes)} · {new Date(a.created_at).toLocaleDateString()}</span></div><div className="assetActions"><button className={selectedMaterialIds.includes(a.id) ? 'mini active' : 'mini'} onClick={() => toggleMaterial(a.id)}>{selectedMaterialIds.includes(a.id) ? '已选' : '选择'}</button><a className="mini" href={a.url} target="_blank">预览</a><button className="mini danger" onClick={() => removeAsset(a)}>删除</button></div></div>)}</div></div><div><h3>采集视频库</h3><div className="assetList">{collectedVideos.length === 0 && <Empty>暂时没有采集到视频。</Empty>}{collectedVideos.map(a => <div key={a.id} className={`assetRow collected ${selectedReferenceAssetId === a.id ? 'selected' : ''}`}><button onClick={() => setSelectedReferenceAssetId(a.id)}>作为参考</button><span>{a.original_name || a.filename}</span><em>{formatBytes(a.size_bytes)}</em><button className="mini danger" onClick={() => removeAsset(a)}>删除</button></div>)}</div></div></div>
+        <div className="grid2 assetGridWrap">
+          <div>
+            <div className="assetPanelHead"><h3>自有素材库</h3><span>已显示 {visibleMaterialAssets.length}/{filteredMaterialAssets.length}，视频用轻量占位，点击预览才打开源文件。</span></div>
+            <div className="assetCards">
+              {filteredMaterialAssets.length === 0 && <Empty>没有匹配的素材。可以拖动上传或调整筛选条件。</Empty>}
+              {visibleMaterialAssets.map(a => <div key={a.id} className={`assetCard ${selectedMaterialIds.includes(a.id) ? 'selected' : ''}`}>
+                <button className={`assetPreview ${a.kind === 'video' ? 'videoThumb' : ''}`} onClick={() => window.open(a.url, '_blank')} title="打开预览">
+                  {a.kind === 'video'
+                    ? <div className="videoPlaceholder"><span>▶</span><strong>视频素材</strong><em>{formatBytes(a.size_bytes)}</em></div>
+                    : <img src={a.url} alt={a.original_name || a.filename} loading="lazy" decoding="async" />}
+                </button>
+                <div className="assetMeta"><strong title={a.original_name || a.filename}>{a.original_name || a.filename}</strong><span>{assetFolderLabel((a as any).folder, a.kind)} · {a.kind === 'video' ? '视频' : '图片'} · {formatBytes(a.size_bytes)} · {new Date(a.created_at).toLocaleDateString()}</span></div>
+                <div className="assetActions"><button className={selectedMaterialIds.includes(a.id) ? 'mini active' : 'mini'} onClick={() => toggleMaterial(a.id)}>{selectedMaterialIds.includes(a.id) ? '已选' : '选择'}</button><a className="mini" href={a.url} target="_blank">预览</a><button className="mini danger" onClick={() => removeAsset(a)}>删除</button></div>
+              </div>)}
+            </div>
+            {visibleMaterialAssets.length < filteredMaterialAssets.length && <div className="loadMoreRow"><button className="btn soft" onClick={() => setAssetVisibleCount(v => v + 24)}>再加载 24 个素材</button></div>}
+          </div>
+          <div>
+            <div className="assetPanelHead"><h3>采集视频库</h3><span>已显示 {visibleCollectedVideos.length}/{collectedVideos.length}</span></div>
+            <div className="assetList">
+              {collectedVideos.length === 0 && <Empty>暂时没有采集到视频。</Empty>}
+              {visibleCollectedVideos.map(a => <div key={a.id} className={`assetRow collected ${selectedReferenceAssetId === a.id ? 'selected' : ''}`}><button onClick={() => setSelectedReferenceAssetId(a.id)}>作为参考</button><span>{a.original_name || a.filename}</span><em>{formatBytes(a.size_bytes)}</em><button className="mini danger" onClick={() => removeAsset(a)}>删除</button></div>)}
+            </div>
+            {visibleCollectedVideos.length < collectedVideos.length && <div className="loadMoreRow"><button className="btn soft" onClick={() => setCollectedVisibleCount(v => v + 40)}>再加载 40 条采集视频</button></div>}
+          </div>
+        </div>
         <div className="selectedTimeline"><h3>已选素材顺序 / 截取设置</h3>{selectedMaterialAssets.length === 0 && <Empty>先选择素材。剪辑会按照这里的顺序出现，不会再因为多段素材丢失而只剩纯文字背景。</Empty>}{selectedMaterialAssets.map((asset, index) => { const cfg = getClipSetting(asset, index); const maxDur = Math.max(1, assetDurations[asset.id] || 60); return <div key={asset.id} className="selectedClip"><div className="clipPreview">{asset.kind === 'video' ? <video controls src={asset.url} onLoadedMetadata={e => setAssetDurations(prev => ({ ...prev, [asset.id]: readMediaDuration(e, prev[asset.id] || 0) }))} /> : <img src={asset.url} />}</div><div className="clipControls"><div className="segmentHead"><strong>{index + 1}. {asset.original_name || asset.filename}</strong><div><button onClick={() => moveSelectedMaterial(index, -1)}>↑</button><button onClick={() => moveSelectedMaterial(index, 1)}>↓</button><button onClick={() => toggleMaterial(asset.id)}>移除</button></div></div>{asset.kind === 'image' ? <Field label={`图片停留 ${cfg.image_seconds.toFixed(1)} 秒`}><input type="range" min="0.8" max="8" step="0.1" value={cfg.image_seconds} onChange={e => updateClipSetting(asset.id, { image_seconds: Number(e.target.value) })} /></Field> : <div className="trimGrid"><Field label={`开始 ${cfg.video_start.toFixed(1)}s`}><input type="range" min="0" max={maxDur} step="0.1" value={cfg.video_start} onChange={e => updateClipSetting(asset.id, { video_start: Math.min(Number(e.target.value), cfg.video_end && cfg.video_end > 0 ? cfg.video_end - 0.3 : maxDur) })} /></Field><Field label={`结束 ${cfg.video_end ? cfg.video_end.toFixed(1) : '自动'}s`}><input type="range" min="0" max={maxDur} step="0.1" value={cfg.video_end || Math.min(maxDur, cfg.video_start + 3)} onChange={e => updateClipSetting(asset.id, { video_end: Number(e.target.value) })} /></Field><span>截取约 {Math.max(0.5, (cfg.video_end || Math.min(maxDur, cfg.video_start + 3)) - cfg.video_start).toFixed(1)} 秒</span></div>}<small>顺序会同步到剪辑合成；如果 R2 旧素材本地丢失，后端会先下载再合成。</small></div></div>})}</div>
         <div className="resultBox"><h3>素材匹配建议</h3><p>图片：每张建议 2-4 秒；视频：每段截 2-5 秒。人物口播主体在画面中间时，字幕建议放底部安全区，避免挡脸。</p></div>
       </section>}

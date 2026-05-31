@@ -269,6 +269,16 @@ input:focus,textarea:focus,select:focus{
 }
 .assetPreview img,
 .assetPreview video { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+.assetPanelHead { display: flex; align-items: end; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+.assetPanelHead h3 { margin: 0; }
+.assetPanelHead span { color: #64748b; font-size: 12px; text-align: right; }
+.assetPreview.videoThumb { background: linear-gradient(135deg, #0f172a, #1e293b); color: #fff; }
+.videoPlaceholder { height: 100%; display: grid; place-items: center; align-content: center; gap: 6px; color: #e2e8f0; }
+.videoPlaceholder span { width: 44px; height: 44px; border-radius: 999px; display: grid; place-items: center; background: rgba(255,255,255,.16); box-shadow: inset 0 0 0 1px rgba(255,255,255,.2); }
+.videoPlaceholder strong { font-size: 13px; }
+.videoPlaceholder em { color: #94a3b8; font-size: 12px; font-style: normal; }
+.loadMoreRow { display: flex; justify-content: center; padding: 14px 0 4px; }
 .assetMeta { padding: 12px 13px 8px; display: grid; gap: 4px; }
 .assetMeta strong { color: #0f172a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .assetMeta span { color: #64748b; font-size: 12px; }

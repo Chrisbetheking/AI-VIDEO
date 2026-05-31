@@ -1491,7 +1491,7 @@ def api_list_assets(
     request: Request,
     kind: Optional[str] = None,
     q: str = '',
-    limit: int = 200,
+    limit: int = 120,
     include_r2: bool = True,
     settings: Settings = Depends(get_settings),
     memory: MemoryStore = Depends(get_memory),
@@ -1596,7 +1596,7 @@ def api_list_assets(
                 ))
 
     items.sort(key=lambda it: it.created_at, reverse=True)
-    return items[:max(1, min(limit, 500))]
+    return items[:max(1, min(limit, 300))]
 
 
 @app.delete('/api/assets/{asset_id}')
