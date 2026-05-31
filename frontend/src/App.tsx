@@ -362,8 +362,30 @@ const emotionOptions = ['自然可信', '提醒警示', '紧张急迫', '坚定�
 
 function getDigitalHumanTaskModel(task: DigitalHumanCreateResponse | null, fallback: string) {
   const engine = String(task?.engine || '')
-  const match = engine.match(/^jimeng:([a-zA-Z0-9_-]+)/)
-  return match?.[1] || fallback || 'omnihuman15'
+  const jobId = String(task?.job_id || '')
+  const rawModel = String((task?.raw as any)?.model || (task?.raw as any)?.endpoint || '')
+
+  // fal 任务的 job_id 会是 fal:<request_id>，engine 通常是 fal:fal-ai/sync-lipsync。
+  // 之前这里只解析 jimeng，导致 fal 异步任务展示时误用 fallback=omnihuman15。
+  if (jobId.startsWith('fal:') || engine.startsWith('fal:') || engine.includes('sync-lipsync') || rawModel.includes('sync-lipsync')) {
+    return engine.startsWith('fal:') ? engine.replace(/^fal:/, '') : (rawModel || 'fal-ai/sync-lipsync')
+  }
+
+  const jimengMatch = engine.match(/^jimeng:([a-zA-Z0-9_-]+)/)
+  if (jimengMatch?.[1]) return jimengMatch[1]
+
+  return fallback || 'omnihuman15'
+}
+
+function getDigitalHumanTaskProvider(task: DigitalHumanCreateResponse | null, fallback: string) {
+  const model = getDigitalHumanTaskModel(task, fallback)
+  if (model.includes('sync-lipsync') || String(task?.job_id || '').startsWith('fal:') || String(task?.engine || '').startsWith('fal:')) {
+    return `fal.ai / ${model}`
+  }
+  if (String(task?.engine || '').startsWith('jimeng:') || ['omnihuman15', 'quick', 'video30'].includes(model)) {
+    return `火山即梦 / ${model}`
+  }
+  return model
 }
 
 
@@ -2824,7 +2846,7 @@ https://www.douyin.com/user/..." /></Field>
           <div><strong>生成后动作</strong><p>成功后自动入素材库，并自动放到素材顺序第 1 个；后面继续添加楼盘、风光、学校、配套 B-roll。</p></div>
         </div>
         {hasRunningDigitalHumanTask && <div className="warn strongWarn">已有数字人任务正在排队/生成中。请不要再次点击提交；等待当前任务完成或点击“查询当前数字人任务”。</div>}
-        {digitalHuman && <div className="resultBox"><h3>数字人 #{digitalHumanVersion} 结果</h3><p>{digitalHuman.message}</p><div className="resultMeta"><Pill tone={digitalHuman.video_url ? 'green' : digitalHuman.status === 'failed' ? 'red' : 'orange'}>状态：{digitalHuman.status || 'running'}</Pill>{digitalHumanLastChecked && <Pill tone="blue">最近查询：{digitalHumanLastChecked}</Pill>}{digitalHumanPollCount > 0 && <Pill tone="purple">已查询 {digitalHumanPollCount} 次</Pill>}</div>{digitalHuman.job_id && <p className="muted">任务 ID：{digitalHuman.job_id}<br />查询模型：{getDigitalHumanTaskModel(digitalHuman, digitalHumanJimengModel)}</p>}{digitalHuman.job_id && !digitalHuman.video_url && <div className="warn">数字人生成是异步任务。系统会每 20 秒自动查一次；fal 通常较快，如果长时间没有结果，请查看 Render Logs 或 fal 后台任务。</div>}{digitalHuman.warnings?.map(w => <div className="warn" key={w}>{w}</div>)}{digitalHuman.job_id && !digitalHuman.video_url && <div className="buttonRow"><button className="btn soft" onClick={() => checkDigitalHumanStatus(false)} disabled={busy === '查询数字人结果'}>{busy === '查询数字人结果' ? '查询中…' : '立即查询数字人结果'}</button><button className="btn ghost danger" onClick={clearDigitalHumanTask}>清除当前任务</button></div>}{digitalHuman.raw && <details className="rawBox"><summary>查看原始返回</summary><pre>{JSON.stringify(digitalHuman.raw, null, 2).slice(0, 2600)}</pre></details>}{digitalHuman.video_url && <video controls src={digitalHuman.video_url} className="previewVideo" />}{digitalHuman.video_url && <a className="download" href={digitalHuman.video_url} target="_blank">下载/打开数字人 #{digitalHumanVersion} 片段</a>}</div>}
+        {digitalHuman && <div className="resultBox"><h3>数字人 #{digitalHumanVersion} 结果</h3><p>{digitalHuman.message}</p><div className="resultMeta"><Pill tone={digitalHuman.video_url ? 'green' : digitalHuman.status === 'failed' ? 'red' : 'orange'}>状态：{digitalHuman.status || 'running'}</Pill>{digitalHumanLastChecked && <Pill tone="blue">最近查询：{digitalHumanLastChecked}</Pill>}{digitalHumanPollCount > 0 && <Pill tone="purple">已查询 {digitalHumanPollCount} 次</Pill>}</div>{digitalHuman.job_id && <p className="muted">任务 ID：{digitalHuman.job_id}<br />查询引擎：{getDigitalHumanTaskProvider(digitalHuman, digitalHumanJimengModel)}</p>}{digitalHuman.job_id && !digitalHuman.video_url && <div className="warn">数字人生成是异步任务。系统会每 20 秒自动查一次；fal 通常较快，如果长时间没有结果，请查看 Render Logs 或 fal 后台任务。</div>}{digitalHuman.warnings?.map(w => <div className="warn" key={w}>{w}</div>)}{digitalHuman.job_id && !digitalHuman.video_url && <div className="buttonRow"><button className="btn soft" onClick={() => checkDigitalHumanStatus(false)} disabled={busy === '查询数字人结果'}>{busy === '查询数字人结果' ? '查询中…' : '立即查询数字人结果'}</button><button className="btn ghost danger" onClick={clearDigitalHumanTask}>清除当前任务</button></div>}{digitalHuman.raw && <details className="rawBox"><summary>查看原始返回</summary><pre>{JSON.stringify(digitalHuman.raw, null, 2).slice(0, 2600)}</pre></details>}{digitalHuman.video_url && <video controls src={digitalHuman.video_url} className="previewVideo" />}{digitalHuman.video_url && <a className="download" href={digitalHuman.video_url} target="_blank">下载/打开数字人 #{digitalHumanVersion} 片段</a>}</div>}
       </section>}
 
       {active === 'assets' && <section className="card modulePanel">
