@@ -11,7 +11,7 @@ class CopyRequest(BaseModel):
     audience: str = Field(default='', max_length=200)
     selling_points: str = Field(default='', max_length=4000)
     style: str = Field(default='老板口播、真实、有信任感、短平快', max_length=200)
-    duration_seconds: int = Field(default=35, ge=10, le=180)
+    duration_seconds: int = Field(default=35, ge=3, le=180)
     knowledge_examples: List[str] = Field(default_factory=list, max_length=20)
     api_key: Optional[str] = Field(default=None, repr=False)
 
@@ -202,7 +202,7 @@ class RewriteFromInspirationRequest(BaseModel):
     audience: str = Field(default='', max_length=200)
     selling_points: str = Field(default='', max_length=4000)
     style: str = Field(default='老板口播、真实可信、强转化', max_length=200)
-    duration_seconds: int = Field(default=35, ge=10, le=180)
+    duration_seconds: int = Field(default=35, ge=3, le=180)
 
 
 class EditPlanRequest(BaseModel):
@@ -666,7 +666,7 @@ class OneClickGenerateRequest(BaseModel):
     audience: str = Field(default='', max_length=2000)
     selling_points: str = Field(default='', max_length=6000)
     style: str = Field(default='老板口播、真实可信、抖音强钩子', max_length=300)
-    duration_seconds: int = Field(default=35, ge=10, le=180)
+    duration_seconds: int = Field(default=35, ge=3, le=180)
     goal: str = Field(default='私信咨询 / 加微信 / 留资', max_length=200)
     output_type: str = Field(default='digital_human', max_length=80)
     material_mode: str = Field(default='selected_assets', max_length=80)
@@ -806,7 +806,7 @@ class HeatRadarRewriteRequest(BaseModel):
     conversion_goal: str = Field(default='私信咨询 / 领取资料包 / 加微信顾问沟通', max_length=1000)
     lead_magnet: str = Field(default='', max_length=500)
     style: str = Field(default='老板口播、真实可信、强钩子、强转化', max_length=300)
-    target_duration_seconds: int = Field(default=35, ge=10, le=180)
+    target_duration_seconds: int = Field(default=35, ge=3, le=180)
     platform: str = Field(default='douyin', max_length=80)
 
 
