@@ -110,7 +110,7 @@ class Settings(BaseSettings):
 
     # 数字人：Render 默认只做静态头像预览；真实口型同步建议接 GPU Worker / API
     enable_digital_human: bool = True
-    digital_human_engine: str = 'preview'
+    digital_human_engine: str = 'fal_lipsync'
     digital_human_webhook_url: str = ''
     digital_human_webhook_token: str = ''
     digital_human_timeout_seconds: int = 900

@@ -2302,3 +2302,85 @@ body:has(.heatRadarV3) .collectorAssist{border-color:#dbeafe}
   .appShell.responsiveShell .headerActions,
   .appShell.responsiveShell .stackButtons{ grid-template-columns:1fr !important; display:grid !important; }
 }
+
+/* === Clean production flow patch: digital-human-first + realtime logs === */
+.digitalHumanLeanGuide{
+  display:grid;
+  grid-template-columns:repeat(3,minmax(0,1fr));
+  gap:12px;
+  margin:14px 0;
+}
+.digitalHumanLeanGuide>div{
+  border:1px solid rgba(20,184,166,.22);
+  border-radius:18px;
+  padding:15px;
+  background:linear-gradient(135deg,rgba(240,253,250,.92),rgba(255,255,255,.96));
+}
+.digitalHumanLeanGuide strong{display:block;color:#0f172a;margin-bottom:7px;}
+.digitalHumanLeanGuide p{margin:0;color:#475569;line-height:1.65;}
+.collectorTerminal{
+  margin:16px 0;
+  border-radius:22px;
+  overflow:hidden;
+  border:1px solid rgba(20,184,166,.28);
+  background:#020617;
+  box-shadow:0 20px 55px rgba(2,6,23,.16);
+}
+.collectorTerminalHead,.collectorTerminalFoot{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  padding:12px 14px;
+  background:linear-gradient(90deg,#0f172a,#0f766e);
+  color:#d7fffa;
+}
+.collectorTerminalHead span{
+  padding:5px 8px;
+  border-radius:999px;
+  background:rgba(45,212,191,.14);
+  color:#99f6e4;
+  font-size:12px;
+  font-weight:900;
+}
+.collectorTerminalHead strong{font-size:15px;color:#fff;}
+.collectorTerminalHead em,.collectorTerminalFoot span{font-style:normal;color:#b6efe8;overflow-wrap:anywhere;}
+.collectorTerminalBody{
+  max-height:520px;
+  overflow:auto;
+  padding:12px;
+  background:#020617;
+}
+.collectorTerminalBody pre{
+  margin:0 0 7px;
+  white-space:pre-wrap;
+  word-break:break-word;
+  color:#d1fae5;
+  font-size:12px;
+  line-height:1.55;
+  font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono",monospace;
+}
+.collectorTerminalBody pre.error{color:#fecaca;}
+.collectorTerminalFoot{justify-content:space-between;flex-wrap:wrap;background:#0b1220;}
+.collectorTerminalFoot button{
+  border:1px solid rgba(153,246,228,.24);
+  background:rgba(15,118,110,.22);
+  color:#ccfbf1;
+  border-radius:999px;
+  padding:7px 11px;
+  cursor:pointer;
+  font-weight:800;
+}
+.collectorTools{margin-top:12px;}
+.collectorTools summary{
+  cursor:pointer;
+  color:#2563eb;
+  font-weight:850;
+  padding:11px 13px;
+  border-radius:14px;
+  background:rgba(239,246,255,.78);
+  border:1px solid rgba(59,130,246,.16);
+  list-style:none;
+}
+.collectorTools summary::-webkit-details-marker{display:none;}
+.compactTools{margin-top:12px;}
+@media(max-width:980px){.digitalHumanLeanGuide{grid-template-columns:1fr}.collectorTerminalHead,.collectorTerminalFoot{align-items:flex-start;flex-direction:column}}

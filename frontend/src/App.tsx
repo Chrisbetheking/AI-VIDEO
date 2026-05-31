@@ -383,12 +383,12 @@ const modules: { key: ModuleKey; icon: string; title: string; desc: string; tag:
   { key: 'copy', icon: '文', title: '文案生产', desc: '先仿写，再出标题、钩子和完整视频脚本', tag: '文案' },
   { key: 'shooting', icon: '拍', title: '脚本 / 拍摄', desc: '上传资料或脚本，生成拍摄任务、提词器和 B-roll 清单', tag: '脚本' },
   { key: 'assets', icon: '素', title: '素材选择', desc: '选择数字人、自拍素材、采集视频或图文素材', tag: '素材' },
-  { key: 'digitalHuman', icon: '人', title: '数字人', desc: '可选数字人口播，也可跳过改用真人拍摄素材', tag: '数字人' },
+  { key: 'digitalHuman', icon: '人', title: '数字人开场', desc: '真人模板口型同步，生成 5-15 秒开场片段并回存素材库', tag: '数字人' },
   { key: 'voice', icon: '声', title: '配音导演', desc: '克隆音色、分段情绪、语速停顿', tag: '配音' },
   { key: 'video', icon: '剪', title: '成片合成', desc: '素材顺序、截取区间、字幕烧录和导出', tag: '成片' },
   { key: 'subtitleCover', icon: '图', title: '图文窗口', desc: '图文引流包、封面、字幕重点单独处理', tag: '图文' },
   { key: 'growth', icon: '投', title: '流量监控', desc: '手动录入数据，AI 判断投多少、投多久、是否继续投', tag: '投流' },
-  { key: 'collector', icon: '采', title: '采集状态', desc: '云 Worker、OpenClaw、安卓/模拟器采集状态预留', tag: '采集' },
+  { key: 'collector', icon: '采', title: '实时日志', desc: '查看 ECS 采集、AI 判断、入库和报错日志', tag: '日志' },
   { key: 'strategy', icon: '档', title: '获客档案', desc: '业务定位、关键词、客群、资料包和承接钩子', tag: '档案' },
   { key: 'monitor', icon: '控', title: '系统状态', desc: 'API、Supabase、R2、任务队列和诊断', tag: '状态' },
   { key: 'oneClick', icon: '旧', title: '旧版一键生成', desc: '保留旧接口，默认不在主流程展示', tag: '隐藏' },
@@ -397,13 +397,13 @@ const modules: { key: ModuleKey; icon: string; title: string; desc: string; tag:
 ]
 
 const workflowSteps: { key: ModuleKey; step: string; title: string; desc: string; action: string }[] = [
-  { key: 'copy', step: '01', title: '文案生产', desc: '先根据同行视频/资料仿写，输出标题、钩子和完整脚本。', action: '写文案' },
-  { key: 'shooting', step: '02', title: '脚本/拍摄', desc: '上传拍摄脚本或资料，生成提词器、镜头和补拍清单。', action: '做脚本' },
-  { key: 'assets', step: '03', title: '素材/数字人', desc: '选择数字人、自拍素材、采集视频或图文素材。', action: '选素材' },
-  { key: 'voice', step: '04', title: '配音分段', desc: '分段控制情绪、语速、音量和停顿，并生成真实时间轴。', action: '去配音' },
-  { key: 'video', step: '05', title: '成片合成', desc: '按素材顺序和配音时长自动铺满，字幕直接在剪辑页调整。', action: '去剪辑' },
-  { key: 'subtitleCover', step: '06', title: '图文窗口', desc: '单独处理图文引流包、封面和字幕重点。', action: '做图文' },
-  { key: 'growth', step: '07', title: '流量监控', desc: '录入发布数据，AI 判断投多少、投多久、是否继续投。', action: '看投流' }
+  { key: 'copy', step: '01', title: '数字人开场稿', desc: '先做 5-15 秒真人模板口播稿，不必等整条片文案。', action: '写开场' },
+  { key: 'voice', step: '02', title: '开场配音', desc: '把开场稿生成真实配音，供 fal 口型同步。', action: '配音' },
+  { key: 'digitalHuman', step: '03', title: '数字人开场', desc: '真人模板视频 + 配音，生成开场片段并自动入素材库。', action: '生成数字人' },
+  { key: 'assets', step: '04', title: '楼盘/风光素材', desc: '选择楼盘、马来西亚风光、配套和教育医疗素材，调整顺序和时长。', action: '选素材' },
+  { key: 'copy', step: '05', title: '按素材补全旁白', desc: '读取已选素材总时长，再生成完整旁白稿和字幕逻辑。', action: '补全脚本' },
+  { key: 'video', step: '06', title: '合成成片', desc: '数字人开场 + B-roll 素材 + 配音字幕，导出 9:16 MP4。', action: '合成' },
+  { key: 'growth', step: '07', title: '流量监控', desc: '录入发布数据，AI 判断投多少、投多久、是否继续投。', action: '投流' }
 ]
 
 const badWords = ['最', '第一', '保证', '包赚', '稳赚', '绝对', '唯一', '国家级', '100%', '躺赚', '无风险']
@@ -766,7 +766,7 @@ function AppInner() {
   const [ad, setAd] = useState<AdAnalysisResponse | null>(null)
   const [platform, setPlatform] = useState('douyin')
   const [publish, setPublish] = useState<PlatformPublishResponse | null>(null)
-  const [lastHandoff, setLastHandoff] = useState('新流程：先文案，再脚本/拍摄，再选素材或数字人，最后成片和投流复盘。')
+  const [lastHandoff, setLastHandoff] = useState('新流程：先生成数字人开场，再选楼盘/风光素材，最后按素材时长补全旁白并合成成片。')
   const [knowledgeDialog, setKnowledgeDialog] = useState({ open: false, source: '', title: '', content: '', tags: '老板口播,获客,短视频' })
 
   const [leadPlan, setLeadPlan] = useState<LeadAcquisitionPlanResponse | null>(null)
@@ -940,6 +940,17 @@ function AppInner() {
     const base = audio?.duration_seconds || voiceEstimatedSeconds || selectedAssetEstimatedSeconds || 35
     return Math.round(Math.min(180, Math.max(10, base)))
   }, [audio?.duration_seconds, voiceEstimatedSeconds, selectedAssetEstimatedSeconds])
+
+  const selectedAssetScriptContext = useMemo(() => {
+    const chosen = selectedMaterialAssets.length ? selectedMaterialAssets : materialAssets.slice(0, 6)
+    return chosen.map((asset, index) => {
+      const cfg = getClipSetting(asset, index)
+      const seconds = asset.kind === 'image'
+        ? Math.max(0.8, safeNumber(cfg.image_seconds, 2.8))
+        : Math.max(0.8, (cfg.video_end && cfg.video_end > cfg.video_start ? cfg.video_end - cfg.video_start : 3.2))
+      return `${index + 1}. ${asset.kind === 'video' ? '视频' : '图片'}｜${asset.original_name || asset.filename}｜约 ${Math.round(seconds * 10) / 10} 秒`
+    }).join('\n')
+  }, [selectedMaterialAssets, materialAssets, assetClipSettings])
 
   const leadScore = useMemo(() => {
     let score = 35
@@ -1513,7 +1524,9 @@ function AppInner() {
 
   async function reloadAssets() {
     const list = await apiGet<AssetItem[]>('/api/assets')
-    setAssets(Array.isArray(list) ? list.map((item, index) => normalizeAsset(item, index)).filter(item => item.id && item.url) : [])
+    const normalized = Array.isArray(list) ? list.map((item, index) => normalizeAsset(item, index)).filter(item => item.id && item.url) : []
+    setAssets(normalized)
+    return normalized
   }
 
   async function reloadCollectorStatus() {
@@ -1678,7 +1691,7 @@ function AppInner() {
 
 
   useEffect(() => {
-    if (active !== 'lead') return
+    if (active !== 'lead' && active !== 'collector') return
     reloadCollectorProgress().catch(() => null)
     const timer = window.setInterval(() => reloadCollectorProgress().catch(() => null), 3000)
     return () => window.clearInterval(timer)
@@ -1920,6 +1933,48 @@ ${manualText || ''}`.trim()
     setActive('copy')
   }
 
+  async function generateDigitalHumanIntroCopy() {
+    const introSeconds = Math.min(18, Math.max(8, Math.round(selectedAssetEstimatedSeconds ? Math.min(selectedAssetEstimatedSeconds * 0.28, 15) : 12)))
+    const res = await run('生成数字人开场稿', () => apiPost<GeneratedCopy>('/api/generate-copy', {
+      topic: `生成 ${introSeconds} 秒数字人真人开场口播：先用强痛点/反差吸引，再自然引出马来西亚房产/第二家园/国际学校/楼盘介绍，结尾接“后面给你看项目和周边环境”。`,
+      industry,
+      audience,
+      selling_points: limitText(`${sellingPointsWithProfile}
+
+【数字人开场规则】只写 5-15 秒开场；像真人顾问对镜头说话；不要写完整长视频；不要夸张承诺；最后一句自然切到楼盘/风光素材。`, 1100),
+      style: `${style}，真人顾问口播，短句，像叔叔/房产顾问面对客户讲话。`,
+      duration_seconds: introSeconds,
+      knowledge_examples: [manualText, heatRewrite?.variants?.[0]?.script || '', referenceText || ''].filter(Boolean).slice(0, 3)
+    }))
+    setCopy(res!)
+    const scriptLines = [res?.hook, res?.script].filter(Boolean).join('\n').split(/\n+/).map(x => x.trim()).filter(Boolean).slice(0, 4)
+    setVoiceSegments(scriptLines.length ? scriptLines.map(text => ({ ...defaultSegment, text, emotion: '自然可信', speed_ratio: 1.06, pause_after_ms: 260 })) : [])
+    setLastHandoff('数字人开场稿已生成。下一步先生成配音，再到“数字人开场”用 fal 真人模板口型同步。')
+    setActive('voice')
+  }
+
+  async function generateScriptFromSelectedAssets() {
+    const targetSeconds = safeProjectDuration(selectedAssetEstimatedSeconds || 45)
+    const res = await run('按素材时长生成旁白稿', () => apiPost<GeneratedCopy>('/api/generate-copy', {
+      topic: `根据已选楼盘/风光/B-roll 素材，生成约 ${targetSeconds} 秒完整旁白稿：前面接数字人开场，后面按素材顺序介绍项目、生活、配套、教育和私信转化。`,
+      industry,
+      audience,
+      selling_points: limitText(`${sellingPointsWithProfile}
+
+【已选素材顺序和时长】
+${selectedAssetScriptContext || '暂无素材，请按马来西亚楼盘、风光、配套、教育医疗的顺序生成通用旁白。'}
+
+【写法要求】按素材画面顺序写旁白；不要照抄同行；不要承诺收益；每 1-2 句适合一段字幕；结尾引导私信领取资料。`, 1600),
+      style: `${style}，房产顾问旁白，口语化，画面转场自然。`,
+      duration_seconds: targetSeconds,
+      knowledge_examples: [copy.script, manualText, heatRewrite?.variants?.[0]?.script || ''].filter(Boolean).slice(0, 3)
+    }))
+    setCopy(res!)
+    setVoiceSegments((res?.script || '').split(/\n+/).map(x => x.trim()).filter(Boolean).slice(0, 10).map(text => ({ ...defaultSegment, text })))
+    setLastHandoff('已按素材总时长生成完整旁白稿。现在去配音导演生成最终旁白，再合成数字人开场 + 素材混剪。')
+    setActive('voice')
+  }
+
   async function rewrite() {
     const res = await run('原创改写', () => apiPost<GeneratedCopy>('/api/rewrite-from-inspiration', {
       reference_text: referenceText || '请根据业务信息生成原创老板口播文案。',
@@ -2013,7 +2068,7 @@ ${manualText || ''}`.trim()
     const currentStatus = String(digitalHuman?.status || '').toLowerCase()
     const hasRunningJimengTask = Boolean(digitalHuman?.job_id && !digitalHuman?.video_url && !['failed', 'error', 'done'].includes(currentStatus))
     if (hasRunningJimengTask) {
-      setError('已有火山即梦数字人任务正在生成中，不要重复提交。火山当前并发额度通常是 1 个任务；请直接查询当前任务结果，或等任务结束后再新建。')
+      setError('已有数字人任务正在生成中，不要重复提交。请直接查询当前任务结果，或等任务结束后再新建。')
       await checkDigitalHumanStatus(false)
       return
     }
@@ -2034,10 +2089,12 @@ ${manualText || ''}`.trim()
     setDigitalHumanPollCount(0)
     setDigitalHumanLastChecked(new Date().toLocaleTimeString())
     if (res?.video_url) {
-      await reloadAssets().catch(() => null)
-      setLastHandoff('数字人片段已生成并保存到素材库。可以把它作为开场素材，再选择楼盘/风光素材进行剪辑合成。')
+      const refreshed = await reloadAssets().catch(() => [] as AssetItem[])
+      const newIntro = (refreshed || []).find(a => a.filename === res.video_name || a.url === res.video_url || a.source_type === 'digital_human_intro')
+      if (newIntro?.id) setSelectedMaterialIds(prev => prev.includes(newIntro.id) ? prev : [newIntro.id, ...prev])
+      setLastHandoff('数字人片段已生成并保存到素材库，并已自动放到素材顺序最前面。接下来选择楼盘/风光素材，再按素材时长补全旁白。')
     } else {
-      setLastHandoff('火山即梦任务已提交。不要重复提交；系统会自动查询，通常需要 5-30 分钟。')
+      setLastHandoff('fal 数字人任务已提交。不要重复提交；系统会自动查询，完成后会自动回存素材库。')
     }
   }
 
@@ -2046,7 +2103,7 @@ ${manualText || ''}`.trim()
     setDigitalHumanPollCount(0)
     setDigitalHumanLastChecked('')
     try { window.localStorage.removeItem(DIGITAL_HUMAN_TASK_KEY) } catch {}
-    setLastHandoff('已清除当前数字人任务。可以重新提交一个新的 OmniHuman1.5 任务。')
+    setLastHandoff('已清除当前数字人任务。可以重新提交一个新的 fal 真人模板口型同步任务。')
   }
 
   async function checkDigitalHumanStatus(silent = false) {
@@ -2065,12 +2122,14 @@ ${manualText || ''}`.trim()
     setDigitalHumanLastChecked(new Date().toLocaleTimeString())
     setDigitalHumanPollCount(prev => prev + 1)
     if (res.video_url) {
-      await reloadAssets().catch(() => null)
-      setLastHandoff('数字人片段已生成并保存到素材库。可以把它作为开场素材，再选择楼盘/风光素材进行剪辑合成。')
+      const refreshed = await reloadAssets().catch(() => [] as AssetItem[])
+      const newIntro = (refreshed || []).find(a => a.filename === res.video_name || a.url === res.video_url || a.source_type === 'digital_human_intro')
+      if (newIntro?.id) setSelectedMaterialIds(prev => prev.includes(newIntro.id) ? prev : [newIntro.id, ...prev])
+      setLastHandoff('数字人片段已生成并保存到素材库，并已自动放到素材顺序最前面。接下来选择楼盘/风光素材，再按素材时长补全旁白。')
     } else if (String(res.status || '').toLowerCase() === 'failed') {
       setLastHandoff('当前数字人任务不可继续查询。请查看火山原始返回，必要时清除当前任务后重新提交。')
     } else {
-      setLastHandoff('火山即梦仍在生成或排队中。系统会每 20 秒自动查询一次，也可以手动点击查询。')
+      setLastHandoff('数字人仍在生成或排队中。系统会每 20 秒自动查询一次，也可以手动点击查询。')
     }
   }
 
@@ -2230,7 +2289,7 @@ ${manualText || ''}`.trim()
   const stageCards: Array<{ key: ModuleKey; label: string; done: boolean; value: string }> = [
     { key: 'copy', label: '1 文案生产', done: Boolean(copy.hook || copy.script), value: copy.title || '先出标题/脚本' },
     { key: 'shooting', label: '2 脚本/拍摄', done: Boolean(shootingPlan), value: shootingPlan?.summary || '上传脚本或生成任务单' },
-    { key: 'assets', label: '3 素材/数字人', done: selectedMaterialIds.length > 0 || Boolean(digitalHumanAvatarId), value: selectedMaterialIds.length ? `已选 ${selectedMaterialIds.length} 个素材` : (digitalHumanAvatarId ? '已选数字人形象' : '待选素材') },
+    { key: 'digitalHuman', label: '3 数字人开场', done: Boolean(digitalHuman?.video_url), value: digitalHuman?.video_url ? '开场已生成' : (digitalHumanAvatarId ? '已选模板' : '待选真人模板') },
     { key: 'voice', label: '4 配音分段', done: Boolean(audio), value: voiceSegments.length ? `${voiceSegments.length} 段 · ${selectedVoiceName}` : '待配音' },
     { key: 'video', label: '5 成片合成', done: Boolean(video?.video_url), value: video?.video_name || '待合成' },
     { key: 'subtitleCover', label: '6 图文窗口', done: Boolean(cover || subtitleAI || generatedImage || graphicPost), value: graphicPost ? `${graphicPost.images.length}张图文` : cover?.cover_name || generatedImage?.image_name || (subtitleAI ? '重点字幕已生成' : '待处理') },
@@ -2240,7 +2299,7 @@ ${manualText || ''}`.trim()
   const digitalHumanStatus = String(digitalHuman?.status || '').toLowerCase()
   const hasRunningDigitalHumanTask = Boolean(digitalHuman?.job_id && !digitalHuman?.video_url && !['failed', 'error', 'done'].includes(digitalHumanStatus))
   const digitalHumanPrimaryLabel = hasRunningDigitalHumanTask ? '查询当前数字人任务' : '生成数字人片段'
-  const contentNavKeys: ModuleKey[] = ['copy','shooting','assets','digitalHuman','voice','video','subtitleCover','growth']
+  const contentNavKeys: ModuleKey[] = ['copy','voice','digitalHuman','assets','video','subtitleCover','growth','collector']
 
   useEffect(() => {
     setNavMobileOpen(false)
@@ -2671,37 +2730,38 @@ ${manualText || ''}`.trim()
       </section>}
 
       {active === 'collector' && <section className="card modulePanel">
-        <div className="sectionHeader"><div><h2>第一步：采集同行视频</h2><p>文件上传后先采集同行视频。可以上传 MP4，也可以粘抖音分享口令；采不到视频时先拆标题、钩子和话题。</p></div><Button busy={busy === '采集/拆解同行内容' ? busy : ''} label="采集同行视频/口令" onClick={collectCompetitor} /></div>
+        <div className="sectionHeader"><div><h2>实时采集 Log</h2><p>这里不再做“状态卡片”，直接显示 ECS command_worker 回传的采集、AI 判断、入库和报错日志。状态统计已并入热度雷达。</p></div><div className="headerActions"><Button label="刷新日志" onClick={() => reloadCollectorProgress()} kind="ghost" /><Button busy={busy === '采集/拆解同行内容' ? busy : ''} label="手动采集链接" onClick={collectCompetitor} kind="soft" /></div></div>
         <div className="grid2">
           <Field label="抖音分享口令 / 视频链接"><textarea value={sourceUrl} onChange={e => setSourceUrl(e.target.value)} placeholder="直接粘贴：1.58 ... https://v.douyin.com/... 复制此链接..." /></Field>
           <Field label="手动粘贴竞品文案 / 豆包 App 识别稿"><textarea value={manualText} onChange={e => setManualText(e.target.value)} placeholder="如果已经有真实口播稿，粘这里。" /></Field>
         </div>
-        <div className="collectorAssist">
-          <div>
-            <strong>视频采集增强</strong>
-            <p>{collectorStatus?.hint || '正在读取采集器状态...'}</p>
-            <small>状态：{collectorStatus?.cookie_exists ? '已配置登录态 Cookies' : '未配置 Cookies'} · 采集器：{collectorStatus?.enabled ? '已启用' : '未启用'}</small>
+        <div className="collectorTerminal">
+          <div className="collectorTerminalHead">
+            <span>RUN</span><strong>{collectorProgress?.run?.status || 'waiting'}</strong><em>{collectorProgress?.run?.run_id || '暂无 run_id'}</em>
           </div>
-          <div className="buttonRow mini">
-            <Button label="刷新采集状态" onClick={() => reloadCollectorStatus()} kind="ghost" />
-            <Button label={showCookiePanel ? '收起 Cookies' : '上传 Cookies'} onClick={() => setShowCookiePanel(v => !v)} kind="soft" />
+          <div className="collectorTerminalBody">
+            {collectorEventsForReport.length === 0 ? <pre>[waiting] 暂无实时日志。ECS Worker 领取命令后会回传：打开账号、抓取视频、AI 判断、入库、失败原因。</pre> : collectorEventsForReport.map((ev, index) => <pre key={ev.id || `${ev.created_at}_${index}`} className={ev.level === 'error' ? 'error' : ''}>[{safeText(ev.created_at, '--').slice(11, 19) || '--'}] {formatCollectorEventLine(ev, index)}</pre>)}
           </div>
+          <div className="collectorTerminalFoot"><span>{collectorReportLine}</span><button onClick={() => reloadCollectorProgress()}>刷新</button><button onClick={() => setShowCookiePanel(v => !v)}>{showCookiePanel ? '收起 Cookies' : 'Cookies'}</button></div>
         </div>
-        <div className="agentPanel">
-          <div className="sectionHeader compact"><div><h3>自动学习同行打法</h3><p>读取账号库和链接，沉淀钩子、节奏和承接方式，不复制原文。</p></div><div className="buttonRow mini"><Button label="刷新智能体" onClick={() => reloadAgentStatus()} kind="ghost" /><Button busy={busy === '自动采集/学习同行打法' ? busy : ''} label="立即跑一轮" onClick={runAutoAgent} kind="soft" /></div></div>
-          <div className="grid2">
-            <Field label="种子链接（可选，一行一个）" hint="可以填某个博主的主页/爆款视频链接；空着时会自动读取竞品账号库 URL。"><textarea value={agentSeedLinks} onChange={e => setAgentSeedLinks(e.target.value)} placeholder="https://v.douyin.com/...
+        <details className="collectorTools" open={false}>
+          <summary>展开：手动采集链接 / 自动学习设置</summary>
+          <div className="agentPanel compactTools">
+            <div className="sectionHeader compact"><div><h3>自动学习同行打法</h3><p>读取账号库和链接，沉淀钩子、节奏和承接方式，不复制原文。</p></div><div className="buttonRow mini"><Button label="刷新智能体" onClick={() => reloadAgentStatus()} kind="ghost" /><Button busy={busy === '自动采集/学习同行打法' ? busy : ''} label="立即跑一轮" onClick={runAutoAgent} kind="soft" /></div></div>
+            <div className="grid2">
+              <Field label="种子链接（可选，一行一个）" hint="可以填某个博主的主页/爆款视频链接；空着时会自动读取竞品账号库 URL。"><textarea value={agentSeedLinks} onChange={e => setAgentSeedLinks(e.target.value)} placeholder="https://v.douyin.com/...
 https://www.douyin.com/user/..." /></Field>
-            <Field label="学习目标" hint="强调学习打法，不要复制文案。"><textarea value={agentLearnGoal} onChange={e => setAgentLearnGoal(e.target.value)} /></Field>
+              <Field label="学习目标" hint="强调学习打法，不要复制文案。"><textarea value={agentLearnGoal} onChange={e => setAgentLearnGoal(e.target.value)} /></Field>
+            </div>
+            <div className="agentStats">
+              <Pill tone={agentStatus?.enabled ? 'green' : 'orange'}>{agentStatus?.enabled ? '后台定时已启用' : '后台定时未启用'}</Pill>
+              <Pill>竞品账号 {agentStatus?.competitors_count ?? competitors.length}</Pill>
+              <Pill tone={agentStatus?.memory_enabled ? 'green' : 'orange'}>{agentStatus?.memory_enabled ? 'Supabase 记忆库' : '本地记忆'}</Pill>
+              <Pill>每轮最多 {agentStatus?.run_limit ?? 3} 条</Pill>
+            </div>
+            {agentResult && <div className="resultBox"><h3>{agentResult.learning?.summary || '自动学习完成'}</h3><div className="splitGrid"><div><h4>学到的方法</h4>{(agentResult.learning?.creator_methods || []).map((x: string) => <p key={x}>· {x}</p>)}</div><div><h4>钩子公式</h4>{(agentResult.learning?.hook_formulas || []).map((x: any, i: number) => <p key={i}>· {x.name || '公式'}：{x.template || x.logic || JSON.stringify(x)}</p>)}</div><div><h4>迁移规则</h4>{(agentResult.learning?.transfer_rules || []).map((x: string) => <p key={x}>· {x}</p>)}</div></div>{agentResult.warnings?.slice(0, 6).map(w => <div className="warn" key={w}>{w}</div>)}</div>}
           </div>
-          <div className="agentStats">
-            <Pill tone={agentStatus?.enabled ? 'green' : 'orange'}>{agentStatus?.enabled ? '后台定时已启用' : '后台定时未启用'}</Pill>
-            <Pill>竞品账号 {agentStatus?.competitors_count ?? competitors.length}</Pill>
-            <Pill tone={agentStatus?.memory_enabled ? 'green' : 'orange'}>{agentStatus?.memory_enabled ? 'Supabase 记忆库' : '本地记忆'}</Pill>
-            <Pill>每轮最多 {agentStatus?.run_limit ?? 3} 条</Pill>
-          </div>
-          {agentResult && <div className="resultBox"><h3>{agentResult.learning?.summary || '自动学习完成'}</h3><div className="splitGrid"><div><h4>学到的方法</h4>{(agentResult.learning?.creator_methods || []).map((x: string) => <p key={x}>· {x}</p>)}</div><div><h4>钩子公式</h4>{(agentResult.learning?.hook_formulas || []).map((x: any, i: number) => <p key={i}>· {x.name || '公式'}：{x.template || x.logic || JSON.stringify(x)}</p>)}</div><div><h4>迁移规则</h4>{(agentResult.learning?.transfer_rules || []).map((x: string) => <p key={x}>· {x}</p>)}</div></div>{agentResult.warnings?.slice(0, 6).map(w => <div className="warn" key={w}>{w}</div>)}</div>}
-        </div>
+        </details>
         {showCookiePanel && <div className="cookiePanel">
           <h4>上传 douyin_cookies.txt</h4>
           <p>遇到 “Fresh cookies needed” 时，需要导出你自己浏览器里的抖音 cookies。只用于你的后端采集公开可访问内容，不会提交到前端展示。</p>
@@ -2722,17 +2782,17 @@ https://www.douyin.com/user/..." /></Field>
       </section>}
 
       {active === 'copy' && <section className="card modulePanel copyFirstPanel">
-        <div className="sectionHeader"><div><h2>第一步：文案生产</h2><p>先根据同行视频、资料脚本或客户目标做原创仿写，输出标题、前三秒钩子和完整视频脚本。这里不再走旧版“一键生成”。</p></div><div className="headerActions"><Button busy={busy === 'AI 仿写热度内容' ? busy : ''} label="读取热度并仿写" onClick={makeHeatRewritePlan} disabled={!todayHeatSnapshots.length} kind="soft" /><Button busy={busy === '生成文案' ? busy : ''} label="直接生成文案" onClick={generateDirectCopy} /></div></div>
+        <div className="sectionHeader"><div><h2>第一步：数字人开场 / 完整旁白</h2><p>先做 5-15 秒数字人开场稿；数字人生成并入素材库后，再按楼盘/风光素材总时长补全完整旁白。</p></div><div className="headerActions"><Button busy={busy === '生成数字人开场稿' ? busy : ''} label="生成数字人开场稿" onClick={generateDigitalHumanIntroCopy} kind="primary" /><Button busy={busy === '按素材时长生成旁白稿' ? busy : ''} label="按素材时长补全旁白" onClick={generateScriptFromSelectedAssets} kind="soft" /></div></div>
         <div className="productionRouteGrid">
           {[
-            ['digital_human','数字人口播','适合老板不出镜，脚本 + 配音 + 数字人自动成片'],
-            ['self_shoot','真人拍摄','适合自己随手拍，系统给提词器、镜头和补拍清单'],
-            ['mixed_assets','素材混剪','适合项目、学校、生活 B-roll 和资料截图混剪'],
+            ['digital_human','数字人开场','先生成 5-15 秒真人模板口播，自动入素材库做片头'],
+            ['mixed_assets','素材混剪','楼盘/马来西亚风光/周边配套按时长生成旁白'],
+            ['self_shoot','真人拍摄','自己拍摄时生成提词器、镜头和补拍清单'],
             ['graphic_post','图文引流','适合小红书/朋友圈收藏型内容']
           ].map(([value,title,desc]) => <button key={value} className={oneClickOutputType === value ? 'selected' : ''} onClick={() => setOneClickOutputType(value)}><strong>{title}</strong><span>{desc}</span></button>)}
         </div>
-        <div className="grid4"><Field label="当前生产方式"><input value={oneClickOutputType === 'digital_human' ? '数字人' : oneClickOutputType === 'self_shoot' ? '真人拍摄' : oneClickOutputType === 'graphic_post' ? '图文' : '素材混剪'} readOnly /></Field><Field label="素材状态"><input value={selectedMaterialIds.length ? `已选 ${selectedMaterialIds.length} 个素材` : '未选素材，可后面再选'} readOnly /></Field><Field label="开头策略"><input value="痛点/反差/警告/结果" readOnly /></Field><Field label="当前风险"><input value={matchedBadWords.length ? `${matchedBadWords.length} 个敏感词` : '暂无明显风险'} readOnly /></Field></div>
-        <div className="buttonRow"><Button busy={busy === '原创改写' ? busy : ''} label="仿写改写" onClick={rewrite} kind="soft" /><Button busy={busy === '文案细改' ? busy : ''} label="AI 细改" onClick={refineCopy} disabled={!currentScript} kind="soft" /><Button label="生成拍摄脚本" onClick={makeShootingPlan} disabled={!currentScript} kind="ghost" /><Button label="加入配音分段" onClick={() => { setVoiceSegments(currentScript.split(/\n+/).map(x => x.trim()).filter(Boolean).slice(0, 8).map(text => ({ ...defaultSegment, text }))); setActive('voice') }} kind="ghost" /><Button label="保存到知识库" onClick={() => openKnowledgeSave('手动保存当前文案', copy)} kind="ghost" disabled={!currentScript} /></div>
+        <div className="grid4"><Field label="当前生产方式"><input value={oneClickOutputType === 'digital_human' ? '数字人开场' : oneClickOutputType === 'self_shoot' ? '真人拍摄' : oneClickOutputType === 'graphic_post' ? '图文' : '素材混剪'} readOnly /></Field><Field label="素材总时长"><input value={selectedAssetEstimatedSeconds ? `约 ${selectedAssetEstimatedSeconds} 秒 / ${selectedMaterialIds.length} 个素材` : '未选素材，可后面再选'} readOnly /></Field><Field label="开头策略"><input value="痛点/反差/警告/结果" readOnly /></Field><Field label="当前风险"><input value={matchedBadWords.length ? `${matchedBadWords.length} 个敏感词` : '暂无明显风险'} readOnly /></Field></div>
+        <div className="buttonRow"><Button busy={busy === '生成数字人开场稿' ? busy : ''} label="数字人开场稿" onClick={generateDigitalHumanIntroCopy} kind="primary" /><Button busy={busy === '按素材时长生成旁白稿' ? busy : ''} label="按素材时长补全旁白" onClick={generateScriptFromSelectedAssets} kind="soft" /><Button busy={busy === '原创改写' ? busy : ''} label="同行仿写改写" onClick={rewrite} kind="ghost" /><Button busy={busy === '文案细改' ? busy : ''} label="AI 细改" onClick={refineCopy} disabled={!currentScript} kind="ghost" /><Button label="加入配音分段" onClick={() => { setVoiceSegments(currentScript.split(/\n+/).map(x => x.trim()).filter(Boolean).slice(0, 10).map(text => ({ ...defaultSegment, text }))); setActive('voice') }} kind="ghost" /></div>
         <div className="flowSource"><strong>当前参考</strong><span>{industry} · {audience}</span><span>热点/同行：{extract?.summary ? shortText(extract.summary) : '暂无'}</span><span>记忆库：{memoryContext?.memory_enabled ? '已连接' : '本地模式'}</span></div>
         <div className="copyEditor"><Field label="标题"><input value={copy.title} onChange={e => setCopy({ ...copy, title: e.target.value })} /></Field><Field label="黄金三秒钩子"><textarea value={copy.hook} onChange={e => setCopy({ ...copy, hook: e.target.value })} /></Field><Field label="完整视频脚本"><textarea className="scriptArea" value={copy.script} onChange={e => setCopy({ ...copy, script: e.target.value })} placeholder="这里精修完整脚本；可以来自热度仿写、PDF资料、拍摄稿或手动输入。" /></Field><Field label="发布简介"><textarea value={copy.description} onChange={e => setCopy({ ...copy, description: e.target.value })} /></Field><Field label="细改要求"><input value={refineInstruction} onChange={e => setRefineInstruction(e.target.value)} /></Field></div>
         <div className="chips">{matchedBadWords.length ? matchedBadWords.map(x => <Pill key={x} tone="red">风险词：{x}</Pill>) : <Pill tone="green">违禁词初筛通过</Pill>}</div>
@@ -2749,32 +2809,26 @@ https://www.douyin.com/user/..." /></Field>
       </section>}
 
       {active === 'digitalHuman' && <section className="card modulePanel">
-        <div className="sectionHeader"><div><h2>数字人工作台</h2><p>先生成真人模板口型同步开场片段，自动保存到素材库；后面再选择楼盘/马来西亚风光素材混剪成完整视频。</p></div><Button busy={busy === '生成数字人片段' || busy === '查询数字人结果' ? busy : ''} label={digitalHumanPrimaryLabel} onClick={hasRunningDigitalHumanTask ? () => checkDigitalHumanStatus(false) : makeDigitalHuman} disabled={!hasRunningDigitalHumanTask && (!audio?.file_name || !digitalHumanAvatarId || !digitalHumanConsent)} /></div>
+        <div className="sectionHeader"><div><h2>第三步：数字人开场</h2><p>用 fal.ai：真人模板视频 + 配音音频 → 口型同步开场片段。生成后自动保存到素材库并放到素材顺序最前。</p></div><Button busy={busy === '生成数字人片段' || busy === '查询数字人结果' ? busy : ''} label={digitalHumanPrimaryLabel} onClick={hasRunningDigitalHumanTask ? () => checkDigitalHumanStatus(false) : makeDigitalHuman} disabled={!hasRunningDigitalHumanTask && (!audio?.file_name || !digitalHumanAvatarId || !digitalHumanConsent)} /></div>
         <div className="grid3">
           <Field label="数字人形象素材" hint="fal 推荐上传本人授权的 5-20 秒正面半身说话视频；静态预览可用照片。"><select value={digitalHumanAvatarId} onChange={e => setDigitalHumanAvatarId(e.target.value)}><option value="">选择已上传照片/视频</option>{assets.map(a => <option key={a.id} value={a.id}>{a.kind} · {a.original_name || a.filename}</option>)}</select></Field>
-          <Field label="动作参考视频（可选）" hint="后续接 LivePortrait/MuseTalk 时可参考表情和头部动作。"><select value={digitalHumanDriverId} onChange={e => setDigitalHumanDriverId(e.target.value)}><option value="">不用动作参考</option>{assets.filter(a => a.kind === 'video').map(a => <option key={a.id} value={a.id}>{a.original_name || a.filename}</option>)}</select></Field>
-          <Field label="数字人引擎" hint="当前推荐：真人模板视频 + 配音做口型同步，先生成 5-20 秒开场。"><select value={digitalHumanEngine} onChange={e => setDigitalHumanEngine(e.target.value)}><option value="fal_lipsync">推荐：fal.ai 真人模板口型同步</option><option value="preview_no_avatar">无训练费素材成片</option><option value="preview">静态预览/素材合成</option><option value="webhook">外部 Webhook/API</option><option value="jimeng">火山即梦/OmniHuman（备用）</option><option value="sadtalker">SadTalker 图片口播</option><option value="wav2lip">Wav2Lip</option><option value="musetalk">本地 MuseTalk</option><option value="liveportrait">本地 LivePortrait</option><option value="heygen_api">HeyGen 公共 Avatar API</option><option value="did_api">D-ID 公共 Presenter API</option><option value="akool_talking_photo">AKOOL Talking Photo</option></select></Field>
+          <Field label="动作参考视频（可选）" hint="fal 当前不需要；后期 MuseTalk/LivePortrait 才用。"><select value={digitalHumanDriverId} onChange={e => setDigitalHumanDriverId(e.target.value)}><option value="">不用动作参考</option>{assets.filter(a => a.kind === 'video').map(a => <option key={a.id} value={a.id}>{a.original_name || a.filename}</option>)}</select></Field>
+          <Field label="数字人引擎" hint="去掉冗余平台，默认只保留真正已接入/可兜底的路线。"><select value={digitalHumanEngine} onChange={e => setDigitalHumanEngine(e.target.value)}><option value="fal_lipsync">推荐：fal.ai 真人模板口型同步</option><option value="preview">免费兜底：静态预览/素材口播</option><option value="webhook">外部 GPU Worker/API</option><option value="jimeng">火山即梦/OmniHuman（备用）</option></select></Field>
           {digitalHumanEngine === 'jimeng' && <Field label="即梦模型" hint="模拟真人优先选 OmniHuman1.5；普通视频生成可用视频3.0。"><select value={digitalHumanJimengModel} onChange={e => setDigitalHumanJimengModel(e.target.value)}><option value="omnihuman15">OmniHuman1.5（单图+音频真人口播）</option><option value="quick">数字人快速模式</option><option value="video30">即梦视频生成3.0（图生视频）</option></select></Field>}
         </div>
         <label className="checkline"><input type="checkbox" checked={digitalHumanConsent} onChange={e => setDigitalHumanConsent(e.target.checked)} /> 我确认已获得本人形象和声音授权，仅用于合法商业内容。</label>
 
-        <div className="providerGrid">
-          {(digitalHumanProviders.length ? digitalHumanProviders : []).slice(0, 4).map(p => <div className={`providerCard ${p.enabled ? 'active' : ''}`} key={p.id}>
-            <div><strong>{p.name}</strong><Pill tone={p.enabled ? 'green' : 'orange'}>{p.stage}</Pill></div>
-            <p>{p.cost_note}</p>
-            <small>{p.best_for}</small>
-            <em>{p.risk}</em>
-            <button className="btn ghost" onClick={() => setDigitalHumanEngine(p.id)}>选择这个引擎</button>
-          </div>)}
-          {!digitalHumanProviders.length && <Empty>正在读取推荐数字人平台。当前默认使用“无训练费素材成片/外部 Webhook”。</Empty>}
+        <div className="digitalHumanLeanGuide">
+          <div><strong>推荐模板</strong><p>上传 5-20 秒正面半身真人视频，人物看镜头、光线稳定、少转头。原视频说什么不重要，fal 会用新配音同步嘴型。</p></div>
+          <div><strong>当前输入</strong><p>版本：#{digitalHumanVersion}<br />模板：{digitalHumanAvatarId || '未选择'}<br />配音：{audio?.file_name || '未生成'}<br />开场稿：{shortText(currentScript || '', 90) || '未生成'}</p></div>
+          <div><strong>生成后动作</strong><p>成功后自动入素材库，并自动放到素材顺序第 1 个；后面继续添加楼盘、风光、学校、配套 B-roll。</p></div>
         </div>
-        <div className="infoGrid"><div><strong>当前输入</strong><p>数字人版本：#{digitalHumanVersion}<br />形象素材：{digitalHumanAvatarId || '未选择'}<br />配音音频：{audio?.file_name || '未生成'}<br />脚本：{shortText(currentScript || '', 90) || '未生成'}</p></div><div><strong>接入建议</strong><p>当前推荐先用 fal.ai：真人模板视频 + 配音做口型同步，生成 5-20 秒数字人开场；生成后会自动保存到素材库，再接楼盘/风光素材混剪。</p></div></div>
-        {hasRunningDigitalHumanTask && <div className="warn strongWarn">已有任务正在火山侧排队/生成中。请不要再次点击提交，否则会触发 429 并发限制；等待当前任务完成或点击“查询当前数字人任务”。</div>}
-        {digitalHuman && <div className="resultBox"><h3>数字人 #{digitalHumanVersion} 结果</h3><p>{digitalHuman.message}</p><div className="resultMeta"><Pill tone={digitalHuman.video_url ? 'green' : digitalHuman.status === 'failed' ? 'red' : 'orange'}>状态：{digitalHuman.status || 'running'}</Pill>{digitalHumanLastChecked && <Pill tone="blue">最近查询：{digitalHumanLastChecked}</Pill>}{digitalHumanPollCount > 0 && <Pill tone="purple">已查询 {digitalHumanPollCount} 次</Pill>}</div>{digitalHuman.job_id && <p className="muted">任务 ID：{digitalHuman.job_id}<br />查询模型：{getDigitalHumanTaskModel(digitalHuman, digitalHumanJimengModel)}</p>}{digitalHuman.job_id && !digitalHuman.video_url && <div className="warn">OmniHuman1.5 是排队生成任务，不是实时接口。系统会每 20 秒自动查一次；如果超过 20-30 分钟仍无结果，请去火山控制台 / API Explorer 用这个 task_id 查询任务详情。</div>}{digitalHuman.warnings?.map(w => <div className="warn" key={w}>{w}</div>)}{digitalHuman.job_id && !digitalHuman.video_url && <div className="buttonRow"><button className="btn soft" onClick={() => checkDigitalHumanStatus(false)} disabled={busy === '查询数字人结果'}>{busy === '查询数字人结果' ? '查询中…' : '立即查询数字人结果'}</button><button className="btn ghost danger" onClick={clearDigitalHumanTask}>清除当前任务</button></div>}{digitalHuman.raw && <details className="rawBox"><summary>查看火山原始返回</summary><pre>{JSON.stringify(digitalHuman.raw, null, 2).slice(0, 2600)}</pre></details>}{digitalHuman.video_url && <video controls src={digitalHuman.video_url} className="previewVideo" />}{digitalHuman.video_url && <a className="download" href={digitalHuman.video_url} target="_blank">下载/打开数字人 #{digitalHumanVersion} 片段</a>}</div>}
+        {hasRunningDigitalHumanTask && <div className="warn strongWarn">已有数字人任务正在排队/生成中。请不要再次点击提交；等待当前任务完成或点击“查询当前数字人任务”。</div>}
+        {digitalHuman && <div className="resultBox"><h3>数字人 #{digitalHumanVersion} 结果</h3><p>{digitalHuman.message}</p><div className="resultMeta"><Pill tone={digitalHuman.video_url ? 'green' : digitalHuman.status === 'failed' ? 'red' : 'orange'}>状态：{digitalHuman.status || 'running'}</Pill>{digitalHumanLastChecked && <Pill tone="blue">最近查询：{digitalHumanLastChecked}</Pill>}{digitalHumanPollCount > 0 && <Pill tone="purple">已查询 {digitalHumanPollCount} 次</Pill>}</div>{digitalHuman.job_id && <p className="muted">任务 ID：{digitalHuman.job_id}<br />查询模型：{getDigitalHumanTaskModel(digitalHuman, digitalHumanJimengModel)}</p>}{digitalHuman.job_id && !digitalHuman.video_url && <div className="warn">数字人生成是异步任务。系统会每 20 秒自动查一次；fal 通常较快，如果长时间没有结果，请查看 Render Logs 或 fal 后台任务。</div>}{digitalHuman.warnings?.map(w => <div className="warn" key={w}>{w}</div>)}{digitalHuman.job_id && !digitalHuman.video_url && <div className="buttonRow"><button className="btn soft" onClick={() => checkDigitalHumanStatus(false)} disabled={busy === '查询数字人结果'}>{busy === '查询数字人结果' ? '查询中…' : '立即查询数字人结果'}</button><button className="btn ghost danger" onClick={clearDigitalHumanTask}>清除当前任务</button></div>}{digitalHuman.raw && <details className="rawBox"><summary>查看原始返回</summary><pre>{JSON.stringify(digitalHuman.raw, null, 2).slice(0, 2600)}</pre></details>}{digitalHuman.video_url && <video controls src={digitalHuman.video_url} className="previewVideo" />}{digitalHuman.video_url && <a className="download" href={digitalHuman.video_url} target="_blank">下载/打开数字人 #{digitalHumanVersion} 片段</a>}</div>}
       </section>}
 
       {active === 'assets' && <section className="card modulePanel">
-        <div className="sectionHeader"><div><h2>第一步：素材选择与截取</h2><p>先选素材，再生成文案。图片可设置停留秒数，视频可预览并截取开始/结束时间；素材顺序会直接同步到剪辑。</p></div></div>
+        <div className="sectionHeader"><div><h2>第四步：素材选择与截取</h2><p>数字人开场会自动排在最前；这里继续选择楼盘、马来西亚风光、周边配套、学校和生活素材，再按总时长补全旁白。</p></div><Button busy={busy === '按素材时长生成旁白稿' ? busy : ''} label="按素材时长生成旁白" onClick={generateScriptFromSelectedAssets} kind="soft" /></div>
         <div className={`uploadDrop ${isDraggingAssets ? 'dragging' : ''} ${busy === '上传素材' ? 'uploading' : ''}`} onDragOver={onAssetDragOver} onDragLeave={onAssetDragLeave} onDrop={onAssetDrop} aria-busy={busy === '上传素材'}>
           <div className="uploadIcon">↑</div>
           <div className="uploadCopy">
@@ -2825,7 +2879,7 @@ https://www.douyin.com/user/..." /></Field>
       </section>}
 
       {active === 'video' && <section className="card modulePanel">
-        <div className="sectionHeader"><div><h2>第五步：剪辑合成 / 抖音字幕</h2><p>先按素材顺序生成画面底片，再叠加配音和字幕。字幕样式用整套模板，不再单独挑颜色。</p></div><Button busy={busy === '合成视频并烧字幕' ? busy : ''} label="生成视频并下载 MP4" onClick={composeVideo} disabled={!currentScript} /></div>
+        <div className="sectionHeader"><div><h2>第六步：数字人开场 + 素材混剪</h2><p>按素材顺序生成画面底片，再叠加最终配音和字幕。没写完整旁白时，先按素材总时长自动补全。</p></div><div className="headerActions"><Button busy={busy === '按素材时长生成旁白稿' ? busy : ''} label="按素材时长补全旁白" onClick={generateScriptFromSelectedAssets} kind="soft" /><Button busy={busy === '合成视频并烧字幕' ? busy : ''} label="生成视频并下载 MP4" onClick={composeVideo} disabled={!currentScript} /></div></div>
         <div className="subtitlePresetGrid">
           {[
             ['douyin_boss','老板口播大字','白字黑描边 + 痛点词亮黄/红，适合强转化口播'],
