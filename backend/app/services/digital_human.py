@@ -194,6 +194,15 @@ def _extract_fal_video_url(data: Any) -> str:
     return ''
 
 
+def _add_logs_param(url: str) -> str:
+    url = (url or '').strip()
+    if not url:
+        return url
+    if 'logs=' in url:
+        return url
+    return url + ('&' if '?' in url else '?') + 'logs=1'
+
+
 async def _fal_get_json(client: httpx.AsyncClient, url: str, headers: dict[str, str]) -> dict[str, Any]:
     res = await client.get(url, headers=headers)
     text = res.text
@@ -206,22 +215,95 @@ async def _fal_get_json(client: httpx.AsyncClient, url: str, headers: dict[str, 
     return data if isinstance(data, dict) else {'data': data}
 
 
-async def query_fal_lipsync(settings: Settings, *, request_id: str) -> DigitalHumanResult:
-    """Query a queued fal.ai lipsync request and return a normalized result."""
+async def _fal_try_get_json(client: httpx.AsyncClient, urls: list[str], headers: dict[str, str]) -> tuple[dict[str, Any] | None, str, str]:
+    """Try several fal queue URLs. Return (data, url, error_text).
+
+    fal's REST submit response includes exact status_url/response_url. Using those is
+    safer than rebuilding URLs from endpoint + request_id, especially when a model
+    changes path/version.
+    """
+    errors: list[str] = []
+    seen: set[str] = set()
+    for url in urls:
+        url = (url or '').strip()
+        if not url or url in seen:
+            continue
+        seen.add(url)
+        try:
+            return await _fal_get_json(client, url, headers), url, ''
+        except Exception as exc:
+            errors.append(f'{url} => {exc}')
+    return None, '', '；'.join(errors)[-1800:]
+
+
+async def query_fal_lipsync(
+    settings: Settings,
+    *,
+    request_id: str,
+    status_url: str = '',
+    response_url: str = '',
+    endpoint: str = '',
+) -> DigitalHumanResult:
+    """Query a queued fal.ai lipsync request and return a normalized result.
+
+    Prefer the exact status_url/response_url returned by fal at submit time.
+    This avoids false failures when a model endpoint/version changes or fal returns
+    405 on a reconstructed status URL.
+    """
     request_id = (request_id or '').strip()
+    if request_id.startswith('fal:'):
+        request_id = request_id.split(':', 1)[1]
     if not request_id:
         raise RuntimeError('缺少 fal request_id，无法查询数字人任务。')
-    endpoint = _fal_endpoint(settings)
+    endpoint = (endpoint or _fal_endpoint(settings)).strip().strip('/')
     headers = _fal_headers(settings)
     base = f'https://queue.fal.run/{endpoint}/requests/{request_id}'
+
     async with httpx.AsyncClient(timeout=max(30, min(settings.digital_human_timeout_seconds, 120))) as client:
-        status_data = await _fal_get_json(client, f'{base}/status?logs=1', headers)
+        status_candidates = [
+            _add_logs_param(status_url),
+            f'{base}/status?logs=1',
+            f'{base}/status',
+        ]
+        status_data, used_status_url, status_error = await _fal_try_get_json(client, status_candidates, headers)
+
+        # If status polling is rejected by fal (commonly HTTP 405 on stale/rebuilt URL),
+        # try the response endpoint directly. Completed requests can often be recovered.
+        response_candidates = [
+            response_url,
+            str((status_data or {}).get('response_url') or ''),
+            f'{base}/response',
+        ]
+        if status_data is None:
+            result_data, used_response_url, response_error = await _fal_try_get_json(client, response_candidates, headers)
+            if result_data is None:
+                return DigitalHumanResult(
+                    status='running',
+                    engine=f'fal:{endpoint}',
+                    message='fal.ai 已扣费/已提交，但状态接口暂时无法查询；请稍后再点查询，或去 fal 后台 Request History 查看结果。',
+                    job_id=f'fal:{request_id}',
+                    warnings=[f'状态查询失败：{status_error}', f'结果查询失败：{response_error}'],
+                    raw={'request_id': request_id, 'status_url': status_url, 'response_url': response_url, 'status_error': status_error, 'response_error': response_error},
+                )
+            video_url = _extract_fal_video_url(result_data)
+            if video_url:
+                return DigitalHumanResult(
+                    status='done', engine=f'fal:{endpoint}', message='fal.ai 真人模板口型同步已生成。',
+                    video_url=video_url, job_id=f'fal:{request_id}', warnings=[], raw={**result_data, '_used_response_url': used_response_url},
+                )
+            return DigitalHumanResult(
+                status='running', engine=f'fal:{endpoint}',
+                message='fal.ai 任务已提交，但结果暂未返回视频 URL。请稍后再查询。',
+                job_id=f'fal:{request_id}', warnings=[status_error, response_error], raw=result_data,
+            )
+
         status = str(status_data.get('status') or '').upper()
+        response_url = response_url or str(status_data.get('response_url') or '')
         if status != 'COMPLETED':
             if status_data.get('error'):
                 return DigitalHumanResult(
                     status='failed', engine=f'fal:{endpoint}', message=f"fal.ai 任务失败：{status_data.get('error')}",
-                    job_id=f'fal:{request_id}', warnings=[str(status_data.get('error_type') or '')], raw=status_data,
+                    job_id=f'fal:{request_id}', warnings=[str(status_data.get('error_type') or '')], raw={**status_data, '_used_status_url': used_status_url},
                 )
             message = 'fal.ai 正在排队/生成中。'
             if status == 'IN_QUEUE' and status_data.get('queue_position') is not None:
@@ -230,19 +312,25 @@ async def query_fal_lipsync(settings: Settings, *, request_id: str) -> DigitalHu
                 message += ' 模型正在处理视频口型。'
             return DigitalHumanResult(
                 status='running', engine=f'fal:{endpoint}', message=message,
-                job_id=f'fal:{request_id}', warnings=[], raw=status_data,
+                job_id=f'fal:{request_id}', warnings=[], raw={**status_data, '_used_status_url': used_status_url},
             )
 
-        result_data = await _fal_get_json(client, f'{base}/response', headers)
+        result_data, used_response_url, response_error = await _fal_try_get_json(client, response_candidates, headers)
+    if result_data is None:
+        return DigitalHumanResult(
+            status='running', engine=f'fal:{endpoint}',
+            message='fal.ai 显示已完成，但结果接口暂时不可读；请稍后再查询一次。',
+            job_id=f'fal:{request_id}', warnings=[response_error], raw={**(status_data or {}), 'response_error': response_error},
+        )
     video_url = _extract_fal_video_url(result_data)
     if not video_url:
         return DigitalHumanResult(
             status='failed', engine=f'fal:{endpoint}', message='fal.ai 已完成，但响应里没有找到 video.url。请展开 raw 检查返回结构。',
-            job_id=f'fal:{request_id}', warnings=['未识别到 fal 输出视频 URL。'], raw=result_data,
+            job_id=f'fal:{request_id}', warnings=['未识别到 fal 输出视频 URL。'], raw={**result_data, '_used_response_url': used_response_url},
         )
     return DigitalHumanResult(
         status='done', engine=f'fal:{endpoint}', message='fal.ai 真人模板口型同步已生成。',
-        video_url=video_url, job_id=f'fal:{request_id}', warnings=[], raw=result_data,
+        video_url=video_url, job_id=f'fal:{request_id}', warnings=[], raw={**result_data, '_used_response_url': used_response_url},
     )
 
 
@@ -290,13 +378,14 @@ async def call_fal_lipsync(
             raise RuntimeError(f'fal.ai 提交接口没有返回 JSON：{text[:1200]}')
         if not isinstance(data, dict):
             data = {'data': data}
+        data.setdefault('endpoint', endpoint)
 
         # Some fal endpoints may return the result directly; queue endpoints return request_id/status_url/response_url.
         direct_video_url = _extract_fal_video_url(data)
         if direct_video_url:
             return DigitalHumanResult(
                 status='done', engine=f'fal:{endpoint}', message='fal.ai 真人模板口型同步已生成。',
-                video_url=direct_video_url, job_id=str(data.get('request_id') or ''), warnings=[], raw=data,
+                video_url=direct_video_url, job_id=str(data.get('request_id') or ''), warnings=[], raw={**data, 'endpoint': endpoint},
             )
 
         request_id = str(data.get('request_id') or '').strip()
@@ -315,7 +404,7 @@ async def call_fal_lipsync(
     return DigitalHumanResult(
         status='running', engine=f'fal:{endpoint}',
         message='fal.ai 任务已提交，仍在排队/生成中。请稍后点击“查询当前数字人任务”。',
-        job_id=f'fal:{request_id}', warnings=['为避免 Render/浏览器长时间等待，已切换为异步查询。'], raw=last_status,
+        job_id=f'fal:{request_id}', warnings=['为避免 Render/浏览器长时间等待，已切换为异步查询。'], raw={**(last_status or {}), 'endpoint': endpoint},
     )
 
 

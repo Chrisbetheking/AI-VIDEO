@@ -2131,8 +2131,19 @@ ${selectedAssetScriptContext || '暂无素材，请按马来西亚楼盘、风�
   async function checkDigitalHumanStatus(silent = false) {
     if (!digitalHuman?.job_id) { if (!silent) setError('当前没有可查询的数字人 task_id。'); return }
     const taskModel = getDigitalHumanTaskModel(digitalHuman, digitalHumanJimengModel)
-    const url = `/api/digital-human/status/${encodeURIComponent(digitalHuman.job_id || '')}?model=${encodeURIComponent(taskModel)}`
-    const fetchStatus = () => apiGet<DigitalHumanCreateResponse>(url)
+    const isFalTask = String(digitalHuman.job_id || '').startsWith('fal:') || String(digitalHuman.engine || '').startsWith('fal:') || taskModel.includes('sync-lipsync')
+    const raw: any = digitalHuman.raw || {}
+    const endpoint = String(raw.endpoint || raw.model || (taskModel.includes('sync-lipsync') ? taskModel : '') || '').replace(/^fal:/, '')
+    const fetchStatus = () => isFalTask
+      ? apiPost<DigitalHumanCreateResponse>('/api/digital-human/status', {
+          job_id: digitalHuman.job_id,
+          model: 'fal_lipsync',
+          endpoint: endpoint || 'fal-ai/sync-lipsync',
+          status_url: raw.status_url || '',
+          response_url: raw.response_url || '',
+          raw,
+        })
+      : apiGet<DigitalHumanCreateResponse>(`/api/digital-human/status/${encodeURIComponent(digitalHuman.job_id || '')}?model=${encodeURIComponent(taskModel)}`)
     let res: DigitalHumanCreateResponse | undefined
     if (silent) {
       try { res = await fetchStatus() } catch { return }

@@ -8,7 +8,7 @@ import os
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import List, Optional
+from typing import Any, List, Optional
 from urllib.parse import urlparse
 
 from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
@@ -2106,22 +2106,40 @@ async def api_digital_human_create(
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
-@app.get('/api/digital-human/status/{job_id}', response_model=DigitalHumanCreateResponse)
-async def api_digital_human_status(
+async def _digital_human_status_response(
+    *,
     job_id: str,
     request: Request,
-    model: str = 'omnihuman15',
-    settings: Settings = Depends(get_settings),
+    model: str,
+    settings: Settings,
+    status_url: str = '',
+    response_url: str = '',
+    endpoint: str = '',
 ) -> DigitalHumanCreateResponse:
     if not settings.enable_digital_human:
         raise HTTPException(status_code=400, detail='数字人功能未启用。')
+    job_id = (job_id or '').strip()
+    model = (model or '').strip()
     try:
-        if job_id.startswith('fal:') or (model or '').startswith('fal'):
+        if job_id.startswith('fal:') or model.startswith('fal') or 'sync-lipsync' in model or status_url or response_url:
             fal_request_id = job_id.split(':', 1)[1] if job_id.startswith('fal:') else job_id
-            result = await query_fal_lipsync(settings, request_id=fal_request_id)
+            result = await query_fal_lipsync(
+                settings,
+                request_id=fal_request_id,
+                status_url=status_url,
+                response_url=response_url,
+                endpoint=endpoint or (model if 'sync-lipsync' in model else ''),
+            )
         else:
             result = await query_jimeng_digital_human(settings, task_id=job_id, model=model or 'omnihuman15')
         stable_video_url, stable_video_name, cache_warnings = await finalize_digital_human_video_url(settings, request, result)
+        final_url = stable_video_url or result.video_url
+        final_name = stable_video_name or None
+        if final_url and final_name and str(result.engine or '').startswith('fal:'):
+            try:
+                _save_digital_human_asset(settings, get_memory(settings), video_name=final_name, video_url=final_url, engine=result.engine, title='数字人开场片段')
+            except Exception:
+                pass
         raw = result.raw or {}
         if stable_video_url and stable_video_url != result.video_url:
             raw = {**raw, '_cached_video_url': stable_video_url, '_source_video_url': result.video_url}
@@ -2129,14 +2147,60 @@ async def api_digital_human_status(
             status=result.status,
             engine=result.engine,
             message=result.message,
-            video_url=stable_video_url or result.video_url,
-            video_name=stable_video_name or None,
+            video_url=final_url,
+            video_name=final_name,
             job_id=result.job_id,
             warnings=[*(result.warnings or []), *cache_warnings],
             raw=raw,
         )
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.get('/api/digital-human/status', response_model=DigitalHumanCreateResponse)
+async def api_digital_human_status_query(
+    request: Request,
+    job_id: str,
+    model: str = 'fal_lipsync',
+    status_url: str = '',
+    response_url: str = '',
+    endpoint: str = '',
+    settings: Settings = Depends(get_settings),
+) -> DigitalHumanCreateResponse:
+    return await _digital_human_status_response(
+        job_id=job_id, request=request, model=model, settings=settings,
+        status_url=status_url, response_url=response_url, endpoint=endpoint,
+    )
+
+
+@app.post('/api/digital-human/status', response_model=DigitalHumanCreateResponse)
+async def api_digital_human_status_post(
+    payload: dict[str, Any],
+    request: Request,
+    settings: Settings = Depends(get_settings),
+) -> DigitalHumanCreateResponse:
+    raw = payload.get('raw') if isinstance(payload.get('raw'), dict) else {}
+    return await _digital_human_status_response(
+        job_id=str(payload.get('job_id') or ''),
+        request=request,
+        model=str(payload.get('model') or raw.get('endpoint') or raw.get('model') or 'fal_lipsync'),
+        settings=settings,
+        status_url=str(payload.get('status_url') or raw.get('status_url') or ''),
+        response_url=str(payload.get('response_url') or raw.get('response_url') or ''),
+        endpoint=str(payload.get('endpoint') or raw.get('endpoint') or raw.get('model') or ''),
+    )
+
+
+@app.get('/api/digital-human/status/{job_id:path}', response_model=DigitalHumanCreateResponse)
+async def api_digital_human_status(
+    job_id: str,
+    request: Request,
+    model: str = 'omnihuman15',
+    settings: Settings = Depends(get_settings),
+) -> DigitalHumanCreateResponse:
+    return await _digital_human_status_response(job_id=job_id, request=request, model=model, settings=settings)
 
 
 @app.post('/api/platform-publish', response_model=PlatformPublishResponse)
