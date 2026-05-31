@@ -445,7 +445,7 @@ def _save_digital_human_asset(
         'url': video_url,
         'size_bytes': size_bytes,
         'created_at': now_iso(),
-        'folder': 'self',
+        'folder': 'digital_human',
         'source_type': 'digital_human_intro',
         'r2_url': r2_url,
         'r2_key': r2_key,
@@ -454,10 +454,14 @@ def _save_digital_human_asset(
         'engine': engine,
     }
     try:
-        upsert_asset(settings, asset_payload, memory, require_supabase=settings.core_storage_strict)
+        upsert_asset(settings, asset_payload, memory, require_supabase=False)
     except Exception:
         # Do not fail generation just because the asset index write failed.
-        pass
+        # Try manifest-only once more so Render/Supabase permission problems do not hide the generated clip.
+        try:
+            upsert_asset(settings, asset_payload, None, require_supabase=False)
+        except Exception:
+            pass
 
 
 def safe_output_path(settings: Settings, name: str) -> Path:
@@ -1460,7 +1464,7 @@ async def api_upload_assets(request: Request, files: List[UploadFile] = File(...
             'deleted': False,
         }
         try:
-            saved_asset = upsert_asset(settings, asset_payload, memory, require_supabase=settings.core_storage_strict)
+            saved_asset = upsert_asset(settings, asset_payload, memory, require_supabase=False)
         except MemoryWriteError as exc:
             dest.unlink(missing_ok=True)
             raise HTTPException(status_code=500, detail=str(exc)) from exc
