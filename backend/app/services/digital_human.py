@@ -15,6 +15,7 @@ from typing import Any, Optional
 from urllib.parse import quote, urlencode, urlparse
 
 import httpx
+from PIL import Image, ImageDraw, ImageFilter, ImageOps
 
 from app.config import Settings
 
@@ -51,6 +52,101 @@ def _probe_duration(path: Path) -> float:
         return max(0.0, float(proc.stdout.strip()))
     except Exception:
         return 0.0
+
+
+
+def _cover_fit_image(img: Image.Image, size: tuple[int, int]) -> Image.Image:
+    """Resize/crop image to cover a fixed canvas."""
+    img = ImageOps.exif_transpose(img).convert('RGB')
+    w, h = img.size
+    tw, th = size
+    scale = max(tw / max(1, w), th / max(1, h))
+    nw, nh = int(w * scale), int(h * scale)
+    img = img.resize((nw, nh), Image.Resampling.LANCZOS)
+    left = max(0, (nw - tw) // 2)
+    top = max(0, (nh - th) // 2)
+    return img.crop((left, top, left + tw, top + th))
+
+
+def _contain_image(img: Image.Image, max_size: tuple[int, int]) -> Image.Image:
+    img = ImageOps.exif_transpose(img).convert('RGBA')
+    img.thumbnail(max_size, Image.Resampling.LANCZOS)
+    return img
+
+
+def create_photo_scene_avatar_image(
+    settings: Settings,
+    photo_path: Path,
+    *,
+    title: str = '',
+    scene: str = '马来西亚样板间/楼盘园区',
+    background_path: Optional[Path] = None,
+) -> Path:
+    """MVP: put an authorized portrait photo into a vertical real-estate scene card.
+
+    This does not guarantee identity-preserving generative editing. It creates a clean 9:16
+    scene image from the uploaded portrait + optional generated background, then the normal
+    preview/lipsync worker can consume it. It is intentionally stable on Render free tier.
+    """
+    out = settings.outputs_dir / f'photo_scene_avatar_{uuid.uuid4().hex}.jpg'
+    W, H = 1080, 1920
+
+    if background_path and background_path.exists():
+        try:
+            bg = _cover_fit_image(Image.open(background_path), (W, H)).filter(ImageFilter.GaussianBlur(radius=1.2))
+        except Exception:
+            bg = None
+    else:
+        bg = None
+
+    if bg is None:
+        # soft property-style gradient fallback
+        bg = Image.new('RGB', (W, H), '#eaf2ff')
+        draw = ImageDraw.Draw(bg)
+        for y in range(H):
+            r = int(238 - y * 50 / H)
+            g = int(247 - y * 70 / H)
+            b = int(255 - y * 35 / H)
+            draw.line([(0, y), (W, y)], fill=(max(20, r), max(25, g), max(40, b)))
+        # simple architectural blocks to suggest hallway/showroom
+        draw.rounded_rectangle([70, 250, 1010, 1680], radius=42, fill=(255,255,255), outline=(200,215,235), width=3)
+        draw.rectangle([90, 1160, 990, 1680], fill=(222,232,242))
+        draw.line([110, 1200, 970, 1200], fill=(180,195,215), width=4)
+        draw.line([180, 250, 280, 1680], fill=(230,237,246), width=8)
+        draw.line([900, 250, 800, 1680], fill=(230,237,246), width=8)
+
+    # dark vignette bottom for subtitles
+    overlay = Image.new('RGBA', (W, H), (0, 0, 0, 0))
+    od = ImageDraw.Draw(overlay)
+    od.rectangle([0, 1360, W, H], fill=(0, 0, 0, 78))
+    od.rectangle([0, 0, W, 190], fill=(0, 0, 0, 32))
+    bg = Image.alpha_composite(bg.convert('RGBA'), overlay)
+
+    portrait = _contain_image(Image.open(photo_path), (760, 1220))
+    # rounded mask
+    mask = Image.new('L', portrait.size, 0)
+    md = ImageDraw.Draw(mask)
+    md.rounded_rectangle([0, 0, portrait.size[0], portrait.size[1]], radius=36, fill=255)
+    # shadow
+    shadow = Image.new('RGBA', portrait.size, (0, 0, 0, 120))
+    shadow_mask = mask.filter(ImageFilter.GaussianBlur(28))
+    x = (W - portrait.size[0]) // 2
+    y = max(330, 1280 - portrait.size[1])
+    bg.alpha_composite(shadow, (x + 18, y + 26), shadow_mask)
+    bg.alpha_composite(portrait, (x, y), mask)
+
+    draw = ImageDraw.Draw(bg)
+    # Use default fonts to avoid environment-specific font files.
+    scene_text = (scene or '马来西亚房产实景讲解')[:38]
+    title_text = (title or '马来西亚置业避坑提醒')[:34]
+    draw.rounded_rectangle([70, 76, 1010, 178], radius=28, fill=(5, 15, 36, 190))
+    draw.text((100, 105), scene_text, fill=(235, 245, 255, 255))
+    draw.rounded_rectangle([74, 1500, 1006, 1665], radius=32, fill=(5, 15, 36, 178))
+    draw.text((110, 1538), title_text, fill=(255, 255, 255, 255))
+    draw.text((110, 1585), '真人授权照片 · 场景片头 · 后接楼盘/风光素材', fill=(210, 232, 255, 255))
+
+    bg.convert('RGB').save(out, 'JPEG', quality=92, optimize=True)
+    return out
 
 
 def create_static_avatar_preview(settings: Settings, avatar_path: Path, audio_path: Path, title: str = '') -> Path:

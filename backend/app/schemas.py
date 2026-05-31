@@ -616,6 +616,9 @@ class DigitalHumanCreateRequest(BaseModel):
     engine: str = Field(default='auto', max_length=80)
     # 使用火山即梦/OmniHuman 时可选；不填则使用环境变量里的默认 action。
     jimeng_model: str = Field(default='omnihuman15', max_length=80)
+    # 照片场景数字人 MVP：上传本人照片后，先生成/合成楼道、样板间、园区等场景片头，再用第 1 段音频做口播预览。
+    scene_template: str = Field(default='', max_length=120)
+    scene_prompt: str = Field(default='', max_length=1200)
     consent_confirmed: bool = False
 
 

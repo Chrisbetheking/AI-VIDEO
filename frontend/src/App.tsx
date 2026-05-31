@@ -756,6 +756,8 @@ function AppInner() {
   const [digitalHumanAudio, setDigitalHumanAudio] = useState<TTSResponse | null>(null)
 
   const [digitalHumanEngine, setDigitalHumanEngine] = useState('fal_lipsync')
+  const [digitalHumanSceneTemplate, setDigitalHumanSceneTemplate] = useState('样板间客厅讲解')
+  const [digitalHumanScenePrompt, setDigitalHumanScenePrompt] = useState('')
   const [digitalHumanJimengModel, setDigitalHumanJimengModel] = useState('omnihuman15')
   const [digitalHumanAvatarId, setDigitalHumanAvatarId] = useState('')
   const [digitalHumanDriverId, setDigitalHumanDriverId] = useState('')
@@ -1016,18 +1018,25 @@ ${selectedAssetScriptContext || '暂未选择素材，先给出通用画面建�
   const isGraphicRoute = normalizedOutputType === 'image_text' || normalizedOutputType === 'all'
   const productionRouteLabel = isDigitalHumanRoute ? '数字人开场 + 素材混剪' : isSelfShootRoute ? '真人拍摄 + 素材混剪' : isGraphicRoute ? '图文引流' : '纯素材混剪'
   const productionRouteHint = isDigitalHumanRoute
-    ? '会先生成 5-15 秒 fal 真人模板口型同步片头，再接楼盘/风光素材。'
+    ? '可选择 fal 真人模板口型同步，或照片场景数字人片头；数字人只吃第 1 段开场音频，后面接楼盘/风光素材。'
     : isSelfShootRoute
       ? '不调用数字人，重点生成提词器、拍摄清单和后期混剪。'
       : isGraphicRoute
         ? '不合成长视频，重点生成首图、图文脚本和发布文案。'
         : '默认路线：不调用数字人，直接用楼盘/风光/B-roll 素材 + 旁白字幕合成。'
-  const digitalHumanNeedsVideo = ['fal_lipsync', 'fal', 'sync_lipsync', 'fal-ai/sync-lipsync'].includes(String(digitalHumanEngine || '').toLowerCase())
+  const normalizedDigitalHumanEngine = String(digitalHumanEngine || '').toLowerCase()
+  const digitalHumanPhotoSceneMode = ['photo_scene', 'photo_scene_preview', 'scene_photo', 'photo_avatar'].includes(normalizedDigitalHumanEngine)
+  const digitalHumanNeedsVideo = ['fal_lipsync', 'fal', 'sync_lipsync', 'fal-ai/sync-lipsync'].includes(normalizedDigitalHumanEngine)
   const digitalHumanAvatarCandidates = useMemo(() => {
     return assets
       .map((a, i) => normalizeAsset(a, i))
-      .filter(a => Boolean(a.id && a.url) && (!digitalHumanNeedsVideo || a.kind === 'video'))
-  }, [assets, digitalHumanNeedsVideo])
+      .filter(a => {
+        if (!a.id || !a.url) return false
+        if (digitalHumanNeedsVideo) return a.kind === 'video'
+        if (digitalHumanPhotoSceneMode) return a.kind === 'image'
+        return true
+      })
+  }, [assets, digitalHumanNeedsVideo, digitalHumanPhotoSceneMode])
 
   const leadScore = useMemo(() => {
     let score = 35
@@ -2271,9 +2280,10 @@ ${selectedAssetScriptContext || '暂无素材，请按马来西亚楼盘、风�
     }
     if (!isDigitalHumanRoute) setOneClickOutputType('digital_human')
     if (!audio?.file_name) { setError('请先在配音导演里生成整条配音音频；数字人只会重新合成第 1 段开场音频，不会拿整条音频去对口型。'); setActive('voice'); return }
-    if (!digitalHumanAvatarId) { setError(digitalHumanNeedsVideo ? 'fal 路线请先手动选择本人授权的 5-20 秒 MP4 真人模板视频。每条片子的开场可以不同，不会再自动固定。' : '请先选择数字人形象素材。'); setActive('digitalHuman'); return }
+    if (!digitalHumanAvatarId) { setError(digitalHumanNeedsVideo ? 'fal 路线请先手动选择本人授权的 5-20 秒 MP4 真人模板视频。每条片子的开场可以不同，不会再自动固定。' : digitalHumanPhotoSceneMode ? '照片场景数字人请先选择本人授权照片。' : '请先选择数字人形象素材。'); setActive('digitalHuman'); return }
     const chosenAvatar = assets.find(a => a.id === digitalHumanAvatarId)
     if (digitalHumanNeedsVideo && chosenAvatar?.kind !== 'video') { setError('fal 真人模板口型同步必须用 MP4 视频模板，不能用图片。请上传/选择 5-20 秒正面半身说话视频。'); return }
+    if (digitalHumanPhotoSceneMode && chosenAvatar?.kind !== 'image') { setError('照片场景数字人必须选择 JPG/PNG/WebP 本人授权照片；视频模板请改选 fal.ai 真人模板口型同步。'); return }
     const introText = getDigitalHumanIntroText()
     const introAudio = await run('生成数字人开场音频', () => apiPost<TTSResponse>('/api/tts', { text: introText, voice, rate: '+0%' }))
     if (!introAudio?.file_name) { setError('数字人开场音频生成失败，请先回到配音页确认文案。'); return }
@@ -2286,6 +2296,8 @@ ${selectedAssetScriptContext || '暂无素材，请按马来西亚楼盘、风�
       script: introText,
       engine: digitalHumanEngine,
       jimeng_model: digitalHumanJimengModel,
+      scene_template: digitalHumanSceneTemplate,
+      scene_prompt: digitalHumanScenePrompt,
       consent_confirmed: digitalHumanConsent
     }))
     setDigitalHuman(res!)
@@ -2315,7 +2327,7 @@ ${selectedAssetScriptContext || '暂无素材，请按马来西亚楼盘、风�
     setDigitalHumanPollCount(0)
     setDigitalHumanLastChecked('')
     try { window.localStorage.removeItem(DIGITAL_HUMAN_TASK_KEY) } catch {}
-    setLastHandoff('已清除当前数字人任务。可以重新提交一个新的 fal 真人模板口型同步任务。')
+    setLastHandoff('已清除当前数字人任务。可以重新提交一个新的数字人片头任务。')
   }
 
   async function checkDigitalHumanStatus(silent = false) {
@@ -3034,19 +3046,20 @@ https://www.douyin.com/user/..." /></Field>
       </section>}
 
       {active === 'digitalHuman' && <section className="card modulePanel">
-        <div className="sectionHeader"><div><h2>第三步：可选数字人开场</h2><p>这一步不是每条都必须用。需要真人感片头时，系统只拿第 1 段配音给 fal 做口型同步；纯素材混剪可直接跳过。</p></div><div className="headerActions"><Button label="跳过数字人，去素材混剪" onClick={skipDigitalHumanAndUseAssets} kind="ghost" /><Button busy={busy === '生成数字人片段' || busy === '查询数字人结果' ? busy : ''} label={digitalHumanPrimaryLabel} onClick={hasRunningDigitalHumanTask ? () => checkDigitalHumanStatus(false) : makeDigitalHuman} disabled={!hasRunningDigitalHumanTask && (!audio?.file_name || !digitalHumanAvatarId || !digitalHumanConsent)} /></div></div>
+        <div className="sectionHeader"><div><h2>第三步：可选数字人片头</h2><p>这一步不是每条都必须用。需要真人感片头时，系统只拿第 1 段配音；可选真人模板视频或照片场景数字人，纯素材混剪可直接跳过。</p></div><div className="headerActions"><Button label="跳过数字人，去素材混剪" onClick={skipDigitalHumanAndUseAssets} kind="ghost" /><Button busy={busy === '生成数字人片段' || busy === '查询数字人结果' ? busy : ''} label={digitalHumanPrimaryLabel} onClick={hasRunningDigitalHumanTask ? () => checkDigitalHumanStatus(false) : makeDigitalHuman} disabled={!hasRunningDigitalHumanTask && (!audio?.file_name || !digitalHumanAvatarId || !digitalHumanConsent)} /></div></div>
         <div className="grid3">
-          <Field label={digitalHumanNeedsVideo ? '真人模板视频 MP4' : '数字人形象素材'} hint={digitalHumanNeedsVideo ? 'fal 必须手动选择本人授权的 5-20 秒正面半身说话视频；每条视频可换不同模板，不能用图片。' : '静态兜底可用照片；fal 路线必须用视频。'}><select value={digitalHumanAvatarId} onChange={e => setDigitalHumanAvatarId(e.target.value)}><option value="">{digitalHumanNeedsVideo ? '手动选择本条视频的真人模板' : '选择已上传照片/视频'}</option>{digitalHumanAvatarCandidates.map(a => <option key={a.id} value={a.id}>{a.kind} · {a.original_name || a.filename}</option>)}</select></Field>
+          <Field label={digitalHumanNeedsVideo ? '真人模板视频 MP4' : digitalHumanPhotoSceneMode ? '本人授权照片' : '数字人形象素材'} hint={digitalHumanNeedsVideo ? 'fal 必须手动选择本人授权的 5-20 秒正面半身说话视频；每条视频可换不同模板，不能用图片。' : digitalHumanPhotoSceneMode ? '上传本人清晰正脸/半身照；系统会做楼道、样板间、园区等场景片头。' : '静态兜底可用照片；fal 路线必须用视频。'}><select value={digitalHumanAvatarId} onChange={e => setDigitalHumanAvatarId(e.target.value)}><option value="">{digitalHumanNeedsVideo ? '手动选择本条视频的真人模板' : digitalHumanPhotoSceneMode ? '选择本人照片' : '选择已上传照片/视频'}</option>{digitalHumanAvatarCandidates.map(a => <option key={a.id} value={a.id}>{a.kind} · {a.original_name || a.filename}</option>)}</select></Field>
           <Field label="动作参考视频（可选）" hint="fal 当前不需要；后期 MuseTalk/LivePortrait 才用。"><select value={digitalHumanDriverId} onChange={e => setDigitalHumanDriverId(e.target.value)}><option value="">不用动作参考</option>{assets.filter(a => a.kind === 'video').map(a => <option key={a.id} value={a.id}>{a.original_name || a.filename}</option>)}</select></Field>
-          <Field label="数字人引擎" hint="去掉冗余平台，默认只保留真正已接入/可兜底的路线。"><select value={digitalHumanEngine} onChange={e => setDigitalHumanEngine(e.target.value)}><option value="fal_lipsync">推荐：fal.ai 真人模板口型同步</option><option value="preview">免费兜底：静态预览/素材口播</option><option value="webhook">外部 GPU Worker/API</option><option value="jimeng">火山即梦/OmniHuman（备用）</option></select></Field>
+          <Field label="数字人模式" hint="数字人不是必选。真人模板最真实；照片场景最灵活；都只吃第 1 段开场音频。"><select value={digitalHumanEngine} onChange={e => setDigitalHumanEngine(e.target.value)}><option value="fal_lipsync">真人模板视频：fal.ai 口型同步（最真实）</option><option value="photo_scene">照片场景数字人：楼道/样板间/园区片头</option><option value="preview">免费兜底：静态预览/素材口播</option><option value="webhook">外部 GPU Worker/API</option><option value="jimeng">火山即梦/OmniHuman（备用）</option></select></Field>
           {digitalHumanEngine === 'jimeng' && <Field label="即梦模型" hint="模拟真人优先选 OmniHuman1.5；普通视频生成可用视频3.0。"><select value={digitalHumanJimengModel} onChange={e => setDigitalHumanJimengModel(e.target.value)}><option value="omnihuman15">OmniHuman1.5（单图+音频真人口播）</option><option value="quick">数字人快速模式</option><option value="video30">即梦视频生成3.0（图生视频）</option></select></Field>}
+          {digitalHumanPhotoSceneMode && <><Field label="照片入场景" hint="先做稳定 MVP：把本人照片放入真实房产场景，再配第 1 段开场音频。"><select value={digitalHumanSceneTemplate} onChange={e => setDigitalHumanSceneTemplate(e.target.value)}><option>样板间客厅讲解</option><option>楼道电梯厅讲解</option><option>小区园林讲解</option><option>会所大堂讲解</option><option>项目沙盘旁讲解</option><option>学校门口讲解</option><option>吉隆坡城市风光</option><option>落地窗办公室讲解</option></select></Field><Field label="场景提示词（可选）" hint="不填就按上面的场景自动生成；想指定楼盘/城市/氛围可以写这里。"><textarea value={digitalHumanScenePrompt} onChange={e => setDigitalHumanScenePrompt(e.target.value)} placeholder="例如：马来西亚高端公寓样板间，自然光，顾问站在客厅，真实可信，竖屏短视频画面" /></Field></>}
         </div>
-        <div className="templatePicker"><strong>本条视频用哪个真人模板？</strong><p>不会再固定同一个开头。先在素材库上传多个顾问 5-20 秒模板，这里每条内容手动选一个。</p><div className="templateCards">{digitalHumanAvatarCandidates.slice(0, 8).map(a => <button key={a.id} type="button" className={digitalHumanAvatarId === a.id ? 'templateCard selected' : 'templateCard'} onClick={() => setDigitalHumanAvatarId(a.id)}>{a.kind === 'video' ? <video src={a.url} muted /> : <img src={a.url} />}<span>{a.original_name || a.filename}</span></button>)}</div></div>
+        <div className="templatePicker"><strong>{digitalHumanPhotoSceneMode ? '本条视频用哪张本人照片？' : '本条视频用哪个真人模板？'}</strong><p>{digitalHumanPhotoSceneMode ? '照片场景数字人每条都可以换照片和场景，不会固定同一个开头。' : '不会再固定同一个开头。先在素材库上传多个顾问 5-20 秒模板，这里每条内容手动选一个。'}</p><div className="templateCards">{digitalHumanAvatarCandidates.slice(0, 8).map(a => <button key={a.id} type="button" className={digitalHumanAvatarId === a.id ? 'templateCard selected' : 'templateCard'} onClick={() => setDigitalHumanAvatarId(a.id)}>{a.kind === 'video' ? <video src={a.url} muted /> : <img src={a.url} />}<span>{a.original_name || a.filename}</span></button>)}</div></div>
         <label className="checkline"><input type="checkbox" checked={digitalHumanConsent} onChange={e => setDigitalHumanConsent(e.target.checked)} /> 我确认已获得本人形象和声音授权，仅用于合法商业内容。</label>
 
         <div className="digitalHumanLeanGuide">
           <div><strong>推荐模板</strong><p>上传 5-20 秒正面半身真人视频，人物看镜头、光线稳定、少转头。原视频说什么不重要，fal 会用新配音同步嘴型。</p></div>
-          <div><strong>当前输入</strong><p>版本：#{digitalHumanVersion}<br />模板：{digitalHumanAvatarId || '未选择'}<br />整条配音：{audio?.file_name || '未生成'}<br />数字人开场音频：{digitalHumanAudio?.file_name || '生成数字人时自动从第 1 段合成'}<br />数字人使用文本：{shortText(getDigitalHumanIntroText(), 90) || '未生成'}</p></div>
+          <div><strong>当前输入</strong><p>版本：#{digitalHumanVersion}<br />模板/照片：{digitalHumanAvatarId || '未选择'}<br />场景：{digitalHumanPhotoSceneMode ? digitalHumanSceneTemplate : '不需要'}<br />整条配音：{audio?.file_name || '未生成'}<br />数字人开场音频：{digitalHumanAudio?.file_name || '生成数字人时自动从第 1 段合成'}<br />数字人使用文本：{shortText(getDigitalHumanIntroText(), 90) || '未生成'}</p></div>
           <div><strong>生成后动作</strong><p>成功后自动入素材库，并自动放到素材顺序第 1 个；后面继续添加楼盘、风光、学校、配套 B-roll。</p></div>
         </div>
         {hasRunningDigitalHumanTask && <div className="warn strongWarn">已有数字人任务正在排队/生成中。请不要再次点击提交；等待当前任务完成或点击“查询当前数字人任务”。</div>}

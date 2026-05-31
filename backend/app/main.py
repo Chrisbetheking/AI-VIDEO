@@ -104,7 +104,7 @@ from app.services.cover import create_cover
 from app.services.image_generation import generate_image_to_file
 from app.services.deepseek import DeepSeekError, generate_copy, generate_edit_plan, generate_growth_decision, generate_lead_acquisition_plan, generate_shooting_plan, generate_subtitle_emphasis, generate_trend_radar, generate_voice_director, refine_copy_with_instruction, rewrite_from_inspiration, test_deepseek, video_edit_chat_advice
 from app.services.doubao import extract_with_doubao
-from app.services.digital_human import call_external_digital_human_worker, call_fal_lipsync, query_fal_lipsync, call_jimeng_digital_human, query_jimeng_digital_human, create_static_avatar_preview
+from app.services.digital_human import call_external_digital_human_worker, call_fal_lipsync, query_fal_lipsync, call_jimeng_digital_human, query_jimeng_digital_human, create_photo_scene_avatar_image, create_static_avatar_preview
 from app.services.collector import get_collector_cookie_status, save_collector_cookie_text
 from app.services.kb import KnowledgeBase
 from app.services.memory import MemoryStore, MemoryWriteError
@@ -2029,6 +2029,67 @@ async def api_digital_human_create(
                 job_id=result.job_id,
                 warnings=[*(result.warnings or []), *cache_warnings, '已自动保存到素材库，可在素材选择/成片合成里继续使用。'] if final_url else [*(result.warnings or []), *cache_warnings],
                 raw=raw,
+            )
+
+        if engine in {'photo_scene', 'photo_scene_preview', 'scene_photo', 'photo_avatar'}:
+            # 照片场景数字人 MVP：本人授权照片 + 第 1 段配音 -> 场景片头视频。
+            # 这不是完整的真人口型同步；它把照片稳定放入楼道/样板间/园林等场景，适合作为 5-8 秒片头。
+            avatar_path = await _ensure_local_media_from_remote(
+                settings,
+                avatar_path,
+                avatar_remote_url,
+                fallback_ext=_safe_media_ext_from_name(req.avatar_file_name, '.jpg'),
+                warnings=warnings,
+                label='照片场景数字人头像',
+            )
+            audio_path = await _ensure_local_media_from_remote(
+                settings,
+                audio_path,
+                audio_remote_url,
+                fallback_ext=_safe_media_ext_from_name(req.audio_file_name, '.mp3'),
+                warnings=warnings,
+                label='数字人开场音频',
+            )
+            if avatar_path is None or audio_path is None:
+                raise HTTPException(status_code=400, detail='照片场景数字人需要本人照片和第 1 段开场音频；请确认素材在本地或 R2 可访问。')
+            avatar_ext = avatar_path.suffix.lower()
+            if avatar_ext not in IMAGE_EXTS:
+                raise HTTPException(status_code=400, detail='照片场景数字人请上传 JPG/PNG/WebP 本人授权照片；真人模板视频请改选 fal.ai 口型同步。')
+
+            scene_label = (req.scene_template or '样板间客厅讲解').strip()
+            scene_prompt = (req.scene_prompt or '').strip() or f"马来西亚房产顾问站在{scene_label}，真实楼盘场景，现代住宅，高级自然光，竖屏短视频背景，干净可信，不要文字，不要水印"
+            background_path = None
+            try:
+                background_path, _bg_source, bg_warnings = await generate_image_to_file(settings, scene_prompt, size=settings.image_size, quality=settings.image_quality)
+                warnings.extend([f'场景背景：{w}' for w in (bg_warnings or [])])
+            except Exception as exc:
+                warnings.append(f'AI 场景背景生成失败，已使用本地稳定场景底图：{str(exc)[:160]}')
+
+            scene_image = create_photo_scene_avatar_image(settings, avatar_path, title=req.title, scene=scene_label, background_path=background_path)
+            public_scene = maybe_upload_to_r2(settings, scene_image, prefix='digital-human/photo-scene')
+            preview = create_static_avatar_preview(settings, scene_image, audio_path, title=req.title)
+            public_url = maybe_upload_to_r2(settings, preview, prefix='digital-human/final')
+            final_url = file_url(request, preview.name, public_url)
+            _save_digital_human_asset(settings, memory, video_name=preview.name, video_url=final_url, engine='photo_scene', title=req.title or '照片场景数字人片头')
+            memory.save_learning_event({
+                'event_type': 'digital_human_photo_scene',
+                'title': req.title or '照片场景数字人片头',
+                'payload': {
+                    'engine': 'photo_scene',
+                    'scene_template': scene_label,
+                    'scene_prompt': scene_prompt,
+                    'scene_image_url': file_url(request, scene_image.name, public_scene),
+                    'video_url': final_url,
+                },
+            })
+            return DigitalHumanCreateResponse(
+                status='done',
+                engine='photo_scene',
+                message='已生成照片场景数字人片头，并自动保存到素材库。',
+                video_url=final_url,
+                video_name=preview.name,
+                warnings=[*warnings, '当前照片场景模式为稳定 MVP：会生成场景片头并配音，但不是完整真人口型同步。要更强嘴型可后续接 LivePortrait/SadTalker/MuseTalk Worker。'],
+                raw={'scene_template': scene_label, 'scene_prompt': scene_prompt, 'scene_image_name': scene_image.name},
             )
 
         if engine in {'webhook', 'sadtalker', 'wav2lip', 'musetalk', 'liveportrait'} and settings.digital_human_webhook_url:
