@@ -881,9 +881,20 @@ function AppInner() {
   const materialAssets = useMemo(() => allNormalizedAssets.filter(a => normalizeAssetFolder(a.folder, a.kind, a.filename) !== 'collected'), [allNormalizedAssets])
   const collectedAssets = useMemo(() => allNormalizedAssets.filter(a => normalizeAssetFolder(a.folder, a.kind, a.filename) === 'collected'), [allNormalizedAssets])
   const collectedVideos = useMemo(() => collectedAssets.filter(a => a.kind === 'video'), [collectedAssets])
-  const uploadedAvatarAssets = useMemo(() => materialAssets.filter(a => a.usage_role === 'avatar'), [materialAssets])
-  const collectedAvatarAssets = useMemo(() => collectedAssets.filter(a => a.usage_role === 'avatar'), [collectedAssets])
-  const contentOnlyAssets = useMemo(() => materialAssets.filter(a => a.usage_role !== 'avatar'), [materialAssets])
+  const isGeneratedDigitalHumanAsset = (a: AssetItem) => {
+    const folder = normalizeAssetFolder((a as any).folder, a.kind, a.filename)
+    return folder === 'digital_human'
+      || safeText(a.source_type).includes('digital_human')
+      || safeText(a.filename).toLowerCase().startsWith('digital_human_')
+      || safeText(a.original_name).includes('数字人开场')
+  }
+
+  // 真人模板 = 你上传/采集到的“人像口播原素材”，不是已经生成出的数字人片段。
+  // 已生成的数字人片段只用于成片开头，不能再拿回去当 fal 模型，否则很容易出现开头重复/口型二次同步。
+  const digitalHumanIntroAssets = useMemo(() => materialAssets.filter(a => a.kind === 'video' && isGeneratedDigitalHumanAsset(a)), [materialAssets])
+  const uploadedAvatarAssets = useMemo(() => materialAssets.filter(a => a.usage_role === 'avatar' && !isGeneratedDigitalHumanAsset(a)), [materialAssets])
+  const collectedAvatarAssets = useMemo(() => collectedAssets.filter(a => a.usage_role === 'avatar' && !isGeneratedDigitalHumanAsset(a)), [collectedAssets])
+  const contentOnlyAssets = useMemo(() => materialAssets.filter(a => a.usage_role !== 'avatar' && !isGeneratedDigitalHumanAsset(a)), [materialAssets])
   const digitalHumanDriverAssets = useMemo(() => [...uploadedAvatarAssets, ...collectedAvatarAssets].filter(a => a.kind === 'video'), [uploadedAvatarAssets, collectedAvatarAssets])
   const filteredMaterialAssets = useMemo(() => {
     const now = Date.now()
@@ -1077,15 +1088,14 @@ ${selectedAssetScriptContext || '暂未选择素材，先给出通用画面建�
   const digitalHumanPhotoSceneMode = ['photo_scene', 'photo_scene_preview', 'scene_photo', 'photo_avatar'].includes(normalizedDigitalHumanEngine)
   const digitalHumanNeedsVideo = ['fal_lipsync', 'fal', 'sync_lipsync', 'fal-ai/sync-lipsync'].includes(normalizedDigitalHumanEngine)
   const digitalHumanAvatarCandidates = useMemo(() => {
-    return assets
-      .map((a, i) => normalizeAsset(a, i))
+    return [...uploadedAvatarAssets, ...collectedAvatarAssets]
       .filter(a => {
         if (!a.id || !a.url) return false
         if (digitalHumanNeedsVideo) return a.kind === 'video'
         if (digitalHumanPhotoSceneMode) return a.kind === 'image'
         return true
       })
-  }, [assets, digitalHumanNeedsVideo, digitalHumanPhotoSceneMode])
+  }, [uploadedAvatarAssets, collectedAvatarAssets, digitalHumanNeedsVideo, digitalHumanPhotoSceneMode])
 
   const leadScore = useMemo(() => {
     let score = 35
@@ -2145,13 +2155,18 @@ ${manualText || ''}`.trim()
   }
 
   function isSameOpeningLine(a: string, b: string) {
-    const clean = (v: string) => safeText(v).replace(/[\s，,。.!！?？、：:；;“”"'（）()【】]/g, '')
+    const clean = (v: string) => safeText(v).replace(/[\s，,。.!！?？、：:；;“”"'（）()【】《》]/g, '')
     const x = clean(a)
     const y = clean(b)
     if (!x || !y) return false
     const n = Math.min(x.length, y.length)
-    if (n < 6) return false
-    return x.includes(y.slice(0, Math.min(14, y.length))) || y.includes(x.slice(0, Math.min(14, x.length))) || x.slice(0, 10) === y.slice(0, 10)
+    if (n < 5) return false
+    const short = x.length <= y.length ? x : y
+    const long = x.length <= y.length ? y : x
+    const head = short.slice(0, Math.min(12, short.length))
+    const keyTerms = ['马来西亚', '第二家园', '买房', '身份', '孩子', '教育', '资产配置', '别盲目', '别盲目跟风']
+    const sameKeywords = keyTerms.filter(k => x.includes(k) && y.includes(k)).length
+    return long.includes(head) || x.slice(0, 9) === y.slice(0, 9) || (sameKeywords >= 2 && Math.abs(x.length - y.length) < 24)
   }
 
   function getDigitalIntroAssetForCompose(): AssetItem | null {
@@ -2194,15 +2209,18 @@ ${manualText || ''}`.trim()
     if (!hasDigitalIntro) return deduped
 
     const introText = cleanSubtitleLikeText(getDigitalHumanIntroText())
-    const body = deduped.filter((seg, index) => index > 0 || !isSameOpeningLine(seg.text, introText))
-    while (body.length && isSameOpeningLine(body[0].text, introText)) body.shift()
+    const introCandidate = introText || deduped[0]?.text || currentScript.slice(0, 80)
+    // 数字人片头已经负责第一句，后面的旁白要承接，不允许再出现同一句/同主题开头。
+    const body = deduped
+      .filter(seg => !isSameOpeningLine(seg.text, introCandidate))
+      .filter((seg, index, arr) => index === 0 || !isSameOpeningLine(seg.text, arr[index - 1]?.text || ''))
 
     const introSegment: VoiceSegment = {
       ...defaultSegment,
-      text: introText || deduped[0]?.text || currentScript.slice(0, 80),
+      text: introCandidate,
       emotion: '自然可信',
       speed_ratio: 0.98,
-      pause_after_ms: 180,
+      pause_after_ms: 120,
     }
     return [introSegment, ...body].filter(seg => safeText(seg.text))
   }
@@ -3231,7 +3249,7 @@ https://www.douyin.com/user/..." /></Field>
           {digitalHumanEngine === 'jimeng' && <Field label="即梦模型" hint="模拟真人优先选 OmniHuman1.5；普通视频生成可用视频3.0。"><select value={digitalHumanJimengModel} onChange={e => setDigitalHumanJimengModel(e.target.value)}><option value="omnihuman15">OmniHuman1.5（单图+音频真人口播）</option><option value="quick">数字人快速模式</option><option value="video30">即梦视频生成3.0（图生视频）</option></select></Field>}
           {digitalHumanPhotoSceneMode && <><Field label="照片入场景" hint="先做稳定 MVP：把本人照片放入真实房产场景，再配第 1 段开场音频。"><select value={digitalHumanSceneTemplate} onChange={e => setDigitalHumanSceneTemplate(e.target.value)}><option>样板间客厅讲解</option><option>楼道电梯厅讲解</option><option>小区园林讲解</option><option>会所大堂讲解</option><option>项目沙盘旁讲解</option><option>学校门口讲解</option><option>吉隆坡城市风光</option><option>落地窗办公室讲解</option></select></Field><Field label="场景提示词（可选）" hint="不填就按上面的场景自动生成；想指定楼盘/城市/氛围可以写这里。"><textarea value={digitalHumanScenePrompt} onChange={e => setDigitalHumanScenePrompt(e.target.value)} placeholder="例如：马来西亚高端公寓样板间，自然光，顾问站在客厅，真实可信，竖屏短视频画面" /></Field></>}
         </div>
-        <div className="templatePicker refinedPicker"><div><strong>{digitalHumanPhotoSceneMode ? '本条视频用哪张本人照片？' : '本条视频用哪个真人模板？'}</strong><p>{digitalHumanPhotoSceneMode ? '照片场景数字人每条都可以换照片和场景，不会固定同一个开头。' : '人物素材和内容素材已经分开；优先用自己上传的人物素材，collected 只做备用。'}</p></div><div className="assetStats compactStats"><Pill tone="blue">自己上传人物 {uploadedAvatarAssets.length}</Pill><Pill tone="purple">采集备用人物 {collectedAvatarAssets.length}</Pill><Pill tone="orange">内容素材 {contentOnlyAssets.length}</Pill></div><div className="templateGroup"><h4>优先：自己上传的人物素材</h4><div className="templateCards">{uploadedAvatarAssets.filter(a => digitalHumanNeedsVideo ? a.kind === 'video' : digitalHumanPhotoSceneMode ? a.kind === 'image' : true).slice(0, 10).map(a => <button key={a.id} type="button" className={digitalHumanAvatarId === a.id ? 'templateCard selected' : 'templateCard'} onClick={() => setDigitalHumanAvatarId(a.id)}>{a.kind === 'video' ? <video src={a.url} muted /> : <img src={a.url} />}<span>{a.original_name || a.filename}</span></button>)}</div>{uploadedAvatarAssets.filter(a => digitalHumanNeedsVideo ? a.kind === 'video' : digitalHumanPhotoSceneMode ? a.kind === 'image' : true).length === 0 && <Empty>还没有自己上传的人物素材。去“素材选择”上传时选择“人物素材”。</Empty>}</div><div className="templateGroup"><h4>备用：collected 里识别的人物素材</h4><div className="templateCards compactTemplates">{collectedAvatarAssets.filter(a => digitalHumanNeedsVideo ? a.kind === 'video' : digitalHumanPhotoSceneMode ? a.kind === 'image' : true).slice(0, 10).map(a => <button key={a.id} type="button" className={digitalHumanAvatarId === a.id ? 'templateCard selected' : 'templateCard'} onClick={() => setDigitalHumanAvatarId(a.id)}>{a.kind === 'video' ? <video src={a.url} muted /> : <img src={a.url} />}<span>{a.original_name || a.filename}</span></button>)}</div></div></div>
+        <div className="templatePicker refinedPicker"><div><strong>{digitalHumanPhotoSceneMode ? '本条视频用哪张本人照片？' : '本条视频用哪个真人口播模板？'}</strong><p>{digitalHumanPhotoSceneMode ? '照片场景数字人每条都可以换照片和场景，不会固定同一个开头。' : '这里选的是你上传/采集的真人原始口播视频，不是已经生成出的数字人片段；数字人片段会自动放到成片开头。'}</p></div><div className="assetStats compactStats"><Pill tone="blue">真人模板 {uploadedAvatarAssets.length}</Pill><Pill tone="purple">采集备用真人 {collectedAvatarAssets.length}</Pill><Pill tone="green">已生成片头 {digitalHumanIntroAssets.length}</Pill><Pill tone="orange">内容素材 {contentOnlyAssets.length}</Pill></div><div className="templateGroup"><h4>优先：自己上传的真人模板视频/照片</h4><div className="templateCards">{uploadedAvatarAssets.filter(a => digitalHumanNeedsVideo ? a.kind === 'video' : digitalHumanPhotoSceneMode ? a.kind === 'image' : true).slice(0, 10).map(a => <button key={a.id} type="button" className={digitalHumanAvatarId === a.id ? 'templateCard selected' : 'templateCard'} onClick={() => setDigitalHumanAvatarId(a.id)}>{a.kind === 'video' ? <video src={a.url} muted /> : <img src={a.url} />}<span>{a.original_name || a.filename}</span></button>)}</div>{uploadedAvatarAssets.filter(a => digitalHumanNeedsVideo ? a.kind === 'video' : digitalHumanPhotoSceneMode ? a.kind === 'image' : true).length === 0 && <Empty>还没有自己上传的真人模板。去“素材选择”上传时选择“人物素材”，fal 路线需要 5-20 秒真人口播 MP4。</Empty>}</div><div className="templateGroup"><h4>备用：collected 里识别的真人素材</h4><div className="templateCards compactTemplates">{collectedAvatarAssets.filter(a => digitalHumanNeedsVideo ? a.kind === 'video' : digitalHumanPhotoSceneMode ? a.kind === 'image' : true).slice(0, 10).map(a => <button key={a.id} type="button" className={digitalHumanAvatarId === a.id ? 'templateCard selected' : 'templateCard'} onClick={() => setDigitalHumanAvatarId(a.id)}>{a.kind === 'video' ? <video src={a.url} muted /> : <img src={a.url} />}<span>{a.original_name || a.filename}</span></button>)}</div></div><div className="templateGroup mutedTemplateGroup"><h4>已生成数字人片头（自动进成片，不作为 fal 模型）</h4><div className="templateCards compactTemplates">{digitalHumanIntroAssets.slice(0, 8).map(a => <button key={a.id} type="button" className={selectedMaterialIds.includes(a.id) ? 'templateCard selected' : 'templateCard'} onClick={() => setSelectedMaterialIds(prev => prev.includes(a.id) ? prev.filter(id => id !== a.id) : [a.id, ...prev])}><video src={a.url} muted /><span>{a.original_name || a.filename}</span></button>)}</div>{digitalHumanIntroAssets.length === 0 && <p className="muted small">还没有已生成的数字人片头；生成后会自动进入成片素材首位。</p>}</div></div>
         <label className="checkline"><input type="checkbox" checked={digitalHumanConsent} onChange={e => setDigitalHumanConsent(e.target.checked)} /> 我确认已获得本人形象和声音授权，仅用于合法商业内容。</label>
 
         <div className="digitalHumanLeanGuide">

@@ -256,7 +256,9 @@ def _compose_max_assets() -> int:
     except Exception:
         value = 8
     allow_tiny = str(os.getenv('COMPOSE_ALLOW_TINY_ASSETS', '')).strip().lower() in {'1', 'true', 'yes', 'on'}
-    if value < 3 and not allow_tiny:
+    # 之前服务器环境变量里常遗留 COMPOSE_MAX_ASSETS=4，导致用户明明选了多条素材也只合前 4 条。
+    # 默认至少给 8 条；只有显式开启 COMPOSE_ALLOW_TINY_ASSETS=true 时才允许更小。
+    if value < 8 and not allow_tiny:
         value = 8
     return max(1, min(12, value))
 

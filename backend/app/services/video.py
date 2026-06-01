@@ -437,6 +437,9 @@ def build_video_base(asset_paths: Iterable[Union[Path, MediaClip]], duration: fl
     warnings: List[str] = []
     duration = max(3.0, min(float(duration), float(_env_int("COMPOSE_MAX_SECONDS", 60, 5, 180))))
     max_assets = _env_int("COMPOSE_MAX_ASSETS", 8, 1, 12)
+    allow_tiny = os.getenv("COMPOSE_ALLOW_TINY_ASSETS", "").strip().lower() in {"1", "true", "yes", "on"}
+    if max_assets < 8 and not allow_tiny:
+        max_assets = 8
     clips = [_coerce_clip(item, idx) for idx, item in enumerate(asset_paths)]
     valid_clips = [c for c in clips if c is not None and c.path.exists() and (is_image(c.path) or is_video(c.path))]
     valid_clips.sort(key=lambda c: c.order)
