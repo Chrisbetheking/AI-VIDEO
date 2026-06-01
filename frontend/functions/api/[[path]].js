@@ -14,28 +14,28 @@ export async function onRequest(context) {
     });
   }
 
-  const headers = new Headers(request.headers);
-  headers.delete("host");
+  const proxyHeaders = new Headers();
 
-  const proxyRequest = new Request(targetUrl, {
+  const contentType = request.headers.get("content-type");
+  if (contentType) proxyHeaders.set("content-type", contentType);
+
+  const authorization = request.headers.get("authorization");
+  if (authorization) proxyHeaders.set("authorization", authorization);
+
+  const response = await fetch(targetUrl, {
     method: request.method,
-    headers,
+    headers: proxyHeaders,
     body:
       request.method === "GET" || request.method === "HEAD"
         ? undefined
         : request.body,
-    redirect: "follow",
   });
 
-  const response = await fetch(proxyRequest);
   const responseHeaders = new Headers(response.headers);
 
   for (const [key, value] of Object.entries(corsHeaders())) {
     responseHeaders.set(key, value);
   }
-
-  responseHeaders.delete("content-security-policy");
-  responseHeaders.delete("content-security-policy-report-only");
 
   return new Response(response.body, {
     status: response.status,
@@ -46,10 +46,9 @@ export async function onRequest(context) {
 
 function corsHeaders() {
   return {
-    "Access-Control-Allow-Origin": "https://ai-video-s5v.pages.dev",
+    "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "GET,POST,PUT,PATCH,DELETE,OPTIONS",
     "Access-Control-Allow-Headers": "*",
-    "Access-Control-Allow-Credentials": "true",
     "Access-Control-Max-Age": "86400",
   };
 }
