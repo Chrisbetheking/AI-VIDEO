@@ -147,6 +147,11 @@ class ComposeAssetClip(BaseModel):
     image_seconds: float = Field(default=2.8, ge=0.0, le=20)
     video_start: float = Field(default=0.0, ge=0, le=7200)
     video_end: float = Field(default=0.0, ge=0, le=7200)
+    # Frontend can pass a direct R2/public URL for generated digital-human clips
+    # even before Supabase/manifest has refreshed. Backend downloads it safely.
+    url: str = Field(default='', max_length=3000)
+    filename: str = Field(default='', max_length=500)
+    source_type: str = Field(default='', max_length=80)
 
 
 class ComposeRequest(BaseModel):

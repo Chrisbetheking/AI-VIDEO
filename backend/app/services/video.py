@@ -47,8 +47,8 @@ def _env_int(name: str, default: int, low: int, high: int) -> int:
 
 def target_size() -> tuple[int, int]:
     # Render free instance只有 512MB。默认 720x1280，避免 1080x1920 合成时 OOM。
-    width = _env_int("COMPOSE_VIDEO_WIDTH", 540, 360, 1080)
-    height = _env_int("COMPOSE_VIDEO_HEIGHT", 960, 640, 1920)
+    width = _env_int("COMPOSE_VIDEO_WIDTH", 720, 360, 1080)
+    height = _env_int("COMPOSE_VIDEO_HEIGHT", 1280, 640, 1920)
     width = width if width % 2 == 0 else width - 1
     height = height if height % 2 == 0 else height - 1
     return width, height
@@ -115,7 +115,8 @@ def _apply_srt_emphasis(text: str, preset: str = 'douyin_boss', keywords: Option
         out = re.sub(safe, f'<font color="{color}"><b>{word}</b></font>', out, count=1)
     return out
 
-def subtitle_chunks(text: str, max_chars: int = 14) -> List[str]:
+def subtitle_chunks(text: str, max_chars: int = 0) -> List[str]:
+    max_chars = max_chars or _env_int("SUBTITLE_MAX_CHARS", 11, 8, 16)
     raw = normalize_text(text)
     if not raw:
         return []
@@ -176,8 +177,8 @@ def _append_srt_line(lines: list[str], index: int, start: float, end: float, tex
     clean = clean_subtitle_text(text)
     if not clean:
         return index
-    # 口播字幕不要太长，否则会挡住人物主体。每句尽量 12-14 字；不显示孤立标点。
-    chunks = subtitle_chunks(clean, max_chars=14) or [clean]
+    # 口播字幕不要太长，否则会被竖屏裁边。默认 11 字以内；不显示孤立标点。
+    chunks = subtitle_chunks(clean) or [clean]
     chunks = [clean_subtitle_text(c) for c in chunks if clean_subtitle_text(c)]
     if not chunks:
         return index
@@ -297,8 +298,9 @@ def _normalize_subtitle_segments(script: str, duration: float, subtitle_segments
         # 以前只有偏差 >0.45s 才缩放，长视频会出现“前面还行、后面越来越慢”。
         scale = auto_scale if 0.45 <= auto_scale <= 1.95 else 1.0
 
-    global_lead = _env_float('SUBTITLE_GLOBAL_LEAD_MS', 160.0, 0.0, 1000.0) / 1000.0
-    progressive_lead = _env_float('SUBTITLE_PROGRESSIVE_LEAD_MS', 950.0, 0.0, 2500.0) / 1000.0
+    # 保守提前：之前默认提前过猛会让字幕和口播感觉对不上。
+    global_lead = _env_float('SUBTITLE_GLOBAL_LEAD_MS', 60.0, 0.0, 1000.0) / 1000.0
+    progressive_lead = _env_float('SUBTITLE_PROGRESSIVE_LEAD_MS', 220.0, 0.0, 2500.0) / 1000.0
 
     shifted: list[dict[str, Any]] = []
     for seg in segments:
@@ -348,7 +350,9 @@ def ffmpeg_subtitle_path(path: Path) -> str:
 
 
 def _video_codec_args() -> list[str]:
-    return ["-c:v", "libx264", "-preset", "ultrafast", "-crf", os.getenv("COMPOSE_VIDEO_CRF", "30"), "-threads", "1", "-pix_fmt", "yuv420p"]
+    preset = os.getenv("COMPOSE_VIDEO_PRESET", "veryfast").strip() or "veryfast"
+    # 竖屏素材如果用 ultrafast + 高 CRF 会明显糊。默认改为 26，2G 香港机仍可承受短视频。
+    return ["-c:v", "libx264", "-preset", preset, "-crf", os.getenv("COMPOSE_VIDEO_CRF", "26"), "-threads", "1", "-pix_fmt", "yuv420p"]
 
 
 def _color_base_cmd(duration: float, output_path: Path) -> list[str]:
@@ -399,7 +403,7 @@ def _render_clip_to_temp(clip: MediaClip, duration: float, output_path: Path, w:
     """
     duration = max(0.6, min(30.0, float(duration or 1.0)))
     vf = (
-        f"scale={w}:{h}:force_original_aspect_ratio=increase,"
+        f"scale={w}:{h}:force_original_aspect_ratio=increase:flags=lanczos,"
         f"crop={w}:{h},setsar=1,fps={fps},format=yuv420p"
     )
     if is_image(clip.path):
@@ -585,8 +589,9 @@ def create_keyword_sfx_track(
     subtitle_segments: Optional[list[dict[str, Any]]],
     subtitle_keywords: str,
     output_path: Path,
+    script: str = '',
     *,
-    volume: float = 0.16,
+    volume: float = 0.26,
 ) -> Optional[Path]:
     """Create a lightweight keyword ding track without external audio assets.
 
@@ -594,7 +599,12 @@ def create_keyword_sfx_track(
     segments that contain important words like 第二家园/国际学校/私信. This avoids
     shipping copyrighted effect files and works on a small VPS.
     """
-    keywords = _subtitle_keywords(subtitle_keywords, '')
+    keywords = _subtitle_keywords(subtitle_keywords, script or '')
+    # 即使前端没点 AI 识别重点词，也用业务高频词兜底，保证音效确实能听到。
+    if not keywords:
+        keywords = _DEFAULT_HIGHLIGHT_WORDS[:8]
+    if not subtitle_segments:
+        subtitle_segments = _weighted_text_segments(script or '', duration)
     if not keywords or not subtitle_segments:
         return None
     duration = max(1.0, float(duration or 1.0))
@@ -619,7 +629,7 @@ def create_keyword_sfx_track(
         return None
 
     amp = max(0.0, min(0.5, float(volume or 0.16))) * 32767
-    tone_len = int(0.18 * sample_rate)
+    tone_len = int(0.24 * sample_rate)
     for start in events:
         base = int(start * sample_rate)
         for i in range(tone_len):
@@ -658,7 +668,7 @@ def burn_subtitles_and_audio(
     subtitle_style_preset: str = 'douyin_boss',
     subtitle_keywords: str = '',
     sfx_path: Optional[Path] = None,
-    keyword_sfx_volume: float = 0.16,
+    keyword_sfx_volume: float = 0.26,
 ) -> List[str]:
     warnings: List[str] = []
     w, h = target_size()
@@ -745,7 +755,7 @@ async def compose_video(
     subtitle_style_preset: str = 'douyin_boss',
     subtitle_keywords: str = '',
     keyword_sfx_enabled: bool = True,
-    keyword_sfx_volume: float = 0.16,
+    keyword_sfx_volume: float = 0.26,
 ) -> VideoResult:
     warnings: List[str] = []
 
@@ -784,10 +794,11 @@ async def compose_video(
                 subtitle_segments,
                 subtitle_keywords,
                 settings.tmp_dir / f"keyword_sfx_{task_id}.wav",
+                script=script,
                 volume=keyword_sfx_volume,
             )
             if sfx_path:
-                warnings.append('已在重点词字幕处叠加轻量提示音效；如觉得太多，可设置 ENABLE_KEYWORD_SFX=false。')
+                warnings.append('已在重点词字幕处叠加可听见的轻量提示音效；如觉得太多，可设置 ENABLE_KEYWORD_SFX=false 或降低 KEYWORD_SFX_VOLUME。')
         except Exception as exc:
             warnings.append(f'关键词音效生成失败，已跳过：{str(exc)[:180]}')
 

@@ -2097,6 +2097,72 @@ ${manualText || ''}`.trim()
     return introId
   }
 
+  function isSameOpeningLine(a: string, b: string) {
+    const clean = (v: string) => safeText(v).replace(/[\s，,。.!！?？、：:；;“”"'（）()【】]/g, '')
+    const x = clean(a)
+    const y = clean(b)
+    if (!x || !y) return false
+    const n = Math.min(x.length, y.length)
+    if (n < 6) return false
+    return x.includes(y.slice(0, Math.min(14, y.length))) || y.includes(x.slice(0, Math.min(14, x.length))) || x.slice(0, 10) === y.slice(0, 10)
+  }
+
+  function getDigitalIntroAssetForCompose(): AssetItem | null {
+    const candidates = materialAssets.filter(a => {
+      const folder = normalizeAssetFolder((a as any).folder, a.kind, a.filename)
+      return a.kind === 'video' && (folder === 'digital_human' || a.source_type === 'digital_human_intro' || a.url === digitalHuman?.video_url || a.filename === digitalHuman?.video_name || safeText(a.original_name).includes('数字人'))
+    })
+    const matched = digitalHuman?.video_url
+      ? candidates.find(a => a.url === digitalHuman.video_url || a.filename === digitalHuman.video_name) || candidates[0]
+      : candidates.find(a => selectedMaterialIds.includes(a.id)) || null
+    if (matched) return matched
+    if (!digitalHuman?.video_url) return null
+    const filename = digitalHuman.video_name || `digital_human_intro_${Date.now()}.mp4`
+    return normalizeAsset({
+      id: filename.replace(/\.[a-z0-9]+$/i, '') || `digital_human_${Date.now()}`,
+      filename,
+      original_name: `数字人开场_${copy.title || filename}`,
+      kind: 'video',
+      url: digitalHuman.video_url,
+      size_bytes: 0,
+      created_at: new Date().toISOString(),
+      folder: 'digital_human',
+      source_type: 'digital_human_intro',
+    }, 0)
+  }
+
+  function buildComposeVoiceSegments(hasDigitalIntro: boolean): VoiceSegment[] {
+    const base = (voiceSegments.length ? voiceSegments : buildVoiceSegmentsFromScript(currentScript, copy.hook))
+      .map((seg, index) => ({ ...defaultSegment, ...seg, text: cleanSubtitleLikeText(seg.text || ''), pause_after_ms: seg.pause_after_ms ?? (index === 0 ? 260 : 320) }))
+      .filter(seg => seg.text)
+
+    const deduped: VoiceSegment[] = []
+    for (const seg of base) {
+      const last = deduped[deduped.length - 1]
+      if (last && isSameOpeningLine(last.text, seg.text)) continue
+      deduped.push(seg)
+    }
+
+    if (!hasDigitalIntro) return deduped
+
+    const introText = cleanSubtitleLikeText(getDigitalHumanIntroText())
+    const body = deduped.filter((seg, index) => index > 0 || !isSameOpeningLine(seg.text, introText))
+    while (body.length && isSameOpeningLine(body[0].text, introText)) body.shift()
+
+    const introSegment: VoiceSegment = {
+      ...defaultSegment,
+      text: introText || deduped[0]?.text || currentScript.slice(0, 80),
+      emotion: '自然可信',
+      speed_ratio: 0.98,
+      pause_after_ms: 180,
+    }
+    return [introSegment, ...body].filter(seg => safeText(seg.text))
+  }
+
+  function cleanSubtitleLikeText(text: string) {
+    return safeText(text).replace(/\s+/g, ' ').replace(/[。．.]+$/g, '').trim()
+  }
+
   async function generateFullCopyAndVoiceDraft() {
     const targetSeconds = safeProjectDuration(selectedAssetEstimatedSeconds || autoProjectSeconds || 45)
     const res = await run('一次生成完整文案和配音分段', () => apiPost<GeneratedCopy>('/api/generate-copy', {
@@ -2404,18 +2470,16 @@ ${selectedAssetScriptContext || '暂无素材，请按马来西亚楼盘、风�
       setError('请先生成或填写文案，再合成视频。')
       return
     }
-    const digitalIntroCandidates = digitalHuman?.video_url
-      ? materialAssets.filter(a => a.source_type === 'digital_human_intro' || a.url === digitalHuman.video_url || a.filename === digitalHuman.video_name)
-      : []
-    const digitalIntroId = digitalIntroCandidates[0]?.id || ''
+    const digitalIntroAsset = getDigitalIntroAssetForCompose()
     const idsToRemoveForCompose = new Set([digitalHumanAvatarId, digitalHumanDriverId].filter(Boolean))
-    const effectiveSelectedIds = digitalIntroId
-      ? [digitalIntroId, ...selectedMaterialIds.filter(id => id !== digitalIntroId && !idsToRemoveForCompose.has(id))]
-      : selectedMaterialIds.filter(id => !idsToRemoveForCompose.has(id))
-    const effectiveSelectedAssets = effectiveSelectedIds
+    const selectedAssetsForCompose = selectedMaterialIds
+      .filter(id => !idsToRemoveForCompose.has(id) && id !== digitalIntroAsset?.id)
       .map(id => materialAssets.find(a => a.id === id))
       .filter((a): a is AssetItem => Boolean(a && a.id && a.url))
-    const chosen = (effectiveSelectedAssets.length ? effectiveSelectedAssets : materialAssets.slice(0, 6))
+    const effectiveAssets = digitalIntroAsset
+      ? [digitalIntroAsset, ...selectedAssetsForCompose.filter(a => a.url !== digitalIntroAsset.url)]
+      : selectedAssetsForCompose
+    const chosen = (effectiveAssets.length ? effectiveAssets : materialAssets.slice(0, 6))
       .map((asset, index) => normalizeAsset(asset, index))
       .filter(asset => Boolean(asset.id && asset.url))
     if (!chosen.length) {
@@ -2423,48 +2487,70 @@ ${selectedAssetScriptContext || '暂无素材，请按马来西亚楼盘、风�
       setActive('assets')
       return
     }
+
+    const hasDigitalIntro = Boolean(digitalIntroAsset && chosen.some(a => a.id === digitalIntroAsset.id || a.url === digitalIntroAsset.url))
+    const composeSegments = buildComposeVoiceSegments(hasDigitalIntro)
+    const composeScript = composeSegments.length ? composeSegments.map(s => s.text).join('\n') : currentScript.trim()
+
+    let composeAudio = audio
+    if (composeSegments.length) {
+      const freshAudio = await run(hasDigitalIntro ? '重新生成分离式配音' : '重新生成成片配音', () => apiPost<TTSResponse>('/api/tts-segments', {
+        segments: composeSegments,
+        voice,
+        overall_rate: '+0%'
+      }))
+      if (freshAudio?.file_name) {
+        composeAudio = freshAudio
+        setAudio(freshAudio)
+      }
+    }
+
     const assetPlan = chosen.map((asset, index) => {
       const cfg = getClipSetting(asset, index)
       const imageSeconds = safeNumber(cfg.image_seconds, 2.8)
       const start = Math.max(0, safeNumber(cfg.video_start, 0))
       const rawEnd = safeNumber(cfg.video_end, 0)
+      const isIntro = hasDigitalIntro && (asset.id === digitalIntroAsset?.id || asset.url === digitalIntroAsset?.url)
       return {
         asset_id: String(asset.id),
         order: index,
         kind: asset.kind === 'video' ? 'video' : 'image',
         image_seconds: Math.min(20, Math.max(0.8, imageSeconds)),
         video_start: asset.kind === 'video' ? start : 0,
-        video_end: asset.kind === 'video' && rawEnd > start ? rawEnd : 0,
+        video_end: asset.kind === 'video' && rawEnd > start ? rawEnd : (isIntro ? Math.max(4, Math.min(18, estimateSeconds(getDigitalHumanIntroText()))) : 0),
+        url: asset.url,
+        filename: asset.filename,
+        source_type: asset.source_type || (isIntro ? 'digital_human_intro' : ''),
       }
     })
-    const safeSubtitleSegments = Array.isArray(audio?.segments) ? audio.segments.map((seg: any, index: number) => ({
+    const safeSubtitleSegments = Array.isArray(composeAudio?.segments) ? composeAudio.segments.map((seg: any, index: number) => ({
       index: Number.isFinite(Number(seg?.index)) ? Number(seg.index) : index,
       text: safeText(seg?.text, ''),
       start: Math.max(0, safeNumber(seg?.start, 0)),
       end: Math.max(0, safeNumber(seg?.end, safeNumber(seg?.start, 0) + safeNumber(seg?.duration, 0))),
       duration: Math.max(0, safeNumber(seg?.duration, safeNumber(seg?.end, 0) - safeNumber(seg?.start, 0))),
     })).filter((seg: any) => seg.text && seg.end > seg.start) : []
-    const durationSeconds = safeProjectDuration(audio?.duration_seconds, selectedAssetEstimatedSeconds, voiceEstimatedSeconds, autoProjectSeconds)
+    const durationSeconds = safeProjectDuration(composeAudio?.duration_seconds, selectedAssetEstimatedSeconds, voiceEstimatedSeconds, autoProjectSeconds)
     const res = await run('合成视频并烧字幕', () => apiPost<ComposeResponse>('/api/compose-video', {
       title: safeText(copy.title, '短视频'),
-      script: currentScript.trim(),
+      script: composeScript,
       asset_ids: chosen.map(a => String(a.id)),
       asset_plan: assetPlan,
-      audio_file_name: audio?.file_name || undefined,
+      audio_file_name: composeAudio?.file_name || undefined,
       duration_seconds: durationSeconds,
       voice,
       rate: '+0%',
-      subtitle_size: subtitleSize,
+      subtitle_size: Math.min(subtitleSize, hasDigitalIntro ? 18 : subtitleSize),
       subtitle_margin_v: subtitleMarginV,
       subtitle_position: subtitlePosition,
       subtitle_style_preset: subtitlePreset,
       subtitle_keywords: subtitleHighlight,
       keyword_sfx_enabled: true,
-      keyword_sfx_volume: 0.16,
+      keyword_sfx_volume: 0.28,
       subtitle_segments: safeSubtitleSegments
     }))
     setVideo(res!)
-    setLastHandoff('视频已出片。已把配音和字幕压到画面上，先预览一遍再决定是否调字幕位置。')
+    setLastHandoff(hasDigitalIntro ? '视频已出片：数字人片头和后续素材已分离，真人模板已去重，配音/字幕按本次最终脚本重新生成。' : '视频已出片。已把配音和字幕压到画面上，先预览一遍再决定是否调字幕位置。')
   }
 
   async function chatEditVideo() {

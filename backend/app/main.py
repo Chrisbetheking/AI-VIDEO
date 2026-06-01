@@ -616,7 +616,7 @@ def _asset_remote_url(settings: Settings, asset_id: str | None, filename: str | 
         if url:
             return url
     if safe_id:
-        for prefix in ['uploads', 'digital-human/avatar', 'digital-human/driver']:
+        for prefix in ['uploads', 'digital-human/final', 'digital-human/preview', 'digital-human/photo-scene', 'digital-human/avatar', 'digital-human/driver']:
             for obj in maybe_list_r2_objects(settings, prefix=prefix, limit=500):
                 name = Path(str(obj.get('name') or '')).name
                 if Path(name).stem == safe_id:
@@ -715,7 +715,11 @@ async def _resolve_compose_clip(settings: Settings, clip_req) -> Optional[MediaC
     local = find_asset_path(settings, asset_id)
     if local is None:
         remote = _asset_remote_url(settings, asset_id)
-        fallback_ext = '.jpg' if kind_hint == 'image' else '.mp4'
+        direct_url = str(getattr(clip_req, 'url', '') or '').strip()
+        if not remote and direct_url.startswith(('http://', 'https://')):
+            remote = direct_url
+        filename_hint = str(getattr(clip_req, 'filename', '') or asset_id or remote or '')
+        fallback_ext = Path(filename_hint).suffix.lower() if Path(filename_hint).suffix.lower() in (IMAGE_EXTS | VIDEO_EXTS) else ('.jpg' if kind_hint == 'image' else '.mp4')
         local = await _download_remote_media_for_compose(settings, remote, fallback_ext=fallback_ext)
     if local is None:
         return None
@@ -1381,19 +1385,26 @@ def _normalize_asset_folder(value: str, *, kind: str = '', filename: str = '') -
         return 'collected'
     if raw in {'ai', 'generated', 'ai_image', 'generated_image', 'ai生成', 'ai生成图'}:
         return 'ai'
+    if raw in {'digital_human', 'digitalhuman', 'digital_human_intro', '数字人', '数字人片段'} or name.startswith(('digital_human_', 'digital-human')) or '/digital-human/' in name:
+        return 'digital_human'
     if name.startswith('collected_'):
         return 'collected'
     if name.startswith(('ai_image_', 'graphic_', 'cover_')):
         return 'ai'
+    if name.startswith(('digital_human_', 'digital-human')) or 'digital-human/' in name:
+        return 'digital_human'
     if kind == 'image':
         return 'image'
     return 'self'
 
 
 def _asset_source_type(folder: str, filename: str = '') -> str:
+    name = (filename or '').lower()
+    if folder == 'digital_human' or name.startswith(('digital_human_', 'digital-human')) or 'digital-human/' in name:
+        return 'digital_human_intro'
     if folder == 'collected':
         return 'collected'
-    if folder == 'ai' or (filename or '').startswith(('ai_image_', 'graphic_', 'cover_')):
+    if folder == 'ai' or name.startswith(('ai_image_', 'graphic_', 'cover_')):
         return 'ai_generated'
     if folder == 'provided':
         return 'provided'
@@ -1571,7 +1582,7 @@ def api_list_assets(
     # 3) R2 fallback after Render restart/OOM. Short timeouts in storage.py prevent hanging.
     if include_r2:
         per_prefix_limit = max(20, min(int(limit or 200), 200))
-        for prefix in ['uploads', 'digital-human/avatar', 'digital-human/driver']:
+        for prefix in ['uploads', 'digital-human/final', 'digital-human/preview', 'digital-human/photo-scene', 'digital-human/avatar', 'digital-human/driver']:
             for obj in maybe_list_r2_objects(settings, prefix=prefix, limit=per_prefix_limit):
                 name = obj.get('name') or ''
                 ext = Path(name).suffix.lower()
