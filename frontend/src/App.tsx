@@ -221,6 +221,19 @@ function safeText(value: unknown, fallback = '') {
   return text || fallback
 }
 
+function safeCompactText(value: unknown, limit = 180) {
+  let text = safeText(value)
+  try {
+    if (/%[0-9A-Fa-f]{2}/.test(text)) text = decodeURIComponent(text)
+  } catch {}
+  text = text
+    .replace(/[\u{1F000}-\u{1FAFF}]/gu, '')
+    .replace(/[\r\n\t]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+  return text.length > limit ? `${text.slice(0, limit - 1)}…` : text
+}
+
 function safeNumber(value: unknown, fallback = 0) {
   const n = Number(value)
   return Number.isFinite(n) ? n : fallback
@@ -228,14 +241,14 @@ function safeNumber(value: unknown, fallback = 0) {
 
 function formatCollectorEventLine(ev: CollectorProgressEvent, index = 0) {
   const stage = safeText(ev.stage, 'event').toUpperCase()
-  const title = safeText(ev.video_title || ev.message || ev.account_name, '-')
-  const account = safeText(ev.account_name, '')
-  const detail = safeText(ev.error_detail || ev.message || ev.video_url || ev.created_at, '')
+  const title = safeCompactText(ev.video_title || ev.message || ev.account_name, 96) || '-'
+  const account = safeCompactText(ev.account_name, 60)
+  const detail = safeCompactText(ev.error_detail || ev.message || ev.video_url || ev.created_at, 180)
   const response = (ev.raw as any)?.response || {}
   const review = response?.review || (ev.raw as any)?.review || {}
   const decision = safeText(review?.decision || response?.decision, '')
   const score = review?.score ?? response?.score
-  const reason = safeText(review?.reason || response?.reason || response?.summary, '')
+  const reason = safeCompactText(review?.reason || response?.reason || response?.summary, 140)
   const warnings = Array.isArray(response?.warnings) ? response.warnings.filter(Boolean).slice(0, 2).join('；') : ''
   const prefix = `${index + 1}. ${stage}`
   if (ev.level === 'error') return `${prefix}｜失败：${title}｜${detail}`
@@ -301,6 +314,20 @@ function assetFolderLabel(folder: string | undefined, kind?: string) {
   const f = normalizeAssetFolder(folder, kind)
   return f === 'digital_human' ? '数字人片段' : f === 'self' ? '自己拍的素材' : f === 'provided' ? '别人提供的素材' : f === 'image' ? '图片素材' : f === 'collected' ? '采集视频' : f === 'ai' ? 'AI生成图' : '素材'
 }
+function normalizeAssetUsageRole(raw: any, kind?: string, filename?: string, folder?: string): 'avatar' | 'content' {
+  const value = safeText(raw).toLowerCase().replace(/[-\s]/g, '_')
+  const name = safeText(filename).toLowerCase()
+  const f = normalizeAssetFolder(folder, kind, filename)
+  if (['avatar', 'person', 'human', 'portrait', '人物', '人物素材', '数字人', '口播'].includes(value)) return 'avatar'
+  if (f === 'digital_human') return 'avatar'
+  if (name.includes('avatar') || name.includes('portrait') || name.includes('person') || name.includes('human') || name.includes('口播') || name.includes('真人') || name.includes('数字人')) return 'avatar'
+  return 'content'
+}
+
+function assetRoleLabel(role?: string) {
+  return role === 'avatar' ? '人物素材' : '内容/B-roll'
+}
+
 
 function imagePromptForVisualOnly(prompt: string) {
   return safeText(prompt)
@@ -315,6 +342,8 @@ function normalizeAsset(raw: any, index = 0): AssetItem {
   const url = safeText(raw?.url, safeText(raw?.file_url, safeText(raw?.public_url, '')))
   const lower = `${filename} ${url}`.toLowerCase()
   const kind = raw?.kind === 'video' || /\.(mp4|mov|webm|m4v)(\?|$)/i.test(lower) ? 'video' : 'image'
+  const folder = normalizeAssetFolder(raw?.folder, kind, filename)
+  const usageRole = normalizeAssetUsageRole(raw?.usage_role, kind, filename, folder)
   return {
     id: safeText(raw?.id, filename || `asset_${index}`),
     filename,
@@ -323,8 +352,9 @@ function normalizeAsset(raw: any, index = 0): AssetItem {
     url,
     size_bytes: Number(raw?.size_bytes || raw?.size || 0) || 0,
     created_at: safeText(raw?.created_at, new Date().toISOString()),
-    folder: normalizeAssetFolder(raw?.folder, kind, filename),
-    source_type: safeText(raw?.source_type, '')
+    folder,
+    source_type: safeText(raw?.source_type, ''),
+    usage_role: usageRole
   }
 }
 
@@ -724,6 +754,7 @@ function AppInner() {
   const [assetKindFilter, setAssetKindFilter] = useState<'all' | 'image' | 'video'>('all')
   const [assetFolderFilter, setAssetFolderFilter] = useState<AssetFolderKey>('all')
   const [assetUploadFolder, setAssetUploadFolder] = useState<AssetFolderKey>('self')
+  const [assetUsageRole, setAssetUsageRole] = useState<'avatar' | 'content'>('content')
   const [assetTimeFilter, setAssetTimeFilter] = useState<'all' | 'today' | '7d' | '30d'>('all')
   const [assetSort, setAssetSort] = useState<'new' | 'old' | 'size_desc' | 'size_asc' | 'name'>('new')
   const [assetVisibleCount, setAssetVisibleCount] = useState(24)
@@ -772,7 +803,7 @@ function AppInner() {
   const [segmentSeconds, setSegmentSeconds] = useState<Record<number, number>>({})
   const [segmentTransitions, setSegmentTransitions] = useState<Record<number, string>>({})
   const [subtitleSize, setSubtitleSize] = useState(20)
-  const [subtitleMarginV, setSubtitleMarginV] = useState(86)
+  const [subtitleMarginV, setSubtitleMarginV] = useState(56)
   const [subtitlePosition, setSubtitlePosition] = useState<'bottom_safe' | 'middle_low' | 'center'>('bottom_safe')
   const [subtitlePreset, setSubtitlePreset] = useState<'douyin_boss' | 'knowledge_highlight' | 'clean_trust' | 'cta_pop'>('douyin_boss')
   const subtitleColor = subtitlePreset === 'clean_trust' ? '#ffffff' : subtitlePreset === 'cta_pop' ? '#FFD84D' : '#ffffff'
@@ -846,8 +877,14 @@ function AppInner() {
     return formatCollectorEventLine(events[0], 0)
   }, [collectorEventsForReport])
 
-  const materialAssets = useMemo(() => assets.map((a, i) => normalizeAsset(a, i)).filter(a => Boolean(a.id && a.url) && !safeText(a.filename).startsWith('collected_')), [assets])
-  const collectedVideos = useMemo(() => assets.map((a, i) => normalizeAsset(a, i)).filter(a => Boolean(a.id && a.url) && a.kind === 'video' && safeText(a.filename).startsWith('collected_')), [assets])
+  const allNormalizedAssets = useMemo(() => assets.map((a, i) => normalizeAsset(a, i)).filter(a => Boolean(a.id && a.url)), [assets])
+  const materialAssets = useMemo(() => allNormalizedAssets.filter(a => normalizeAssetFolder(a.folder, a.kind, a.filename) !== 'collected'), [allNormalizedAssets])
+  const collectedAssets = useMemo(() => allNormalizedAssets.filter(a => normalizeAssetFolder(a.folder, a.kind, a.filename) === 'collected'), [allNormalizedAssets])
+  const collectedVideos = useMemo(() => collectedAssets.filter(a => a.kind === 'video'), [collectedAssets])
+  const uploadedAvatarAssets = useMemo(() => materialAssets.filter(a => a.usage_role === 'avatar'), [materialAssets])
+  const collectedAvatarAssets = useMemo(() => collectedAssets.filter(a => a.usage_role === 'avatar'), [collectedAssets])
+  const contentOnlyAssets = useMemo(() => materialAssets.filter(a => a.usage_role !== 'avatar'), [materialAssets])
+  const digitalHumanDriverAssets = useMemo(() => [...uploadedAvatarAssets, ...collectedAvatarAssets].filter(a => a.kind === 'video'), [uploadedAvatarAssets, collectedAvatarAssets])
   const filteredMaterialAssets = useMemo(() => {
     const now = Date.now()
     const maxAge = assetTimeFilter === 'today' ? 24 * 3600 * 1000 : assetTimeFilter === '7d' ? 7 * 24 * 3600 * 1000 : assetTimeFilter === '30d' ? 30 * 24 * 3600 * 1000 : 0
@@ -856,7 +893,7 @@ function AppInner() {
       if (a.kind !== assetLibraryPage) return false
       if (assetKindFilter !== 'all' && a.kind !== assetKindFilter) return false
       if (assetFolderFilter !== 'all' && normalizeAssetFolder((a as any).folder, a.kind, a.filename) !== assetFolderFilter) return false
-      if (q && !`${a.original_name} ${a.filename} ${a.kind}`.toLowerCase().includes(q)) return false
+      if (q && !`${a.original_name} ${a.filename} ${a.kind} ${assetRoleLabel(a.usage_role)} ${assetFolderLabel((a as any).folder, a.kind)}`.toLowerCase().includes(q)) return false
       if (maxAge) {
         const t = new Date(a.created_at).getTime()
         if (!Number.isFinite(t) || now - t > maxAge) return false
@@ -1800,6 +1837,13 @@ ${selectedAssetScriptContext || '暂未选择素材，先给出通用画面建�
   }, [active])
 
   useEffect(() => {
+    if (oneClickOutputType === 'digital_human') {
+      setSubtitlePosition('bottom_safe')
+      setSubtitleMarginV(prev => Math.min(prev || 56, 56))
+    }
+  }, [oneClickOutputType])
+
+  useEffect(() => {
     const status = String(digitalHuman?.status || '').toLowerCase()
     const shouldPoll = active === 'digitalHuman'
       && Boolean(digitalHuman?.job_id)
@@ -1814,10 +1858,12 @@ ${selectedAssetScriptContext || '暂未选择素材，先给出通用画面建�
 
   async function handleUpload(files: FileList | null) {
     if (!files?.length) return
-    const res = await run('上传素材', () => uploadAssets(files, assetUploadFolder === 'all' ? 'self' : assetUploadFolder))
-    setAssets(prev => [...(res || []), ...prev])
-    const ids = (res || []).filter(a => !a.filename.startsWith('collected_')).map(a => a.id)
+    const res = await run('上传素材', () => uploadAssets(files, assetUploadFolder === 'all' ? 'self' : assetUploadFolder, assetUsageRole))
+    const normalized = (res || []).map((a, i) => normalizeAsset(a, i))
+    setAssets(prev => [...normalized, ...prev])
+    const ids = normalized.filter(a => a.usage_role !== 'avatar' && normalizeAssetFolder(a.folder, a.kind, a.filename) !== 'collected').map(a => a.id)
     if (ids.length) setSelectedMaterialIds(prev => Array.from(new Set([...ids, ...prev])))
+    if (normalized.some(a => a.usage_role === 'avatar')) setLastHandoff('人物素材已上传：它会出现在“可选数字人片头”，不会自动混进后面的楼盘/风光成片素材。')
   }
 
   function defaultClipSetting(asset: AssetItem, order: number): AssetClipSetting {
@@ -1945,7 +1991,7 @@ ${manualText || ''}`.trim()
     if (!files || files.length === 0) return
     const list = Array.from(files)
     try {
-      await run('上传脚本资料', () => uploadAssets(files, 'provided'))
+      await run('上传脚本资料', () => uploadAssets(files, 'provided', 'content'))
       const textFile = list.find(file => /\.(txt|md|srt|csv)$/i.test(file.name))
       if (textFile) {
         const text = (await textFile.text()).slice(0, 6000)
@@ -2068,6 +2114,7 @@ ${manualText || ''}`.trim()
       size_bytes: 0,
       folder: 'digital_human',
       source_type: 'digital_human_intro',
+      usage_role: 'avatar',
       created_at: new Date().toISOString(),
     }, 0)
     setAssets(prev => {
@@ -2128,6 +2175,7 @@ ${manualText || ''}`.trim()
       created_at: new Date().toISOString(),
       folder: 'digital_human',
       source_type: 'digital_human_intro',
+      usage_role: 'avatar',
     }, 0)
   }
 
@@ -2479,7 +2527,7 @@ ${selectedAssetScriptContext || '暂无素材，请按马来西亚楼盘、风�
     const effectiveAssets = digitalIntroAsset
       ? [digitalIntroAsset, ...selectedAssetsForCompose.filter(a => a.url !== digitalIntroAsset.url)]
       : selectedAssetsForCompose
-    const chosen = (effectiveAssets.length ? effectiveAssets : materialAssets.slice(0, 6))
+    const chosen = (effectiveAssets.length ? effectiveAssets : contentOnlyAssets.slice(0, 6))
       .map((asset, index) => normalizeAsset(asset, index))
       .filter(asset => Boolean(asset.id && asset.url))
     if (!chosen.length) {
@@ -2726,7 +2774,7 @@ ${selectedAssetScriptContext || '暂无素材，请按马来西亚楼盘、风�
       {busy && <div className="busy">正在执行：{busy}</div>}
       <div className="handoffBar">
         <div><strong>当前状态</strong><span>{lastHandoff}</span></div>
-        {nextTodo && <button onClick={() => setActive(nextTodo.go)}>下一件事：{nextTodo.text}</button>}
+        {nextTodo && <button className="handoffNextBtn" onClick={() => setActive(nextTodo.go)}><span>下一件事</span><b>{nextTodo.text}</b></button>}
       </div>
 
       {knowledgeDialog.open && <div className="modalMask">
@@ -3177,13 +3225,13 @@ https://www.douyin.com/user/..." /></Field>
       {active === 'digitalHuman' && <section className="card modulePanel">
         <div className="sectionHeader"><div><h2>第三步：可选数字人片头</h2><p>这一步不是每条都必须用。需要真人感片头时，系统只拿第 1 段配音；可选真人模板视频或照片场景数字人，纯素材混剪可直接跳过。</p></div><div className="headerActions"><Button label="跳过数字人，去素材混剪" onClick={skipDigitalHumanAndUseAssets} kind="ghost" /><Button busy={busy === '生成数字人片段' || busy === '查询数字人结果' ? busy : ''} label={digitalHumanPrimaryLabel} onClick={hasRunningDigitalHumanTask ? () => checkDigitalHumanStatus(false) : makeDigitalHuman} disabled={!hasRunningDigitalHumanTask && (!audio?.file_name || !digitalHumanAvatarId || !digitalHumanConsent)} /></div></div>
         <div className="grid3">
-          <Field label={digitalHumanNeedsVideo ? '真人模板视频 MP4' : digitalHumanPhotoSceneMode ? '本人授权照片' : '数字人形象素材'} hint={digitalHumanNeedsVideo ? 'fal 必须手动选择本人授权的 5-20 秒正面半身说话视频；每条视频可换不同模板，不能用图片。' : digitalHumanPhotoSceneMode ? '上传本人清晰正脸/半身照；系统会做楼道、样板间、园区等场景片头。' : '静态兜底可用照片；fal 路线必须用视频。'}><select value={digitalHumanAvatarId} onChange={e => setDigitalHumanAvatarId(e.target.value)}><option value="">{digitalHumanNeedsVideo ? '手动选择本条视频的真人模板' : digitalHumanPhotoSceneMode ? '选择本人照片' : '选择已上传照片/视频'}</option>{digitalHumanAvatarCandidates.map(a => <option key={a.id} value={a.id}>{a.kind} · {a.original_name || a.filename}</option>)}</select></Field>
-          <Field label="动作参考视频（可选）" hint="fal 当前不需要；后期 MuseTalk/LivePortrait 才用。"><select value={digitalHumanDriverId} onChange={e => setDigitalHumanDriverId(e.target.value)}><option value="">不用动作参考</option>{assets.filter(a => a.kind === 'video').map(a => <option key={a.id} value={a.id}>{a.original_name || a.filename}</option>)}</select></Field>
+          <Field label={digitalHumanNeedsVideo ? '真人模板视频 MP4' : digitalHumanPhotoSceneMode ? '本人授权照片' : '数字人形象素材'} hint={digitalHumanNeedsVideo ? 'fal 必须手动选择本人授权的 5-20 秒正面半身说话视频；每条视频可换不同模板，不能用图片。' : digitalHumanPhotoSceneMode ? '上传本人清晰正脸/半身照；系统会做楼道、样板间、园区等场景片头。' : '静态兜底可用照片；fal 路线必须用视频。'}><select value={digitalHumanAvatarId} onChange={e => setDigitalHumanAvatarId(e.target.value)}><option value="">{digitalHumanNeedsVideo ? '手动选择本条视频的真人模板' : digitalHumanPhotoSceneMode ? '选择本人照片' : '选择已上传照片/视频'}</option>{uploadedAvatarAssets.filter(a => digitalHumanNeedsVideo ? a.kind === 'video' : digitalHumanPhotoSceneMode ? a.kind === 'image' : true).map(a => <option key={a.id} value={a.id}>自己上传 · {a.kind} · {a.original_name || a.filename}</option>)}{collectedAvatarAssets.filter(a => digitalHumanNeedsVideo ? a.kind === 'video' : digitalHumanPhotoSceneMode ? a.kind === 'image' : true).map(a => <option key={a.id} value={a.id}>采集备用 · {a.kind} · {a.original_name || a.filename}</option>)}</select></Field>
+          <Field label="动作参考视频（可选）" hint="fal 当前不需要；后期 MuseTalk/LivePortrait 才用。"><select value={digitalHumanDriverId} onChange={e => setDigitalHumanDriverId(e.target.value)}><option value="">不用动作参考</option>{digitalHumanDriverAssets.map(a => <option key={a.id} value={a.id}>{assetFolderLabel(a.folder, a.kind)} · {a.original_name || a.filename}</option>)}</select></Field>
           <Field label="数字人模式" hint="数字人不是必选。真人模板最真实；照片场景最灵活；都只吃第 1 段开场音频。"><select value={digitalHumanEngine} onChange={e => setDigitalHumanEngine(e.target.value)}><option value="fal_lipsync">真人模板视频：fal.ai 口型同步（最真实）</option><option value="photo_scene">照片场景数字人：楼道/样板间/园区片头</option><option value="preview">免费兜底：静态预览/素材口播</option><option value="webhook">外部 GPU Worker/API</option><option value="jimeng">火山即梦/OmniHuman（备用）</option></select></Field>
           {digitalHumanEngine === 'jimeng' && <Field label="即梦模型" hint="模拟真人优先选 OmniHuman1.5；普通视频生成可用视频3.0。"><select value={digitalHumanJimengModel} onChange={e => setDigitalHumanJimengModel(e.target.value)}><option value="omnihuman15">OmniHuman1.5（单图+音频真人口播）</option><option value="quick">数字人快速模式</option><option value="video30">即梦视频生成3.0（图生视频）</option></select></Field>}
           {digitalHumanPhotoSceneMode && <><Field label="照片入场景" hint="先做稳定 MVP：把本人照片放入真实房产场景，再配第 1 段开场音频。"><select value={digitalHumanSceneTemplate} onChange={e => setDigitalHumanSceneTemplate(e.target.value)}><option>样板间客厅讲解</option><option>楼道电梯厅讲解</option><option>小区园林讲解</option><option>会所大堂讲解</option><option>项目沙盘旁讲解</option><option>学校门口讲解</option><option>吉隆坡城市风光</option><option>落地窗办公室讲解</option></select></Field><Field label="场景提示词（可选）" hint="不填就按上面的场景自动生成；想指定楼盘/城市/氛围可以写这里。"><textarea value={digitalHumanScenePrompt} onChange={e => setDigitalHumanScenePrompt(e.target.value)} placeholder="例如：马来西亚高端公寓样板间，自然光，顾问站在客厅，真实可信，竖屏短视频画面" /></Field></>}
         </div>
-        <div className="templatePicker"><strong>{digitalHumanPhotoSceneMode ? '本条视频用哪张本人照片？' : '本条视频用哪个真人模板？'}</strong><p>{digitalHumanPhotoSceneMode ? '照片场景数字人每条都可以换照片和场景，不会固定同一个开头。' : '不会再固定同一个开头。先在素材库上传多个顾问 5-20 秒模板，这里每条内容手动选一个。'}</p><div className="templateCards">{digitalHumanAvatarCandidates.slice(0, 8).map(a => <button key={a.id} type="button" className={digitalHumanAvatarId === a.id ? 'templateCard selected' : 'templateCard'} onClick={() => setDigitalHumanAvatarId(a.id)}>{a.kind === 'video' ? <video src={a.url} muted /> : <img src={a.url} />}<span>{a.original_name || a.filename}</span></button>)}</div></div>
+        <div className="templatePicker refinedPicker"><div><strong>{digitalHumanPhotoSceneMode ? '本条视频用哪张本人照片？' : '本条视频用哪个真人模板？'}</strong><p>{digitalHumanPhotoSceneMode ? '照片场景数字人每条都可以换照片和场景，不会固定同一个开头。' : '人物素材和内容素材已经分开；优先用自己上传的人物素材，collected 只做备用。'}</p></div><div className="assetStats compactStats"><Pill tone="blue">自己上传人物 {uploadedAvatarAssets.length}</Pill><Pill tone="purple">采集备用人物 {collectedAvatarAssets.length}</Pill><Pill tone="orange">内容素材 {contentOnlyAssets.length}</Pill></div><div className="templateGroup"><h4>优先：自己上传的人物素材</h4><div className="templateCards">{uploadedAvatarAssets.filter(a => digitalHumanNeedsVideo ? a.kind === 'video' : digitalHumanPhotoSceneMode ? a.kind === 'image' : true).slice(0, 10).map(a => <button key={a.id} type="button" className={digitalHumanAvatarId === a.id ? 'templateCard selected' : 'templateCard'} onClick={() => setDigitalHumanAvatarId(a.id)}>{a.kind === 'video' ? <video src={a.url} muted /> : <img src={a.url} />}<span>{a.original_name || a.filename}</span></button>)}</div>{uploadedAvatarAssets.filter(a => digitalHumanNeedsVideo ? a.kind === 'video' : digitalHumanPhotoSceneMode ? a.kind === 'image' : true).length === 0 && <Empty>还没有自己上传的人物素材。去“素材选择”上传时选择“人物素材”。</Empty>}</div><div className="templateGroup"><h4>备用：collected 里识别的人物素材</h4><div className="templateCards compactTemplates">{collectedAvatarAssets.filter(a => digitalHumanNeedsVideo ? a.kind === 'video' : digitalHumanPhotoSceneMode ? a.kind === 'image' : true).slice(0, 10).map(a => <button key={a.id} type="button" className={digitalHumanAvatarId === a.id ? 'templateCard selected' : 'templateCard'} onClick={() => setDigitalHumanAvatarId(a.id)}>{a.kind === 'video' ? <video src={a.url} muted /> : <img src={a.url} />}<span>{a.original_name || a.filename}</span></button>)}</div></div></div>
         <label className="checkline"><input type="checkbox" checked={digitalHumanConsent} onChange={e => setDigitalHumanConsent(e.target.checked)} /> 我确认已获得本人形象和声音授权，仅用于合法商业内容。</label>
 
         <div className="digitalHumanLeanGuide">
@@ -3206,9 +3254,13 @@ https://www.douyin.com/user/..." /></Field>
           </div>
           <div className="uploadSide">
             <select value={assetUploadFolder} onChange={e => setAssetUploadFolder(e.target.value as AssetFolderKey)} disabled={busy === '上传素材'}>
-              <option value="self">自己拍的素材</option>
-              <option value="provided">别人提供的素材</option>
+              <option value="self">自己上传</option>
+              <option value="provided">客户/别人提供</option>
               <option value="image">图片素材</option>
+            </select>
+            <select value={assetUsageRole} onChange={e => setAssetUsageRole(e.target.value as 'avatar' | 'content')} disabled={busy === '上传素材'}>
+              <option value="content">内容素材：楼盘/风光/B-roll</option>
+              <option value="avatar">人物素材：数字人/真人口播</option>
             </select>
             <label className={`uploadPick ${busy === '上传素材' ? 'disabled' : ''}`}>
               选择文件
@@ -3231,7 +3283,7 @@ https://www.douyin.com/user/..." /></Field>
           <select value={assetSort} onChange={e => setAssetSort(e.target.value as any)}><option value="new">最新优先</option><option value="old">最早优先</option><option value="size_desc">文件从大到小</option><option value="size_asc">文件从小到大</option><option value="name">名称排序</option></select>
           <button className="btn ghost" onClick={() => { setAssetSearch(''); setAssetKindFilter('all'); setAssetFolderFilter('all'); setAssetTimeFilter('all'); setAssetSort('new') }}>重置</button>
         </div>
-        <div className="assetStats"><Pill tone="blue">视频 {materialVideoCount}</Pill><Pill tone="purple">图片 {materialImageCount}</Pill><Pill tone="green">已选 {selectedMaterialIds.length}</Pill>{assetLibraryPage === 'video' && <Pill tone="purple">采集视频 {collectedVideos.length}</Pill>}{selectedMaterialAssets.length > 0 && <span>已选顺序：{selectedMaterialAssets.map(a => a.original_name || a.filename).slice(0, 4).join(' → ')}{selectedMaterialAssets.length > 4 ? ` 等 ${selectedMaterialAssets.length} 个` : ''}</span>}</div>
+        <div className="assetStats"><Pill tone="blue">视频 {materialVideoCount}</Pill><Pill tone="purple">图片 {materialImageCount}</Pill><Pill tone="green">已选 {selectedMaterialIds.length}</Pill><Pill tone="orange">人物素材 {uploadedAvatarAssets.length + collectedAvatarAssets.length}</Pill>{assetLibraryPage === 'video' && <Pill tone="purple">采集视频 {collectedVideos.length}</Pill>}{selectedMaterialAssets.length > 0 && <span>已选顺序：{selectedMaterialAssets.map(a => a.original_name || a.filename).slice(0, 4).join(' → ')}{selectedMaterialAssets.length > 4 ? ` 等 ${selectedMaterialAssets.length} 个` : ''}</span>}</div>
         <div className="assetFolderTabs">{assetFolderTabOptions.map(([key,label]) => <button key={key} className={assetFolderFilter === key ? 'active' : ''} onClick={() => setAssetFolderFilter(key as AssetFolderKey)}>{label}</button>)}</div>
 
         <div className={`assetGridWrap ${assetLibraryPage === 'image' ? 'single' : 'grid2'}`}>
@@ -3245,7 +3297,7 @@ https://www.douyin.com/user/..." /></Field>
                     ? <div className="videoPlaceholder"><span>▶</span><strong>视频素材</strong><em>{formatBytes(a.size_bytes)}</em></div>
                     : <img src={a.url} alt={a.original_name || a.filename} loading="lazy" decoding="async" />}
                 </button>
-                <div className="assetMeta"><strong title={a.original_name || a.filename}>{a.original_name || a.filename}</strong><span>{assetFolderLabel((a as any).folder, a.kind)} · {a.kind === 'video' ? '视频' : '图片'} · {formatBytes(a.size_bytes)} · {new Date(a.created_at).toLocaleDateString()}</span></div>
+                <div className="assetMeta"><strong title={a.original_name || a.filename}>{a.original_name || a.filename}</strong><span>{assetFolderLabel((a as any).folder, a.kind)} · {assetRoleLabel(a.usage_role)} · {a.kind === 'video' ? '视频' : '图片'} · {formatBytes(a.size_bytes)} · {new Date(a.created_at).toLocaleDateString()}</span></div>
                 <div className="assetActions"><button className={selectedMaterialIds.includes(a.id) ? 'mini active' : 'mini'} onClick={() => toggleMaterial(a.id)}>{selectedMaterialIds.includes(a.id) ? '已选' : '选择'}</button><a className="mini" href={a.url} target="_blank">预览</a><button className="mini danger" onClick={() => removeAsset(a)}>删除</button></div>
               </div>)}
             </div>
@@ -3255,7 +3307,7 @@ https://www.douyin.com/user/..." /></Field>
             <div className="assetPanelHead"><h3>采集视频库</h3><span>已显示 {visibleCollectedVideos.length}/{collectedVideos.length}，只在视频页展示。</span></div>
             <div className="assetList">
               {collectedVideos.length === 0 && <Empty>暂时没有采集到视频。</Empty>}
-              {visibleCollectedVideos.map(a => <div key={a.id} className={`assetRow collected ${selectedReferenceAssetId === a.id ? 'selected' : ''}`}><button onClick={() => setSelectedReferenceAssetId(a.id)}>作为参考</button><span>{a.original_name || a.filename}</span><em>{formatBytes(a.size_bytes)}</em><button className="mini danger" onClick={() => removeAsset(a)}>删除</button></div>)}
+              {visibleCollectedVideos.map(a => <div key={a.id} className={`assetRow collected ${selectedReferenceAssetId === a.id ? 'selected' : ''}`}><button onClick={() => setSelectedReferenceAssetId(a.id)}>作参考</button><button onClick={() => toggleMaterial(a.id)}>进成片</button><span>{a.original_name || a.filename}</span><em>{formatBytes(a.size_bytes)}</em><button className="mini danger" onClick={() => removeAsset(a)}>删除</button></div>)}
             </div>
             {visibleCollectedVideos.length < collectedVideos.length && <div className="loadMoreRow"><button className="btn soft" onClick={() => setCollectedVisibleCount(v => v + 40)}>再加载 40 条采集视频</button></div>}
           </div>}
@@ -3297,7 +3349,7 @@ https://www.douyin.com/user/..." /></Field>
       {active === 'subtitleCover' && <section className="card modulePanel visualPanel">
         <div className="sectionHeader"><div><h2>第六步：字幕 / 封面 / 图文引流</h2><p>封面负责点击，图文负责收藏和私信。文字由系统叠加，图片只做背景，避免 AI 把提示词画进图里。</p></div><div className="stackButtons"><Button busy={busy === '智能字幕重点' ? busy : ''} label="智能识别重点字幕" onClick={makeSubtitleAI} disabled={!currentScript} kind="ghost" /><Button busy={busy === '生成图文引流包' ? busy : ''} label="生成图文引流包" onClick={makeGraphicPost} /></div></div>
         <div className="visualTabs"><span>字幕</span><span>封面</span><span>图文素材</span></div>
-        <div className="grid4"><Field label="字幕模板"><select value={subtitlePreset} onChange={e => setSubtitlePreset(e.target.value as any)}><option value="douyin_boss">老板口播大字</option><option value="knowledge_highlight">知识科普高亮</option><option value="clean_trust">干净可信</option><option value="cta_pop">结尾强 CTA</option></select></Field><Field label="字幕字号"><input type="number" min="16" max="34" value={subtitleSize} onChange={e => setSubtitleSize(Number(e.target.value || 20))} /></Field><Field label="重点词"><input value={subtitleHighlight} onChange={e => setSubtitleHighlight(e.target.value)} placeholder="AI 可自动识别，也可补充关键词" /></Field><Field label="封面大标题"><input value={copy.title || coverStyle} onChange={e => setCopy({ ...copy, title: e.target.value })} placeholder="例如：海外买房避坑指南" /></Field></div>
+        <div className="grid4"><Field label="字幕模板"><select value={subtitlePreset} onChange={e => setSubtitlePreset(e.target.value as any)}><option value="douyin_boss">老板口播大字</option><option value="knowledge_highlight">知识科普高亮</option><option value="clean_trust">干净可信</option><option value="cta_pop">结尾强 CTA</option></select></Field><Field label="字幕字号"><input type="number" min="16" max="34" value={subtitleSize} onChange={e => setSubtitleSize(Number(e.target.value || 20))} /></Field><Field label={`离底部 ${subtitleMarginV}px`} hint="数值越小越靠下；数字人口播建议 48-60，避免挡嘴。"><input type="range" min="36" max="180" step="4" value={subtitleMarginV} onChange={e => setSubtitleMarginV(Number(e.target.value))} /></Field><Field label="重点词"><input value={subtitleHighlight} onChange={e => setSubtitleHighlight(e.target.value)} placeholder="AI 可自动识别，也可补充关键词" /></Field><Field label="封面大标题"><input value={copy.title || coverStyle} onChange={e => setCopy({ ...copy, title: e.target.value })} placeholder="例如：海外买房避坑指南" /></Field></div>
         <div className="coverBuilder">
           <div>
             <h3>封面生成方式</h3>

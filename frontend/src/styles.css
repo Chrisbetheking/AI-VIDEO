@@ -2468,3 +2468,52 @@ body:has(.heatRadarV3) .collectorAssist{border-color:#dbeafe}
   .assetLibrarySwitch { grid-template-columns: 1fr; }
   .assetToolbar.splitMode { grid-template-columns: 1fr; }
 }
+
+/* === 2026-06 workflow/ui refinement patch === */
+.handoffBar{
+  grid-template-columns:minmax(0,1fr) minmax(260px,auto) !important;
+  align-items:stretch !important;
+  gap:14px !important;
+  padding:14px 16px !important;
+  overflow:hidden !important;
+}
+.handoffBar > div:first-child{min-width:0;display:flex;flex-direction:column;justify-content:center;}
+.handoffBar > div:first-child span{white-space:normal!important;line-height:1.55!important;word-break:break-word;}
+.handoffNextBtn{
+  display:flex!important;
+  align-items:center!important;
+  justify-content:center!important;
+  gap:8px!important;
+  max-width:440px!important;
+  min-width:260px!important;
+  white-space:normal!important;
+  text-align:left!important;
+  line-height:1.25!important;
+  padding:10px 14px!important;
+}
+.handoffNextBtn span{display:inline-flex!important;margin:0!important;color:#dbeafe!important;font-size:11px!important;font-weight:900!important;white-space:nowrap!important;}
+.handoffNextBtn b{display:block!important;min-width:0!important;overflow:hidden!important;text-overflow:ellipsis!important;white-space:nowrap!important;color:#fff!important;font-size:13px!important;}
+.progressRail{margin-top:12px!important;clear:both;}
+
+.uploadSide{display:grid!important;grid-template-columns:1fr!important;gap:8px!important;min-width:260px;}
+.uploadSide select{min-height:42px!important;font-size:13px!important;}
+.assetStats.compactStats{margin:8px 0 12px!important;}
+.refinedPicker{display:grid!important;gap:14px!important;background:linear-gradient(135deg,rgba(240,253,250,.72),rgba(248,250,252,.92))!important;}
+.refinedPicker > div:first-child strong{display:block;color:#0f172a;margin-bottom:4px;}
+.refinedPicker > div:first-child p{margin:0;color:#64748b;font-size:13px;line-height:1.55;}
+.templateGroup{padding:12px;border:1px solid rgba(148,163,184,.22);border-radius:16px;background:rgba(255,255,255,.72);}
+.templateGroup h4{margin:0 0 10px;color:#0f172a;font-size:14px;}
+.compactTemplates .templateCard{opacity:.92;}
+.assetCard .assetMeta span{display:block;white-space:normal;overflow-wrap:anywhere;}
+.assetRow.collected{grid-template-columns:auto auto minmax(0,1fr) auto!important;gap:8px!important;}
+.assetRow.collected span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.collectorTickerTrack span{max-width:none;white-space:nowrap;}
+.collectorEvent strong,.collectorEvent p,.collectorEvent small{word-break:break-word;overflow-wrap:anywhere;}
+
+@media (max-width: 980px){
+  .handoffBar{grid-template-columns:1fr!important;}
+  .handoffNextBtn{max-width:none!important;width:100%!important;}
+  .handoffNextBtn b{white-space:normal!important;}
+  .uploadSide{min-width:0;}
+  .assetRow.collected{grid-template-columns:1fr!important;}
+}

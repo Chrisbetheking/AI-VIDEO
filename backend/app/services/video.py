@@ -663,7 +663,7 @@ def burn_subtitles_and_audio(
     duration: float,
     *,
     subtitle_size: int = 18,
-    subtitle_margin_v: int = 70,
+    subtitle_margin_v: int = 56,
     subtitle_position: str = 'bottom_safe',
     subtitle_style_preset: str = 'douyin_boss',
     subtitle_keywords: str = '',
@@ -676,7 +676,7 @@ def burn_subtitles_and_audio(
     if subtitle_path and subtitle_path.exists():
         sub_path = ffmpeg_subtitle_path(subtitle_path)
         font_size = max(12, min(36, int(subtitle_size or 18)))
-        margin_v = max(20, min(320, int(subtitle_margin_v or 70)))
+        margin_v = max(28, min(220, int(subtitle_margin_v or 56)))
         if subtitle_position == 'middle_low':
             margin_v = max(margin_v, 220)
         elif subtitle_position == 'center':
@@ -750,7 +750,7 @@ async def compose_video(
     rate: Optional[str] = None,
     subtitle_segments: Optional[list[dict[str, Any]]] = None,
     subtitle_size: int = 18,
-    subtitle_margin_v: int = 70,
+    subtitle_margin_v: int = 56,
     subtitle_position: str = 'bottom_safe',
     subtitle_style_preset: str = 'douyin_boss',
     subtitle_keywords: str = '',

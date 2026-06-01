@@ -1398,6 +1398,19 @@ def _normalize_asset_folder(value: str, *, kind: str = '', filename: str = '') -
     return 'self'
 
 
+def _normalize_asset_usage_role(value: str, *, kind: str = '', filename: str = '', folder: str = '') -> str:
+    raw = (value or '').strip().lower().replace(' ', '_').replace('-', '_')
+    name = (filename or '').lower()
+    folder = (folder or '').lower()
+    if raw in {'avatar', 'person', 'human', 'portrait', '人物', '人物素材', '数字人', '口播'}:
+        return 'avatar'
+    if folder == 'digital_human':
+        return 'avatar'
+    if name.startswith(('digital_human_', 'digital-human')) or any(x in name for x in ['avatar', 'portrait', 'person', 'human', '口播', '真人', '数字人']):
+        return 'avatar'
+    return 'content'
+
+
 def _asset_source_type(folder: str, filename: str = '') -> str:
     name = (filename or '').lower()
     if folder == 'digital_human' or name.startswith(('digital_human_', 'digital-human')) or 'digital-human/' in name:
@@ -1412,7 +1425,7 @@ def _asset_source_type(folder: str, filename: str = '') -> str:
 
 
 @app.post('/api/assets', response_model=List[AssetItem])
-async def api_upload_assets(request: Request, files: List[UploadFile] = File(...), folder: str = Form('self'), settings: Settings = Depends(get_settings), memory: MemoryStore = Depends(get_memory)) -> List[AssetItem]:
+async def api_upload_assets(request: Request, files: List[UploadFile] = File(...), folder: str = Form('self'), usage_role: str = Form('content'), settings: Settings = Depends(get_settings), memory: MemoryStore = Depends(get_memory)) -> List[AssetItem]:
     """Upload material assets.
 
     Fixes two common production problems:
@@ -1454,6 +1467,7 @@ async def api_upload_assets(request: Request, files: List[UploadFile] = File(...
 
         kind = 'image' if ext in IMAGE_EXTS else 'video'
         item_folder = _normalize_asset_folder(folder, kind=kind, filename=original)
+        item_usage_role = _normalize_asset_usage_role(usage_role, kind=kind, filename=original, folder=item_folder)
         created_at = now_iso()
         public_url = maybe_upload_to_r2(settings, dest, prefix='uploads')
         if settings.require_r2_assets and not public_url:
@@ -1470,6 +1484,7 @@ async def api_upload_assets(request: Request, files: List[UploadFile] = File(...
             'created_at': created_at,
             'folder': item_folder,
             'source_type': _asset_source_type(item_folder, original),
+            'usage_role': item_usage_role,
             'r2_url': public_url or '',
             'r2_key': f'uploads/{dest_name}' if public_url else '',
             'deleted': False,
@@ -1489,6 +1504,7 @@ async def api_upload_assets(request: Request, files: List[UploadFile] = File(...
             created_at=str(saved_asset.get('created_at') or created_at),
             folder=item_folder,
             source_type=_asset_source_type(item_folder, original),
+            usage_role=item_usage_role,
             r2_url=public_url or '',
             r2_key=f'uploads/{dest_name}' if public_url else '',
             workspace_id=str(saved_asset.get('workspace_id') or settings.workspace_id or ''),
@@ -1556,6 +1572,7 @@ def api_list_assets(
                 created_at=str(raw.get('created_at') or now_iso()),
                 folder=_normalize_asset_folder(str(raw.get('folder') or ''), kind=str(raw.get('kind') or ('image' if ext in IMAGE_EXTS else 'video')), filename=filename),
                 source_type=str(raw.get('source_type') or _asset_source_type(_normalize_asset_folder(str(raw.get('folder') or ''), kind=str(raw.get('kind') or ('image' if ext in IMAGE_EXTS else 'video')), filename=filename), filename)),
+                usage_role=str(raw.get('usage_role') or _normalize_asset_usage_role('', kind=str(raw.get('kind') or ('image' if ext in IMAGE_EXTS else 'video')), filename=filename, folder=_normalize_asset_folder(str(raw.get('folder') or ''), kind=str(raw.get('kind') or ('image' if ext in IMAGE_EXTS else 'video')), filename=filename))),
             ))
         except Exception:
             continue
@@ -1577,6 +1594,7 @@ def api_list_assets(
                 created_at=datetime.fromtimestamp(stat.st_mtime, timezone.utc).isoformat(),
                 folder=_normalize_asset_folder('', kind=item_kind, filename=path.name),
                 source_type=_asset_source_type(_normalize_asset_folder('', kind=item_kind, filename=path.name), path.name),
+                usage_role=_normalize_asset_usage_role('', kind=item_kind, filename=path.name, folder=_normalize_asset_folder('', kind=item_kind, filename=path.name)),
             ))
 
     # 3) R2 fallback after Render restart/OOM. Short timeouts in storage.py prevent hanging.
@@ -1604,6 +1622,7 @@ def api_list_assets(
                     created_at=created_at,
                     folder=_normalize_asset_folder('', kind=item_kind, filename=name),
                     source_type=_asset_source_type(_normalize_asset_folder('', kind=item_kind, filename=name), name),
+                    usage_role=_normalize_asset_usage_role('', kind=item_kind, filename=name, folder=_normalize_asset_folder('', kind=item_kind, filename=name)),
                 ))
 
     items.sort(key=lambda it: it.created_at, reverse=True)

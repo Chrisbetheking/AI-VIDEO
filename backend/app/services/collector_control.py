@@ -28,7 +28,29 @@ def _safe_int(value: Any, default: int = 0) -> int:
         return default
 
 
+def _windows_safe_text(value: Any, limit: int = 600) -> str:
+    text = '' if value is None else str(value)
+    # Windows CMD often runs in GBK; strip astral emojis and control chars to prevent
+    # `'gbk' codec can't encode character` from killing the collector worker.
+    text = ''.join(ch for ch in text if ord(ch) <= 0xFFFF and (ord(ch) >= 32 or ch in '\r\n\t'))
+    text = ' '.join(text.replace('\r', ' ').replace('\n', ' ').replace('\t', ' ').split())
+    return text[:limit]
+
+
+def _sanitize_payload(value: Any, depth: int = 0) -> Any:
+    if depth > 5:
+        return _windows_safe_text(value, 240)
+    if isinstance(value, str):
+        return _windows_safe_text(value, 1200)
+    if isinstance(value, list):
+        return [_sanitize_payload(v, depth + 1) for v in value[:200]]
+    if isinstance(value, dict):
+        return {str(k): _sanitize_payload(v, depth + 1) for k, v in list(value.items())[:120]}
+    return value
+
+
 def create_collector_run(memory: MemoryStore, payload: dict[str, Any]) -> dict[str, Any]:
+    payload = _sanitize_payload(payload)
     require_ingest_token(str(payload.get('token') or ''))
     run_id = str(payload.get('run_id') or f"collector_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}")
     item = {
@@ -58,6 +80,7 @@ def create_collector_run(memory: MemoryStore, payload: dict[str, Any]) -> dict[s
 
 
 def append_collector_event(memory: MemoryStore, run_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    payload = _sanitize_payload(payload)
     token = str(payload.get('token') or '')
     if token:
         require_ingest_token(token)
@@ -113,6 +136,7 @@ def latest_collector_status(memory: MemoryStore, events_limit: int = 30) -> dict
 
 
 def create_collector_command(memory: MemoryStore, payload: dict[str, Any]) -> dict[str, Any]:
+    payload = _sanitize_payload(payload)
     # 前端只负责下发命令；真正执行、上报和上传仍由 ECS Worker 使用 HEAT_RADAR_INGEST_TOKEN 校验。
     # 这样网页不会因为浏览器本地没有 token 而误报，ECS 侧安全校验不变。
     command_id = f"cmd_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}"
@@ -139,10 +163,11 @@ def next_collector_command(memory: MemoryStore, token: str) -> dict[str, Any]:
         return {'ok': True, 'command': None}
     cmd = queued[0]
     claimed = memory.update_by_id('collector_commands', str(cmd.get('id') or cmd.get('command_id')), {'status': 'claimed', 'claimed_at': now_iso(), 'message': 'ECS Worker 已领取'}, require_supabase=True)
-    return {'ok': True, 'command': claimed}
+    return {'ok': True, 'command': _sanitize_payload(claimed)}
 
 
 def complete_collector_command(memory: MemoryStore, command_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    payload = _sanitize_payload(payload)
     require_ingest_token(str(payload.get('token') or ''))
     status = payload.get('status') or ('failed' if payload.get('error') else 'finished')
     return memory.update_by_id('collector_commands', command_id, {'status': status, 'finished_at': now_iso(), 'message': payload.get('message') or '', 'raw': payload.get('raw') or {}}, require_supabase=True)

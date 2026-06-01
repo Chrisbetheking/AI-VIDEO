@@ -114,6 +114,8 @@ class AssetItem(BaseModel):
     # 素材文件夹：self=自己拍的，provided=别人提供，image=图片素材，collected=采集视频，ai=AI生成图
     folder: str = 'self'
     source_type: str = 'upload'
+    # 素材用途：avatar=人物/数字人模板，content=楼盘/风光/B-roll 内容素材
+    usage_role: str = 'content'
     r2_url: str = ''
     r2_key: str = ''
     workspace_id: str = ''
@@ -164,7 +166,7 @@ class ComposeRequest(BaseModel):
     voice: Optional[str] = None
     rate: Optional[str] = None
     subtitle_size: int = Field(default=18, ge=12, le=36)
-    subtitle_margin_v: int = Field(default=70, ge=20, le=320)
+    subtitle_margin_v: int = Field(default=56, ge=20, le=320)
     subtitle_position: str = Field(default='bottom_safe', max_length=40)
     subtitle_style_preset: str = Field(default='douyin_boss', max_length=40)
     subtitle_keywords: str = Field(default='', max_length=500)
