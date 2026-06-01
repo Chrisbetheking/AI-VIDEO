@@ -1724,6 +1724,8 @@ async def api_compose_video(req: ComposeRequest, request: Request, settings: Set
             subtitle_position=req.subtitle_position,
             subtitle_style_preset=req.subtitle_style_preset,
             subtitle_keywords=req.subtitle_keywords,
+            keyword_sfx_enabled=req.keyword_sfx_enabled,
+            keyword_sfx_volume=req.keyword_sfx_volume,
         )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f'视频合成失败：{str(exc)[:1800]}') from exc
@@ -2200,7 +2202,7 @@ async def _digital_human_status_response(
         stable_video_url, stable_video_name, cache_warnings = await finalize_digital_human_video_url(settings, request, result)
         final_url = stable_video_url or result.video_url
         final_name = stable_video_name or None
-        if final_url and final_name and str(result.engine or '').startswith('fal:'):
+        if final_url and final_name:
             try:
                 _save_digital_human_asset(settings, get_memory(settings), video_name=final_name, video_url=final_url, engine=result.engine, title='数字人开场片段')
             except Exception:

@@ -2074,8 +2074,27 @@ ${manualText || ''}`.trim()
       const rest = prev.filter(a => a.id !== item.id && a.url !== item.url && a.filename !== item.filename)
       return [item, ...rest]
     })
-    setSelectedMaterialIds(prev => prev.includes(item.id) ? prev : [item.id, ...prev])
+    setAssetLibraryPage('video')
+    setAssetFolderFilter('digital_human')
     return item.id
+  }
+
+  function attachDigitalHumanIntroToTimeline(res: DigitalHumanCreateResponse | null | undefined, refreshedIntro?: AssetItem | null) {
+    const localId = upsertDigitalHumanAssetToClient(res)
+    const introId = refreshedIntro?.id || localId
+    if (!introId) return ''
+
+    // 数字人片头是用真人模板 + 第 1 段音频生成的。最终剪辑里只保留数字人结果，
+    // 自动移除原真人模板/动作参考，避免“片头说一遍，后面模板又出现一遍”。
+    const idsToRemove = new Set([digitalHumanAvatarId, digitalHumanDriverId].filter(Boolean))
+    setSelectedMaterialIds(prev => [introId, ...prev.filter(id => id !== introId && !idsToRemove.has(id))])
+
+    const introSeconds = Math.max(3, Math.min(18, estimateSeconds(getDigitalHumanIntroText(), voiceSegments[0]?.speed_ratio)))
+    setAssetClipSettings(prev => ({
+      ...prev,
+      [introId]: { ...(prev[introId] || {}), order: 0, image_seconds: introSeconds, video_start: 0, video_end: introSeconds },
+    }))
+    return introId
   }
 
   async function generateFullCopyAndVoiceDraft() {
@@ -2318,11 +2337,10 @@ ${selectedAssetScriptContext || '暂无素材，请按马来西亚楼盘、风�
     setDigitalHumanPollCount(0)
     setDigitalHumanLastChecked(new Date().toLocaleTimeString())
     if (res?.video_url) {
-      upsertDigitalHumanAssetToClient(res)
       const refreshed = await reloadAssets().catch(() => [] as AssetItem[])
       const newIntro = (refreshed || []).find(a => a.filename === res.video_name || a.url === res.video_url || a.source_type === 'digital_human_intro')
-      if (newIntro?.id) setSelectedMaterialIds(prev => prev.includes(newIntro.id) ? prev : [newIntro.id, ...prev])
-      setLastHandoff('数字人片段已生成：前端已立即放入素材库并排到成片最前；后端也会写入素材库，刷新后仍可看到。')
+      attachDigitalHumanIntroToTimeline(res, newIntro)
+      setLastHandoff('数字人片段已生成：已自动放入“数字人片段”素材库，并排到本次合成第 1 位；原真人模板已从本次素材顺序移除，避免重复开头。')
     } else {
       setLastHandoff('fal 数字人任务已提交。不要重复提交；系统会自动查询，完成后会自动回存素材库并排到素材最前。')
     }
@@ -2370,11 +2388,10 @@ ${selectedAssetScriptContext || '暂无素材，请按马来西亚楼盘、风�
     setDigitalHumanLastChecked(new Date().toLocaleTimeString())
     setDigitalHumanPollCount(prev => prev + 1)
     if (res.video_url) {
-      upsertDigitalHumanAssetToClient(res)
       const refreshed = await reloadAssets().catch(() => [] as AssetItem[])
       const newIntro = (refreshed || []).find(a => a.filename === res.video_name || a.url === res.video_url || a.source_type === 'digital_human_intro')
-      if (newIntro?.id) setSelectedMaterialIds(prev => prev.includes(newIntro.id) ? prev : [newIntro.id, ...prev])
-      setLastHandoff('数字人片段已生成：已立即放进本次素材顺序最前面，后面直接合成就会带上。')
+      attachDigitalHumanIntroToTimeline(res, newIntro)
+      setLastHandoff('数字人片段已生成：已自动进素材库并排到素材顺序第 1 位；合成时会静音素材原音，只保留完整配音，避免声音重复。')
     } else if (String(res.status || '').toLowerCase() === 'failed') {
       setLastHandoff('当前数字人任务不可继续查询。请展开原始返回或去 fal 后台 Request History 查看；必要时清除任务后重试。')
     } else {
@@ -2387,7 +2404,18 @@ ${selectedAssetScriptContext || '暂无素材，请按马来西亚楼盘、风�
       setError('请先生成或填写文案，再合成视频。')
       return
     }
-    const chosen = (selectedMaterialAssets.length ? selectedMaterialAssets : materialAssets.slice(0, 6))
+    const digitalIntroCandidates = digitalHuman?.video_url
+      ? materialAssets.filter(a => a.source_type === 'digital_human_intro' || a.url === digitalHuman.video_url || a.filename === digitalHuman.video_name)
+      : []
+    const digitalIntroId = digitalIntroCandidates[0]?.id || ''
+    const idsToRemoveForCompose = new Set([digitalHumanAvatarId, digitalHumanDriverId].filter(Boolean))
+    const effectiveSelectedIds = digitalIntroId
+      ? [digitalIntroId, ...selectedMaterialIds.filter(id => id !== digitalIntroId && !idsToRemoveForCompose.has(id))]
+      : selectedMaterialIds.filter(id => !idsToRemoveForCompose.has(id))
+    const effectiveSelectedAssets = effectiveSelectedIds
+      .map(id => materialAssets.find(a => a.id === id))
+      .filter((a): a is AssetItem => Boolean(a && a.id && a.url))
+    const chosen = (effectiveSelectedAssets.length ? effectiveSelectedAssets : materialAssets.slice(0, 6))
       .map((asset, index) => normalizeAsset(asset, index))
       .filter(asset => Boolean(asset.id && asset.url))
     if (!chosen.length) {
@@ -2431,6 +2459,8 @@ ${selectedAssetScriptContext || '暂无素材，请按马来西亚楼盘、风�
       subtitle_position: subtitlePosition,
       subtitle_style_preset: subtitlePreset,
       subtitle_keywords: subtitleHighlight,
+      keyword_sfx_enabled: true,
+      keyword_sfx_volume: 0.16,
       subtitle_segments: safeSubtitleSegments
     }))
     setVideo(res!)

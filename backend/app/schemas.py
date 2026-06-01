@@ -163,6 +163,8 @@ class ComposeRequest(BaseModel):
     subtitle_position: str = Field(default='bottom_safe', max_length=40)
     subtitle_style_preset: str = Field(default='douyin_boss', max_length=40)
     subtitle_keywords: str = Field(default='', max_length=500)
+    keyword_sfx_enabled: bool = Field(default=True)
+    keyword_sfx_volume: float = Field(default=0.16, ge=0.0, le=0.5)
     subtitle_segments: List[AudioSegmentTiming] = Field(default_factory=list)
 
 

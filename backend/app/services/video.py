@@ -5,6 +5,8 @@ import os
 import re
 import subprocess
 import uuid
+import wave
+import struct
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable, List, Optional, Tuple, Union
@@ -40,13 +42,6 @@ def _env_int(name: str, default: int, low: int, high: int) -> int:
         value = int(os.getenv(name, str(default)))
     except Exception:
         value = default
-    # Older Render demos sometimes set COMPOSE_MAX_ASSETS=2. That made user
-    # timelines look broken because only two clips survived. Keep the escape
-    # hatch COMPOSE_ALLOW_TINY_ASSETS=true for true low-memory demos.
-    if name == "COMPOSE_MAX_ASSETS" and value < 3:
-        allow_tiny = str(os.getenv("COMPOSE_ALLOW_TINY_ASSETS", "")).strip().lower() in {"1", "true", "yes", "on"}
-        if not allow_tiny:
-            value = default
     return max(low, min(high, value))
 
 
@@ -578,6 +573,78 @@ def _subtitle_force_style(preset: str, font_size: int, margin_v: int, alignment:
         })
     return ','.join(f'{k}={v}' for k, v in base.items())
 
+
+def _segment_has_keyword(text: str, keywords: list[str]) -> bool:
+    if not text:
+        return False
+    return any(word and word in text for word in keywords)
+
+
+def create_keyword_sfx_track(
+    duration: float,
+    subtitle_segments: Optional[list[dict[str, Any]]],
+    subtitle_keywords: str,
+    output_path: Path,
+    *,
+    volume: float = 0.16,
+) -> Optional[Path]:
+    """Create a lightweight keyword ding track without external audio assets.
+
+    The goal is not heavy sound design; it adds very short, low-volume accents on
+    segments that contain important words like 第二家园/国际学校/私信. This avoids
+    shipping copyrighted effect files and works on a small VPS.
+    """
+    keywords = _subtitle_keywords(subtitle_keywords, '')
+    if not keywords or not subtitle_segments:
+        return None
+    duration = max(1.0, float(duration or 1.0))
+    sample_rate = 44100
+    total = int(duration * sample_rate)
+    if total <= 0:
+        return None
+    samples = [0.0] * total
+    events: list[float] = []
+    for seg in subtitle_segments:
+        text = clean_subtitle_text(str(seg.get('text') or ''))
+        if not _segment_has_keyword(text, keywords):
+            continue
+        start = max(0.0, min(duration - 0.1, _safe_float(seg.get('start'), 0.0)))
+        # Avoid stacking too many dings in a short window.
+        if events and start - events[-1] < 1.2:
+            continue
+        events.append(start)
+        if len(events) >= 10:
+            break
+    if not events:
+        return None
+
+    amp = max(0.0, min(0.5, float(volume or 0.16))) * 32767
+    tone_len = int(0.18 * sample_rate)
+    for start in events:
+        base = int(start * sample_rate)
+        for i in range(tone_len):
+            pos = base + i
+            if pos >= total:
+                break
+            tt = i / sample_rate
+            # Two short sine tones with exponential decay: close to a soft ding/pop.
+            env = math.exp(-18 * tt)
+            value = (math.sin(2 * math.pi * 880 * tt) * 0.75 + math.sin(2 * math.pi * 1320 * tt) * 0.25) * env
+            samples[pos] += value * amp
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with wave.open(str(output_path), 'w') as wf:
+        wf.setnchannels(1)
+        wf.setsampwidth(2)
+        wf.setframerate(sample_rate)
+        frames = bytearray()
+        for s in samples:
+            v = int(max(-32767, min(32767, s)))
+            frames.extend(struct.pack('<h', v))
+        wf.writeframes(bytes(frames))
+    return output_path if output_path.exists() and output_path.stat().st_size > 1024 else None
+
+
 def burn_subtitles_and_audio(
     base_video: Path,
     subtitle_path: Optional[Path],
@@ -590,6 +657,8 @@ def burn_subtitles_and_audio(
     subtitle_position: str = 'bottom_safe',
     subtitle_style_preset: str = 'douyin_boss',
     subtitle_keywords: str = '',
+    sfx_path: Optional[Path] = None,
+    keyword_sfx_volume: float = 0.16,
 ) -> List[str]:
     warnings: List[str] = []
     w, h = target_size()
@@ -606,15 +675,24 @@ def burn_subtitles_and_audio(
         style = _subtitle_force_style(subtitle_style_preset, font_size, margin_v, alignment=2)
         vf += f",subtitles='{sub_path}':force_style='{style}'"
 
+    has_audio = bool(audio_path and audio_path.exists())
+    has_sfx = bool(sfx_path and sfx_path.exists())
     cmd = ["ffmpeg", "-hide_banner", "-loglevel", "warning", "-y", "-i", str(base_video)]
-    if audio_path and audio_path.exists():
+    if has_audio:
         cmd += ["-i", str(audio_path)]
+    if has_sfx:
+        cmd += ["-i", str(sfx_path)]
     cmd += ["-vf", vf]
-    if audio_path and audio_path.exists():
+    if has_audio and has_sfx:
+        vol = max(0.0, min(0.5, float(keyword_sfx_volume or 0.16)))
+        cmd += ["-filter_complex", f"[1:a]volume=1.0[a0];[2:a]volume={vol:.3f}[a1];[a0][a1]amix=inputs=2:duration=first:dropout_transition=0[aout]", "-map", "0:v:0", "-map", "[aout]", "-shortest"]
+    elif has_audio:
+        cmd += ["-map", "0:v:0", "-map", "1:a:0", "-shortest"]
+    elif has_sfx:
         cmd += ["-map", "0:v:0", "-map", "1:a:0", "-shortest"]
     cmd += ["-t", f"{duration:.2f}", *_video_codec_args()]
-    if audio_path and audio_path.exists():
-        cmd += ["-c:a", "aac", "-b:a", "96k"]
+    if has_audio or has_sfx:
+        cmd += ["-c:a", "aac", "-b:a", "128k"]
     cmd += ["-movflags", "+faststart", str(output_path)]
 
     proc = run_cmd(cmd, timeout=max(240, int(duration * 14)))
@@ -627,15 +705,24 @@ def burn_subtitles_and_audio(
     except Exception:
         pass
 
+    has_audio = bool(audio_path and audio_path.exists())
+    has_sfx = bool(sfx_path and sfx_path.exists())
     cmd = ["ffmpeg", "-hide_banner", "-loglevel", "warning", "-y", "-i", str(base_video)]
-    if audio_path and audio_path.exists():
+    if has_audio:
         cmd += ["-i", str(audio_path)]
+    if has_sfx:
+        cmd += ["-i", str(sfx_path)]
     cmd += ["-vf", f"scale={w}:{h},format=yuv420p"]
-    if audio_path and audio_path.exists():
+    if has_audio and has_sfx:
+        vol = max(0.0, min(0.5, float(keyword_sfx_volume or 0.16)))
+        cmd += ["-filter_complex", f"[1:a]volume=1.0[a0];[2:a]volume={vol:.3f}[a1];[a0][a1]amix=inputs=2:duration=first:dropout_transition=0[aout]", "-map", "0:v:0", "-map", "[aout]", "-shortest"]
+    elif has_audio:
+        cmd += ["-map", "0:v:0", "-map", "1:a:0", "-shortest"]
+    elif has_sfx:
         cmd += ["-map", "0:v:0", "-map", "1:a:0", "-shortest"]
     cmd += ["-t", f"{duration:.2f}", *_video_codec_args()]
-    if audio_path and audio_path.exists():
-        cmd += ["-c:a", "aac", "-b:a", "96k"]
+    if has_audio or has_sfx:
+        cmd += ["-c:a", "aac", "-b:a", "128k"]
     cmd += ["-movflags", "+faststart", str(output_path)]
     proc2 = run_cmd(cmd, timeout=max(240, int(duration * 12)))
     if proc2.returncode != 0:
@@ -657,6 +744,8 @@ async def compose_video(
     subtitle_position: str = 'bottom_safe',
     subtitle_style_preset: str = 'douyin_boss',
     subtitle_keywords: str = '',
+    keyword_sfx_enabled: bool = True,
+    keyword_sfx_volume: float = 0.16,
 ) -> VideoResult:
     warnings: List[str] = []
 
@@ -686,6 +775,22 @@ async def compose_video(
         warnings.append('字幕已按最终音频时长重新缩放，并对后半段自动提前，减少越往后越慢的问题。')
     base_video, base_warnings = build_video_base(list(asset_paths), duration, base_video)
     warnings.extend(base_warnings)
+
+    sfx_path: Optional[Path] = None
+    if keyword_sfx_enabled and os.getenv('ENABLE_KEYWORD_SFX', 'true').strip().lower() not in {'0', 'false', 'no', 'off'}:
+        try:
+            sfx_path = create_keyword_sfx_track(
+                duration,
+                subtitle_segments,
+                subtitle_keywords,
+                settings.tmp_dir / f"keyword_sfx_{task_id}.wav",
+                volume=keyword_sfx_volume,
+            )
+            if sfx_path:
+                warnings.append('已在重点词字幕处叠加轻量提示音效；如觉得太多，可设置 ENABLE_KEYWORD_SFX=false。')
+        except Exception as exc:
+            warnings.append(f'关键词音效生成失败，已跳过：{str(exc)[:180]}')
+
     warnings.extend(burn_subtitles_and_audio(
         base_video,
         subtitle_path,
@@ -697,6 +802,8 @@ async def compose_video(
         subtitle_position=subtitle_position,
         subtitle_style_preset=subtitle_style_preset,
         subtitle_keywords=subtitle_keywords,
+        sfx_path=sfx_path,
+        keyword_sfx_volume=keyword_sfx_volume,
     ))
 
     try:
