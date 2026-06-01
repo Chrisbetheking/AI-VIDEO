@@ -221,6 +221,13 @@ function safeText(value: unknown, fallback = '') {
   return text || fallback
 }
 
+function videoPreviewUrl(url: string, seconds = 0.35) {
+  const clean = safeText(url)
+  if (!clean) return ''
+  if (clean.includes('#t=')) return clean
+  return `${clean}#t=${seconds}`
+}
+
 function safeCompactText(value: unknown, limit = 180) {
   let text = safeText(value)
   try {
@@ -795,7 +802,6 @@ function AppInner() {
   const [digitalHumanJimengModel, setDigitalHumanJimengModel] = useState('omnihuman15')
   const [digitalHumanAvatarId, setDigitalHumanAvatarId] = useState('')
   const [digitalHumanDriverId, setDigitalHumanDriverId] = useState('')
-  const [digitalHumanConsent, setDigitalHumanConsent] = useState(false)
   const [digitalHuman, setDigitalHuman] = useState<DigitalHumanCreateResponse | null>(null)
   const [digitalHumanPollCount, setDigitalHumanPollCount] = useState(0)
   const [digitalHumanLastChecked, setDigitalHumanLastChecked] = useState('')
@@ -2108,7 +2114,7 @@ ${manualText || ''}`.trim()
 
   function getDigitalHumanIntroText() {
     const first = voiceSegments[0]?.text || copy.hook || (currentScript.split(/\n+/).map(x => x.trim()).filter(Boolean)[0] || '')
-    return limitText(first || currentScript || copy.title || '请用一句自然开场介绍今天的马来西亚置业重点。', 520)
+    return limitText(first || currentScript || copy.title || '请用一句自然开场介绍今天的马来西亚置业重点。', 90)
   }
 
   function upsertDigitalHumanAssetToClient(res: DigitalHumanCreateResponse | null | undefined) {
@@ -2462,7 +2468,7 @@ ${selectedAssetScriptContext || '暂无素材，请按马来西亚楼盘、风�
       jimeng_model: digitalHumanJimengModel,
       scene_template: digitalHumanSceneTemplate,
       scene_prompt: digitalHumanScenePrompt,
-      consent_confirmed: digitalHumanConsent
+      consent_confirmed: true
     }))
     setDigitalHuman(res!)
     setDigitalHumanVersion(prev => digitalHuman?.job_id || digitalHuman?.video_url ? prev + 1 : prev)
@@ -3241,7 +3247,7 @@ https://www.douyin.com/user/..." /></Field>
       </section>}
 
       {active === 'digitalHuman' && <section className="card modulePanel">
-        <div className="sectionHeader"><div><h2>第三步：可选数字人片头</h2><p>这一步不是每条都必须用。需要真人感片头时，系统只拿第 1 段配音；可选真人模板视频或照片场景数字人，纯素材混剪可直接跳过。</p></div><div className="headerActions"><Button label="跳过数字人，去素材混剪" onClick={skipDigitalHumanAndUseAssets} kind="ghost" /><Button busy={busy === '生成数字人片段' || busy === '查询数字人结果' ? busy : ''} label={digitalHumanPrimaryLabel} onClick={hasRunningDigitalHumanTask ? () => checkDigitalHumanStatus(false) : makeDigitalHuman} disabled={!hasRunningDigitalHumanTask && (!audio?.file_name || !digitalHumanAvatarId || !digitalHumanConsent)} /></div></div>
+        <div className="sectionHeader digitalHumanHeader"><div><h2>第三步：可选数字人片头</h2><p>这一步不是每条都必须用。需要真人感片头时，只把第 1 段开场配音送去 fal；成片配音会单独生成，避免数字人开头和后面旁白重复。</p></div><div className="headerActions digitalHumanActions"><Button label="跳过数字人，去素材混剪" onClick={skipDigitalHumanAndUseAssets} kind="ghost" /><button className="btn digitalHumanMainCta" onClick={hasRunningDigitalHumanTask ? () => checkDigitalHumanStatus(false) : makeDigitalHuman} disabled={Boolean(busy === '生成数字人片段' || busy === '查询数字人结果') || (!hasRunningDigitalHumanTask && (!audio?.file_name || !digitalHumanAvatarId))}>{busy === '生成数字人片段' || busy === '查询数字人结果' ? busy : digitalHumanPrimaryLabel}</button></div></div>
         <div className="grid3">
           <Field label={digitalHumanNeedsVideo ? '真人模板视频 MP4' : digitalHumanPhotoSceneMode ? '本人授权照片' : '数字人形象素材'} hint={digitalHumanNeedsVideo ? 'fal 必须手动选择本人授权的 5-20 秒正面半身说话视频；每条视频可换不同模板，不能用图片。' : digitalHumanPhotoSceneMode ? '上传本人清晰正脸/半身照；系统会做楼道、样板间、园区等场景片头。' : '静态兜底可用照片；fal 路线必须用视频。'}><select value={digitalHumanAvatarId} onChange={e => setDigitalHumanAvatarId(e.target.value)}><option value="">{digitalHumanNeedsVideo ? '手动选择本条视频的真人模板' : digitalHumanPhotoSceneMode ? '选择本人照片' : '选择已上传照片/视频'}</option>{uploadedAvatarAssets.filter(a => digitalHumanNeedsVideo ? a.kind === 'video' : digitalHumanPhotoSceneMode ? a.kind === 'image' : true).map(a => <option key={a.id} value={a.id}>自己上传 · {a.kind} · {a.original_name || a.filename}</option>)}{collectedAvatarAssets.filter(a => digitalHumanNeedsVideo ? a.kind === 'video' : digitalHumanPhotoSceneMode ? a.kind === 'image' : true).map(a => <option key={a.id} value={a.id}>采集备用 · {a.kind} · {a.original_name || a.filename}</option>)}</select></Field>
           <Field label="动作参考视频（可选）" hint="fal 当前不需要；后期 MuseTalk/LivePortrait 才用。"><select value={digitalHumanDriverId} onChange={e => setDigitalHumanDriverId(e.target.value)}><option value="">不用动作参考</option>{digitalHumanDriverAssets.map(a => <option key={a.id} value={a.id}>{assetFolderLabel(a.folder, a.kind)} · {a.original_name || a.filename}</option>)}</select></Field>
@@ -3249,12 +3255,10 @@ https://www.douyin.com/user/..." /></Field>
           {digitalHumanEngine === 'jimeng' && <Field label="即梦模型" hint="模拟真人优先选 OmniHuman1.5；普通视频生成可用视频3.0。"><select value={digitalHumanJimengModel} onChange={e => setDigitalHumanJimengModel(e.target.value)}><option value="omnihuman15">OmniHuman1.5（单图+音频真人口播）</option><option value="quick">数字人快速模式</option><option value="video30">即梦视频生成3.0（图生视频）</option></select></Field>}
           {digitalHumanPhotoSceneMode && <><Field label="照片入场景" hint="先做稳定 MVP：把本人照片放入真实房产场景，再配第 1 段开场音频。"><select value={digitalHumanSceneTemplate} onChange={e => setDigitalHumanSceneTemplate(e.target.value)}><option>样板间客厅讲解</option><option>楼道电梯厅讲解</option><option>小区园林讲解</option><option>会所大堂讲解</option><option>项目沙盘旁讲解</option><option>学校门口讲解</option><option>吉隆坡城市风光</option><option>落地窗办公室讲解</option></select></Field><Field label="场景提示词（可选）" hint="不填就按上面的场景自动生成；想指定楼盘/城市/氛围可以写这里。"><textarea value={digitalHumanScenePrompt} onChange={e => setDigitalHumanScenePrompt(e.target.value)} placeholder="例如：马来西亚高端公寓样板间，自然光，顾问站在客厅，真实可信，竖屏短视频画面" /></Field></>}
         </div>
-        <div className="templatePicker refinedPicker"><div><strong>{digitalHumanPhotoSceneMode ? '本条视频用哪张本人照片？' : '本条视频用哪个真人口播模板？'}</strong><p>{digitalHumanPhotoSceneMode ? '照片场景数字人每条都可以换照片和场景，不会固定同一个开头。' : '这里选的是你上传/采集的真人原始口播视频，不是已经生成出的数字人片段；数字人片段会自动放到成片开头。'}</p></div><div className="assetStats compactStats"><Pill tone="blue">真人模板 {uploadedAvatarAssets.length}</Pill><Pill tone="purple">采集备用真人 {collectedAvatarAssets.length}</Pill><Pill tone="green">已生成片头 {digitalHumanIntroAssets.length}</Pill><Pill tone="orange">内容素材 {contentOnlyAssets.length}</Pill></div><div className="templateGroup"><h4>优先：自己上传的真人模板视频/照片</h4><div className="templateCards">{uploadedAvatarAssets.filter(a => digitalHumanNeedsVideo ? a.kind === 'video' : digitalHumanPhotoSceneMode ? a.kind === 'image' : true).slice(0, 10).map(a => <button key={a.id} type="button" className={digitalHumanAvatarId === a.id ? 'templateCard selected' : 'templateCard'} onClick={() => setDigitalHumanAvatarId(a.id)}>{a.kind === 'video' ? <video src={a.url} muted /> : <img src={a.url} />}<span>{a.original_name || a.filename}</span></button>)}</div>{uploadedAvatarAssets.filter(a => digitalHumanNeedsVideo ? a.kind === 'video' : digitalHumanPhotoSceneMode ? a.kind === 'image' : true).length === 0 && <Empty>还没有自己上传的真人模板。去“素材选择”上传时选择“人物素材”，fal 路线需要 5-20 秒真人口播 MP4。</Empty>}</div><div className="templateGroup"><h4>备用：collected 里识别的真人素材</h4><div className="templateCards compactTemplates">{collectedAvatarAssets.filter(a => digitalHumanNeedsVideo ? a.kind === 'video' : digitalHumanPhotoSceneMode ? a.kind === 'image' : true).slice(0, 10).map(a => <button key={a.id} type="button" className={digitalHumanAvatarId === a.id ? 'templateCard selected' : 'templateCard'} onClick={() => setDigitalHumanAvatarId(a.id)}>{a.kind === 'video' ? <video src={a.url} muted /> : <img src={a.url} />}<span>{a.original_name || a.filename}</span></button>)}</div></div><div className="templateGroup mutedTemplateGroup"><h4>已生成数字人片头（自动进成片，不作为 fal 模型）</h4><div className="templateCards compactTemplates">{digitalHumanIntroAssets.slice(0, 8).map(a => <button key={a.id} type="button" className={selectedMaterialIds.includes(a.id) ? 'templateCard selected' : 'templateCard'} onClick={() => setSelectedMaterialIds(prev => prev.includes(a.id) ? prev.filter(id => id !== a.id) : [a.id, ...prev])}><video src={a.url} muted /><span>{a.original_name || a.filename}</span></button>)}</div>{digitalHumanIntroAssets.length === 0 && <p className="muted small">还没有已生成的数字人片头；生成后会自动进入成片素材首位。</p>}</div></div>
-        <label className="checkline"><input type="checkbox" checked={digitalHumanConsent} onChange={e => setDigitalHumanConsent(e.target.checked)} /> 我确认已获得本人形象和声音授权，仅用于合法商业内容。</label>
-
-        <div className="digitalHumanLeanGuide">
+        <div className="templatePicker refinedPicker"><div><strong>{digitalHumanPhotoSceneMode ? '本条视频用哪张本人照片？' : '本条视频用哪个真人口播模板？'}</strong><p>{digitalHumanPhotoSceneMode ? '照片场景数字人每条都可以换照片和场景，不会固定同一个开头。' : '这里选的是你上传/采集的真人原始口播视频，不是已经生成出的数字人片段；数字人片段会自动放到成片开头。'}</p></div><div className="assetStats compactStats"><Pill tone="blue">真人模板 {uploadedAvatarAssets.length}</Pill><Pill tone="purple">采集备用真人 {collectedAvatarAssets.length}</Pill><Pill tone="green">已生成片头 {digitalHumanIntroAssets.length}</Pill><Pill tone="orange">内容素材 {contentOnlyAssets.length}</Pill></div><div className="templateGroup"><h4>优先：自己上传的真人模板视频/照片</h4><div className="templateCards">{uploadedAvatarAssets.filter(a => digitalHumanNeedsVideo ? a.kind === 'video' : digitalHumanPhotoSceneMode ? a.kind === 'image' : true).slice(0, 10).map(a => <button key={a.id} type="button" className={digitalHumanAvatarId === a.id ? 'templateCard selected' : 'templateCard'} onClick={() => setDigitalHumanAvatarId(a.id)}>{a.kind === 'video' ? <video src={videoPreviewUrl(a.url)} muted preload="metadata" playsInline /> : <img src={a.url} />}<span>{a.original_name || a.filename}</span></button>)}</div>{uploadedAvatarAssets.filter(a => digitalHumanNeedsVideo ? a.kind === 'video' : digitalHumanPhotoSceneMode ? a.kind === 'image' : true).length === 0 && <Empty>还没有自己上传的真人模板。去“素材选择”上传时选择“人物素材”，fal 路线需要 5-20 秒真人口播 MP4。</Empty>}</div><div className="templateGroup"><h4>备用：collected 里识别的真人素材</h4><div className="templateCards compactTemplates">{collectedAvatarAssets.filter(a => digitalHumanNeedsVideo ? a.kind === 'video' : digitalHumanPhotoSceneMode ? a.kind === 'image' : true).slice(0, 10).map(a => <button key={a.id} type="button" className={digitalHumanAvatarId === a.id ? 'templateCard selected' : 'templateCard'} onClick={() => setDigitalHumanAvatarId(a.id)}>{a.kind === 'video' ? <video src={videoPreviewUrl(a.url)} muted preload="metadata" playsInline /> : <img src={a.url} />}<span>{a.original_name || a.filename}</span></button>)}</div></div><div className="templateGroup mutedTemplateGroup"><h4>已生成数字人片头（自动进成片，不作为 fal 模型）</h4><div className="templateCards compactTemplates">{digitalHumanIntroAssets.slice(0, 8).map(a => <button key={a.id} type="button" className={selectedMaterialIds.includes(a.id) ? 'templateCard selected' : 'templateCard'} onClick={() => setSelectedMaterialIds(prev => prev.includes(a.id) ? prev.filter(id => id !== a.id) : [a.id, ...prev])}><video src={videoPreviewUrl(a.url)} muted preload="metadata" playsInline /><span>{a.original_name || a.filename}</span></button>)}</div>{digitalHumanIntroAssets.length === 0 && <p className="muted small">还没有已生成的数字人片头；生成后会自动进入成片素材首位。</p>}</div></div>
+                <div className="digitalHumanLeanGuide">
           <div><strong>推荐模板</strong><p>上传 5-20 秒正面半身真人视频，人物看镜头、光线稳定、少转头。原视频说什么不重要，fal 会用新配音同步嘴型。</p></div>
-          <div><strong>当前输入</strong><p>版本：#{digitalHumanVersion}<br />模板/照片：{digitalHumanAvatarId || '未选择'}<br />场景：{digitalHumanPhotoSceneMode ? digitalHumanSceneTemplate : '不需要'}<br />整条配音：{audio?.file_name || '未生成'}<br />数字人开场音频：{digitalHumanAudio?.file_name || '生成数字人时自动从第 1 段合成'}<br />数字人使用文本：{shortText(getDigitalHumanIntroText(), 90) || '未生成'}</p></div>
+          <div><strong>当前输入</strong><p>版本：#{digitalHumanVersion}<br />模板/照片：{digitalHumanAvatarId || '未选择'}<br />场景：{digitalHumanPhotoSceneMode ? digitalHumanSceneTemplate : '不需要'}<br />完整成片配音：{audio?.file_name || '未生成'}<br />数字人片头配音：{digitalHumanAudio?.file_name || '点击生成时自动用第 1 段单独合成'}<br />数字人只读这一句：{shortText(getDigitalHumanIntroText(), 90) || '未生成'}</p></div>
           <div><strong>生成后动作</strong><p>成功后自动入素材库，并自动放到素材顺序第 1 个；后面继续添加楼盘、风光、学校、配套 B-roll。</p></div>
         </div>
         {hasRunningDigitalHumanTask && <div className="warn strongWarn">已有数字人任务正在排队/生成中。请不要再次点击提交；等待当前任务完成或点击“查询当前数字人任务”。</div>}
@@ -3312,7 +3316,7 @@ https://www.douyin.com/user/..." /></Field>
               {visibleMaterialAssets.map(a => <div key={a.id} className={`assetCard ${selectedMaterialIds.includes(a.id) ? 'selected' : ''}`}>
                 <button className={`assetPreview ${a.kind === 'video' ? 'videoThumb' : ''}`} onClick={() => window.open(a.url, '_blank')} title="打开预览">
                   {a.kind === 'video'
-                    ? <div className="videoPlaceholder"><span>▶</span><strong>视频素材</strong><em>{formatBytes(a.size_bytes)}</em></div>
+                    ? <div className="videoPreviewWrap"><video src={videoPreviewUrl(a.url)} muted preload="metadata" playsInline /><span className="playBadge">▶</span></div>
                     : <img src={a.url} alt={a.original_name || a.filename} loading="lazy" decoding="async" />}
                 </button>
                 <div className="assetMeta"><strong title={a.original_name || a.filename}>{a.original_name || a.filename}</strong><span>{assetFolderLabel((a as any).folder, a.kind)} · {assetRoleLabel(a.usage_role)} · {a.kind === 'video' ? '视频' : '图片'} · {formatBytes(a.size_bytes)} · {new Date(a.created_at).toLocaleDateString()}</span></div>

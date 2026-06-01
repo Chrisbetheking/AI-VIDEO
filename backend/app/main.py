@@ -250,16 +250,16 @@ def _compose_max_assets() -> int:
     as a legacy safety value unless COMPOSE_ALLOW_TINY_ASSETS=true is explicitly
     set, so user-selected timelines no longer silently collapse to two clips.
     """
-    raw = os.getenv('COMPOSE_MAX_ASSETS', '8')
+    raw = os.getenv('COMPOSE_MAX_ASSETS', '12')
     try:
         value = int(raw)
     except Exception:
-        value = 8
+        value = 12
     allow_tiny = str(os.getenv('COMPOSE_ALLOW_TINY_ASSETS', '')).strip().lower() in {'1', 'true', 'yes', 'on'}
     # 之前服务器环境变量里常遗留 COMPOSE_MAX_ASSETS=4，导致用户明明选了多条素材也只合前 4 条。
-    # 默认至少给 8 条；只有显式开启 COMPOSE_ALLOW_TINY_ASSETS=true 时才允许更小。
-    if value < 8 and not allow_tiny:
-        value = 8
+    # 默认至少给 12 条；只有显式开启 COMPOSE_ALLOW_TINY_ASSETS=true 时才允许更小。
+    if value < 12 and not allow_tiny:
+        value = 12
     return max(1, min(12, value))
 
 
@@ -1699,7 +1699,7 @@ async def api_compose_video(req: ComposeRequest, request: Request, settings: Set
         compose_max_assets = _compose_max_assets()
         sorted_plan = sorted(req.asset_plan, key=lambda x: x.order)
         if len(sorted_plan) > compose_max_assets:
-            pre_warnings.append(f'本次后端最多合成前 {compose_max_assets} 个素材；如需更多，可把 COMPOSE_MAX_ASSETS 调到 12 内，并建议改由 ECS/Worker 合成。')
+            pre_warnings.append(f'本次后端最多合成前 {compose_max_assets} 个素材；如需更多，建议改由 ECS/Worker 合成，或提高服务器配置。')
         for clip_req in sorted_plan[:compose_max_assets]:
             clip = await _resolve_compose_clip(settings, clip_req)
             if clip:
@@ -1709,7 +1709,7 @@ async def api_compose_video(req: ComposeRequest, request: Request, settings: Set
     elif req.asset_ids:
         compose_max_assets = _compose_max_assets()
         if len(req.asset_ids) > compose_max_assets:
-            pre_warnings.append(f'本次后端最多合成前 {compose_max_assets} 个素材；如需更多，可把 COMPOSE_MAX_ASSETS 调到 12 内，并建议改由 ECS/Worker 合成。')
+            pre_warnings.append(f'本次后端最多合成前 {compose_max_assets} 个素材；如需更多，建议改由 ECS/Worker 合成，或提高服务器配置。')
         for order, asset_id in enumerate(req.asset_ids[:compose_max_assets]):
             class _Tmp:
                 pass
