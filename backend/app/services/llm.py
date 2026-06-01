@@ -57,18 +57,63 @@ def _candidate_providers(settings: Settings) -> list[str]:
 
 def _provider_model(settings: Settings, provider: str, *, backup: bool = False) -> str:
     provider = _clean_provider(provider)
-    if backup and settings.ai_backup_model.strip():
-        return settings.ai_backup_model.strip()
-    if settings.ai_text_model.strip() and provider not in {'gemini', 'google'}:
-        return settings.ai_text_model.strip()
+    # Provider-specific model selection. Do NOT reuse Qwen model names on DeepSeek;
+    # that caused requests like deepseek/qwen3.7-max and broke文案生成.
     if provider in {'qwen', 'dashscope', 'aliyun', 'bailian'}:
         return settings.ai_text_model.strip() or settings.qwen_model.strip() or 'qwen-max'
     if provider in {'gemini', 'google'}:
-        return settings.ai_backup_model.strip() or settings.gemini_model.strip() or 'gemini-2.5-pro'
-    if provider in {'deepseek'}:
+        if backup and settings.ai_backup_model.strip() and 'gemini' in settings.ai_backup_model.lower():
+            return settings.ai_backup_model.strip()
+        return settings.gemini_model.strip() or 'gemini-2.5-flash'
+    if provider == 'deepseek':
+        if backup and settings.ai_backup_model.strip() and 'deepseek' in settings.ai_backup_model.lower():
+            return settings.ai_backup_model.strip()
         return settings.deepseek_model.strip() or 'deepseek-chat'
     return settings.ai_text_model.strip() or provider
 
+
+def _provider_models(settings: Settings, provider: str, *, backup: bool = False) -> list[str]:
+    provider = _clean_provider(provider)
+    first = _provider_model(settings, provider, backup=backup)
+    if provider in {'qwen', 'dashscope', 'aliyun', 'bailian'}:
+        candidates = [first, settings.qwen_model.strip(), 'qwen-max', 'qwen-plus']
+    elif provider in {'gemini', 'google'}:
+        # Prefer flash as a cheap fallback when pro quota is exhausted.
+        candidates = [first, settings.gemini_model.strip(), 'gemini-2.5-flash', 'gemini-2.0-flash']
+    elif provider == 'deepseek':
+        # Support both official DeepSeek names and some gateway aliases.
+        candidates = [first, settings.deepseek_model.strip(), 'deepseek-chat', 'deepseek-v4-flash', 'deepseek-v4-pro']
+    else:
+        candidates = [first]
+    out: list[str] = []
+    for m in candidates:
+        m = (m or '').strip()
+        if m and m not in out:
+            out.append(m)
+    return out
+
+
+def _short_error(text: str, limit: int = 220) -> str:
+    t = ' '.join(str(text or '').replace('\n', ' ').replace('\r', ' ').split())
+    return t[:limit] + ('…' if len(t) > limit else '')
+
+
+def _friendly_http_error(provider: str, status_code: int, model: str, text: str) -> str:
+    raw = str(text or '')
+    low = raw.lower()
+    if status_code == 401:
+        hint = 'API Key 不正确或未授权。'
+    elif status_code == 402:
+        hint = '账户余额不足或未开通计费。'
+    elif status_code == 429:
+        hint = '额度/频率超限，已自动尝试下一个模型。'
+    elif status_code in (400, 422) and ('model' in low or 'api model' in low or 'invalid' in low):
+        hint = '模型名不兼容，已自动尝试同供应商备用模型。'
+    elif status_code >= 500:
+        hint = '供应商服务繁忙，已自动尝试备用模型。'
+    else:
+        hint = '调用失败，已自动尝试备用模型。'
+    return f'{provider}/{model} 返回 {status_code}：{hint} {_short_error(raw, 180)}'
 
 def _openai_compatible_url(settings: Settings, provider: str) -> str:
     provider = _clean_provider(provider)
@@ -111,7 +156,7 @@ async def _chat_openai_compatible(
         for body in bodies:
             resp = await client.post(url, headers=headers, json=body)
             if resp.status_code >= 400:
-                last_error = f'{provider} 返回 {resp.status_code}，model={model}，url={url}，原始返回：{resp.text[:500]}'
+                last_error = _friendly_http_error(provider, resp.status_code, model, resp.text)
                 continue
             data = resp.json()
             try:
@@ -148,7 +193,7 @@ async def _chat_gemini(
     async with httpx.AsyncClient(timeout=timeout) as client:
         resp = await client.post(url, json=body)
     if resp.status_code >= 400:
-        raise LLMError(f'Gemini 返回 {resp.status_code}，model={model}。原始返回：{resp.text[:500]}')
+        raise LLMError(_friendly_http_error('gemini', resp.status_code, model, resp.text))
     data = resp.json()
     try:
         parts = data['candidates'][0]['content']['parts']
@@ -176,17 +221,18 @@ async def chat_json(
 
     for i, provider in enumerate(providers):
         is_backup = i > 0 and provider == _clean_provider(settings.ai_backup_provider)
-        model = _provider_model(settings, provider, backup=is_backup)
-        try:
-            if provider in {'qwen', 'dashscope', 'aliyun', 'bailian', 'deepseek'}:
-                return await _chat_openai_compatible(settings, provider, system, user, model=model, temperature=temperature, timeout=timeout, api_key_override=api_key_override)
-            if provider in {'gemini', 'google'}:
-                return await _chat_gemini(settings, system, user, model=model, temperature=temperature, timeout=timeout, api_key_override=api_key_override)
-            errors.append(f'未知供应商：{provider}')
-        except Exception as exc:
-            errors.append(f'{provider}/{model}: {exc}')
-            continue
-    raise LLMError('；'.join(errors) or '所有 AI 模型调用失败。')
+        for model in _provider_models(settings, provider, backup=is_backup):
+            try:
+                if provider in {'qwen', 'dashscope', 'aliyun', 'bailian', 'deepseek'}:
+                    return await _chat_openai_compatible(settings, provider, system, user, model=model, temperature=temperature, timeout=timeout, api_key_override=api_key_override)
+                if provider in {'gemini', 'google'}:
+                    return await _chat_gemini(settings, system, user, model=model, temperature=temperature, timeout=timeout, api_key_override=api_key_override)
+                errors.append(f'未知供应商：{provider}')
+                break
+            except Exception as exc:
+                errors.append(_short_error(f'{provider}/{model}: {exc}', 260))
+                continue
+    raise LLMError('；'.join(errors[-8:]) or '所有 AI 模型调用失败。')
 
 
 async def test_llm(settings: Settings, api_key_override: Optional[str] = None) -> Dict[str, Any]:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import uuid
 from datetime import datetime, timezone
 from typing import Any
@@ -30,10 +31,14 @@ def _safe_int(value: Any, default: int = 0) -> int:
 
 def _windows_safe_text(value: Any, limit: int = 600) -> str:
     text = '' if value is None else str(value)
-    # Windows CMD often runs in GBK; strip astral emojis and control chars to prevent
-    # `'gbk' codec can't encode character` from killing the collector worker.
-    text = ''.join(ch for ch in text if ord(ch) <= 0xFFFF and (ord(ch) >= 32 or ch in '\r\n\t'))
+    # Windows CMD often runs in GBK; emoji / variation selectors / some symbols can
+    # crash local worker output. Keep Chinese, strip anything GBK cannot encode.
+    text = ''.join(ch for ch in text if ord(ch) >= 32 or ch in '\r\n\t')
+    text = text.encode('gbk', errors='ignore').decode('gbk', errors='ignore')
     text = ' '.join(text.replace('\r', ' ').replace('\n', ' ').replace('\t', ' ').split())
+    # Avoid long encoded URLs or browserInfo dumps stretching the UI.
+    text = re.sub(r'%7B[^\s]{80,}', '[encoded_payload]', text) if 're' in globals() else text
+    text = re.sub(r'https?://\S{120,}', '[long_url]', text) if 're' in globals() else text
     return text[:limit]
 
 

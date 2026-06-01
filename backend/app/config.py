@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     ai_provider: str = 'qwen'
     ai_text_model: str = 'qwen-max'
     ai_backup_provider: str = 'gemini'
-    ai_backup_model: str = 'gemini-2.5-pro'
+    ai_backup_model: str = 'gemini-2.5-flash'
 
     # 阿里云百炼 / DashScope：Qwen 文案、分镜、AI 修改、Qwen-Image、ASR
     dashscope_api_key: str = ''
@@ -36,7 +36,7 @@ class Settings(BaseSettings):
     # Google Gemini：复杂分析/素材理解/备用强模型
     gemini_api_key: str = ''
     gemini_base_url: str = 'https://generativelanguage.googleapis.com/v1beta'
-    gemini_model: str = 'gemini-2.5-pro'
+    gemini_model: str = 'gemini-2.5-flash'
 
     # DeepSeek：文案改写 / 标题 / 钩子 / 剪辑方案
     deepseek_api_key: str = ''
