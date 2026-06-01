@@ -388,6 +388,11 @@ def _clip_duration(clip: MediaClip, fallback: float) -> float:
     end = max(0.0, float(clip.video_end or 0.0))
     if end > start + 0.3:
         return max(0.5, min(30.0, end - start))
+    # 对视频素材也优先尊重前端传来的 image_seconds 作为“未截取时的默认停留/取片时长”。
+    # 旧逻辑会按整条配音平均分配 fallback，导致 UI 显示的素材时间和最终视频时间明显对不上。
+    requested = float(clip.image_seconds or 0.0)
+    if requested > 0:
+        return max(1.0, min(20.0, requested))
     return max(1.0, min(12.0, fallback))
 
 
@@ -696,13 +701,14 @@ def burn_subtitles_and_audio(
     if has_sfx:
         cmd += ["-i", str(sfx_path)]
     cmd += ["-vf", vf]
+    pad_expr = max(0.0, float(duration or 0.0))
     if has_audio and has_sfx:
         vol = max(0.0, min(0.5, float(keyword_sfx_volume or 0.16)))
-        cmd += ["-filter_complex", f"[1:a]volume=1.0[a0];[2:a]volume={vol:.3f}[a1];[a0][a1]amix=inputs=2:duration=first:dropout_transition=0[aout]", "-map", "0:v:0", "-map", "[aout]", "-shortest"]
+        cmd += ["-filter_complex", f"[1:a]volume=1.0[a0];[2:a]volume={vol:.3f}[a1];[a0][a1]amix=inputs=2:duration=first:dropout_transition=0[mix];[mix]apad=pad_dur={pad_expr:.3f}[aout]", "-map", "0:v:0", "-map", "[aout]"]
     elif has_audio:
-        cmd += ["-map", "0:v:0", "-map", "1:a:0", "-shortest"]
+        cmd += ["-filter_complex", f"[1:a]apad=pad_dur={pad_expr:.3f}[aout]", "-map", "0:v:0", "-map", "[aout]"]
     elif has_sfx:
-        cmd += ["-map", "0:v:0", "-map", "1:a:0", "-shortest"]
+        cmd += ["-filter_complex", f"[1:a]apad=pad_dur={pad_expr:.3f}[aout]", "-map", "0:v:0", "-map", "[aout]"]
     cmd += ["-t", f"{duration:.2f}", *_video_codec_args()]
     if has_audio or has_sfx:
         cmd += ["-c:a", "aac", "-b:a", "128k"]
@@ -726,13 +732,14 @@ def burn_subtitles_and_audio(
     if has_sfx:
         cmd += ["-i", str(sfx_path)]
     cmd += ["-vf", f"scale={w}:{h},format=yuv420p"]
+    pad_expr = max(0.0, float(duration or 0.0))
     if has_audio and has_sfx:
         vol = max(0.0, min(0.5, float(keyword_sfx_volume or 0.16)))
-        cmd += ["-filter_complex", f"[1:a]volume=1.0[a0];[2:a]volume={vol:.3f}[a1];[a0][a1]amix=inputs=2:duration=first:dropout_transition=0[aout]", "-map", "0:v:0", "-map", "[aout]", "-shortest"]
+        cmd += ["-filter_complex", f"[1:a]volume=1.0[a0];[2:a]volume={vol:.3f}[a1];[a0][a1]amix=inputs=2:duration=first:dropout_transition=0[mix];[mix]apad=pad_dur={pad_expr:.3f}[aout]", "-map", "0:v:0", "-map", "[aout]"]
     elif has_audio:
-        cmd += ["-map", "0:v:0", "-map", "1:a:0", "-shortest"]
+        cmd += ["-filter_complex", f"[1:a]apad=pad_dur={pad_expr:.3f}[aout]", "-map", "0:v:0", "-map", "[aout]"]
     elif has_sfx:
-        cmd += ["-map", "0:v:0", "-map", "1:a:0", "-shortest"]
+        cmd += ["-filter_complex", f"[1:a]apad=pad_dur={pad_expr:.3f}[aout]", "-map", "0:v:0", "-map", "[aout]"]
     cmd += ["-t", f"{duration:.2f}", *_video_codec_args()]
     if has_audio or has_sfx:
         cmd += ["-c:a", "aac", "-b:a", "128k"]
@@ -770,10 +777,15 @@ async def compose_video(
         audio_duration = probe_duration(audio_path)
 
     duration_cap = float(_env_int("COMPOSE_MAX_SECONDS", 60, 5, 180))
-    # 视频时长优先跟音频走，避免“素材时长输入”和口播时长不一致导致字幕/语音错位。
-    duration = max(audio_duration or 0, 5.0)
-    if not audio_duration:
-        duration = max(float(duration_seconds), 5.0)
+    requested_duration = max(float(duration_seconds or 0), 5.0)
+    audio_duration = max(float(audio_duration or 0), 0.0)
+    # 最终成片时长取“素材时间轴”和“真实配音时长”的较长者。
+    # 这样 UI 里列出的 7 个素材不会因为配音较短而只导出前 29 秒。
+    duration = max(requested_duration, audio_duration, 5.0)
+    if requested_duration > audio_duration + 1.0 and audio_duration > 0:
+        warnings.append(f"成片已按素材时间轴 {requested_duration:.1f}s 导出；配音实际 {audio_duration:.1f}s，结尾如有留白，建议点击“按素材时长补全旁白”后重配音。")
+    elif audio_duration > requested_duration + 1.0:
+        warnings.append(f"成片已按配音真实时长 {audio_duration:.1f}s 导出；素材时间轴较短时会循环补足。")
     if duration > duration_cap:
         warnings.append(f"为避免 Render 免费实例合成超时/爆内存，本次视频时长从 {duration:.1f}s 限制为 {duration_cap:.1f}s。")
         duration = duration_cap

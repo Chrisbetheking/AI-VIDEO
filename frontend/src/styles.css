@@ -2531,3 +2531,6 @@ body:has(.heatRadarV3) .collectorAssist{border-color:#dbeafe}
 .digitalHumanLeanGuide strong{font-size:14px;}
 .digitalHumanLeanGuide p{font-size:13px;line-height:1.65;}
 @media(max-width:980px){.digitalHumanMainCta{width:100%;}.digitalHumanActions{width:100%;display:grid!important;grid-template-columns:1fr!important;}}
+
+.timelineSummary{display:flex;flex-wrap:wrap;gap:10px;align-items:center;border:1px solid rgba(37,99,235,.18);background:linear-gradient(135deg,#eff6ff,#ffffff);border-radius:16px;padding:10px 12px;color:#1e3a8a}
+.timelineSummary strong{font-weight:900;color:#0f172a}.timelineSummary span{border:1px solid rgba(37,99,235,.18);background:#fff;border-radius:999px;padding:5px 9px;font-size:12px;font-weight:850}.timelineSummary em{font-style:normal;color:#475467;font-size:12px;line-height:1.5}

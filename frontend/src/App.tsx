@@ -2200,6 +2200,60 @@ ${manualText || ''}`.trim()
     }, 0)
   }
 
+  function getComposeAssetsForPreview(): AssetItem[] {
+    const digitalIntroAsset = getDigitalIntroAssetForCompose()
+    const idsToRemoveForCompose = new Set([digitalHumanAvatarId, digitalHumanDriverId].filter(Boolean))
+    const selectedAssetsForCompose = selectedMaterialIds
+      .filter(id => !idsToRemoveForCompose.has(id) && id !== digitalIntroAsset?.id)
+      .map(id => materialAssets.find(a => a.id === id))
+      .filter((a): a is AssetItem => Boolean(a && a.id && a.url))
+    const effectiveAssets = digitalIntroAsset
+      ? [digitalIntroAsset, ...selectedAssetsForCompose.filter(a => a.url !== digitalIntroAsset.url)]
+      : selectedAssetsForCompose
+    return (effectiveAssets.length ? effectiveAssets : contentOnlyAssets.slice(0, 6))
+      .map((asset, index) => normalizeAsset(asset, index))
+      .filter(asset => Boolean(asset.id && asset.url))
+  }
+
+  function getComposeClipPlan(asset: AssetItem, index: number, digitalIntroAsset?: AssetItem | null) {
+    const cfg = getClipSetting(asset, index)
+    const isIntro = Boolean(digitalIntroAsset && (asset.id === digitalIntroAsset.id || asset.url === digitalIntroAsset.url || asset.source_type === 'digital_human_intro'))
+    if (asset.kind === 'image') {
+      const seconds = Math.min(20, Math.max(0.8, safeNumber(cfg.image_seconds, 2.8)))
+      return { seconds, start: 0, end: 0, label: `${seconds.toFixed(1)}秒` }
+    }
+    const start = Math.max(0, safeNumber(cfg.video_start, 0))
+    const rawEnd = Math.max(0, safeNumber(cfg.video_end, 0))
+    const maxDur = Math.max(0, safeNumber(assetDurations[asset.id], 0))
+    let seconds = 0
+    if (rawEnd > start + 0.2) {
+      seconds = rawEnd - start
+    } else if (isIntro) {
+      seconds = Math.max(4, Math.min(18, estimateSeconds(getDigitalHumanIntroText())))
+    } else {
+      seconds = Math.max(1, safeNumber(cfg.image_seconds, 3))
+    }
+    if (maxDur > start + 0.3) seconds = Math.min(seconds, maxDur - start)
+    seconds = Math.min(20, Math.max(0.8, seconds))
+    const end = start + seconds
+    return { seconds, start, end, label: `${start.toFixed(1)}-${end.toFixed(1)}秒` }
+  }
+
+  function getComposeTimelinePreview() {
+    const digitalIntroAsset = getDigitalIntroAssetForCompose()
+    let cursor = 0
+    const rows = getComposeAssetsForPreview().map((asset, index) => {
+      const plan = getComposeClipPlan(asset, index, digitalIntroAsset)
+      const startAt = cursor
+      cursor += plan.seconds
+      return { asset, index, ...plan, startAt, endAt: cursor }
+    })
+    const materialSeconds = Math.round(cursor * 10) / 10
+    const audioSeconds = Math.round(safeNumber(audio?.duration_seconds, voiceEstimatedSeconds || 0) * 10) / 10
+    const finalSeconds = Math.round(Math.max(materialSeconds, audioSeconds, 5) * 10) / 10
+    return { rows, materialSeconds, audioSeconds, finalSeconds }
+  }
+
   function buildComposeVoiceSegments(hasDigitalIntro: boolean): VoiceSegment[] {
     const base = (voiceSegments.length ? voiceSegments : buildVoiceSegmentsFromScript(currentScript, copy.hook))
       .map((seg, index) => ({ ...defaultSegment, ...seg, text: cleanSubtitleLikeText(seg.text || ''), pause_after_ms: seg.pause_after_ms ?? (index === 0 ? 260 : 320) }))
@@ -2543,17 +2597,7 @@ ${selectedAssetScriptContext || '暂无素材，请按马来西亚楼盘、风�
       return
     }
     const digitalIntroAsset = getDigitalIntroAssetForCompose()
-    const idsToRemoveForCompose = new Set([digitalHumanAvatarId, digitalHumanDriverId].filter(Boolean))
-    const selectedAssetsForCompose = selectedMaterialIds
-      .filter(id => !idsToRemoveForCompose.has(id) && id !== digitalIntroAsset?.id)
-      .map(id => materialAssets.find(a => a.id === id))
-      .filter((a): a is AssetItem => Boolean(a && a.id && a.url))
-    const effectiveAssets = digitalIntroAsset
-      ? [digitalIntroAsset, ...selectedAssetsForCompose.filter(a => a.url !== digitalIntroAsset.url)]
-      : selectedAssetsForCompose
-    const chosen = (effectiveAssets.length ? effectiveAssets : contentOnlyAssets.slice(0, 6))
-      .map((asset, index) => normalizeAsset(asset, index))
-      .filter(asset => Boolean(asset.id && asset.url))
+    const chosen = getComposeAssetsForPreview()
     if (!chosen.length) {
       setError('请先在素材选择页上传或选择至少 1 个图片/视频素材。')
       setActive('assets')
@@ -2578,23 +2622,24 @@ ${selectedAssetScriptContext || '暂无素材，请按马来西亚楼盘、风�
     }
 
     const assetPlan = chosen.map((asset, index) => {
-      const cfg = getClipSetting(asset, index)
-      const imageSeconds = safeNumber(cfg.image_seconds, 2.8)
-      const start = Math.max(0, safeNumber(cfg.video_start, 0))
-      const rawEnd = safeNumber(cfg.video_end, 0)
-      const isIntro = hasDigitalIntro && (asset.id === digitalIntroAsset?.id || asset.url === digitalIntroAsset?.url)
+      const clipPlan = getComposeClipPlan(asset, index, digitalIntroAsset)
+      const isIntro = hasDigitalIntro && (asset.id === digitalIntroAsset?.id || asset.url === digitalIntroAsset?.url || asset.source_type === 'digital_human_intro')
       return {
         asset_id: String(asset.id),
         order: index,
         kind: asset.kind === 'video' ? 'video' : 'image',
-        image_seconds: Math.min(20, Math.max(0.8, imageSeconds)),
-        video_start: asset.kind === 'video' ? start : 0,
-        video_end: asset.kind === 'video' && rawEnd > start ? rawEnd : (isIntro ? Math.max(4, Math.min(18, estimateSeconds(getDigitalHumanIntroText()))) : 0),
+        image_seconds: Math.min(20, Math.max(0.8, clipPlan.seconds)),
+        video_start: asset.kind === 'video' ? clipPlan.start : 0,
+        video_end: asset.kind === 'video' ? clipPlan.end : 0,
         url: asset.url,
         filename: asset.filename,
         source_type: asset.source_type || (isIntro ? 'digital_human_intro' : ''),
       }
     })
+    const assetPlanSeconds = Math.round(assetPlan.reduce((sum, item) => {
+      if (item.kind === 'image') return sum + Math.max(0.8, safeNumber(item.image_seconds, 2.8))
+      return sum + Math.max(0.8, safeNumber(item.video_end, 0) - safeNumber(item.video_start, 0))
+    }, 0) * 10) / 10
     const safeSubtitleSegments = Array.isArray(composeAudio?.segments) ? composeAudio.segments.map((seg: any, index: number) => ({
       index: Number.isFinite(Number(seg?.index)) ? Number(seg.index) : index,
       text: safeText(seg?.text, ''),
@@ -2602,7 +2647,7 @@ ${selectedAssetScriptContext || '暂无素材，请按马来西亚楼盘、风�
       end: Math.max(0, safeNumber(seg?.end, safeNumber(seg?.start, 0) + safeNumber(seg?.duration, 0))),
       duration: Math.max(0, safeNumber(seg?.duration, safeNumber(seg?.end, 0) - safeNumber(seg?.start, 0))),
     })).filter((seg: any) => seg.text && seg.end > seg.start) : []
-    const durationSeconds = safeProjectDuration(composeAudio?.duration_seconds, selectedAssetEstimatedSeconds, voiceEstimatedSeconds, autoProjectSeconds)
+    const durationSeconds = safeProjectDuration(Math.max(assetPlanSeconds, safeNumber(composeAudio?.duration_seconds, 0), voiceEstimatedSeconds, autoProjectSeconds))
     const res = await run('合成视频并烧字幕', () => apiPost<ComposeResponse>('/api/compose-video', {
       title: safeText(copy.title, '短视频'),
       script: composeScript,
@@ -3363,7 +3408,7 @@ https://www.douyin.com/user/..." /></Field>
         <div className="grid3"><Field label="字幕字号"><input type="number" min="16" max="34" value={subtitleSize} onChange={e => setSubtitleSize(Number(e.target.value || 20))} /></Field><Field label="字幕位置"><select value={subtitlePosition} onChange={e => setSubtitlePosition(e.target.value as any)}><option value="bottom_safe">底部安全区，不挡脸</option><option value="middle_low">中下方，大字口播</option><option value="center">居中强调，慎用</option></select></Field><Field label={`离底部 ${subtitleMarginV}px`}><input type="range" min="40" max="260" step="5" value={subtitleMarginV} onChange={e => setSubtitleMarginV(Number(e.target.value))} /></Field></div>
         <div className="smartSubtitleBox"><div><strong>智能重点词</strong><p>{subtitleHighlight || '系统会从文案里识别费用、避坑、身份、学校、私信等转化词，自动放大或高亮。'}</p></div><Button busy={busy === '智能字幕重点' ? busy : ''} label="AI 识别重点词" onClick={makeSubtitleAI} disabled={!currentScript} kind="soft" /></div>
         <div className="hintBox">对齐逻辑：以最终配音真实时长为准；先生成画面，再叠加配音与字幕。后半段会自动提前补偿，避免越往后越慢。</div>
-        <div className="selectedTimeline compact"><h3>本次合成素材顺序</h3>{selectedMaterialAssets.length === 0 ? <Empty>未选择素材，会自动使用前几个素材；建议先去素材选择页确认顺序和截取区间。</Empty> : selectedMaterialAssets.map((asset, index) => { const cfg = getClipSetting(asset, index); return <div key={asset.id} className="assetRow"><span>{index + 1}</span><strong>{asset.original_name || asset.filename}</strong><em>{asset.kind === 'image' ? `${cfg.image_seconds.toFixed(1)}秒` : `${cfg.video_start.toFixed(1)}-${cfg.video_end ? cfg.video_end.toFixed(1) : '自动'}秒`}</em><button className="mini" onClick={() => setActive('assets')}>调整</button></div>})}</div>
+        <div className="selectedTimeline compact"><h3>本次合成素材顺序</h3>{(() => { const timeline = getComposeTimelinePreview(); return timeline.rows.length === 0 ? <Empty>未选择素材，会自动使用前几个素材；建议先去素材选择页确认顺序和截取区间。</Empty> : <><div className="timelineSummary"><strong>素材合计 {timeline.materialSeconds.toFixed(1)} 秒</strong><span>配音 {timeline.audioSeconds ? timeline.audioSeconds.toFixed(1) : '未生成'} 秒</span><em>最终导出约 {timeline.finalSeconds.toFixed(1)} 秒；现在按素材时间轴和配音较长者导出，不会再显示 48 秒素材但只出 29 秒视频。</em></div>{timeline.rows.map(row => <div key={`${row.asset.id}-${row.index}`} className="assetRow"><span>{row.index + 1}</span><strong>{row.asset.original_name || row.asset.filename}</strong><em>{row.startAt.toFixed(1)}-{row.endAt.toFixed(1)}s · 取 {row.label}</em><button className="mini" onClick={() => setActive('assets')}>调整</button></div>)}</> })()}</div>
         {video && <div className="videoGrid"><video controls src={video.video_url} /><div className="downloadPanel"><a className="download" href={video.video_url} target="_blank">下载视频 MP4</a>{video.subtitle_url && <a href={video.subtitle_url} target="_blank">下载字幕 SRT</a>}{video.audio_url && <a href={video.audio_url} target="_blank">下载音频</a>}{video.warnings?.map(w => <div className="warn" key={w}>{w}</div>)}</div></div>}
         <div className="editChatBox"><Field label="AI + 插件剪辑指令"><textarea value={editInstruction} onChange={e => setEditInstruction(e.target.value)} placeholder="例如：去掉开头2秒、整体加速1.1倍、重新加字幕、转成9:16。" /></Field><Button busy={busy === 'AI + 插件修改视频' ? busy : ''} label="AI + 插件修改视频" onClick={chatEditVideo} kind="ghost" disabled={!currentVideoName} />{editChat.map((msg, i) => <div className="chatMsg" key={i}><strong>AI：</strong>{msg.assistant_message}<p>{msg.summary}</p><div className="chips">{msg.actions?.map(x => <Pill key={x}>{x}</Pill>)}</div>{msg.new_video_url && <a href={msg.new_video_url} target="_blank">打开修改后视频</a>}{msg.warnings?.map(w => <div className="warn" key={w}>{w}</div>)}</div>)}</div>
       </section>}
