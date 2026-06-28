@@ -1,11 +1,6 @@
 ﻿import React, { useEffect, useState } from 'react'
-import { Card } from '../../components/ui/Card'
-import { Badge } from '../../components/ui/Badge'
-import { StatusDot } from '../../components/ui/StatusDot'
-import { LoadingBlock } from '../../components/ui/LoadingBlock'
-import { getHealth, getIndustryPacks, getMinimaxStatus, getLeads } from '../../lib/api'
-import type { HealthStatus, IndustryPackSummary, MinimaxStatus, LeadItem } from '../../lib/types'
-import { LayoutDashboard, Video, MessageSquare, Radio } from 'lucide-react'
+import { apiGet, apiPost } from '../../lib/api'
+import type { HealthStatus, IndustryPackSummary, MinimaxStatus, LeadItem, LeadAnalyzeResult } from '../../lib/types'
 
 export function DashboardPage() {
   const [health, setHealth] = useState<HealthStatus | null>(null)
@@ -13,123 +8,91 @@ export function DashboardPage() {
   const [minimax, setMinimax] = useState<MinimaxStatus | null>(null)
   const [leads, setLeads] = useState<LeadItem[]>([])
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
 
   useEffect(() => {
     Promise.all([
-      getHealth().catch(() => null),
-      getIndustryPacks().catch(() => []),
-      getMinimaxStatus().catch(() => null),
-      getLeads().catch(() => []),
+      apiGet<HealthStatus>('/api/health').catch(e => { setError(String(e)); return null }),
+      apiGet<IndustryPackSummary[]>('/api/industry-packs').catch(() => [] as IndustryPackSummary[]),
+      apiGet<MinimaxStatus>('/api/minimax/status').catch(() => null),
+      apiGet<LeadItem[]>('/api/leads').catch(() => [] as LeadItem[]),
     ]).then(([h, p, m, l]) => {
-      setHealth(h)
-      setPacks(p)
-      setMinimax(m)
-      setLeads(l)
-      setLoading(false)
+      setHealth(h); setPacks(p); setMinimax(m); setLeads(l); setLoading(false)
     })
   }, [])
 
-  if (loading) return <LoadingBlock text="Loading dashboard..." />
+  if (loading) return <div className="card"><p>Loading dashboard...</p></div>
 
-  const apiOnline = health?.status === 'ok'
   const highLeads = leads.filter(l => l.intent_level === 'high').length
+  const apiOnline = health?.status === 'ok'
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h2 className="text-2xl font-bold text-white">Welcome back</h2>
-        <p className="text-slate-400 mt-1">AI Video Growth Studio - Your content automation hub</p>
+    <div>
+      <div className="heroHeader" style={{ minHeight: 190 }}>
+        <div>
+          <span className="eyebrow">AI Video Growth Studio</span>
+          <h1 style={{ fontSize: 32 }}>Welcome back</h1>
+          <p>Automate your video production pipeline. Create, analyze, and grow.</p>
+        </div>
+        <div className="scoreCard">
+          <span>Videos Ready</span>
+          <strong style={{ fontSize: 48 }}>0</strong>
+          <small>Start composing →</small>
+        </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <Card>
-          <div className="flex items-center justify-between">
-            <div><p className="text-sm text-slate-400">API Status</p>
-              <p className="text-2xl font-bold text-white mt-1">{apiOnline ? 'Online' : 'Offline'}</p>
-            </div>
-            <StatusDot status={apiOnline ? 'configured' : 'error'} />
-          </div>
-        </Card>
-        <Card>
-          <div className="flex items-center justify-between">
-            <div><p className="text-sm text-slate-400">Industry Packs</p>
-              <p className="text-2xl font-bold text-white mt-1">{packs.length}</p>
-            </div>
-            <LayoutDashboard size={24} className="text-blue-400" />
-          </div>
-        </Card>
-        <Card>
-          <div className="flex items-center justify-between">
-            <div><p className="text-sm text-slate-400">High-Intent Leads</p>
-              <p className="text-2xl font-bold text-white mt-1">{highLeads}</p>
-            </div>
-            <MessageSquare size={24} className="text-green-400" />
-          </div>
-        </Card>
-        <Card>
-          <div className="flex items-center justify-between">
-            <div><p className="text-sm text-slate-400">MiniMax</p>
-              <p className="text-2xl font-bold text-white mt-1">{minimax?.enabled ? 'On' : 'Off'}</p>
-            </div>
-            <StatusDot status={minimax?.enabled ? 'configured' : 'disabled'} />
-          </div>
-        </Card>
+      {error && <div className="card" style={{ marginTop: 16, border: '2px solid var(--red)' }}><p style={{ color: 'var(--red)' }}>{error}</p></div>}
+
+      <div className="grid4" style={{ marginTop: 24 }}>
+        <div className="card"><span className="card-eyebrow">API Status</span><strong style={{ fontSize: 28 }} className={apiOnline ? 'greenText' : 'redText'}>{apiOnline ? 'Online' : 'Offline'}</strong></div>
+        <div className="card"><span className="card-eyebrow">Industry Packs</span><strong style={{ fontSize: 28 }}>{packs.length}</strong></div>
+        <div className="card"><span className="card-eyebrow">High-Intent Leads</span><strong style={{ fontSize: 28 }} className="greenText">{highLeads}</strong></div>
+        <div className="card"><span className="card-eyebrow">MiniMax</span><strong style={{ fontSize: 28 }} className={minimax?.enabled ? 'greenText' : ''}>{minimax?.enabled ? 'On' : 'Off'}</strong></div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <Card title="Industry Packs" subtitle="Available content templates">
-          <div className="space-y-3">
-            {packs.map(p => (
-              <div key={p.industry} className="flex items-center justify-between py-2 border-b border-slate-800 last:border-0">
-                <div>
-                  <span className="text-white font-medium">{p.industry === 'real_estate' ? 'Real Estate' : 'Foreign Trade'}</span>
-                  <p className="text-xs text-slate-500 mt-0.5">{p.pain_points_count} pain points · {p.hook_templates_count} hooks · {p.cta_templates_count} CTAs</p>
-                </div>
-                <Badge variant="success">Active</Badge>
-              </div>
-            ))}
-          </div>
-        </Card>
-
-        <Card title="Recent Leads" subtitle={`${leads.length} total`}>
-          {leads.length === 0 ? (
-            <p className="text-sm text-slate-500">No leads yet. Go to Leads to analyze comments.</p>
-          ) : (
-            <div className="space-y-2 max-h-64 overflow-y-auto">
-              {leads.slice(0, 6).map(l => (
-                <div key={l.id} className="flex items-center justify-between py-2 border-b border-slate-800 last:border-0">
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm text-slate-300 truncate">{l.content}</p>
-                    <p className="text-xs text-slate-500">{l.intent_type} · {l.platform}</p>
-                  </div>
-                  <Badge variant={l.intent_level === 'high' ? 'success' : l.intent_level === 'medium' ? 'warning' : 'neutral'}>
-                    {l.intent_level}
-                  </Badge>
-                </div>
-              ))}
-            </div>
-          )}
-        </Card>
-      </div>
-
-      <Card title="Provider Status">
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          {[
-            { name: 'API', status: apiOnline ? 'configured' : 'error' as const, model: health?.version || '?' },
-            { name: 'MiniMax', status: minimax?.enabled ? 'configured' as const : 'disabled' as const, model: minimax?.video_model || 'N/A' },
-            { name: 'TTS', status: 'unknown' as const, model: 'Volcengine' },
-            { name: 'Digital Human', status: 'unknown' as const, model: 'OmniHuman 1.5' },
-          ].map(p => (
-            <div key={p.name} className="flex items-center gap-3 p-3 bg-slate-800/50 rounded-lg">
-              <StatusDot status={p.status} />
-              <div>
-                <p className="text-sm text-white font-medium">{p.name}</p>
-                <p className="text-xs text-slate-500">{p.model}</p>
-              </div>
+      <div className="grid2" style={{ marginTop: 24 }}>
+        <div className="card">
+          <h3>Industry Packs</h3>
+          {packs.map(p => (
+            <div key={p.industry} className="timelineRow" style={{ gridTemplateColumns: '1fr auto' }}>
+              <div><strong>{p.industry === 'real_estate' ? 'Real Estate' : 'Foreign Trade'}</strong><br/><small>{p.pain_points_count} pain points · {p.hook_templates_count} hooks · {p.cta_templates_count} CTAs</small></div>
+              <span style={{ background: 'var(--green)', color: '#fff', borderRadius: 999, padding: '2px 10px', fontSize: 11, fontWeight: 800 }}>Active</span>
             </div>
           ))}
         </div>
-      </Card>
+
+        <div className="card">
+          <h3>Recent Leads</h3>
+          {leads.length === 0 ? <p style={{ color: 'var(--muted)' }}>No leads yet. Go to Leads tab to analyze comments.</p> :
+            leads.slice(0, 5).map(l => (
+              <div key={l.id} className="timelineRow" style={{ gridTemplateColumns: '1fr auto' }}>
+                <div><strong style={{ fontSize: 13 }}>{l.content.slice(0, 60)}{l.content.length > 60 ? '...' : ''}</strong><br/><small>{l.intent_type} · {l.platform}</small></div>
+                <span style={{
+                  background: l.intent_level === 'high' ? 'var(--green)' : l.intent_level === 'medium' ? 'var(--orange)' : 'var(--muted)',
+                  color: '#fff', borderRadius: 999, padding: '2px 10px', fontSize: 11, fontWeight: 800
+                }}>{l.intent_level}</span>
+              </div>
+            ))}
+        </div>
+      </div>
+
+      <div className="card" style={{ marginTop: 24 }}>
+        <h3>Provider Status</h3>
+        <div className="grid4">
+          {[
+            { n: 'API', s: apiOnline ? 'configured' : 'error', m: health?.version || '?' },
+            { n: 'MiniMax', s: minimax?.enabled ? 'configured' : 'disabled', m: minimax?.video_model || 'N/A' },
+            { n: 'TTS', s: 'unknown', m: 'Volcengine' },
+            { n: 'Digital Human', s: 'unknown', m: 'OmniHuman 1.5' },
+          ].map(p => (
+            <div key={p.n} style={{ padding: 12, border: '1px solid var(--line)', borderRadius: 16, background: '#fff' }}>
+              <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: 999, marginRight: 8, background: p.s === 'configured' ? 'var(--green)' : p.s === 'error' ? 'var(--red)' : 'var(--muted)' }} />
+              <strong style={{ fontSize: 14 }}>{p.n}</strong>
+              <br/><small style={{ color: 'var(--muted)' }}>{p.m}</small>
+            </div>
+          ))}
+        </div>
+      </div>
     </div>
   )
 }

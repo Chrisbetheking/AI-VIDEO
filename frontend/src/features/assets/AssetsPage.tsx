@@ -1,62 +1,74 @@
 ﻿import React, { useState, useEffect } from 'react'
-import { Card } from '../../components/ui/Card'
-import { Badge } from '../../components/ui/Badge'
-import { EmptyState } from '../../components/ui/EmptyState'
-import { LoadingBlock } from '../../components/ui/LoadingBlock'
-import { getAssets } from '../../lib/api'
+import { apiGet } from '../../lib/api'
 import type { AssetItem } from '../../lib/types'
-import { Image, Video, Upload } from 'lucide-react'
 
 const FOLDER_LABELS: Record<string, string> = {
-  all: 'All', self: 'Self-Shot', digital_human: 'Digital Human', provided: 'Provided', image: 'Images', collected: 'Collected', ai: 'AI Generated',
+  all: 'All', self: 'Self-Shot', digital_human: 'Digital Human',
+  provided: 'Provided', image: 'Images', collected: 'Collected', ai: 'AI Generated',
 }
 
 export function AssetsPage() {
   const [assets, setAssets] = useState<AssetItem[]>([])
   const [filter, setFilter] = useState('all')
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
 
   useEffect(() => {
-    getAssets().then(setAssets).catch(() => setAssets([])).finally(() => setLoading(false))
+    apiGet<AssetItem[]>('/api/assets?limit=160')
+      .then(setAssets)
+      .catch(e => setError(String(e)))
+      .finally(() => setLoading(false))
   }, [])
 
-  const folders = ['all', ...new Set(assets.map(a => a.folder).filter(Boolean))]
+  const folders = ['all', ...Array.from(new Set(assets.map(a => a.folder).filter(Boolean)))]
+  const filtered = filter === 'all' ? assets : assets.filter(a => a.folder === filter)
 
-  if (loading) return <LoadingBlock text="Loading assets..." />
+  if (loading) return <div className="card"><p>Loading assets...</p></div>
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h2 className="text-2xl font-bold text-white">Assets</h2>
-        <p className="text-slate-400 mt-1">Manage your video, image, and B-roll materials</p>
+    <div>
+      <div className="heroHeader" style={{ minHeight: 120 }}>
+        <div>
+          <span className="eyebrow">Asset Library</span>
+          <h1 style={{ fontSize: 28 }}>Assets</h1>
+          <p>Manage your video, image, and B-roll materials</p>
+        </div>
       </div>
 
-      <div className="flex gap-2 flex-wrap">
+      {error && <div className="card" style={{ marginTop: 16, border: '2px solid var(--red)' }}><p style={{ color: 'var(--red)' }}>{error}</p></div>}
+
+      <div style={{ display: 'flex', gap: 8, margin: '16px 0', flexWrap: 'wrap' }}>
         {folders.map(f => (
           <button key={f} onClick={() => setFilter(f)}
-            className={`px-3 py-1.5 rounded-full text-xs font-medium ${filter === f ? 'bg-blue-600 text-white' : 'bg-slate-800 text-slate-400 hover:text-white'}`}>
-            {FOLDER_LABELS[f] || f}
+            style={{
+              padding: '6px 14px', borderRadius: 999, border: filter === f ? '2px solid var(--primary)' : '1px solid var(--line)',
+              background: filter === f ? '#eff6ff' : '#fff', fontSize: 13, fontWeight: filter === f ? 800 : 500, cursor: 'pointer'
+            }}>{FOLDER_LABELS[f] || f} ({f === 'all' ? assets.length : assets.filter(a => a.folder === f).length})
           </button>
         ))}
       </div>
 
-      {assets.length === 0 ? (
-        <EmptyState icon={<Upload size={32} />} title="No assets yet" description="Upload your first asset to get started" />
+      {filtered.length === 0 ? (
+        <div className="card" style={{ textAlign: 'center', padding: 60 }}>
+          <p style={{ fontSize: 32, margin: 0 }}>📁</p>
+          <h3>No assets</h3>
+          <p style={{ color: 'var(--muted)' }}>Upload your first asset via the API or collector.</p>
+        </div>
       ) : (
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-          {(filter === 'all' ? assets : assets.filter(a => a.folder === filter)).map(a => (
-            <Card key={a.id} className="p-3">
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 16 }}>
+          {filtered.map(a => (
+            <div key={a.id} className="card" style={{ padding: 10 }}>
               {a.kind === 'video' ? (
-                <video src={a.url} className="w-full h-32 object-cover rounded-lg mb-2 bg-slate-800" controls preload="metadata" playsInline />
+                <video src={a.url} style={{ width: '100%', height: 140, objectFit: 'cover', borderRadius: 12, background: '#020617' }} controls preload="metadata" />
               ) : (
-                <img src={a.url} className="w-full h-32 object-cover rounded-lg mb-2 bg-slate-800" alt={a.original_name} />
+                <img src={a.url} style={{ width: '100%', height: 140, objectFit: 'cover', borderRadius: 12, background: '#f2f4f7' }} alt={a.original_name} />
               )}
-              <p className="text-xs text-slate-300 truncate">{a.original_name || a.filename}</p>
-              <div className="flex items-center gap-1 mt-1">
-                <Badge variant="neutral">{a.kind}</Badge>
-                <Badge variant="neutral">{FOLDER_LABELS[a.folder] || a.folder}</Badge>
+              <p style={{ fontSize: 12, margin: '8px 0 4px', fontWeight: 700 }}>{a.original_name || a.filename}</p>
+              <div style={{ display: 'flex', gap: 4 }}>
+                <span style={{ background: 'var(--line)', borderRadius: 6, padding: '2px 8px', fontSize: 10 }}>{a.kind}</span>
+                <span style={{ background: 'var(--line)', borderRadius: 6, padding: '2px 8px', fontSize: 10 }}>{FOLDER_LABELS[a.folder] || a.folder}</span>
               </div>
-            </Card>
+            </div>
           ))}
         </div>
       )}

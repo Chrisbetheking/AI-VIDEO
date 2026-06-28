@@ -1,240 +1,171 @@
-﻿import React, { useState } from 'react'
-import { Card } from '../../components/ui/Card'
-import { Button } from '../../components/ui/Button'
-import { Badge } from '../../components/ui/Badge'
-import { EmptyState } from '../../components/ui/EmptyState'
-import { LoadingBlock } from '../../components/ui/LoadingBlock'
+﻿import React, { useState, useEffect } from 'react'
+import { apiGet, apiPost } from '../../lib/api'
 import type { Industry, HumanMode } from '../../lib/types'
-import { generateCopy, composeVideo, getIndustryPacks } from '../../lib/api'
-import { Video, Sparkles, Radio, User, Image } from 'lucide-react'
-
-const STEPS = ['Industry', 'Script', 'Voice', 'Human', 'B-Roll', 'Compose'] as const
 
 export function CreateVideoPage() {
-  const [step, setStep] = useState(0)
   const [industry, setIndustry] = useState<Industry>('real_estate')
   const [script, setScript] = useState('')
-  const [voice, setVoice] = useState('volcengine')
-  const [humanMode, setHumanMode] = useState<HumanMode>('none')
-  const [brollMode, setBrollMode] = useState<'upload' | 'minimax' | 'existing'>('existing')
   const [prompt, setPrompt] = useState('')
-  const [generating, setGenerating] = useState(false)
+  const [subtitleSize, setSubtitleSize] = useState(80)
+  const [subtitleHighlight, setSubtitleHighlight] = useState('')
+  const [voice, setVoice] = useState('default')
+  const [humanMode, setHumanMode] = useState<HumanMode>('none')
+  const [composing, setComposing] = useState(false)
   const [result, setResult] = useState<any>(null)
   const [error, setError] = useState('')
+  const [minimaxStatus, setMinimaxStatus] = useState<any>(null)
+  const [packs, setPacks] = useState<any[]>([])
 
-  const handleGenerateScript = async () => {
-    setGenerating(true)
+  useEffect(() => {
+    apiGet<any>('/api/minimax/status').then(setMinimaxStatus).catch(() => {})
+    apiGet<any[]>('/api/industry-packs').then(setPacks).catch(() => {})
+  }, [])
+
+  const handleGenerate = async () => {
+    if (!prompt.trim()) return
     setError('')
     try {
-      const res = await generateCopy({ topic: prompt, industry, style: '老板口播、真实、有信任感' })
+      const res = await apiPost<any>('/api/generate-copy', { topic: prompt, industry, style: '老板口播、真实、有信任感', duration_seconds: 35 })
       setScript(res.script || res.copy?.script || JSON.stringify(res))
-      setStep(1)
-    } catch (e: any) {
-      setError(e.message || 'Failed to generate script')
-    } finally {
-      setGenerating(false)
-    }
+    } catch (e: any) { setError(String(e)) }
   }
 
   const handleCompose = async () => {
-    setGenerating(true)
+    if (!script.trim()) return
+    setComposing(true); setError('')
+    try {
+      const res = await apiPost<any>('/api/compose-video', {
+        script, title: prompt, duration_seconds: 35, voice,
+        subtitle_size: subtitleSize, subtitle_keywords: subtitleHighlight,
+        asset_plan: [], asset_ids: [],
+      })
+      setResult(res)
+    } catch (e: any) { setError(String(e)) }
+    setComposing(false)
+  }
+
+  const handleMinimaxBroll = async () => {
+    if (!minimaxStatus?.enabled) return
     setError('')
     try {
-      const res = await composeVideo({ script, industry, subtitle_size: 80 })
-      setResult(res)
-      setStep(5)
-    } catch (e: any) {
-      setError(e.message || 'Compose failed')
-    } finally {
-      setGenerating(false)
-    }
+      const prompts = minimaxStatus.broll_prompts?.[industry] || ['cinematic drone shot']
+      const res = await apiPost<any>('/api/minimax/video/text-to-video', { prompt: prompts[0], duration_seconds: 5 })
+      setResult({ ...result, minimax_broll: res })
+    } catch (e: any) { setError(String(e)) }
   }
 
   return (
-    <div className="max-w-3xl mx-auto space-y-6">
-      <div>
-        <h2 className="text-2xl font-bold text-white">Create Video</h2>
-        <p className="text-slate-400 mt-1">Step-by-step video production workflow</p>
+    <div>
+      <div className="heroHeader" style={{ minHeight: 140 }}>
+        <div>
+          <span className="eyebrow">Create Video</span>
+          <h1 style={{ fontSize: 28 }}>New Production</h1>
+          <p>Industry → Script → Voice → Human → B-Roll → Compose</p>
+        </div>
       </div>
 
-      {/* Stepper */}
-      <div className="flex items-center gap-2 overflow-x-auto pb-2">
-        {STEPS.map((s, i) => (
-          <React.Fragment key={s}>
-            <button
-              onClick={() => setStep(i)}
-              className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap transition-colors ${
-                i === step ? 'bg-blue-600 text-white' : i < step ? 'bg-green-900/50 text-green-400' : 'bg-slate-800 text-slate-500'
-              }`}
-            >
-              {i < step ? '✓' : i + 1} {s}
-            </button>
-            {i < STEPS.length - 1 && <span className="text-slate-700">→</span>}
-          </React.Fragment>
-        ))}
-      </div>
+      {error && <div className="card" style={{ marginTop: 16, border: '2px solid var(--red)' }}><p style={{ color: 'var(--red)' }}>{error}</p></div>}
 
-      {/* Step 0: Industry */}
-      {step === 0 && (
-        <Card title="Step 1: Choose Industry" subtitle="Select the content vertical for your video">
-          <div className="grid grid-cols-2 gap-4">
+      <div className="workflowBoard" style={{ marginTop: 24 }}>
+        {/* Step 1: Industry */}
+        <div className="card">
+          <h3>1. Industry</h3>
+          <div className="grid2" style={{ gap: 10 }}>
             {(['real_estate', 'foreign_trade'] as Industry[]).map(ind => (
-              <button
-                key={ind}
-                onClick={() => setIndustry(ind)}
-                className={`p-6 rounded-xl border-2 text-left transition-all ${
-                  industry === ind ? 'border-blue-500 bg-blue-500/10' : 'border-slate-700 hover:border-slate-600'
-                }`}
-              >
-                <h3 className="text-lg font-semibold text-white mb-1">{ind === 'real_estate' ? 'Real Estate' : 'Foreign Trade'}</h3>
-                <p className="text-sm text-slate-400">{ind === 'real_estate' ? 'Property, investment, lifestyle' : 'Factory, wholesale, B2B'}</p>
+              <button key={ind} onClick={() => setIndustry(ind)}
+                style={{ padding: 16, borderRadius: 16, border: industry === ind ? '2px solid var(--primary)' : '1px solid var(--line)', background: industry === ind ? '#eff6ff' : '#fff', textAlign: 'left', cursor: 'pointer' }}>
+                <strong>{ind === 'real_estate' ? 'Real Estate' : 'Foreign Trade'}</strong>
+                <br/><small style={{ color: 'var(--muted)' }}>{ind === 'real_estate' ? 'Property, investment' : 'Factory, wholesale'}</small>
               </button>
             ))}
           </div>
-          <div className="mt-4">
-            <label className="block text-sm text-slate-400 mb-2">What topic do you want to cover?</label>
-            <textarea
-              value={prompt}
-              onChange={e => setPrompt(e.target.value)}
-              placeholder="e.g. 马来西亚吉隆坡 vs 槟城投资对比"
-              rows={2}
-              className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
-            />
+          <div style={{ marginTop: 12 }}>
+            <label style={{ fontWeight: 700, fontSize: 13 }}>Topic</label>
+            <input value={prompt} onChange={e => setPrompt(e.target.value)} placeholder="e.g. 马来西亚吉隆坡投资对比"
+              style={{ width: '100%', marginTop: 6, padding: '10px 14px', borderRadius: 12, border: '1px solid var(--line)', fontSize: 14 }} />
           </div>
-          <div className="mt-4 flex gap-3">
-            <Button onClick={handleGenerateScript} disabled={generating || !prompt.trim()}>
-              <Sparkles size={16} className="mr-2" /> Generate Script
-            </Button>
-          </div>
-          {error && <p className="text-red-400 text-sm mt-3">{error}</p>}
-        </Card>
-      )}
+          <button className="btn" onClick={handleGenerate} disabled={!prompt.trim()} style={{ marginTop: 12 }}>
+            Generate Script
+          </button>
+        </div>
 
-      {/* Step 1: Script */}
-      {step === 1 && (
-        <Card title="Step 2: Script" subtitle="Review and edit the generated script">
-          <textarea
-            value={script}
-            onChange={e => setScript(e.target.value)}
-            rows={6}
-            className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-3 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
-          />
-          <div className="mt-4 flex gap-3">
-            <Button onClick={() => setStep(2)} disabled={!script.trim()}>Next: Voice</Button>
-            <Button variant="ghost" onClick={() => setStep(0)}>Back</Button>
+        {/* Step 2: Script */}
+        <div className="card">
+          <h3>2. Script & Subtitles</h3>
+          <textarea value={script} onChange={e => setScript(e.target.value)} rows={5}
+            placeholder="Your video narration script..." style={{ width: '100%', padding: 12, borderRadius: 12, border: '1px solid var(--line)', fontSize: 14, resize: 'vertical' }} />
+          <div className="grid2" style={{ marginTop: 10, gap: 10 }}>
+            <div><label style={{ fontWeight: 700, fontSize: 12 }}>Subtitle Size</label>
+              <input type="number" value={subtitleSize} onChange={e => setSubtitleSize(Number(e.target.value))} min={48} max={120}
+                style={{ width: '100%', padding: '8px 12px', borderRadius: 10, border: '1px solid var(--line)' }} /></div>
+            <div><label style={{ fontWeight: 700, fontSize: 12 }}>Keywords</label>
+              <input value={subtitleHighlight} onChange={e => setSubtitleHighlight(e.target.value)} placeholder="AI, area, price"
+                style={{ width: '100%', padding: '8px 12px', borderRadius: 10, border: '1px solid var(--line)' }} /></div>
           </div>
-        </Card>
-      )}
+          <button className="btn" onClick={handleCompose} disabled={composing || !script.trim()} style={{ marginTop: 12, background: 'var(--primary-2)' }}>
+            {composing ? 'Composing...' : 'Compose Video'}
+          </button>
+        </div>
 
-      {/* Step 2: Voice */}
-      {step === 2 && (
-        <Card title="Step 3: TTS Provider" subtitle="Choose voice synthesis provider">
-          <div className="grid grid-cols-2 gap-4">
-            {[
-              { id: 'volcengine', name: 'Volcengine TTS', desc: 'Cloud Chinese TTS' },
-              { id: 'mock', name: 'Mock (Testing)', desc: 'Silent audio for testing' },
-            ].map(v => (
-              <button
-                key={v.id}
-                onClick={() => setVoice(v.id)}
-                className={`p-4 rounded-xl border-2 text-left ${voice === v.id ? 'border-blue-500 bg-blue-500/10' : 'border-slate-700'}`}
-              >
-                <div className="flex items-center gap-2 mb-1"><Radio size={16} className="text-blue-400" /><span className="text-white font-medium">{v.name}</span></div>
-                <p className="text-xs text-slate-500">{v.desc}</p>
+        {/* Step 3: Voice / TTS */}
+        <div className="card">
+          <h3>3. Voice</h3>
+          <select value={voice} onChange={e => setVoice(e.target.value)}
+            style={{ width: '100%', padding: '10px 14px', borderRadius: 12, border: '1px solid var(--line)', fontSize: 14 }}>
+            <option value="default">Volcengine TTS (Default)</option>
+            <option value="mock">Mock / Testing</option>
+          </select>
+          <div className="card" style={{ marginTop: 12, background: '#f8fafc' }}>
+            <h3>4. Human Mode</h3>
+            <div className="grid2" style={{ gap: 8 }}>
+              {(['none', 'digital_human', 'human_intro', 'human_pip'] as HumanMode[]).map(m => (
+                <button key={m} onClick={() => setHumanMode(m)}
+                  style={{ padding: 10, borderRadius: 12, border: humanMode === m ? '2px solid var(--primary-2)' : '1px solid var(--line)', background: humanMode === m ? '#f5f3ff' : '#fff', cursor: 'pointer', fontSize: 13 }}>
+                  {m === 'none' ? 'No Human' : m === 'digital_human' ? 'Digital Human' : m === 'human_intro' ? 'Human Intro' : 'Human PIP'}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* Step 4: MiniMax B-Roll */}
+        <div className="card">
+          <h3>5. B-Roll (MiniMax)</h3>
+          <p style={{ fontSize: 13, color: minimaxStatus?.enabled ? 'var(--green)' : 'var(--muted)' }}>
+            {minimaxStatus?.enabled ? `MiniMax enabled (${minimaxStatus.video_model})` : 'MiniMax disabled — set MINIMAX_API_KEY in .env'}
+          </p>
+          {minimaxStatus?.enabled && minimaxStatus.broll_prompts && (
+            <div style={{ marginTop: 8 }}>
+              <small style={{ color: 'var(--muted)' }}>B-Roll Prompts ({industry}):</small>
+              {(minimaxStatus.broll_prompts[industry] || []).slice(0, 2).map((p: string, i: number) => (
+                <p key={i} style={{ fontSize: 12, color: 'var(--ink)', background: '#f8fafc', padding: '6px 10px', borderRadius: 8, marginTop: 4 }}>{p}</p>
+              ))}
+              <button className="btn" onClick={handleMinimaxBroll} style={{ marginTop: 8, background: 'var(--cyan)' }}>
+                Generate B-Roll
               </button>
-            ))}
-          </div>
-          <div className="mt-4 flex gap-3">
-            <Button onClick={() => setStep(3)}>Next: Human Mode</Button>
-            <Button variant="ghost" onClick={() => setStep(1)}>Back</Button>
-          </div>
-        </Card>
-      )}
-
-      {/* Step 3: Human */}
-      {step === 3 && (
-        <Card title="Step 4: Human Mode" subtitle="Choose presenter mode for the video">
-          <div className="grid grid-cols-2 gap-4">
-            {([
-              { id: 'none', name: 'No Human', desc: 'Pure B-roll + subtitles' },
-              { id: 'digital_human', name: 'Digital Human', desc: 'AI avatar intro' },
-              { id: 'human_intro', name: 'Human Intro', desc: 'Green screen person intro' },
-              { id: 'human_pip', name: 'Human PIP', desc: 'Picture-in-picture overlay' },
-            ] as { id: HumanMode; name: string; desc: string }[]).map(h => (
-              <button
-                key={h.id}
-                onClick={() => setHumanMode(h.id)}
-                className={`p-4 rounded-xl border-2 text-left ${humanMode === h.id ? 'border-blue-500 bg-blue-500/10' : 'border-slate-700'}`}
-              >
-                <div className="flex items-center gap-2 mb-1"><User size={16} className="text-purple-400" /><span className="text-white font-medium">{h.name}</span></div>
-                <p className="text-xs text-slate-500">{h.desc}</p>
-              </button>
-            ))}
-          </div>
-          <div className="mt-4 flex gap-3">
-            <Button onClick={() => setStep(4)}>Next: B-Roll</Button>
-            <Button variant="ghost" onClick={() => setStep(2)}>Back</Button>
-          </div>
-        </Card>
-      )}
-
-      {/* Step 4: B-Roll */}
-      {step === 4 && (
-        <Card title="Step 5: B-Roll" subtitle="Choose background footage source">
-          <div className="grid grid-cols-3 gap-4">
-            {[
-              { id: 'existing', name: 'Existing', desc: 'Use uploaded assets' },
-              { id: 'upload', name: 'Upload', desc: 'Upload new footage' },
-              { id: 'minimax', name: 'MiniMax AI', desc: 'Generate with AI' },
-            ].map(b => (
-              <button
-                key={b.id}
-                onClick={() => setBrollMode(b.id as any)}
-                className={`p-4 rounded-xl border-2 text-center ${brollMode === b.id ? 'border-blue-500 bg-blue-500/10' : 'border-slate-700'}`}
-              >
-                <Image size={20} className="mx-auto mb-2 text-blue-400" />
-                <p className="text-white font-medium text-sm">{b.name}</p>
-                <p className="text-xs text-slate-500 mt-1">{b.desc}</p>
-              </button>
-            ))}
-          </div>
-          {brollMode === 'minimax' && (
-            <div className="mt-4 p-4 bg-slate-800 rounded-lg">
-              <p className="text-sm text-yellow-400">MiniMax integration available. Go to Providers page to enable.</p>
             </div>
           )}
-          <div className="mt-4 flex gap-3">
-            <Button onClick={handleCompose} disabled={generating}>
-              <Video size={16} className="mr-2" /> Compose Video
-            </Button>
-            <Button variant="ghost" onClick={() => setStep(3)}>Back</Button>
-          </div>
-        </Card>
-      )}
+        </div>
+      </div>
 
-      {/* Step 5: Result */}
-      {step === 5 && (
-        <Card title="Video Ready">
-          {result ? (
-            <div className="space-y-4">
-              <p className="text-green-400">Video composed successfully!</p>
-              {result.video_url && (
-                <a href={result.video_url} target="_blank" className="text-blue-400 underline text-sm" rel="noreferrer">
-                  Open video: {result.video_name || 'output.mp4'}
-                </a>
-              )}
-              <pre className="text-xs text-slate-400 bg-slate-800 p-3 rounded overflow-auto max-h-48">{JSON.stringify(result, null, 2)}</pre>
+      {/* Result */}
+      {result && (
+        <div className="card" style={{ marginTop: 24 }}>
+          <h3>Result</h3>
+          {result.video_url ? (
+            <div className="videoGrid">
+              <video src={result.video_url} controls className="previewVideo" />
+              <div className="downloadPanel">
+                <a href={result.video_url} className="download" target="_blank" rel="noreferrer">Download Video</a>
+                <p><strong>Duration:</strong> {result.duration_seconds?.toFixed(1)}s</p>
+                {result.warnings?.map((w: string, i: number) => <small key={i} style={{ color: 'var(--orange)' }}>{w}</small>)}
+              </div>
             </div>
           ) : (
-            <EmptyState icon="🎬" title="No result yet" description="Compose a video to see the result here." />
+            <pre style={{ fontSize: 12, color: 'var(--muted)', maxHeight: 200, overflow: 'auto' }}>{JSON.stringify(result, null, 2)}</pre>
           )}
-          <div className="mt-4">
-            <Button variant="ghost" onClick={() => { setStep(0); setResult(null); setScript(''); setPrompt('') }}>Start New Video</Button>
-          </div>
-        </Card>
+        </div>
       )}
-
-      {generating && <LoadingBlock text="Processing..." />}
     </div>
   )
 }

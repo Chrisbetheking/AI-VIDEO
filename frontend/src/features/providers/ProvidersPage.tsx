@@ -1,97 +1,96 @@
 ﻿import React, { useEffect, useState } from 'react'
-import { Card } from '../../components/ui/Card'
-import { Badge } from '../../components/ui/Badge'
-import { StatusDot } from '../../components/ui/StatusDot'
-import { LoadingBlock } from '../../components/ui/LoadingBlock'
-import { getHealth, getMinimaxStatus } from '../../lib/api'
-import type { HealthStatus, MinimaxStatus, ProviderInfo, ProviderStatus } from '../../lib/types'
-import { Radio, Brain, Video, User, Key, CheckCircle, XCircle } from 'lucide-react'
+import { apiGet } from '../../lib/api'
+import type { HealthStatus, MinimaxStatus } from '../../lib/types'
 
 export function ProvidersPage() {
   const [health, setHealth] = useState<HealthStatus | null>(null)
   const [minimax, setMinimax] = useState<MinimaxStatus | null>(null)
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
 
   useEffect(() => {
     Promise.all([
-      getHealth().catch(() => null),
-      getMinimaxStatus().catch(() => null),
+      apiGet<HealthStatus>('/api/health').catch(e => { setError(String(e)); return null }),
+      apiGet<MinimaxStatus>('/api/minimax/status').catch(() => null),
     ]).then(([h, m]) => { setHealth(h); setMinimax(m); setLoading(false) })
   }, [])
 
-  const providers: ProviderInfo[] = [
-    { name: 'Volcengine TTS', type: 'tts', status: 'unknown', model: 'Volcengine TTS', note: 'Check .env VOLCENGINE_*' },
-    { name: 'MiniMax / Hailuo', type: 'video_gen', status: minimax?.enabled ? 'configured' : 'disabled', model: minimax?.video_model || 'MiniMax-Hailuo-2.3', note: minimax?.message },
-    { name: 'Qwen / DeepSeek', type: 'llm', status: 'unknown', model: 'qwen-max', note: 'Check AI_PROVIDER in .env' },
-    { name: 'Digital Human', type: 'digital_human', status: 'unknown', model: 'OmniHuman 1.5', note: 'Check ENABLE_DIGITAL_HUMAN' },
+  if (loading) return <div className="card"><p>Loading providers...</p></div>
+
+  const providers = [
+    { n: 'API Backend', t: 'Core', s: health?.status === 'ok' ? 'configured' as const : 'error' as const, m: health?.version || '?', note: health?.status === 'ok' ? 'Online' : 'Offline' },
+    { n: 'MiniMax / Hailuo', t: 'Video Gen', s: minimax?.enabled ? 'configured' as const : 'disabled' as const, m: minimax?.video_model || 'N/A', note: minimax?.message || '' },
+    { n: 'Volcengine TTS', t: 'TTS', s: 'unknown' as const, m: 'Volcengine TTS', note: 'Check VOLCENGINE_* in .env' },
+    { n: 'Qwen / DeepSeek', t: 'LLM', s: 'unknown' as const, m: 'qwen-max', note: 'Check AI_PROVIDER in .env' },
+    { n: 'Digital Human', t: 'Avatar', s: 'unknown' as const, m: 'OmniHuman 1.5', note: 'Check ENABLE_DIGITAL_HUMAN' },
   ]
 
-  if (loading) return <LoadingBlock text="Loading provider status..." />
+  const statusDot = (s: string) => ({
+    width: 10, height: 10, borderRadius: 999, display: 'inline-block', marginRight: 10,
+    background: s === 'configured' ? 'var(--green)' : s === 'error' ? 'var(--red)' : s === 'disabled' ? 'var(--muted)' : 'var(--orange)'
+  })
 
   return (
-    <div className="space-y-6 max-w-3xl mx-auto">
-      <div>
-        <h2 className="text-2xl font-bold text-white">Providers</h2>
-        <p className="text-slate-400 mt-1">Manage AI service integrations</p>
+    <div>
+      <div className="heroHeader" style={{ minHeight: 120 }}>
+        <div>
+          <span className="eyebrow">Configuration</span>
+          <h1 style={{ fontSize: 28 }}>Providers</h1>
+          <p>Manage AI service integrations and API keys</p>
+        </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-4">
-        {providers.map(p => (
-          <Card key={p.name}>
-            <div className="flex items-start justify-between">
-              <div className="flex items-center gap-3">
-                <div className={`p-2 rounded-lg ${p.type === 'tts' ? 'bg-purple-900/30' : p.type === 'llm' ? 'bg-blue-900/30' : p.type === 'video_gen' ? 'bg-green-900/30' : 'bg-orange-900/30'}`}>
-                  {p.type === 'tts' ? <Radio size={20} className="text-purple-400" /> :
-                   p.type === 'llm' ? <Brain size={20} className="text-blue-400" /> :
-                   p.type === 'video_gen' ? <Video size={20} className="text-green-400" /> :
-                   <User size={20} className="text-orange-400" />}
-                </div>
+      {error && <div className="card" style={{ marginTop: 16, border: '2px solid var(--red)' }}><p style={{ color: 'var(--red)' }}>{error}</p></div>}
+
+      <div className="card" style={{ marginTop: 24 }}>
+        <h3>Provider Status</h3>
+        <div style={{ display: 'grid', gap: 12 }}>
+          {providers.map(p => (
+            <div key={p.n} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 18px', border: '1px solid var(--line)', borderRadius: 16, background: '#fff' }}>
+              <div style={{ display: 'flex', alignItems: 'center' }}>
+                <span style={statusDot(p.s)} />
                 <div>
-                  <div className="flex items-center gap-2">
-                    <h3 className="text-white font-medium">{p.name}</h3>
-                    <Badge variant={p.status === 'configured' ? 'success' : p.status === 'disabled' ? 'neutral' : 'warning'}>
-                      {p.status}
-                    </Badge>
-                  </div>
-                  <p className="text-sm text-slate-500 mt-0.5">Model: {p.model}</p>
+                  <strong style={{ fontSize: 14 }}>{p.n}</strong>
+                  <span style={{ marginLeft: 8, background: p.s === 'configured' ? '#ecfdf5' : p.s === 'error' ? '#fef2f2' : '#f8fafc', color: p.s === 'configured' ? 'var(--green)' : p.s === 'error' ? 'var(--red)' : 'var(--muted)', borderRadius: 999, padding: '2px 10px', fontSize: 11, fontWeight: 800 }}>
+                    {p.s}
+                  </span>
                 </div>
               </div>
-              <StatusDot status={p.status} />
+              <div style={{ textAlign: 'right' }}>
+                <small style={{ color: 'var(--muted)', display: 'block' }}>Model: {p.m}</small>
+                {p.note && <small style={{ color: 'var(--muted-2)', fontSize: 11 }}>{p.note}</small>}
+              </div>
             </div>
-            {p.note && <p className="text-xs text-slate-500 mt-3 pl-11">{p.note}</p>}
-          </Card>
-        ))}
+          ))}
+        </div>
       </div>
 
       {minimax?.broll_prompts && (
-        <Card title="MiniMax B-Roll Prompts" subtitle="Pre-built prompts for AI video generation">
-          <div className="space-y-4">
+        <div className="card" style={{ marginTop: 24 }}>
+          <h3>MiniMax B-Roll Prompts</h3>
+          <div className="grid2">
             <div>
-              <h4 className="text-sm font-medium text-green-400 mb-2">Real Estate</h4>
-              <div className="space-y-1">
-                {minimax.broll_prompts.real_estate.map((p, i) => (
-                  <p key={i} className="text-xs text-slate-400 bg-slate-800 rounded px-3 py-1.5">{p}</p>
-                ))}
-              </div>
+              <h4 style={{ color: 'var(--green)', marginBottom: 8 }}>Real Estate</h4>
+              {minimax.broll_prompts.real_estate.map((p, i) => (
+                <p key={i} style={{ fontSize: 12, background: '#f8fafc', padding: '6px 12px', borderRadius: 8, marginTop: 4 }}>{p}</p>
+              ))}
             </div>
             <div>
-              <h4 className="text-sm font-medium text-blue-400 mb-2">Foreign Trade</h4>
-              <div className="space-y-1">
-                {minimax.broll_prompts.foreign_trade.map((p, i) => (
-                  <p key={i} className="text-xs text-slate-400 bg-slate-800 rounded px-3 py-1.5">{p}</p>
-                ))}
-              </div>
+              <h4 style={{ color: 'var(--primary)', marginBottom: 8 }}>Foreign Trade</h4>
+              {minimax.broll_prompts.foreign_trade.map((p, i) => (
+                <p key={i} style={{ fontSize: 12, background: '#f8fafc', padding: '6px 12px', borderRadius: 8, marginTop: 4 }}>{p}</p>
+              ))}
             </div>
           </div>
-        </Card>
+        </div>
       )}
 
-      <Card title="Configuration">
-        <div className="space-y-2 text-sm text-slate-400">
-          <p>Provider API keys are configured in <code className="bg-slate-800 px-1.5 py-0.5 rounded text-xs">backend/.env</code> on your server.</p>
-          <p>API keys are <strong>never</strong> exposed to the frontend. This page only shows configuration status.</p>
-        </div>
-      </Card>
+      <div className="card" style={{ marginTop: 24, background: '#fefce8' }}>
+        <p style={{ fontSize: 13, color: 'var(--ink)' }}>
+          <strong>Note:</strong> API keys are configured in <code>backend/.env</code> on your server.
+          They are never exposed to the frontend. This page only shows configuration status.
+        </p>
+      </div>
     </div>
   )
 }
