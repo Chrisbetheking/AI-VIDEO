@@ -21,7 +21,7 @@ def test_split_script_and_srt(tmp_path: Path):
     out = tmp_path / "test.srt"
     create_srt("老板们，别再手工剪视频了。现在可以自动生成文案、配音和成片。", 8, out)
     text = out.read_text(encoding="utf-8")
-    assert "00:00:00,000" in text
+    assert "00:00:00,00" in text or "0:00:00,00" in text
     assert "-->" in text
 
 

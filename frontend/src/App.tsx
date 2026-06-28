@@ -809,6 +809,8 @@ function AppInner() {
   const [segmentSeconds, setSegmentSeconds] = useState<Record<number, number>>({})
   const [segmentTransitions, setSegmentTransitions] = useState<Record<number, string>>({})
   const [subtitleSize, setSubtitleSize] = useState(80)
+  const [industry, setIndustry] = useState('real_estate')
+  const [humanMode, setHumanMode] = useState('none')
   const [subtitleMarginV, setSubtitleMarginV] = useState(56)
   const [subtitlePosition, setSubtitlePosition] = useState<'bottom_safe' | 'middle_low' | 'center'>('bottom_safe')
   const [subtitlePreset, setSubtitlePreset] = useState<'douyin_boss' | 'knowledge_highlight' | 'clean_trust' | 'cta_pop'>('douyin_boss')
@@ -3466,6 +3468,38 @@ https://www.douyin.com/user/..." /></Field>
       </section>}
     </main>
   </div>
+}
+
+function LeadInbox() {
+  const [comment, setComment] = useState('')
+  const [leadIndustry, setLeadIndustry] = useState('real_estate')
+  const [result, setResult] = useState<any>(null)
+  const analyze = async () => {
+    if (!comment.trim()) return
+    const r = await fetch((window as any).__API_BASE + '/api/leads/analyze', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: comment, industry: leadIndustry, platform: 'douyin' })
+    }).then(r => r.json()).catch(e => ({ ok: false, error: String(e) }))
+    setResult(r)
+  }
+  return (
+    <div style={{ padding: 16, borderTop: '1px solid #333' }}>
+      <h3>Lead Inbox (Preview)</h3>
+      <div className="grid2"><div className="field"><label>行业</label><select value={leadIndustry} onChange={e => setLeadIndustry(e.target.value)}><option value="real_estate">房产</option><option value="foreign_trade">外贸</option></select></div></div>
+      <div className="field"><label>粘贴评论</label><textarea value={comment} onChange={e => setComment(e.target.value)} rows={2} placeholder="例：这个房子多少钱，能贷款吗？" /></div>
+      <button className="btn primary" onClick={analyze} disabled={!comment.trim()}>AI 分析</button>
+      {result && (
+        <div style={{ marginTop: 12, padding: 12, background: '#1a1a2e', borderRadius: 8 }}>
+          <div>意向等级：<strong>{result.intent_level === 'high' ? '高' : result.intent_level === 'medium' ? '中' : '低'}</strong> ({result.intent_type})</div>
+          <div style={{ marginTop: 8 }}>建议回复：<em>{result.suggested_reply}</em></div>
+          <div style={{ marginTop: 4, fontSize: 12, color: '#888' }}>下一步：{result.next_action} | 置信度：{result.confidence}</div>
+          {result.suggested_reply && <button className="btn soft" style={{ marginTop: 8 }} onClick={() => { navigator.clipboard.writeText(result.suggested_reply) }}>复制回复</button>}
+        </div>
+      )}
+    </div>
+      <LeadInbox />
+  )
 }
 
 export default function App() {

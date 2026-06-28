@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any, List, Optional
 from urllib.parse import urlparse
 
+from pydantic import BaseModel
 from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, RedirectResponse
@@ -116,6 +117,9 @@ from app.services.video import IMAGE_EXTS, VIDEO_EXTS, MediaClip, compose_video
 from app.services.video_edit import apply_video_edit
 from app.services.auto_collector import run_auto_collection
 from app.services.one_click import generate_one_click, revise_one_click
+from app.services.industry_packs import list_packs, get_pack, INDUSTRY_PACKS
+from app.services.human_overlay import overlay_human_on_video, build_human_overlay_filter
+from app.services.reply_assistant import suggest_reply, store_lead, list_leads, get_lead, update_lead
 from app.services.graphic_post import create_graphic_post
 from app.services.heat_radar import run_public_heat_radar, generate_heat_radar_rewrite, ingest_openclaw_heat_radar, audit_heat_radar_accounts, analyze_heat_radar_video_intake
 from app.services.collector_control import create_collector_run, append_collector_event, latest_collector_status, create_collector_command, next_collector_command, complete_collector_command, recommended_digital_human_providers
@@ -125,6 +129,178 @@ app = FastAPI(title='AI-VIDEO 正式版 API', version='1.0.0')
 settings = get_settings()
 _auto_collector_task: asyncio.Task | None = None
 _auto_agent_jobs: dict[str, dict] = {}
+
+
+
+# ===== MVP: Industry Packs =====
+
+@app.get("/api/industry-packs")
+def api_industry_packs() -> list[dict]:
+    """List available industry packs for the growth studio."""
+    return list_packs()
+
+
+@app.get("/api/industry-packs/{industry}")
+def api_industry_pack_detail(industry: str):
+    """Get a specific industry pack by name."""
+    try:
+        pack = get_pack(industry)
+        return {
+            "ok": True,
+            "industry_name": pack.industry_name,
+            "pain_points": pack.pain_points,
+            "hook_templates": pack.hook_templates,
+            "copy_templates": pack.copy_templates,
+            "cta_templates": pack.cta_templates,
+            "asset_keywords": pack.asset_keywords,
+            "lead_keywords": pack.lead_keywords,
+            "reply_templates": pack.reply_templates,
+            "forbidden_words": pack.forbidden_words,
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+# ===== MVP: Human Overlay =====
+
+class HumanOverlayRequest(BaseModel):
+    base_video_name: str = ""
+    human_video_name: str = ""
+    position: str = "right_bottom"
+    scale_pct: str = "40%"
+    take_first_seconds: float = 0.0
+    keep_human_audio: bool = False
+
+
+@app.post("/api/human-overlay/preview")
+def api_human_overlay_preview(
+    req: HumanOverlayRequest,
+    settings: Settings = Depends(get_settings),
+) -> dict:
+    """Return the FFmpeg filter string for preview (no actual compose)."""
+    filter_str = build_human_overlay_filter(
+        scale_pct=req.scale_pct,
+        position=req.position,
+    )
+    return {"ok": True, "filter": filter_str, "mode": "human_pip" if req.scale_pct in ("30%", "40%") else "human_intro"}
+
+
+@app.post("/api/human-overlay/compose")
+def api_human_overlay_compose(
+    req: HumanOverlayRequest,
+    request: Request,
+    settings: Settings = Depends(get_settings),
+) -> dict:
+    """Compose human overlay onto base video."""
+    base_video = find_media_file(settings, req.base_video_name) if req.base_video_name else None
+    human_video = find_media_file(settings, req.human_video_name) if req.human_video_name else None
+
+    if base_video is None:
+        raise HTTPException(status_code=400, detail="Base video not found")
+    if human_video is None:
+        raise HTTPException(status_code=400, detail="Human video not found")
+
+    output = settings.outputs_dir / f"human_overlay_{uuid.uuid4().hex}.mp4"
+    result = overlay_human_on_video(
+        base_video=base_video,
+        human_video=human_video,
+        output_path=output,
+        position=req.position,
+        scale_pct=req.scale_pct,
+        take_first_seconds=req.take_first_seconds,
+        keep_human_audio=req.keep_human_audio,
+    )
+    if not result.output_path or not result.output_path.exists():
+        return {"ok": False, "error": "Overlay failed", "warnings": result.warnings, "mode": "none"}
+    public_url = maybe_upload_to_r2(settings, result.output_path, prefix="videos")
+    return {
+        "ok": True,
+        "video_url": file_url(request, result.output_path.name, public_url),
+        "video_name": result.output_path.name,
+        "mode": result.mode,
+        "warnings": result.warnings,
+    }
+
+
+# ===== MVP: Lead Capture =====
+
+class LeadAnalyzeRequest(BaseModel):
+    industry: str = "real_estate"
+    platform: str = "douyin"
+    content: str = ""
+
+
+class LeadUpdateRequest(BaseModel):
+    status: Optional[str] = None
+
+
+@app.post("/api/leads/analyze")
+def api_leads_analyze(req: LeadAnalyzeRequest) -> dict:
+    """Analyze a comment/message for lead intent."""
+    suggestion = suggest_reply(content=req.content, industry=req.industry, platform=req.platform)
+    record = store_lead(suggestion, req.content, req.industry, req.platform)
+    return {
+        "ok": True,
+        "lead_id": record.id,
+        "intent_level": suggestion.intent_level,
+        "intent_type": suggestion.intent_type,
+        "suggested_reply": suggestion.suggested_reply,
+        "fallback_reply": suggestion.fallback_reply,
+        "next_action": suggestion.next_action,
+        "keywords_matched": suggestion.keywords_matched,
+        "confidence": suggestion.confidence,
+    }
+
+
+@app.post("/api/leads/reply-suggestions")
+def api_leads_reply_suggestions(req: LeadAnalyzeRequest) -> dict:
+    """Get reply suggestions for a comment (without storing)."""
+    suggestion = suggest_reply(content=req.content, industry=req.industry, platform=req.platform)
+    return {
+        "ok": True,
+        "intent_level": suggestion.intent_level,
+        "intent_type": suggestion.intent_type,
+        "suggested_reply": suggestion.suggested_reply,
+        "fallback_reply": suggestion.fallback_reply,
+        "next_action": suggestion.next_action,
+        "keywords_matched": suggestion.keywords_matched,
+        "confidence": suggestion.confidence,
+    }
+
+
+@app.get("/api/leads")
+def api_leads_list(industry: Optional[str] = None) -> list[dict]:
+    """List captured leads, optionally filtered by industry."""
+    leads = list_leads(industry=industry)
+    return [
+        {
+            "id": r.id,
+            "content": r.content,
+            "industry": r.industry,
+            "platform": r.platform,
+            "intent_level": r.intent_level,
+            "intent_type": r.intent_type,
+            "suggested_reply": r.suggested_reply,
+            "status": r.status,
+            "created_at": r.created_at,
+        }
+        for r in leads
+    ]
+
+
+@app.patch("/api/leads/{lead_id}")
+def api_leads_update(lead_id: str, req: LeadUpdateRequest) -> dict:
+    """Update a lead's status."""
+    record = update_lead(lead_id, status=req.status)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    return {
+        "ok": True,
+        "id": record.id,
+        "status": record.status,
+    }
+
+
 
 
 async def _auto_collector_loop() -> None:
