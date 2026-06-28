@@ -137,9 +137,11 @@ async def synthesize_volcengine_v1(settings: Settings, text: str, voice: Optiona
         # V3 大模型语音合成/声音复刻接口需要用 X-Api-Resource-Id 选择版本效果，例如 seed-icl-2.0。
         headers['X-Api-Resource-Id'] = resource_id
     async with httpx.AsyncClient(timeout=180) as client:
-        resp = await client.post(settings.volcengine_tts_endpoint, headers=headers, json=body)
+        params = {'voice_type': voice_type}
+        headers['X-Api-Voice-Type'] = voice_type
+        resp = await client.post(settings.volcengine_tts_endpoint, headers=headers, params=params, json=body)
     if resp.status_code >= 400:
-        raise RuntimeError(f'豆包语音合成失败 HTTP {resp.status_code}：{resp.text[:1000]}')
+        raise RuntimeError(f'豆包语音合成失败 HTTP {resp.status_code} (voice_type={voice_type})：{resp.text[:1000]}')
     data = resp.json()
     # 常见成功码 3000；兼容部分网关只返回 data/audio 字段
     code = str(data.get('code', '3000'))
