@@ -41,6 +41,16 @@ npm run dev  # Opens at http://localhost:5173
 docker compose up --build
 ```
 
+## Experimental: MiniMax / Hailuo B-roll
+
+Optional video generation for real estate and foreign trade B-roll. Set `MINIMAX_ENABLED=true` and `MINIMAX_API_KEY` in `.env`.
+
+| Endpoint | Description |
+|----------|-------------|
+| `POST /api/minimax/video/text-to-video` | Text → B-roll video |
+| `POST /api/minimax/video/image-to-video` | Image → B-roll video |
+| `GET /api/minimax/status` | Provider status + B-roll prompts |
+
 ## Key API Endpoints
 
 | Endpoint | Description |

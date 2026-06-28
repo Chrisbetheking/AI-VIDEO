@@ -127,6 +127,15 @@ pip install -r requirements.txt
 
 Configure `.env` with ECS backend URL and collector token.
 
+### MiniMax / Hailuo (Experimental)
+
+```bash
+# .env
+MINIMAX_ENABLED=true
+MINIMAX_API_KEY=your_minimax_api_key
+MINIMAX_VIDEO_MODEL=MiniMax-Hailuo-2.3
+```
+
 ## Health Check
 
 ```bash

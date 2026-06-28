@@ -119,6 +119,23 @@ sudo certbot certificates
    - `Unknown encoder 'libx264'`: `sudo apt install libx264-dev`
    - `Fontconfig error`: `sudo apt install fonts-noto-cjk`
 
+### MiniMax / Hailuo Issues
+
+1. Check if MiniMax is enabled:
+   ```bash
+   curl https://ai-video.YOUR_SERVER.sslip.io/api/minimax/status
+   ```
+
+2. Verify API key:
+   ```bash
+   grep MINIMAX_API_KEY /opt/ai-video/backend/.env
+   ```
+
+3. If disabled, all MiniMax endpoints return:
+   ```json
+   {"ok": false, "enabled": false, "message": "MiniMax provider is disabled or missing API key"}
+   ```
+
 ### Windows Collector Issues
 
 1. Verify collector is running:

@@ -119,6 +119,7 @@ from app.services.auto_collector import run_auto_collection
 from app.services.one_click import generate_one_click, revise_one_click
 from app.services.industry_packs import list_packs, get_pack, INDUSTRY_PACKS
 from app.services.human_overlay import overlay_human_on_video, build_human_overlay_filter
+from app.services.minimax_provider import get_minimax_status, text_to_video, image_to_video, query_video_status, get_broll_prompts
 from app.services.reply_assistant import suggest_reply, store_lead, list_leads, get_lead, update_lead
 from app.services.graphic_post import create_graphic_post
 from app.services.heat_radar import run_public_heat_radar, generate_heat_radar_rewrite, ingest_openclaw_heat_radar, audit_heat_radar_accounts, analyze_heat_radar_video_intake
@@ -219,6 +220,89 @@ def api_human_overlay_compose(
         "video_name": result.output_path.name,
         "mode": result.mode,
         "warnings": result.warnings,
+    }
+
+
+# ===== Experimental: MiniMax Provider =====
+
+class MiniMaxTextToVideoRequest(BaseModel):
+    prompt: str = ""
+    negative_prompt: str = ""
+    duration_seconds: int = 5
+    resolution: str = "1080p"
+
+
+class MiniMaxImageToVideoRequest(BaseModel):
+    image_url: str = ""
+    prompt: str = ""
+    duration_seconds: int = 5
+
+
+@app.post("/api/minimax/video/text-to-video")
+async def api_minimax_text_to_video(
+    req: MiniMaxTextToVideoRequest,
+    settings: Settings = Depends(get_settings),
+) -> dict:
+    """Generate B-roll video from text prompt via MiniMax Hailuo."""
+    if not req.prompt.strip():
+        raise HTTPException(status_code=400, detail="Prompt is required")
+    result = await text_to_video(
+        settings,
+        prompt=req.prompt,
+        negative_prompt=req.negative_prompt,
+        duration_seconds=req.duration_seconds,
+        resolution=req.resolution,
+    )
+    return {
+        "ok": result.ok,
+        "enabled": result.enabled,
+        "task_id": result.task_id,
+        "status": result.status,
+        "video_url": result.video_url,
+        "message": result.message,
+    }
+
+
+@app.post("/api/minimax/video/image-to-video")
+async def api_minimax_image_to_video(
+    req: MiniMaxImageToVideoRequest,
+    settings: Settings = Depends(get_settings),
+) -> dict:
+    """Generate B-roll video from image via MiniMax Hailuo."""
+    if not req.image_url.strip():
+        raise HTTPException(status_code=400, detail="Image URL is required")
+    result = await image_to_video(
+        settings,
+        image_url=req.image_url,
+        prompt=req.prompt,
+        duration_seconds=req.duration_seconds,
+    )
+    return {
+        "ok": result.ok,
+        "enabled": result.enabled,
+        "task_id": result.task_id,
+        "status": result.status,
+        "video_url": result.video_url,
+        "message": result.message,
+    }
+
+
+@app.get("/api/minimax/status")
+def api_minimax_status(settings: Settings = Depends(get_settings)) -> dict:
+    """Get MiniMax provider status and available B-roll prompts."""
+    status = get_minimax_status(settings)
+    broll_real_estate = get_broll_prompts("real_estate", count=2)
+    broll_foreign_trade = get_broll_prompts("foreign_trade", count=2)
+    return {
+        "ok": True,
+        "enabled": status.enabled,
+        "video_model": status.video_model,
+        "tts_model": status.tts_model,
+        "message": status.message,
+        "broll_prompts": {
+            "real_estate": broll_real_estate,
+            "foreign_trade": broll_foreign_trade,
+        },
     }
 
 
