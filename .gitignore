@@ -60,3 +60,6 @@ desktop.ini
 dist/
 build/
 node_modules/
+
+# TypeScript build info
+*.tsbuildinfo
