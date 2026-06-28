@@ -1,0 +1,62 @@
+﻿# Environment
+.env
+backend/.env
+collector-local/.env
+
+# Python virtual environments
+.venv/
+venv/
+env/
+backend/.venv/
+
+# Python bytecode
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Backend runtime data (contain sensitive paths / keys / generated media)
+backend/outputs/
+backend/uploads/
+backend/tmp/
+backend/downloads/
+backend/data/
+
+# Media files (large binaries, should not be in git)
+*.mp4
+*.mov
+*.mkv
+*.webm
+*.mp3
+*.wav
+*.m4a
+*.aac
+*.ogg
+
+# Databases
+*.db
+*.sqlite3
+*.sqlite
+
+# Logs
+*.log
+
+# Backup files
+*.bak
+*.bak.*
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Build artifacts
+dist/
+build/
+node_modules/

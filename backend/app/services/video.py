@@ -6,7 +6,7 @@ import subprocess
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from app.config import Settings
 from app.services.effect_planner import (
@@ -22,6 +22,21 @@ from app.services.tts import probe_duration, synthesize_tts
 
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
 VIDEO_EXTS = {".mp4", ".mov", ".m4v", ".avi", ".mkv", ".webm"}
+
+
+
+@dataclass
+class MediaClip:
+    """Material clip for compose-video. Path is the resolved local file."""
+    path: Path
+    order: int = 0
+    kind: str = ""
+    url: str = ""
+    filename: str = ""
+    source_type: str = ""
+    image_seconds: float = 2.8
+    video_start: float = 0.0
+    video_end: float = 0.0
 
 
 @dataclass
@@ -77,8 +92,56 @@ def _ass_color_for_tone(tone: str) -> str:
     }.get((tone or "soft").lower(), "&H00FFFFFF")
 
 
-def create_smart_ass(segments: List[TimedSegment], stickers: List[StickerCue], output_path: Path) -> None:
-    """Create one ASS file containing synced subtitles + subtle AI planned sticker text overlays."""
+
+def create_srt(script: str, total_seconds: float, output_path: Path) -> None:
+    """Generate a simple SRT file from a script."""
+    parts = remove_repeated_intro(split_narration(script, max_chars=24)) or [" "]
+    weights = [max(4, len(p)) for p in parts]
+    total_w = sum(weights) or 1
+    total_seconds = max(float(total_seconds or 0), len(parts) * 1.1)
+    lines: List[str] = []
+    cursor = 0.0
+    for idx, (part, w) in enumerate(zip(parts, weights), start=1):
+        dur = max(0.9, total_seconds * w / total_w)
+        start = cursor
+        end = total_seconds if idx == len(parts) else min(total_seconds, cursor + dur)
+        start_ts = fmt_ass_time(start).replace(".", ",")
+        end_ts = fmt_ass_time(end).replace(".", ",")
+        lines.append(f"{idx}")
+        lines.append(f"{start_ts} --> {end_ts}")
+        lines.append(part)
+        lines.append("")
+        cursor = end
+    output_path.write_text("\n".join(lines), encoding="utf-8")
+
+
+def ffmpeg_subtitle_path(path: Path) -> str:
+    """Return an ffmpeg-safe subtitle path for -vf subtitles filter."""
+    return str(path.resolve()).replace("\\", "/").replace(":", "\\:").replace("'", "\\'")
+
+
+def split_script(script: str, max_chars: int = 24) -> List[str]:
+    """Split a script into sentence-level chunks for subtitles."""
+    return remove_repeated_intro(split_narration(script, max_chars=max_chars)) or [" "]
+
+
+def create_smart_ass(
+    segments: List[TimedSegment],
+    stickers: List[StickerCue],
+    output_path: Path,
+    font_size: int = 80,
+    margin_v: int = 170,
+    subtitle_keywords: str = "",
+) -> None:
+    """Create one ASS file containing synced subtitles + keyword text overlays.
+
+    Keyword overlays are pure text (no black box, no BackColour, no drawtext box=1).
+    They use a brief scale-up animation and fade out.
+    """
+    # Fallback: if font_size < 70, bump to 80.
+    if font_size < 70:
+        font_size = 80
+    sticker_fs = max(32, int(font_size * 0.72))
     header = """[Script Info]
 ScriptType: v4.00+
 PlayResX: 1080
@@ -88,18 +151,17 @@ WrapStyle: 2
 
 [V4+ Styles]
 Format: Name,Fontname,Fontsize,PrimaryColour,SecondaryColour,OutlineColour,BackColour,Bold,Italic,Underline,StrikeOut,ScaleX,ScaleY,Spacing,Angle,BorderStyle,Outline,Shadow,Alignment,MarginL,MarginR,MarginV,Encoding
-Style: Main,Noto Sans CJK SC,58,&H00FFFFFF,&H000000FF,&HBE000000,&H64000000,-1,0,0,0,100,100,0,0,1,5,1,2,70,70,170,1
-Style: Sticker,Noto Sans CJK SC,46,&H00FFFFFF,&H000000FF,&H88000000,&H7A000000,-1,0,0,0,100,100,0,0,3,10,0,7,30,30,30,1
+Style: Main,Noto Sans CJK SC,{font_size},&H00FFFFFF,&H000000FF,&HBE000000,&H00000000,-1,0,0,0,100,100,0,0,1,5,1,2,70,70,{margin_v},1
+Style: Sticker,Noto Sans CJK SC,{sticker_fs},&H00FFFFFF,&H000000FF,&HAA000000,&H00000000,-1,0,0,0,100,100,0,0,1,7,2,7,30,30,30,1
 
 [Events]
 Format: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text
-"""
+""".format(font_size=font_size, margin_v=margin_v, sticker_fs=sticker_fs)
     lines: List[str] = [header]
     for seg in segments:
         if seg.end <= seg.start:
             continue
         text = _ass_escape(wrap_cn(seg.text, max_chars=14))
-        # Slight fade reduces dryness, keeps subtitles readable.
         override = r"{\fad(60,80)}"
         lines.append(
             f"Dialogue: 0,{fmt_ass_time(seg.start)},{fmt_ass_time(seg.end)},Main,,0,0,0,,{override}{text}\n"
@@ -109,20 +171,19 @@ Format: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text
         if cue.end <= cue.start or not cue.text:
             continue
         color = _ass_color_for_tone(cue.tone)
-        text = _ass_escape(cue.text)
+        keyword_text = _ass_escape(cue.text)
         # Subtle sticker: small pop, fades in/out, fixed away from mouth/subtitle center.
         override = (
-            r"{\an7"
+            r"{\an8"
             rf"\pos({int(cue.x)},{int(cue.y)})"
             r"\fad(180,320)"
             rf"\1c{color}"
-            r"\alpha&H10&"
-            r"\t(0,180,\alpha&H00&\fscx106\fscy106)"
-            r"\t(180,500,\fscx100\fscy100)"
+            r"\t(0,200,\fscx114\fscy114)"
+            r"\t(200,500,\fscx100\fscy100)"
             r"}"
         )
         lines.append(
-            f"Dialogue: 2,{fmt_ass_time(cue.start)},{fmt_ass_time(cue.end)},Sticker,,0,0,0,,{override}{text}\n"
+            f"Dialogue: 2,{fmt_ass_time(cue.start)},{fmt_ass_time(cue.end)},Sticker,,0,0,0,,{override}{keyword_text}\n"
         )
     output_path.write_text("".join(lines), encoding="utf-8")
 
@@ -312,11 +373,33 @@ async def compose_video(
     audio_path: Optional[Path] = None,
     voice: Optional[str] = None,
     rate: Optional[str] = None,
+    subtitle_segments: Optional[List[Dict[str, Any]]] = None,
+    subtitle_size: int = 80,
+    subtitle_margin_v: int = 170,
+    subtitle_position: str = "bottom_safe",
+    subtitle_style_preset: str = "douyin_boss",
+    subtitle_keywords: str = "",
+    keyword_sfx_enabled: bool = True,
+    keyword_sfx_volume: float = 0.16,
 ) -> VideoResult:
     warnings: List[str] = []
     script = clean_narration_text(script)
 
-    if audio_path is None or not audio_path.exists():
+    # Use caller-provided subtitle_segments when available (avoids re-synthesizing TTS).
+    if subtitle_segments is not None and len(subtitle_segments) > 0:
+        segments: List[TimedSegment] = []
+        for item in subtitle_segments:
+            segments.append(TimedSegment(
+                index=int(item.get("index", 0)),
+                text=str(item.get("text", "")),
+                start=float(item.get("start", 0)),
+                end=float(item.get("end", 0)),
+            ))
+        if audio_path and audio_path.exists():
+            audio_duration = probe_duration(audio_path)
+        else:
+            audio_duration = segments[-1].end if segments else 5.0
+    elif audio_path is None or not audio_path.exists():
         audio_path, segments, audio_duration, tts_warnings = await synthesize_segmented_audio(
             settings, script, voice=voice, rate=rate
         )
@@ -326,8 +409,8 @@ async def compose_video(
         segments = estimate_segments_for_existing_audio(script, audio_duration)
         warnings.append("使用了已有整段音频：字幕只能按文本估算；想更准请不要传 audio_file_name，让系统分句生成 TTS。")
 
-    # Keep exported video aligned with both asset timeline and narration.
-    duration = max(float(duration_seconds or 0), audio_duration or 0, segments[-1].end if segments else 0, 5.0)
+    # Final duration follows audio (narration) length. Assets stretch/fill to match.
+    duration = max(audio_duration or 0, segments[-1].end if segments else 0, 5.0)
 
     task_id = uuid.uuid4().hex
     base_video = settings.tmp_dir / f"base_{task_id}.mp4"
@@ -335,7 +418,7 @@ async def compose_video(
     output_video = settings.outputs_dir / f"video_{task_id}.mp4"
 
     stickers = await plan_stickers(settings, title="", script=script, segments=segments, max_stickers=6)
-    create_smart_ass(segments, stickers, ass_path)
+    create_smart_ass(segments, stickers, ass_path, font_size=subtitle_size, margin_v=subtitle_margin_v, subtitle_keywords=subtitle_keywords)
 
     base_video, base_warnings = build_video_base(list(asset_paths), duration, base_video)
     warnings.extend(base_warnings)

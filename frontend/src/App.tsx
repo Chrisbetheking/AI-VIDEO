@@ -808,7 +808,7 @@ function AppInner() {
 
   const [segmentSeconds, setSegmentSeconds] = useState<Record<number, number>>({})
   const [segmentTransitions, setSegmentTransitions] = useState<Record<number, string>>({})
-  const [subtitleSize, setSubtitleSize] = useState(20)
+  const [subtitleSize, setSubtitleSize] = useState(80)
   const [subtitleMarginV, setSubtitleMarginV] = useState(56)
   const [subtitlePosition, setSubtitlePosition] = useState<'bottom_safe' | 'middle_low' | 'center'>('bottom_safe')
   const [subtitlePreset, setSubtitlePreset] = useState<'douyin_boss' | 'knowledge_highlight' | 'clean_trust' | 'cta_pop'>('douyin_boss')
@@ -2657,7 +2657,7 @@ ${selectedAssetScriptContext || '暂无素材，请按马来西亚楼盘、风�
       duration_seconds: durationSeconds,
       voice,
       rate: '+0%',
-      subtitle_size: Math.min(subtitleSize, hasDigitalIntro ? 18 : subtitleSize),
+      subtitle_size: subtitleSize,
       subtitle_margin_v: subtitleMarginV,
       subtitle_position: subtitlePosition,
       subtitle_style_preset: subtitlePreset,
@@ -3405,7 +3405,7 @@ https://www.douyin.com/user/..." /></Field>
             ['cta_pop','结尾强 CTA','亮色重点词 + 结尾放大，适合私信/领取资料']
           ].map(([value,title,desc]) => <button key={value} className={subtitlePreset === value ? 'selected' : ''} onClick={() => setSubtitlePreset(value as any)}><strong>{title}</strong><span>{desc}</span></button>)}
         </div>
-        <div className="grid3"><Field label="字幕字号"><input type="number" min="16" max="34" value={subtitleSize} onChange={e => setSubtitleSize(Number(e.target.value || 20))} /></Field><Field label="字幕位置"><select value={subtitlePosition} onChange={e => setSubtitlePosition(e.target.value as any)}><option value="bottom_safe">底部安全区，不挡脸</option><option value="middle_low">中下方，大字口播</option><option value="center">居中强调，慎用</option></select></Field><Field label={`离底部 ${subtitleMarginV}px`}><input type="range" min="40" max="260" step="5" value={subtitleMarginV} onChange={e => setSubtitleMarginV(Number(e.target.value))} /></Field></div>
+        <div className="grid3"><Field label="字幕字号"><input type="number" min="48" max="120" value={subtitleSize} onChange={e => setSubtitleSize(Number(e.target.value || 20))} /></Field><Field label="字幕位置"><select value={subtitlePosition} onChange={e => setSubtitlePosition(e.target.value as any)}><option value="bottom_safe">底部安全区，不挡脸</option><option value="middle_low">中下方，大字口播</option><option value="center">居中强调，慎用</option></select></Field><Field label={`离底部 ${subtitleMarginV}px`}><input type="range" min="40" max="260" step="5" value={subtitleMarginV} onChange={e => setSubtitleMarginV(Number(e.target.value))} /></Field></div>
         <div className="smartSubtitleBox"><div><strong>智能重点词</strong><p>{subtitleHighlight || '系统会从文案里识别费用、避坑、身份、学校、私信等转化词，自动放大或高亮。'}</p></div><Button busy={busy === '智能字幕重点' ? busy : ''} label="AI 识别重点词" onClick={makeSubtitleAI} disabled={!currentScript} kind="soft" /></div>
         <div className="hintBox">对齐逻辑：以最终配音真实时长为准；先生成画面，再叠加配音与字幕。后半段会自动提前补偿，避免越往后越慢。</div>
         <div className="selectedTimeline compact"><h3>本次合成素材顺序</h3>{(() => { const timeline = getComposeTimelinePreview(); return timeline.rows.length === 0 ? <Empty>未选择素材，会自动使用前几个素材；建议先去素材选择页确认顺序和截取区间。</Empty> : <><div className="timelineSummary"><strong>素材合计 {timeline.materialSeconds.toFixed(1)} 秒</strong><span>配音 {timeline.audioSeconds ? timeline.audioSeconds.toFixed(1) : '未生成'} 秒</span><em>最终导出约 {timeline.finalSeconds.toFixed(1)} 秒；现在按素材时间轴和配音较长者导出，不会再显示 48 秒素材但只出 29 秒视频。</em></div>{timeline.rows.map(row => <div key={`${row.asset.id}-${row.index}`} className="assetRow"><span>{row.index + 1}</span><strong>{row.asset.original_name || row.asset.filename}</strong><em>{row.startAt.toFixed(1)}-{row.endAt.toFixed(1)}s · 取 {row.label}</em><button className="mini" onClick={() => setActive('assets')}>调整</button></div>)}</> })()}</div>
@@ -3416,7 +3416,7 @@ https://www.douyin.com/user/..." /></Field>
       {active === 'subtitleCover' && <section className="card modulePanel visualPanel">
         <div className="sectionHeader"><div><h2>第六步：字幕 / 封面 / 图文引流</h2><p>封面负责点击，图文负责收藏和私信。文字由系统叠加，图片只做背景，避免 AI 把提示词画进图里。</p></div><div className="stackButtons"><Button busy={busy === '智能字幕重点' ? busy : ''} label="智能识别重点字幕" onClick={makeSubtitleAI} disabled={!currentScript} kind="ghost" /><Button busy={busy === '生成图文引流包' ? busy : ''} label="生成图文引流包" onClick={makeGraphicPost} /></div></div>
         <div className="visualTabs"><span>字幕</span><span>封面</span><span>图文素材</span></div>
-        <div className="grid4"><Field label="字幕模板"><select value={subtitlePreset} onChange={e => setSubtitlePreset(e.target.value as any)}><option value="douyin_boss">老板口播大字</option><option value="knowledge_highlight">知识科普高亮</option><option value="clean_trust">干净可信</option><option value="cta_pop">结尾强 CTA</option></select></Field><Field label="字幕字号"><input type="number" min="16" max="34" value={subtitleSize} onChange={e => setSubtitleSize(Number(e.target.value || 20))} /></Field><Field label={`离底部 ${subtitleMarginV}px`} hint="数值越小越靠下；数字人口播建议 48-60，避免挡嘴。"><input type="range" min="36" max="180" step="4" value={subtitleMarginV} onChange={e => setSubtitleMarginV(Number(e.target.value))} /></Field><Field label="重点词"><input value={subtitleHighlight} onChange={e => setSubtitleHighlight(e.target.value)} placeholder="AI 可自动识别，也可补充关键词" /></Field><Field label="封面大标题"><input value={copy.title || coverStyle} onChange={e => setCopy({ ...copy, title: e.target.value })} placeholder="例如：海外买房避坑指南" /></Field></div>
+        <div className="grid4"><Field label="字幕模板"><select value={subtitlePreset} onChange={e => setSubtitlePreset(e.target.value as any)}><option value="douyin_boss">老板口播大字</option><option value="knowledge_highlight">知识科普高亮</option><option value="clean_trust">干净可信</option><option value="cta_pop">结尾强 CTA</option></select></Field><Field label="字幕字号"><input type="number" min="48" max="120" value={subtitleSize} onChange={e => setSubtitleSize(Number(e.target.value || 20))} /></Field><Field label={`离底部 ${subtitleMarginV}px`} hint="数值越小越靠下；数字人口播建议 48-60，避免挡嘴。"><input type="range" min="36" max="180" step="4" value={subtitleMarginV} onChange={e => setSubtitleMarginV(Number(e.target.value))} /></Field><Field label="重点词"><input value={subtitleHighlight} onChange={e => setSubtitleHighlight(e.target.value)} placeholder="AI 可自动识别，也可补充关键词" /></Field><Field label="封面大标题"><input value={copy.title || coverStyle} onChange={e => setCopy({ ...copy, title: e.target.value })} placeholder="例如：海外买房避坑指南" /></Field></div>
         <div className="coverBuilder">
           <div>
             <h3>封面生成方式</h3>

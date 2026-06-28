@@ -98,7 +98,10 @@ class VoiceDirectorResponse(BaseModel):
 
 
 class TTSSegmentsRequest(BaseModel):
-    segments: List[VoiceSegment] = Field(..., min_length=1, max_length=30)
+    segments: List[VoiceSegment] = Field(default_factory=list, max_length=30)
+    text: Optional[str] = None
+    script: Optional[str] = None
+    copy: Optional[str] = None
     voice: Optional[str] = None
     overall_rate: Optional[str] = None
 

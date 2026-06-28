@@ -24,19 +24,17 @@ IMAGE_EXTS = {'.jpg', '.jpeg', '.png', '.webp'}
 VIDEO_EXTS = {'.mp4', '.mov', '.m4v', '.webm'}
 AUDIO_EXTS = {'.mp3', '.wav', '.m4a', '.aac', '.ogg'}
 
-
-@dataclass
-class DigitalHumanResult:
-    status: str
-    engine: str
-    message: str
-    video_path: Optional[Path] = None
-    video_url: Optional[str] = None
-    job_id: Optional[str] = None
-    warnings: list[str] | None = None
-    raw: dict[str, Any] | None = None
-
-
+def extract_hook_text(script: str, max_chars: int = 24) -> str:
+    import re
+    if not script or not script.strip():
+        return ""
+    parts = re.split(r'[。！？!?\n]', script.strip())
+    first = parts[0].strip() if parts else script.strip()
+    first = re.sub(r'[，。！？、；：,!.?;:]', '', first)
+    first = re.sub(r'\s+', ' ', first).strip()
+    if len(first) > max_chars:
+        first = first[:max_chars].rstrip()
+    return first
 def _run(cmd: list[str], timeout: int = 240) -> subprocess.CompletedProcess[str]:
     return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, check=False)
 

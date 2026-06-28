@@ -104,7 +104,7 @@ from app.services.cover import create_cover
 from app.services.image_generation import generate_image_to_file
 from app.services.deepseek import DeepSeekError, generate_copy, generate_edit_plan, generate_growth_decision, generate_lead_acquisition_plan, generate_shooting_plan, generate_subtitle_emphasis, generate_trend_radar, generate_voice_director, refine_copy_with_instruction, rewrite_from_inspiration, test_deepseek, video_edit_chat_advice
 from app.services.doubao import extract_with_doubao
-from app.services.digital_human import call_external_digital_human_worker, call_fal_lipsync, query_fal_lipsync, call_jimeng_digital_human, query_jimeng_digital_human, create_photo_scene_avatar_image, create_static_avatar_preview
+from app.services.digital_human import call_external_digital_human_worker, call_fal_lipsync, query_fal_lipsync, call_jimeng_digital_human, query_jimeng_digital_human, create_photo_scene_avatar_image, create_static_avatar_preview, extract_hook_text
 from app.services.collector import get_collector_cookie_status, save_collector_cookie_text
 from app.services.kb import KnowledgeBase
 from app.services.memory import MemoryStore, MemoryWriteError
@@ -1336,7 +1336,28 @@ async def api_tts(req: TTSRequest, request: Request, settings: Settings = Depend
 @app.post('/api/tts-segments', response_model=TTSResponse)
 async def api_tts_segments(req: TTSSegmentsRequest, request: Request, settings: Settings = Depends(get_settings)) -> TTSResponse:
     try:
-        path, duration, warning, timings = await synthesize_tts_segments(settings, req.segments, voice=req.voice, overall_rate=req.overall_rate)
+        # Support both {"text": "..."} and {"segments": [...]} inputs
+        segments = req.segments
+        if (not segments or len(segments) == 0) and hasattr(req, 'text') and getattr(req, 'text', None):
+            # Auto-wrap plain text into segments for backward compatibility
+            from app.schemas import VoiceSegment
+            segments = [VoiceSegment(text=str(getattr(req, 'text', '')), emotion='', speed_ratio=1.0, volume_ratio=1.0, pitch_ratio=1.0, pause_after_ms=350)]
+        if not segments:
+            # Try script/copy fallback fields
+            fallback_text = ''
+            for field in ('script', 'copy', 'text'):
+                val = getattr(req, field, None)
+                if val and str(val).strip():
+                    fallback_text = str(val).strip()
+                    break
+            if fallback_text:
+                from app.schemas import VoiceSegment
+                segments = [VoiceSegment(text=fallback_text, emotion='', speed_ratio=1.0, volume_ratio=1.0, pitch_ratio=1.0, pause_after_ms=350)]
+            else:
+                raise HTTPException(status_code=422, detail='Missing segments or text field')
+        path, duration, warning, timings = await synthesize_tts_segments(settings, segments, voice=req.voice, overall_rate=req.overall_rate)
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     public_url = maybe_upload_to_r2(settings, path, prefix='audio')
@@ -1980,6 +2001,9 @@ async def api_digital_human_create(
     driver_url_value = upload_url(request, driver_video_path.name, driver_public) if driver_video_path else driver_public
 
     warnings: List[str] = []
+    # Extract hook_text for digital human: only first sentence, 18-24 chars max.
+    hook_text = extract_hook_text(req.script, max_chars=24) if req.script else ""
+    hook_title = req.title or hook_text or ""
     try:
         if engine in {'jimeng', 'jimeng_omni15', 'omnihuman15', 'omnihuman', 'volcengine_avatar', 'volcengine_jimeng'}:
             result = await call_jimeng_digital_human(
@@ -1989,11 +2013,13 @@ async def api_digital_human_create(
                 avatar_url=avatar_url_value,
                 audio_url=audio_url_value,
                 driver_video_url=driver_url_value,
-                script=req.script,
-                title=req.title,
+                script=hook_text or req.script,
+                title=hook_title,
                 model=req.jimeng_model or 'omnihuman15',
             )
             stable_video_url, stable_video_name, cache_warnings = await finalize_digital_human_video_url(settings, request, result)
+            if hook_text:
+                warnings.append(f'已提取口播钩子文案：{hook_text}')
             memory.save_learning_event({
                 'event_type': 'digital_human_jimeng',
                 'title': req.title or '火山即梦数字人任务',
