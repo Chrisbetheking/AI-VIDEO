@@ -1,16 +1,19 @@
 ﻿"""MiniMax TTS / voice clone provider.
 
-Supports MiniMax speech synthesis for /api/tts-segments and compose-video.
-Does NOT replace volcengine TTS — runs as an alternative provider.
+Full flow:
+  Reference audio upload -> file_id -> voice clone -> voice_id -> TTS synthesis.
+Voice IDs are persisted to backend/data/minimax_voice.json.
 """
 
 from __future__ import annotations
 
 import base64
+import json
+import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Optional
 
 import httpx
 
@@ -19,12 +22,20 @@ from app.config import Settings
 
 MINIMAX_TTS_BASE = "https://api.minimaxi.com/v1"
 
+# Local persist path for voice_id
+VOICE_JSON_PATH = Path(__file__).resolve().parent.parent.parent / "data" / "minimax_voice.json"
+
+
+# ---- Data classes ----
 
 @dataclass
 class MiniMaxTTSStatus:
     enabled: bool = False
+    configured: bool = False
+    has_api_key: bool = False
+    has_voice_id: bool = False
+    voice_id_masked: str = ""
     model: str = ""
-    voice_id: str = ""
     message: str = ""
 
 
@@ -40,16 +51,77 @@ class MiniMaxTTSResult:
     raw: Dict[str, Any] = field(default_factory=dict)
 
 
+@dataclass
+class VoiceCloneResult:
+    ok: bool = False
+    file_id: str = ""
+    voice_id: str = ""
+    message: str = ""
+    raw_preview: str = ""
+    raw: Dict[str, Any] = field(default_factory=dict)
+
+
+# ---- Voice ID persistence ----
+
+def _ensure_voice_dir() -> None:
+    VOICE_JSON_PATH.parent.mkdir(parents=True, exist_ok=True)
+
+
+def save_voice_id(voice_id: str, file_id: str = "", voice_name: str = "") -> Dict[str, Any]:
+    """Persist voice_id to local JSON file."""
+    _ensure_voice_dir()
+    data: Dict[str, Any] = {}
+    if VOICE_JSON_PATH.exists():
+        try:
+            data = json.loads(VOICE_JSON_PATH.read_text(encoding="utf-8"))
+        except Exception:
+            data = {}
+    data["voice_id"] = voice_id
+    data["file_id"] = file_id
+    data["voice_name"] = voice_name or f"voice_{voice_id[:12]}"
+    data["created_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    VOICE_JSON_PATH.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    return data
+
+
+def load_voice_data() -> Dict[str, Any]:
+    """Load saved voice data from local JSON."""
+    if not VOICE_JSON_PATH.exists():
+        return {}
+    try:
+        return json.loads(VOICE_JSON_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def load_voice_id() -> str:
+    """Load saved voice_id. Returns empty string if not found."""
+    return str(load_voice_data().get("voice_id", "")).strip()
+
+
+# ---- Status ----
+
 def get_minimax_tts_status(settings: Settings) -> MiniMaxTTSStatus:
+    """Return rich MiniMax TTS provider status."""
+    has_key = bool(getattr(settings, "minimax_api_key", ""))
+    saved_id = load_voice_id()
+    env_id = getattr(settings, "minimax_voice_id", "") or ""
+    has_voice = bool(saved_id or env_id)
     enabled = bool(
         getattr(settings, "minimax_tts_enabled", False)
-        and getattr(settings, "minimax_api_key", "")
-        and getattr(settings, "minimax_voice_id", "")
+        and has_key
+        and has_voice
     )
+    voice_id = saved_id or env_id
+    masked = _mask_id(voice_id) if voice_id else ""
+
     return MiniMaxTTSStatus(
         enabled=enabled,
+        configured=bool(has_key and has_voice),
+        has_api_key=has_key,
+        has_voice_id=has_voice,
+        voice_id_masked=masked,
         model=getattr(settings, "minimax_tts_model", "speech-2.8-hd") or "",
-        voice_id=getattr(settings, "minimax_voice_id", "") or "",
         message=(
             "MiniMax TTS is ready"
             if enabled
@@ -57,6 +129,122 @@ def get_minimax_tts_status(settings: Settings) -> MiniMaxTTSStatus:
         ),
     )
 
+
+def _mask_id(value: str) -> str:
+    if len(value) <= 8:
+        return value[:4] + "***"
+    return value[:8] + "***"
+
+
+# ---- Upload & Clone ----
+
+async def upload_reference_audio(
+    settings: Settings,
+    file_bytes: bytes,
+    filename: str,
+) -> Dict[str, Any]:
+    """Upload reference audio to MiniMax. Returns {file_id, ...}"""
+    api_key = settings.minimax_api_key.strip()
+    url = f"{MINIMAX_TTS_BASE}/files/upload"
+
+    # Build multipart form
+    import io
+    boundary = f"----FormBoundary{uuid.uuid4().hex[:16]}"
+
+    import email.mime.multipart
+    import email.mime.base
+    import email.mime.text
+    import email.mime.application
+
+    # Simple manual multipart
+    purpose = "voice_clone"
+    body_parts = []
+    body_parts.append(f'--{boundary}')
+    body_parts.append(f'Content-Disposition: form-data; name="purpose"')
+    body_parts.append('')
+    body_parts.append(purpose)
+    body_parts.append(f'--{boundary}')
+    body_parts.append(f'Content-Disposition: form-data; name="file"; filename="{filename}"')
+    content_type = "audio/mpeg" if filename.lower().endswith(".mp3") else "audio/wav"
+    body_parts.append(f'Content-Type: {content_type}')
+    body_parts.append('')
+    body_bytes = ("\r\n".join(body_parts) + "\r\n").encode("utf-8")
+    body_bytes += file_bytes
+    body_bytes += f"\r\n--{boundary}--\r\n".encode("utf-8")
+
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": f"multipart/form-data; boundary={boundary}",
+    }
+
+    async with httpx.AsyncClient(timeout=120) as client:
+        resp = await client.post(url, headers=headers, content=body_bytes)
+
+    if resp.status_code >= 400:
+        return {"ok": False, "message": f"Upload HTTP {resp.status_code}: {resp.text[:500]}"}
+
+    data = resp.json()
+    base_resp = data.get("base_resp", {})
+    if base_resp.get("status_code", -1) != 0:
+        return {
+            "ok": False,
+            "message": f"Upload error: {base_resp.get('status_msg', 'unknown')}",
+            "raw_preview": json.dumps(data, ensure_ascii=False)[:300],
+        }
+
+    file_id = str(data.get("file", {}).get("file_id", ""))
+    if not file_id:
+        return {
+            "ok": False,
+            "message": "Upload succeeded but no file_id returned",
+            "raw_preview": json.dumps(data, ensure_ascii=False)[:300],
+        }
+
+    return {"ok": True, "file_id": file_id, "raw": data}
+
+
+async def create_voice_clone(
+    settings: Settings,
+    file_id: str,
+    voice_id: str,
+) -> Dict[str, Any]:
+    """Create a voice clone from an uploaded file_id."""
+    api_key = settings.minimax_api_key.strip()
+    url = f"{MINIMAX_TTS_BASE}/voice_clone"
+
+    body = {
+        "file_id": int(file_id) if file_id.isdigit() else file_id,
+        "voice_id": voice_id,
+        "language_boost": "Chinese",
+        "noise_reduction": 0,
+    }
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+
+    async with httpx.AsyncClient(timeout=180) as client:
+        resp = await client.post(url, headers=headers, json=body)
+
+    if resp.status_code >= 400:
+        return {"ok": False, "message": f"Clone HTTP {resp.status_code}: {resp.text[:500]}"}
+
+    data = resp.json()
+    base_resp = data.get("base_resp", {})
+    status_code = base_resp.get("status_code", -1)
+
+    # status_code 0 = success, some versions return different codes
+    if status_code != 0:
+        return {
+            "ok": False,
+            "message": f"Clone error {status_code}: {base_resp.get('status_msg', 'unknown')}",
+            "raw_preview": json.dumps(data, ensure_ascii=False)[:300],
+        }
+
+    return {"ok": True, "voice_id": voice_id, "message": "Voice clone created", "raw": data}
+
+
+# ---- TTS Synthesis ----
 
 def _minimax_disabled() -> MiniMaxTTSResult:
     return MiniMaxTTSResult(
@@ -72,19 +260,24 @@ async def synthesize_minimax(
     voice_id: Optional[str] = None,
     model: Optional[str] = None,
 ) -> MiniMaxTTSResult:
-    """Call MiniMax TTS API to synthesize speech. Returns a MiniMaxTTSResult."""
+    """Call MiniMax TTS API to synthesize speech. Auto-loads saved voice_id."""
     if not getattr(settings, "minimax_tts_enabled", False) or not getattr(settings, "minimax_api_key", ""):
         return _minimax_disabled()
 
     api_key = settings.minimax_api_key.strip()
-    resolved_voice = (voice_id or settings.minimax_voice_id or "").strip()
+    resolved_voice = (
+        (voice_id or "").strip()
+        or load_voice_id()
+        or (settings.minimax_voice_id or "").strip()
+        or ""
+    )
     resolved_model = (model or settings.minimax_tts_model or "speech-2.8-hd").strip()
 
     if not resolved_voice:
         return MiniMaxTTSResult(
             ok=False,
             enabled=True,
-            message="MiniMax TTS missing voice_id. Set MINIMAX_VOICE_ID or pass voice_id in request.",
+            message="MiniMax TTS missing voice_id. Upload reference audio and create voice clone first.",
         )
 
     url = f"{MINIMAX_TTS_BASE}/t2a_v2"
@@ -139,10 +332,8 @@ async def synthesize_minimax(
             raw=data,
         )
 
-    # Extract audio — MiniMax returns hex-encoded audio in data.audio
     audio_hex = data.get("data", {}).get("audio", "")
     if not audio_hex:
-        # Some endpoints return base64
         audio_hex = data.get("audio", "") or data.get("data", {}).get("audio_data", "")
 
     if not audio_hex:
@@ -169,7 +360,6 @@ async def synthesize_minimax(
     output = settings.outputs_dir / f"minimax_tts_{uuid.uuid4().hex}.mp3"
     output.write_bytes(audio_bytes)
 
-    # Probe duration
     duration = _probe_duration(output) or _estimate_duration(text)
 
     return MiniMaxTTSResult(

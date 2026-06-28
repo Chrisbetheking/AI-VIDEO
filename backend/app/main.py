@@ -1,4 +1,5 @@
 from __future__ import annotations
+import time
 
 import asyncio
 import hashlib
@@ -120,7 +121,7 @@ from app.services.one_click import generate_one_click, revise_one_click
 from app.services.industry_packs import list_packs, get_pack, INDUSTRY_PACKS
 from app.services.human_overlay import overlay_human_on_video, build_human_overlay_filter
 from app.services.minimax_provider import get_minimax_status, text_to_video, image_to_video, query_video_status, get_broll_prompts
-from app.services.minimax_tts import get_minimax_tts_status, synthesize_minimax
+from app.services.minimax_tts import get_minimax_tts_status, synthesize_minimax, upload_reference_audio, create_voice_clone, save_voice_id, load_voice_id
 from app.services.reply_assistant import suggest_reply, store_lead, list_leads, get_lead, update_lead
 from app.services.graphic_post import create_graphic_post
 from app.services.heat_radar import run_public_heat_radar, generate_heat_radar_rewrite, ingest_openclaw_heat_radar, audit_heat_radar_accounts, analyze_heat_radar_video_intake
@@ -311,14 +312,20 @@ def api_minimax_status(settings: Settings = Depends(get_settings)) -> dict:
 
 @app.get("/api/minimax/tts/status")
 def api_minimax_tts_status(settings: Settings = Depends(get_settings)) -> dict:
-    """Return MiniMax TTS provider status."""
+    """Return MiniMax TTS provider status with rich info."""
     status = get_minimax_tts_status(settings)
+    saved = load_voice_data()
     return {
         "ok": True,
         "enabled": status.enabled,
+        "configured": status.configured,
+        "has_api_key": status.has_api_key,
+        "has_voice_id": status.has_voice_id,
+        "voice_id_masked": status.voice_id_masked,
         "model": status.model,
-        "voice_id": status.voice_id,
         "message": status.message,
+        "saved_voice_name": saved.get("voice_name", ""),
+        "saved_created_at": saved.get("created_at", ""),
     }
 
 
@@ -342,13 +349,77 @@ async def api_minimax_voice_clone(req: dict, settings: Settings = Depends(get_se
 
     return {
         "ok": False,
-        "message": "No voice_id provided. Set MINIMAX_VOICE_ID in .env or pass voice_id in request.",
+        "message": "No voice_id provided. Use /api/minimax/voice-clone/upload to upload reference audio.",
+    }
+
+
+@app.post("/api/minimax/voice-clone/upload")
+async def api_minimax_voice_clone_upload(
+    file: UploadFile = File(...),
+    voice_id: str = Form(""),
+    voice_name: str = Form(""),
+    settings: Settings = Depends(get_settings),
+) -> dict:
+    """Upload reference audio and create MiniMax voice clone."""
+    if not getattr(settings, "minimax_tts_enabled", False) or not getattr(settings, "minimax_api_key", ""):
+        return {"ok": False, "enabled": False, "message": "MiniMax TTS is disabled or missing API key"}
+
+    # Validate file
+    filename = (file.filename or "reference.mp3").lower()
+    if not any(filename.endswith(ext) for ext in (".mp3", ".wav", ".m4a", ".mpeg")):
+        return {"ok": False, "message": "Unsupported audio format. Use mp3, wav, or m4a."}
+
+    try:
+        file_bytes = await file.read()
+        if len(file_bytes) < 1024:
+            return {"ok": False, "message": "Audio file too small (< 1KB)"}
+        if len(file_bytes) > 20 * 1024 * 1024:
+            return {"ok": False, "message": "Audio file too large (> 20MB)"}
+    except Exception as exc:
+        return {"ok": False, "message": f"Failed to read uploaded file: {exc}"}
+
+    # Step 1: Upload to MiniMax
+    upload_result = await upload_reference_audio(settings, file_bytes, filename)
+    if not upload_result.get("ok"):
+        return {
+            "ok": False,
+            "message": upload_result.get("message", "Upload failed"),
+            "raw_preview": upload_result.get("raw_preview", ""),
+        }
+
+    file_id = str(upload_result["file_id"])
+
+    # Step 2: Generate voice_id
+    resolved_voice_id = (voice_id or "").strip()
+    if not resolved_voice_id:
+        ts = str(int(time.time()))
+        resolved_voice_id = f"uncle_voice_{ts}"
+
+    # Step 3: Create voice clone
+    clone_result = await create_voice_clone(settings, file_id, resolved_voice_id)
+    if not clone_result.get("ok"):
+        return {
+            "ok": False,
+            "file_id": file_id,
+            "message": clone_result.get("message", "Voice clone creation failed"),
+            "raw_preview": clone_result.get("raw_preview", ""),
+        }
+
+    # Step 4: Save voice_id
+    save_voice_id(resolved_voice_id, file_id=file_id, voice_name=voice_name or resolved_voice_id)
+
+    return {
+        "ok": True,
+        "file_id": file_id,
+        "voice_id": resolved_voice_id,
+        "voice_name": voice_name or resolved_voice_id,
+        "message": "MiniMax voice clone created and saved",
     }
 
 
 @app.post("/api/minimax/tts")
 async def api_minimax_tts(req: dict, settings: Settings = Depends(get_settings)) -> dict:
-    """Synthesize speech via MiniMax TTS."""
+    """Synthesize speech via MiniMax TTS. Auto-uses saved voice_id if not provided."""
     text = str(req.get("text", "")).strip()
     if not text:
         return {"ok": False, "message": "Missing text field"}
@@ -357,6 +428,8 @@ async def api_minimax_tts(req: dict, settings: Settings = Depends(get_settings))
         return {"ok": False, "enabled": False, "message": "MiniMax TTS is disabled or missing API key"}
 
     voice_id = str(req.get("voice_id") or "").strip() or None
+    if not voice_id:
+        voice_id = load_voice_id() or None
     model = str(req.get("model") or "").strip() or None
 
     result = await synthesize_minimax(settings, text, voice_id=voice_id, model=model)

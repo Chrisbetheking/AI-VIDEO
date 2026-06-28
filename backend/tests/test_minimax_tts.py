@@ -50,7 +50,9 @@ class TestMiniMaxTTSStatus:
         )
         status = get_minimax_tts_status(settings)
         assert status.enabled is True
-        assert status.voice_id == "voice_123"
+        assert status.has_voice_id is True
+        assert status.has_api_key is True
+        assert "***" in status.voice_id_masked
 
     def test_disabled_does_not_crash_synthesize(self):
         """synthesize_minimax returns disabled result instead of crashing."""
@@ -155,3 +157,33 @@ class TestHealthEndpoint:
         )
         assert hasattr(settings, "minimax_tts_enabled")
         assert hasattr(settings, "minimax_voice_id")
+
+
+class TestVoiceIdPersistence:
+    """Verify voice_id save/load works."""
+
+    def test_save_and_load_voice_id(self, tmp_path, monkeypatch):
+        """Saving voice_id persists to JSON and loads back."""
+        from app.services.minimax_tts import save_voice_id, load_voice_id, load_voice_data, VOICE_JSON_PATH
+        import app.services.minimax_tts as mm_tts
+
+        # Override the path to use tmp_path
+        monkeypatch.setattr(mm_tts, "VOICE_JSON_PATH", tmp_path / "minimax_voice.json")
+
+        save_voice_id("test_voice_123", file_id="file_456", voice_name="Test Voice")
+        assert load_voice_id() == "test_voice_123"
+
+        data = load_voice_data()
+        assert data["voice_id"] == "test_voice_123"
+        assert data["file_id"] == "file_456"
+        assert data["voice_name"] == "Test Voice"
+
+    def test_load_empty_when_no_file(self, tmp_path, monkeypatch):
+        """Returns empty string when no voice file exists."""
+        from app.services.minimax_tts import load_voice_id, load_voice_data
+        import app.services.minimax_tts as mm_tts
+
+        monkeypatch.setattr(mm_tts, "VOICE_JSON_PATH", tmp_path / "nonexistent.json")
+        assert load_voice_id() == ""
+        assert load_voice_data() == {}
+
