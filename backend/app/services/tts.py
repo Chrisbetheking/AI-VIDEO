@@ -131,7 +131,7 @@ async def synthesize_volcengine_v1(settings: Settings, text: str, voice: Optiona
     headers = {
         'Authorization': f'Bearer;{settings.volcengine_access_token}',
         'Content-Type': 'application/json',
-        'X-Api-App-Id': settings.volcengine_app_id,
+        'X-Api-App-Key': settings.volcengine_app_id,
         'X-Api-Access-Key': settings.volcengine_access_token,
     }
     resource_id = getattr(settings, 'volcengine_resource_id', '').strip()
@@ -144,6 +144,7 @@ async def synthesize_volcengine_v1(settings: Settings, text: str, voice: Optiona
             'appid': settings.volcengine_app_id,
             'app_id': settings.volcengine_app_id,
             'appkey': settings.volcengine_app_id,
+            'app_key': settings.volcengine_app_id,
         }
         headers['X-Api-Voice-Type'] = voice_type
         resp = await client.post(settings.volcengine_tts_endpoint, headers=headers, params=params, json=body)

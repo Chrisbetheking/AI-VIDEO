@@ -46,11 +46,12 @@ class TestVolcengineTTSParams:
         assert called_params.get("appid") == "test_app_id", f"appid not in params: {called_params}"
         assert called_params.get("app_id") == "test_app_id", f"app_id not in params: {called_params}"
         assert called_params.get("appkey") == "test_app_id", f"appkey not in params: {called_params}"
+        assert called_params.get("app_key") == "test_app_id", f"app_key not in params: {called_params}"
 
         # Check headers
         called_headers = call_kwargs.kwargs.get("headers", {})
         assert called_headers.get("X-Api-Voice-Type") == "zh_female_v11", f"X-Api-Voice-Type missing: {called_headers}"
-        assert called_headers.get("X-Api-App-Id") == "test_app_id", f"X-Api-App-Id missing: {called_headers}"
+        assert called_headers.get("X-Api-App-Key") == "test_app_id", f"X-Api-App-Key missing: {called_headers}"
         assert called_headers.get("X-Api-Access-Key") == "test_token", f"X-Api-Access-Key missing: {called_headers}"
         assert called_headers.get("X-Api-Resource-Id") == "seed-icl-2.0", f"X-Api-Resource-Id missing: {called_headers}"
         assert "Authorization" in called_headers, "Authorization header missing"
