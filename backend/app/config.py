@@ -50,7 +50,8 @@ class Settings(BaseSettings):
 
     # 豆包语音 / 火山语音合成
     # 正式部署建议：TTS_PROVIDER=volcengine
-    tts_provider: str = 'volcengine'
+    tts_provider: str = 'minimax'
+    tts_fallback_provider: str = 'mock'
     tts_voice: str = 'default'
     tts_rate: str = '+0%'
     tts_voices_json: str = ''
@@ -156,6 +157,8 @@ class Settings(BaseSettings):
     minimax_api_key: str = ''
     minimax_video_model: str = 'MiniMax-Hailuo-2.3'
     minimax_tts_model: str = ''
+    minimax_tts_enabled: bool = False
+    minimax_voice_id: str = ''
 
     # Supabase / AI 记忆库
     supabase_url: str = ''

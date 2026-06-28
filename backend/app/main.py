@@ -120,6 +120,7 @@ from app.services.one_click import generate_one_click, revise_one_click
 from app.services.industry_packs import list_packs, get_pack, INDUSTRY_PACKS
 from app.services.human_overlay import overlay_human_on_video, build_human_overlay_filter
 from app.services.minimax_provider import get_minimax_status, text_to_video, image_to_video, query_video_status, get_broll_prompts
+from app.services.minimax_tts import get_minimax_tts_status, synthesize_minimax
 from app.services.reply_assistant import suggest_reply, store_lead, list_leads, get_lead, update_lead
 from app.services.graphic_post import create_graphic_post
 from app.services.heat_radar import run_public_heat_radar, generate_heat_radar_rewrite, ingest_openclaw_heat_radar, audit_heat_radar_accounts, analyze_heat_radar_video_intake
@@ -305,6 +306,68 @@ def api_minimax_status(settings: Settings = Depends(get_settings)) -> dict:
         },
     }
 
+
+
+
+@app.get("/api/minimax/tts/status")
+def api_minimax_tts_status(settings: Settings = Depends(get_settings)) -> dict:
+    """Return MiniMax TTS provider status."""
+    status = get_minimax_tts_status(settings)
+    return {
+        "ok": True,
+        "enabled": status.enabled,
+        "model": status.model,
+        "voice_id": status.voice_id,
+        "message": status.message,
+    }
+
+
+@app.post("/api/minimax/voice-clone")
+async def api_minimax_voice_clone(req: dict, settings: Settings = Depends(get_settings)) -> dict:
+    """Create or bind a MiniMax voice_id from reference audio or manual entry."""
+    enabled = bool(
+        getattr(settings, "minimax_tts_enabled", False)
+        and getattr(settings, "minimax_api_key", "")
+    )
+    if not enabled:
+        return {"ok": False, "enabled": False, "message": "MiniMax TTS is disabled or missing API key"}
+
+    manual_voice_id = str(req.get("voice_id") or "").strip()
+    if manual_voice_id:
+        return {
+            "ok": True,
+            "voice_id": manual_voice_id,
+            "message": f"Using manually provided voice_id: {manual_voice_id}",
+        }
+
+    return {
+        "ok": False,
+        "message": "No voice_id provided. Set MINIMAX_VOICE_ID in .env or pass voice_id in request.",
+    }
+
+
+@app.post("/api/minimax/tts")
+async def api_minimax_tts(req: dict, settings: Settings = Depends(get_settings)) -> dict:
+    """Synthesize speech via MiniMax TTS."""
+    text = str(req.get("text", "")).strip()
+    if not text:
+        return {"ok": False, "message": "Missing text field"}
+
+    if not getattr(settings, "minimax_tts_enabled", False) or not getattr(settings, "minimax_api_key", ""):
+        return {"ok": False, "enabled": False, "message": "MiniMax TTS is disabled or missing API key"}
+
+    voice_id = str(req.get("voice_id") or "").strip() or None
+    model = str(req.get("model") or "").strip() or None
+
+    result = await synthesize_minimax(settings, text, voice_id=voice_id, model=model)
+    return {
+        "ok": result.ok,
+        "enabled": result.enabled,
+        "file_name": result.file_name,
+        "duration_seconds": result.duration_seconds,
+        "provider": result.provider,
+        "message": result.message,
+    }
 
 # ===== MVP: Lead Capture =====
 
@@ -1010,6 +1073,13 @@ def health(settings: Settings = Depends(get_settings), memory: MemoryStore = Dep
         'image_model': settings.image_model,
         'ark_video_model': settings.ark_video_model,
         'tts_provider': settings.tts_provider,
+        'tts_fallback_provider': settings.tts_fallback_provider,
+        'minimax_enabled': getattr(settings, 'minimax_enabled', False),
+        'minimax_video_model': getattr(settings, 'minimax_video_model', '') or '',
+        'minimax_tts_model': getattr(settings, 'minimax_tts_model', 'speech-2.8-hd') or '',
+        'minimax_tts_enabled': getattr(settings, 'minimax_tts_enabled', False),
+        'minimax_voice_id': getattr(settings, 'minimax_voice_id', '') or '',
+        'minimax_tts_status': get_minimax_tts_status(settings).enabled,
         'r2_enabled': settings.r2_enabled,
         'require_r2_assets': settings.require_r2_assets,
         'memory_enabled': bool(settings.supabase_url and settings.supabase_service_role_key),
@@ -1615,7 +1685,7 @@ async def api_tts_segments(req: TTSSegmentsRequest, request: Request, settings: 
                 segments = [VoiceSegment(text=fallback_text, emotion='', speed_ratio=1.0, volume_ratio=1.0, pitch_ratio=1.0, pause_after_ms=350)]
             else:
                 raise HTTPException(status_code=422, detail='Missing segments or text field')
-        path, duration, warning, timings = await synthesize_tts_segments(settings, segments, voice=req.voice, overall_rate=req.overall_rate)
+        path, duration, warning, timings = await synthesize_tts_segments(settings, segments, voice=req.voice, overall_rate=req.overall_rate, tts_provider=getattr(req, 'tts_provider', None))
     except HTTPException:
         raise
     except Exception as exc:

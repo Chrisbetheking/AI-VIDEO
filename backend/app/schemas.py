@@ -104,6 +104,7 @@ class TTSSegmentsRequest(BaseModel):
     copy: Optional[str] = None
     voice: Optional[str] = None
     overall_rate: Optional[str] = None
+    tts_provider: Optional[str] = None
 
 
 class AssetItem(BaseModel):

@@ -792,6 +792,7 @@ function AppInner() {
 
   const [voices, setVoices] = useState<TTSVoice[]>([])
   const [voice, setVoice] = useState('')
+  const [voiceTtsProvider, setVoiceTtsProvider] = useState('')
   const [voiceStyle, setVoiceStyle] = useState('老板压迫感')
   const [voiceIntensity, setVoiceIntensity] = useState('标准')
   const [voiceSegments, setVoiceSegments] = useState<VoiceSegment[]>([])
@@ -2492,7 +2493,7 @@ ${selectedAssetScriptContext || '暂无素材，请按马来西亚楼盘、风�
   async function makeSegmentTTS() {
     const segments = voiceSegments.length ? voiceSegments : [{ ...defaultSegment, text: currentScript || defaultSegment.text }]
     if (!subtitleHighlight.trim()) await refreshSubtitleKeywordsForScript(segments.map(s => s.text).join('\n'), false).catch(() => null)
-    const res = await run('生成分段情绪配音', () => apiPost<TTSResponse>('/api/tts-segments', { segments, voice, overall_rate: '+0%' }))
+    const res = await run('生成分段情绪配音', () => apiPost<TTSResponse>('/api/tts-segments', { segments, voice, overall_rate: '+0%', tts_provider: voiceTtsProvider || undefined }))
     setAudio(res!)
     setLastHandoff(isDigitalHumanRoute ? '配音已生成。需要真人感片头就去“可选数字人”；不需要就直接进入素材选择和合成。' : '配音已生成。当前路线不强制数字人，可以直接进入素材选择和成片合成。')
   }
@@ -2615,7 +2616,7 @@ ${selectedAssetScriptContext || '暂无素材，请按马来西亚楼盘、风�
     let composeAudio = audio
     if (composeSegments.length) {
       const freshAudio = await run(hasDigitalIntro ? '重新生成分离式配音' : '重新生成成片配音', () => apiPost<TTSResponse>('/api/tts-segments', {
-        segments: composeSegments,
+      tts_provider: voiceTtsProvider || undefined,   segments: composeSegments,
         voice,
         overall_rate: '+0%'
       }))
@@ -3305,7 +3306,7 @@ https://www.douyin.com/user/..." /></Field>
 
       {moduleVisible('voice') && active === 'voice' && <section className="card modulePanel">
         <div className="sectionHeader"><div><h2>第四步：配音导演</h2><p>把口播拆成几段，调整语速、停顿和重点。生成后剪辑会按真实音频时长对齐字幕。</p></div></div>
-        <div className="grid4"><Field label="音色"><select value={voice} onChange={e => setVoice(e.target.value)}>{voices.map(v => <option key={v.id} value={v.id}>{v.name || v.id}</option>)}</select></Field><Field label="配音风格"><select value={voiceStyle} onChange={e => setVoiceStyle(e.target.value)}>{['老板压迫感','真实聊天感','短视频强钩子','销售转化感','案例讲述感','沉稳信任感'].map(x => <option key={x}>{x}</option>)}</select></Field><Field label="情绪强度"><select value={voiceIntensity} onChange={e => setVoiceIntensity(e.target.value)}>{['轻微','标准','强烈'].map(x => <option key={x}>{x}</option>)}</select></Field><div className="stackButtons"><Button busy={busy === '生成配音导演稿' ? busy : ''} label="AI重排配音分段" onClick={makeVoiceDirector} kind="ghost" disabled={!currentScript} /><Button busy={busy === '智能字幕重点' ? busy : ''} label="AI提取重读关键词" onClick={() => refreshSubtitleKeywordsForScript(currentScript, false)} kind="ghost" disabled={!currentScript} /><Button busy={busy === '生成分段情绪配音' ? busy : ''} label="生成声音并校准时间轴" onClick={makeSegmentTTS} disabled={!currentScript} /></div></div>
+        <div className="grid4"><Field label="TTS Provider"><select value={voiceTtsProvider} onChange={e => setVoiceTtsProvider(e.target.value)}><option value="">默认 (minimax)</option><option value="minimax">MiniMax 复刻音色</option><option value="volcengine">火山 TTS</option><option value="mock">Mock 静音</option></select></Field><Field label="音色"><select value={voice} onChange={e => setVoice(e.target.value)}>{voices.map(v => <option key={v.id} value={v.id}>{v.name || v.id}</option>)}</select></Field><Field label="配音风格"><select value={voiceStyle} onChange={e => setVoiceStyle(e.target.value)}>{['老板压迫感','真实聊天感','短视频强钩子','销售转化感','案例讲述感','沉稳信任感'].map(x => <option key={x}>{x}</option>)}</select></Field><Field label="情绪强度"><select value={voiceIntensity} onChange={e => setVoiceIntensity(e.target.value)}>{['轻微','标准','强烈'].map(x => <option key={x}>{x}</option>)}</select></Field><div className="stackButtons"><Button busy={busy === '生成配音导演稿' ? busy : ''} label="AI重排配音分段" onClick={makeVoiceDirector} kind="ghost" disabled={!currentScript} /><Button busy={busy === '智能字幕重点' ? busy : ''} label="AI提取重读关键词" onClick={() => refreshSubtitleKeywordsForScript(currentScript, false)} kind="ghost" disabled={!currentScript} /><Button busy={busy === '生成分段情绪配音' ? busy : ''} label="生成声音并校准时间轴" onClick={makeSegmentTTS} disabled={!currentScript} /></div></div>
         <div className="smartSubtitleBox voiceKeywords"><div><strong>配音重读 / 字幕关键词</strong><p>{subtitleHighlight || '点击 AI 提取，系统会把热度雷达和脚本里的费用、避坑、身份、学校、私信等转化词同步给配音和字幕。'}</p></div><Field label="可手动调整重点词"><input value={subtitleHighlight} onChange={e => setSubtitleHighlight(e.target.value)} placeholder="第二家园,费用,身份,国际学校,私信报告" /></Field></div>
         {voiceNotes.length > 0 && <div className="tips">{voiceNotes.map(x => <span key={x}>{x}</span>)}</div>}
         <div className="hintBox">提示：想要更像真人口播，优先调语速、停顿和重点句；情绪只是辅助。</div>

@@ -12,6 +12,7 @@ from typing import Optional, Tuple, Iterable, Any
 import httpx
 
 from app.config import Settings
+from app.services.minimax_tts import synthesize_minimax
 from app.schemas import TTSVoice, VoiceSegment
 
 
@@ -243,11 +244,11 @@ def _concat_wavs(parts: Iterable[Path], output: Path) -> None:
         raise RuntimeError(f'分段音频合并失败：{proc.stderr[-1200:]}')
 
 
-async def synthesize_tts_segments(settings: Settings, segments: list[VoiceSegment], voice: Optional[str] = None, overall_rate: Optional[str] = None) -> Tuple[Path, float, Optional[str], list[dict[str, Any]]]:
+async def synthesize_tts_segments(settings: Settings, segments: list[VoiceSegment], voice: Optional[str] = None, overall_rate: Optional[str] = None, tts_provider: Optional[str] = None) -> Tuple[Path, float, Optional[str], list[dict[str, Any]]]:
     if not segments:
         raise RuntimeError('缺少分段配音内容。')
 
-    provider = settings.tts_provider.lower().strip()
+    provider = (tts_provider or settings.tts_provider).lower().strip()
     tmp_dir = settings.tmp_dir / f'tts_segments_{uuid.uuid4().hex}'
     tmp_dir.mkdir(parents=True, exist_ok=True)
     wav_parts: list[Path] = []
@@ -260,7 +261,18 @@ async def synthesize_tts_segments(settings: Settings, segments: list[VoiceSegmen
         for index, segment in enumerate(usable_segments, start=1):
             text = segment.text.strip()
             try:
-                if provider in {'volcengine', 'doubao', 'bytedance'}:
+                if provider in {'minimax'}:
+                    result = await synthesize_minimax(settings, text, voice_id=voice or None)
+                    if not result.ok or not result.file_path:
+                        raise RuntimeError(result.message or 'MiniMax TTS failed')
+                    raw = result.file_path
+                    wav = tmp_dir / f'{index:02d}_voice.wav'
+                    await asyncio.to_thread(_convert_to_standard_wav, raw, wav)
+                    try:
+                        raw.unlink(missing_ok=True)
+                    except Exception:
+                        pass
+                elif provider in {'volcengine', 'doubao', 'bytedance'}:
                     raw = await synthesize_volcengine_v1(
                         settings,
                         text,
@@ -280,7 +292,7 @@ async def synthesize_tts_segments(settings: Settings, segments: list[VoiceSegmen
                     wav = tmp_dir / f'{index:02d}_voice.wav'
                     await asyncio.to_thread(synthesize_sapi_to_wav, wav, text, voice or 'default', str(segment.speed_ratio))
                 else:
-                    raise RuntimeError(f'未知 TTS_PROVIDER={settings.tts_provider}')
+                    raise RuntimeError(f'未知 TTS_PROVIDER={provider}')
 
                 seg_duration = probe_duration(wav) or estimate_speech_duration(text)
                 start_time = cursor
