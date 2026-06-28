@@ -131,13 +131,20 @@ async def synthesize_volcengine_v1(settings: Settings, text: str, voice: Optiona
     headers = {
         'Authorization': f'Bearer;{settings.volcengine_access_token}',
         'Content-Type': 'application/json',
+        'X-Api-App-Id': settings.volcengine_app_id,
+        'X-Api-Access-Key': settings.volcengine_access_token,
     }
     resource_id = getattr(settings, 'volcengine_resource_id', '').strip()
     if resource_id:
         # V3 大模型语音合成/声音复刻接口需要用 X-Api-Resource-Id 选择版本效果，例如 seed-icl-2.0。
         headers['X-Api-Resource-Id'] = resource_id
     async with httpx.AsyncClient(timeout=180) as client:
-        params = {'voice_type': voice_type}
+        params = {
+            'voice_type': voice_type,
+            'appid': settings.volcengine_app_id,
+            'app_id': settings.volcengine_app_id,
+            'appkey': settings.volcengine_app_id,
+        }
         headers['X-Api-Voice-Type'] = voice_type
         resp = await client.post(settings.volcengine_tts_endpoint, headers=headers, params=params, json=body)
     if resp.status_code >= 400:
