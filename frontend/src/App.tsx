@@ -718,7 +718,10 @@ function readMediaDuration(event: any, fallback = 0) {
 }
 
 function AppInner() {
-  const [active, setActive] = useState<ModuleKey>('dashboard')
+  type MainTab = 'video-prod' | 'assets' | 'leads' | 'avatar' | 'providers'
+  const [mainTab, setMainTab] = useState<MainTab>('video-prod')
+  const [active, setActive] = useState<ModuleKey>('oneClick')
+  const [showAdvanced, setShowAdvanced] = useState(false)
   const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
   const [health, setHealth] = useState<any>(null)
@@ -809,7 +812,6 @@ function AppInner() {
   const [segmentSeconds, setSegmentSeconds] = useState<Record<number, number>>({})
   const [segmentTransitions, setSegmentTransitions] = useState<Record<number, string>>({})
   const [subtitleSize, setSubtitleSize] = useState(80)
-  const [industry, setIndustry] = useState('real_estate')
   const [humanMode, setHumanMode] = useState('none')
   const [subtitleMarginV, setSubtitleMarginV] = useState(56)
   const [subtitlePosition, setSubtitlePosition] = useState<'bottom_safe' | 'middle_low' | 'center'>('bottom_safe')
@@ -2800,6 +2802,16 @@ ${selectedAssetScriptContext || '暂无素材，请按马来西亚楼盘、风�
     return () => window.removeEventListener('resize', syncLayout)
   }, [])
 
+  function moduleVisible(key: ModuleKey): boolean {
+    if (mainTab === 'video-prod') return ['oneClick','copy','voice','digitalHuman','assets','video','subtitleCover'].includes(key);
+    if (mainTab === 'assets') return key === 'assets';
+    if (mainTab === 'leads') return key === 'lead' || key === 'monitor';
+    if (mainTab === 'avatar') return key === 'digitalHuman';
+    if (mainTab === 'providers') return key === 'dashboard';
+    if (showAdvanced) return ['strategy','competitor','trend','shooting','growth','publish','collector','monitor'].includes(key);
+    return false;
+  }
+
   return <div className={`appShell responsiveShell ${navCollapsed ? 'navCollapsed' : ''} ${navMobileOpen ? 'navMobileOpen' : ''}`}>
     {navMobileOpen && <button className="navBackdrop" aria-label="关闭菜单" onClick={() => setNavMobileOpen(false)} />}
     <aside className={`studioNav responsiveNav ${navCollapsed ? 'collapsed' : ''}`}>
@@ -2810,20 +2822,27 @@ ${selectedAssetScriptContext || '暂无素材，请按马来西亚楼盘、风�
         </div>
         <button className="navIconBtn desktopOnly" onClick={() => setNavCollapsed(v => !v)} title={navCollapsed ? '展开左侧菜单' : '收起左侧菜单'}>{navCollapsed ? '»' : '«'}</button>
       </div>
-      <button className="startButton" onClick={() => setActive('dashboard')}>开始使用</button>
-      <nav>
-        {modules.filter(item => ['dashboard','lead','competitor'].includes(item.key)).map(item => <button key={item.key} className={active === item.key ? 'active' : ''} onClick={() => setActive(item.key)}>
-          <span>{item.icon}</span><b>{item.title}</b><em>{item.tag}</em>
-        </button>)}
-        <button className={contentNavOpen ? 'groupHeader open' : 'groupHeader'} onClick={() => setContentNavOpen(!contentNavOpen)}>
-          <span>生</span><b>内容生产</b><em>{contentNavOpen ? '收起' : '展开'}</em>
+            <nav className="mainTabsNav">
+        {([
+          { tab: 'video-prod' as MainTab, icon: '🎬', label: '视频生产' },
+          { tab: 'assets' as MainTab, icon: '📦', label: '素材库' },
+          { tab: 'leads' as MainTab, icon: '🎯', label: '线索截流' },
+          { tab: 'avatar' as MainTab, icon: '👤', label: '数字人/真人' },
+          { tab: 'providers' as MainTab, icon: '⚙️', label: '设置' },
+        ] as const).map(item => (
+          <button key={item.tab} className={mainTab === item.tab ? 'active' : ''} onClick={() => { setMainTab(item.tab); setActive(item.tab === 'video-prod' ? 'oneClick' : item.tab === 'assets' ? 'assets' : item.tab === 'leads' ? 'lead' : item.tab === 'avatar' ? 'digitalHuman' : 'dashboard'); }}>
+            <span>{item.icon}</span><b>{item.label}</b>
+          </button>
+        ))}
+        <button className={`groupHeader ${showAdvanced ? 'open' : ''}`} onClick={() => setShowAdvanced(!showAdvanced)}>
+          <span>🔧</span><b>高级</b><em>{showAdvanced ? '收起' : '展开'}</em>
         </button>
-        {contentNavOpen && contentNavKeys.map(key => modules.find(item => item.key === key)).filter(Boolean).map(item => <button key={item!.key} className={`subNav ${active === item!.key ? 'active' : ''}`} onClick={() => setActive(item!.key)}>
-          <span>{item!.icon}</span><b>{item!.title}</b><em>{item!.tag}</em>
-        </button>)}
-        {modules.filter(item => ['strategy','collector','monitor'].includes(item.key)).map(item => <button key={item.key} className={active === item.key ? 'active' : ''} onClick={() => setActive(item.key)}>
-          <span>{item.icon}</span><b>{item.title}</b><em>{item.tag}</em>
-        </button>)}
+        {showAdvanced && ['strategy','competitor','trend','shooting','growth','publish','collector','monitor'].map(key => {
+          const item = modules.find(m => m.key === key);
+          return item ? <button key={item.key} className={`subNav ${active === item.key ? 'active' : ''}`} onClick={() => { setActive(item.key); setShowAdvanced(true); }}>
+            <span>{item.icon}</span><b>{item.title}</b><em>{item.tag}</em>
+          </button> : null;
+        })}
       </nav>
       <div className="miniStatus"><span>API</span><strong className={health?.ok ? 'greenText' : 'redText'}>{health?.ok ? '已连接' : '未连接'}</strong><small>{health?.tts_provider || 'waiting'} · {health?.ark_video_model || '-'}</small></div>
     </aside>
@@ -2864,7 +2883,7 @@ ${selectedAssetScriptContext || '暂无素材，请按马来西亚楼盘、风�
         </button>)}
       </section>
 
-      {active === 'oneClick' && <section className="card modulePanel oneClickPanel">
+      {moduleVisible('oneClick') && active === 'oneClick' && <section className="card modulePanel oneClickPanel">
         <div className="sectionHeader"><div><h2>一键生成中心</h2><p>想快就一键出方案；想细调就进文案、配音、素材、剪辑单独改。</p></div><Button busy={busy === '一键生成完整方案' ? busy : ''} label="一键生成方案" onClick={runOneClickGenerate} /></div>
         <div className="oneClickIntro">
           <strong>推荐顺序</strong>
@@ -2911,7 +2930,7 @@ ${selectedAssetScriptContext || '暂无素材，请按马来西亚楼盘、风�
         {!oneClick && <Empty>填写行业、客户和目标后，点“一键生成方案”。生成后可在这里继续对话修改，也会自动同步到后续步骤。</Empty>}
       </section>}
 
-      {active === 'dashboard' && <section className="dashboardStack">
+      {moduleVisible('dashboard') && active === 'dashboard' && <section className="dashboardStack">
         <div className="workflowBoard">
           {workflowSteps.map((step, idx) => <button className="workflowCard" key={`${step.step}-${step.title}`} onClick={() => setActive(step.key)}>
             <span>{step.step}</span>
@@ -2931,7 +2950,7 @@ ${selectedAssetScriptContext || '暂无素材，请按马来西亚楼盘、风�
         </div>
       </section>}
 
-      {active === 'monitor' && <section className="card modulePanel">
+      {moduleVisible('monitor') && active === 'monitor' && <section className="card modulePanel">
         <div className="sectionHeader"><div><h2>运营中控台</h2><p>这里是总览监控：看流程进度、数据库记忆、插件状态和下一步待办。详细数据和投流判断放在最后的增长模块。</p></div><div className="headerActions"><Button label="刷新数据库记忆" onClick={() => reloadMemoryContext(true)} kind="ghost" /><Button busy={busy === '生成行业爆点雷达' ? busy : ''} label="自动跑一次行业雷达" onClick={makeTrendRadar} kind="soft" /></div></div>
         <div className="monitorGrid">
           <div className="monitorCard"><span>流程完成度</span><strong>{leadScore}%</strong><p>{nextTodo ? nextTodo.text : '当前流程已基本闭环，可以进入发布和复盘。'}</p></div>
@@ -2947,7 +2966,7 @@ ${selectedAssetScriptContext || '暂无素材，请按马来西亚楼盘、风�
       </section>}
 
 
-      {active === 'lead' && <section className="card modulePanel leadRadarPanel heatRadarPanel heatRadarV3">
+      {moduleVisible('lead') && active === 'lead' && <section className="card modulePanel leadRadarPanel heatRadarPanel heatRadarV3">
         <div className="radarHeaderV3">
           <div>
             <Pill tone="green">Heat Radar</Pill>
@@ -3160,7 +3179,9 @@ ${selectedAssetScriptContext || '暂无素材，请按马来西亚楼盘、风�
         {heatCrawlerResult && <div className="resultBox heatCrawlerResult slim"><h3>{heatCrawlerResult.analysis?.summary || '真实热度采集完成'}</h3><div className="splitGrid"><div><h4>跟进选题</h4>{(heatCrawlerResult.analysis?.content_angles || []).map((x: string) => <p key={x}>· {x}</p>)}</div><div><h4>客户意图</h4>{(heatCrawlerResult.analysis?.customer_intents || []).map((x: string) => <p key={x}>· {x}</p>)}</div><div><h4>资料承接</h4>{(heatCrawlerResult.analysis?.lead_magnets || []).map((x: string) => <p key={x}>· {x}</p>)}</div></div>{heatCrawlerResult.warnings?.slice(0, 3).map(w => <div className="warn compactWarn" key={w}>{w}</div>)}</div>}
       </section>}
 
-      {active === 'strategy' && <section className="card modulePanel industryProfilePanel">
+      {mainTab === 'leads' && <LeadInbox />}
+
+      {moduleVisible('strategy') && active === 'strategy' && <section className="card modulePanel industryProfilePanel">
         <div className="sectionHeader"><div><h2>行业获客档案</h2><p>把业务定位、监听词、目标客群、资料包和承接钩子沉淀成长期档案。后面截流雷达、文案、图文、剪辑、私信回复都会自动读取。</p></div><div className="headerActions"><Button label="套用马来西亚房产模板" onClick={applyMalaysiaPreset} kind="ghost" /><Button busy={busy === '保存行业档案' ? busy : ''} label="保存行业档案" onClick={saveCustomerProfile} kind="soft" /><Button busy={busy === '生成获客自动化作战图' ? busy : ''} label="生成获客作战图" onClick={makeLeadPlan} kind="primary" /></div></div>
         <div className="profileHero">
           <div><span>业务定位</span><strong>{businessPositioning || industry}</strong><p>{conversionGoal}</p></div>
@@ -3187,7 +3208,7 @@ ${selectedAssetScriptContext || '暂无素材，请按马来西亚楼盘、风�
         {ad && <div className="resultBox"><h3>{ad.decision}</h3><p>建议预算：{ad.suggested_budget} · 置信度：{Math.round(ad.confidence * 100)}%</p><div className="chips">{ad.target_audience?.map(x => <Pill key={x}>{x}</Pill>)}</div>{ad.optimization_tips?.map(x => <p key={x}>· {x}</p>)}</div>}
       </section>}
 
-      {active === 'trend' && <section className="card modulePanel">
+      {moduleVisible('trend') && active === 'trend' && <section className="card modulePanel">
         <div className="sectionHeader"><div><h2>行业爆点与截流雷达</h2><p>根据搜索词、评论、同行账号和采集内容，生成可截流的机会、监控关键词和下一步动作。</p></div><Button busy={busy === '生成行业爆点雷达' ? busy : ''} label="自动采集/生成行业雷达" onClick={makeTrendRadar} /></div>
         <div className="grid2">
           <Field label="监控关键词"><input value={trendKeywords} onChange={e => setTrendKeywords(e.target.value)} placeholder="海外房产,第二家园,海外置业,子女教育,养老度假" /></Field>
@@ -3196,7 +3217,7 @@ ${selectedAssetScriptContext || '暂无素材，请按马来西亚楼盘、风�
         {trendRadar ? <div className="resultBox"><h3>{trendRadar.summary}</h3><div className="trendGrid">{trendRadar.hot_topics?.map(item => <div className="trendCard" key={item.title}><div className="heat"><span>{item.heat}</span><em>热度</em></div><strong>{item.title}</strong><p>{item.reason}</p><small>角度：{item.angle}</small><small>钩子：{item.suggested_hook}</small>{item.risk && <div className="warn">{item.risk}</div>}</div>)}</div><div className="splitGrid"><div><h4>内容角度</h4>{trendRadar.content_angles?.map(x => <p key={x}>· {x}</p>)}</div><div><h4>拍摄建议</h4>{trendRadar.shooting_suggestions?.map(x => <p key={x}>· {x}</p>)}</div><div><h4>监控词</h4><div className="chips">{trendRadar.monitor_keywords?.map(x => <Pill key={x}>{x}</Pill>)}</div></div></div></div> : <Empty>保存客户定位、账号库和采集结果后，系统会自动读取数据库生成行业雷达。</Empty>}
       </section>}
 
-      {active === 'competitor' && <section className="card modulePanel accountLibraryPanel">
+      {moduleVisible('competitor') && active === 'competitor' && <section className="card modulePanel accountLibraryPanel">
         <div className="sectionHeader"><div><h2>账号库</h2><p>固定监控的博主/同行账号单独管理。热度雷达只看采集结果，这里只管账号、平台、标签和采集备注。</p></div><div className="headerActions"><Button label="刷新账号库" onClick={() => reloadHeatRadarData()} kind="ghost" /><Button busy={busy === '保存热度账号' ? busy : ''} label="保存账号" onClick={addHeatAccount} kind="soft" /></div></div>
         <div className="accountLibraryGrid">
           <div className="accountEditorCard">
@@ -3213,7 +3234,7 @@ ${selectedAssetScriptContext || '暂无素材，请按马来西亚楼盘、风�
         </div>
       </section>}
 
-      {active === 'collector' && <section className="card modulePanel">
+      {moduleVisible('collector') && active === 'collector' && <section className="card modulePanel">
         <div className="sectionHeader"><div><h2>实时采集 Log</h2><p>这里不再做“状态卡片”，直接显示 ECS command_worker 回传的采集、AI 判断、入库和报错日志。状态统计已并入热度雷达。</p></div><div className="headerActions"><Button label="刷新日志" onClick={() => reloadCollectorProgress()} kind="ghost" /><Button busy={busy === '采集/拆解同行内容' ? busy : ''} label="手动采集链接" onClick={collectCompetitor} kind="soft" /></div></div>
         <div className="grid2">
           <Field label="抖音分享口令 / 视频链接"><textarea value={sourceUrl} onChange={e => setSourceUrl(e.target.value)} placeholder="直接粘贴：1.58 ... https://v.douyin.com/... 复制此链接..." /></Field>
@@ -3265,7 +3286,7 @@ https://www.douyin.com/user/..." /></Field>
         <div className="memoryList"><h3>自动学习到的博主打法</h3>{(memoryContext?.events || []).filter((e: any) => e.event_type === 'auto_creator_learning').slice(0, 5).map((e: any) => <div className="memoryItem" key={e.id || e.created_at}><strong>{e.payload?.learning?.summary || e.title || '自动学习记录'}</strong><p>{(e.payload?.learning?.creator_methods || []).slice(0, 3).join('；')}</p><small>只学习结构方法，不照抄文案 · {e.created_at}</small></div>)}{!(memoryContext?.events || []).filter((e: any) => e.event_type === 'auto_creator_learning').length && <Empty>自动智能体跑过后，会把钩子公式、情绪推进和迁移规则沉淀到这里。</Empty>}</div>
       </section>}
 
-      {active === 'copy' && <section className="card modulePanel copyFirstPanel">
+      {moduleVisible('copy') && active === 'copy' && <section className="card modulePanel copyFirstPanel">
         <div className="sectionHeader"><div><h2>第一步：路线 / 完整文案 / 配音分段</h2><p>先一次性生成完整脚本和配音分段；要数字人时，只把第 1 段给数字人，后面继续接素材混剪。</p></div><div className="headerActions"><Button busy={busy === '一次生成完整文案和配音分段' ? busy : ''} label="一次生成完整脚本+配音分段" onClick={generateFullCopyAndVoiceDraft} kind="primary" /><Button busy={busy === '按素材时长生成旁白稿' ? busy : ''} label="按素材时长重写完整旁白" onClick={generateScriptFromSelectedAssets} kind="soft" /></div></div>
         <div className="productionRouteGrid">
           {[
@@ -3282,7 +3303,7 @@ https://www.douyin.com/user/..." /></Field>
         <div className="chips">{matchedBadWords.length ? matchedBadWords.map(x => <Pill key={x} tone="red">风险词：{x}</Pill>) : <Pill tone="green">违禁词初筛通过</Pill>}</div>
       </section>}
 
-      {active === 'voice' && <section className="card modulePanel">
+      {moduleVisible('voice') && active === 'voice' && <section className="card modulePanel">
         <div className="sectionHeader"><div><h2>第四步：配音导演</h2><p>把口播拆成几段，调整语速、停顿和重点。生成后剪辑会按真实音频时长对齐字幕。</p></div></div>
         <div className="grid4"><Field label="音色"><select value={voice} onChange={e => setVoice(e.target.value)}>{voices.map(v => <option key={v.id} value={v.id}>{v.name || v.id}</option>)}</select></Field><Field label="配音风格"><select value={voiceStyle} onChange={e => setVoiceStyle(e.target.value)}>{['老板压迫感','真实聊天感','短视频强钩子','销售转化感','案例讲述感','沉稳信任感'].map(x => <option key={x}>{x}</option>)}</select></Field><Field label="情绪强度"><select value={voiceIntensity} onChange={e => setVoiceIntensity(e.target.value)}>{['轻微','标准','强烈'].map(x => <option key={x}>{x}</option>)}</select></Field><div className="stackButtons"><Button busy={busy === '生成配音导演稿' ? busy : ''} label="AI重排配音分段" onClick={makeVoiceDirector} kind="ghost" disabled={!currentScript} /><Button busy={busy === '智能字幕重点' ? busy : ''} label="AI提取重读关键词" onClick={() => refreshSubtitleKeywordsForScript(currentScript, false)} kind="ghost" disabled={!currentScript} /><Button busy={busy === '生成分段情绪配音' ? busy : ''} label="生成声音并校准时间轴" onClick={makeSegmentTTS} disabled={!currentScript} /></div></div>
         <div className="smartSubtitleBox voiceKeywords"><div><strong>配音重读 / 字幕关键词</strong><p>{subtitleHighlight || '点击 AI 提取，系统会把热度雷达和脚本里的费用、避坑、身份、学校、私信等转化词同步给配音和字幕。'}</p></div><Field label="可手动调整重点词"><input value={subtitleHighlight} onChange={e => setSubtitleHighlight(e.target.value)} placeholder="第二家园,费用,身份,国际学校,私信报告" /></Field></div>
@@ -3293,7 +3314,7 @@ https://www.douyin.com/user/..." /></Field>
         {audio && <div className="mediaBox"><audio controls src={audio.file_url} /><a href={audio.file_url} target="_blank">下载配音</a><Pill tone="green">已生成 {audio.segments?.length || voiceSegments.length} 段时间轴</Pill>{audio.warning && <div className="warn">{audio.warning}</div>}</div>}
       </section>}
 
-      {active === 'digitalHuman' && <section className="card modulePanel">
+      {moduleVisible('digitalHuman') && active === 'digitalHuman' && <section className="card modulePanel">
         <div className="sectionHeader digitalHumanHeader"><div><h2>第三步：可选数字人片头</h2><p>这一步不是每条都必须用。需要真人感片头时，只把第 1 段开场配音送去 fal；成片配音会单独生成，避免数字人开头和后面旁白重复。</p></div><div className="headerActions digitalHumanActions"><Button label="跳过数字人，去素材混剪" onClick={skipDigitalHumanAndUseAssets} kind="ghost" /><button className="btn digitalHumanMainCta" onClick={hasRunningDigitalHumanTask ? () => checkDigitalHumanStatus(false) : makeDigitalHuman} disabled={Boolean(busy === '生成数字人片段' || busy === '查询数字人结果') || (!hasRunningDigitalHumanTask && (!audio?.file_name || !digitalHumanAvatarId))}>{busy === '生成数字人片段' || busy === '查询数字人结果' ? busy : digitalHumanPrimaryLabel}</button></div></div>
         <div className="grid3">
           <Field label={digitalHumanNeedsVideo ? '真人模板视频 MP4' : digitalHumanPhotoSceneMode ? '本人授权照片' : '数字人形象素材'} hint={digitalHumanNeedsVideo ? 'fal 必须手动选择本人授权的 5-20 秒正面半身说话视频；每条视频可换不同模板，不能用图片。' : digitalHumanPhotoSceneMode ? '上传本人清晰正脸/半身照；系统会做楼道、样板间、园区等场景片头。' : '静态兜底可用照片；fal 路线必须用视频。'}><select value={digitalHumanAvatarId} onChange={e => setDigitalHumanAvatarId(e.target.value)}><option value="">{digitalHumanNeedsVideo ? '手动选择本条视频的真人模板' : digitalHumanPhotoSceneMode ? '选择本人照片' : '选择已上传照片/视频'}</option>{uploadedAvatarAssets.filter(a => digitalHumanNeedsVideo ? a.kind === 'video' : digitalHumanPhotoSceneMode ? a.kind === 'image' : true).map(a => <option key={a.id} value={a.id}>自己上传 · {a.kind} · {a.original_name || a.filename}</option>)}{collectedAvatarAssets.filter(a => digitalHumanNeedsVideo ? a.kind === 'video' : digitalHumanPhotoSceneMode ? a.kind === 'image' : true).map(a => <option key={a.id} value={a.id}>采集备用 · {a.kind} · {a.original_name || a.filename}</option>)}</select></Field>
@@ -3312,7 +3333,7 @@ https://www.douyin.com/user/..." /></Field>
         {digitalHuman && <div className="resultBox"><h3>可选数字人 #{digitalHumanVersion} 结果</h3><p>{digitalHuman.message}</p><div className="resultMeta"><Pill tone={digitalHuman.video_url ? 'green' : digitalHuman.status === 'failed' ? 'red' : 'orange'}>状态：{digitalHuman.status || 'running'}</Pill>{digitalHumanLastChecked && <Pill tone="blue">最近查询：{digitalHumanLastChecked}</Pill>}{digitalHumanPollCount > 0 && <Pill tone="purple">已查询 {digitalHumanPollCount} 次</Pill>}</div>{digitalHuman.job_id && <p className="muted">任务 ID：{digitalHuman.job_id}<br />查询引擎：{getDigitalHumanTaskProvider(digitalHuman, digitalHumanJimengModel)}</p>}{digitalHuman.job_id && !digitalHuman.video_url && <div className="warn">数字人生成是异步任务。系统会每 20 秒自动查一次；fal 通常较快，如果长时间没有结果，请查看 Render Logs 或 fal 后台 Request History。</div>}{digitalHuman.warnings?.map(w => <div className="warn" key={w}>{w}</div>)}{digitalHuman.job_id && !digitalHuman.video_url && <div className="buttonRow"><button className="btn soft" onClick={() => checkDigitalHumanStatus(false)} disabled={busy === '查询数字人结果'}>{busy === '查询数字人结果' ? '查询中…' : '立即查询数字人结果'}</button><button className="btn ghost danger" onClick={clearDigitalHumanTask}>清除当前任务</button></div>}{digitalHuman.raw && <details className="rawBox"><summary>查看原始返回</summary><pre>{JSON.stringify(digitalHuman.raw, null, 2).slice(0, 2600)}</pre></details>}{digitalHuman.video_url && <video controls src={digitalHuman.video_url} className="previewVideo" />}{digitalHuman.video_url && <a className="download" href={digitalHuman.video_url} target="_blank">下载/打开数字人 #{digitalHumanVersion} 片段</a>}</div>}
       </section>}
 
-      {active === 'assets' && <section className="card modulePanel">
+      {moduleVisible('assets') && active === 'assets' && <section className="card modulePanel">
         <div className="sectionHeader"><div><h2>第四步：素材选择与截取</h2><p>这里选择楼盘、马来西亚风光、周边配套、学校和生活素材；如果已生成数字人，它会自动排在最前，否则直接用素材开场。</p></div><Button busy={busy === '按素材时长生成旁白稿' ? busy : ''} label="按素材时长生成旁白" onClick={generateScriptFromSelectedAssets} kind="soft" /></div>
         <div className={`uploadDrop ${isDraggingAssets ? 'dragging' : ''} ${busy === '上传素材' ? 'uploading' : ''}`} onDragOver={onAssetDragOver} onDragLeave={onAssetDragLeave} onDrop={onAssetDrop} aria-busy={busy === '上传素材'}>
           <div className="uploadIcon">↑</div>
@@ -3385,7 +3406,7 @@ https://www.douyin.com/user/..." /></Field>
         <div className="resultBox"><h3>素材匹配建议</h3><p>图片：每张建议 2-4 秒；视频：每段截 2-5 秒。人物口播主体在画面中间时，字幕建议放底部安全区，避免挡脸。</p></div>
       </section>}
 
-      {active === 'shooting' && <section className="card modulePanel shootingScriptPanel">
+      {moduleVisible('shooting') && active === 'shooting' && <section className="card modulePanel shootingScriptPanel">
         <div className="sectionHeader"><div><h2>第二步：脚本 / 拍摄工作台</h2><p>这里处理“上传脚本/资料 → AI 解析 → 生成拍摄任务、提词器、B-roll 和素材需求”。用户可选数字人，也可自己拍摄。</p></div><Button busy={busy === '生成运营拍摄任务' ? busy : ''} label="分析脚本并生成拍摄清单" onClick={makeShootingPlan} disabled={!currentScript} /></div>
         <div className="scriptDropZone" onDragOver={e => e.preventDefault()} onDrop={e => { e.preventDefault(); handleShootingScriptFiles(e.dataTransfer.files) }}>
           <input id="shooting-script-upload" type="file" multiple accept=".pdf,.doc,.docx,.txt,.md,.srt,.csv,video/*,image/*" onChange={e => handleShootingScriptFiles(e.target.files)} />
@@ -3397,7 +3418,7 @@ https://www.douyin.com/user/..." /></Field>
         {shootingPlan ? <div className="resultBox"><h3>{shootingPlan.summary}</h3><div className="shotTable">{shootingPlan.shot_tasks?.map((task, i) => <div className="shotRow" key={`${task.scene}-${i}`}><span>{task.priority}</span><strong>{task.scene}</strong><em>{task.duration}</em><p>{task.content}</p><small>{task.camera}</small><small>{task.props}</small></div>)}</div><div className="splitGrid"><div><h4>B-roll 补拍</h4>{shootingPlan.broll_list?.map(x => <p key={x}>· {x}</p>)}</div><div><h4>提词器短句</h4>{shootingPlan.teleprompter?.map(x => <p key={x}>· {x}</p>)}</div><div><h4>拍摄检查</h4>{shootingPlan.checklist?.map(x => <p key={x}>· {x}</p>)}</div></div></div> : <Empty>先在文案生产里生成/粘贴脚本，或把脚本文件拖到上方上传区。</Empty>}
       </section>}
 
-      {active === 'video' && <section className="card modulePanel">
+      {moduleVisible('video') && active === 'video' && <section className="card modulePanel">
         <div className="sectionHeader"><div><h2>第六步：素材混剪 / 成片合成</h2><p>按素材顺序生成画面底片，再叠加最终配音和字幕。有数字人片头就排在最前；没有也能直接合成。</p></div><div className="headerActions"><Button busy={busy === '按素材时长生成旁白稿' ? busy : ''} label="按素材时长补全旁白" onClick={generateScriptFromSelectedAssets} kind="soft" /><Button busy={busy === '合成视频并烧字幕' ? busy : ''} label="生成视频并下载 MP4" onClick={composeVideo} disabled={!currentScript} /></div></div>
         <div className="subtitlePresetGrid">
           {[
@@ -3415,7 +3436,7 @@ https://www.douyin.com/user/..." /></Field>
         <div className="editChatBox"><Field label="AI + 插件剪辑指令"><textarea value={editInstruction} onChange={e => setEditInstruction(e.target.value)} placeholder="例如：去掉开头2秒、整体加速1.1倍、重新加字幕、转成9:16。" /></Field><Button busy={busy === 'AI + 插件修改视频' ? busy : ''} label="AI + 插件修改视频" onClick={chatEditVideo} kind="ghost" disabled={!currentVideoName} />{editChat.map((msg, i) => <div className="chatMsg" key={i}><strong>AI：</strong>{msg.assistant_message}<p>{msg.summary}</p><div className="chips">{msg.actions?.map(x => <Pill key={x}>{x}</Pill>)}</div>{msg.new_video_url && <a href={msg.new_video_url} target="_blank">打开修改后视频</a>}{msg.warnings?.map(w => <div className="warn" key={w}>{w}</div>)}</div>)}</div>
       </section>}
 
-      {active === 'subtitleCover' && <section className="card modulePanel visualPanel">
+      {moduleVisible('subtitleCover') && active === 'subtitleCover' && <section className="card modulePanel visualPanel">
         <div className="sectionHeader"><div><h2>第六步：字幕 / 封面 / 图文引流</h2><p>封面负责点击，图文负责收藏和私信。文字由系统叠加，图片只做背景，避免 AI 把提示词画进图里。</p></div><div className="stackButtons"><Button busy={busy === '智能字幕重点' ? busy : ''} label="智能识别重点字幕" onClick={makeSubtitleAI} disabled={!currentScript} kind="ghost" /><Button busy={busy === '生成图文引流包' ? busy : ''} label="生成图文引流包" onClick={makeGraphicPost} /></div></div>
         <div className="visualTabs"><span>字幕</span><span>封面</span><span>图文素材</span></div>
         <div className="grid4"><Field label="字幕模板"><select value={subtitlePreset} onChange={e => setSubtitlePreset(e.target.value as any)}><option value="douyin_boss">老板口播大字</option><option value="knowledge_highlight">知识科普高亮</option><option value="clean_trust">干净可信</option><option value="cta_pop">结尾强 CTA</option></select></Field><Field label="字幕字号"><input type="number" min="48" max="120" value={subtitleSize} onChange={e => setSubtitleSize(Number(e.target.value || 20))} /></Field><Field label={`离底部 ${subtitleMarginV}px`} hint="数值越小越靠下；数字人口播建议 48-60，避免挡嘴。"><input type="range" min="36" max="180" step="4" value={subtitleMarginV} onChange={e => setSubtitleMarginV(Number(e.target.value))} /></Field><Field label="重点词"><input value={subtitleHighlight} onChange={e => setSubtitleHighlight(e.target.value)} placeholder="AI 可自动识别，也可补充关键词" /></Field><Field label="封面大标题"><input value={copy.title || coverStyle} onChange={e => setCopy({ ...copy, title: e.target.value })} placeholder="例如：海外买房避坑指南" /></Field></div>
@@ -3445,7 +3466,7 @@ https://www.douyin.com/user/..." /></Field>
         {subtitleAI && <div className="resultBox"><h3>{subtitleAI.template}</h3><div className="chips">{subtitleAI.keywords?.map(k => <Pill key={k.word} tone="orange">{k.word} · {k.effect}</Pill>)}</div><div className="splitGrid"><div><h4>字幕建议</h4>{subtitleAI.srt_tips?.map(x => <p key={x}>· {x}</p>)}</div><div><h4>封面大字</h4>{subtitleAI.cover_text_options?.map(x => <p key={x}>· {x}</p>)}</div><div><h4>已写入重点词</h4><p>{subtitleHighlight}</p></div></div></div>}
       </section>}
 
-      {active === 'growth' && <section className="card modulePanel">
+      {moduleVisible('growth') && active === 'growth' && <section className="card modulePanel">
         <div className="sectionHeader"><div><h2>流量监控与投流决策</h2><p>先手动录入发布后的核心数据，系统会用规则 + AI 判断是否加热、换封面、重剪或停投。</p></div><Button busy={busy === '机器学习投流判断' ? busy : ''} label="生成投流决策" onClick={makeGrowthDecision} kind="soft" /></div>
         <div className="metricGrid">
           <Field label="播放量"><input type="number" value={growthMetrics.views} onChange={e => setGrowthMetrics({ ...growthMetrics, views: Number(e.target.value || 0) })} /></Field>
@@ -3461,7 +3482,7 @@ https://www.douyin.com/user/..." /></Field>
         {growthDecision ? <div className="resultBox growthResult"><div className="scoreRing"><strong>{growthDecision.score}</strong><span>投流分</span></div><div><h3>{growthDecision.decision}</h3><p>{growthDecision.reason}</p><p>预算建议：{growthDecision.recommended_budget}</p><div className="splitGrid"><div><h4>动作</h4>{growthDecision.actions?.map(x => <p key={x}>· {x}</p>)}</div><div><h4>风险</h4>{growthDecision.alerts?.map(x => <p key={x}>· {x}</p>)}</div><div><h4>下一轮测试</h4>{growthDecision.next_test?.map(x => <p key={x}>· {x}</p>)}</div></div></div></div> : <Empty>发布后录入数据，系统会给投流/停投/重剪建议。</Empty>}
       </section>}
 
-      {active === 'publish' && <section className="card modulePanel">
+      {moduleVisible('publish') && active === 'publish' && <section className="card modulePanel">
         <div className="sectionHeader"><div><h2>第七步：平台发布</h2><p>先生成抖音、视频号、快手、小红书发布草稿。开放平台权限下来后再接真实发布和数据回流。</p></div></div>
         <div className="buttonRow"><Button busy={busy === '投流分析' ? busy : ''} label="投流分析" onClick={analyzeAd} kind="ghost" /><select value={platform} onChange={e => setPlatform(e.target.value)}><option value="douyin">抖音</option><option value="shipinhao">视频号</option><option value="kuaishou">快手</option><option value="xiaohongshu">小红书</option></select><Button busy={busy === '生成平台发布草稿' ? busy : ''} label="生成平台发布草稿" onClick={platformPublish} /></div>
         <div className="grid2">{ad && <div className="miniResult"><h3>{ad.decision}</h3><p>预算：{ad.suggested_budget}</p>{ad.optimization_tips?.map(x => <p key={x}>· {x}</p>)}</div>}{publish && <div className="miniResult"><h3>{publish.platform}：{publish.status}</h3><p>{publish.message}</p>{publish.checklist?.map(x => <p key={x}>· {x}</p>)}</div>}</div>
@@ -3498,7 +3519,6 @@ function LeadInbox() {
         </div>
       )}
     </div>
-      <LeadInbox />
   )
 }
 

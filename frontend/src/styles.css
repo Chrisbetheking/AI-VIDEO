@@ -2534,3 +2534,81 @@ body:has(.heatRadarV3) .collectorAssist{border-color:#dbeafe}
 
 .timelineSummary{display:flex;flex-wrap:wrap;gap:10px;align-items:center;border:1px solid rgba(37,99,235,.18);background:linear-gradient(135deg,#eff6ff,#ffffff);border-radius:16px;padding:10px 12px;color:#1e3a8a}
 .timelineSummary strong{font-weight:900;color:#0f172a}.timelineSummary span{border:1px solid rgba(37,99,235,.18);background:#fff;border-radius:999px;padding:5px 9px;font-size:12px;font-weight:850}.timelineSummary em{font-style:normal;color:#475467;font-size:12px;line-height:1.5}
+/* === Main Tabs Navigation === */
+.mainTabsNav {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 0;
+}
+.mainTabsNav > button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  color: #cbd5e1;
+  font-size: 14px;
+  cursor: pointer;
+  text-align: left;
+  width: 100%;
+  transition: all 0.15s ease;
+}
+.mainTabsNav > button:hover {
+  background: rgba(255,255,255,0.06);
+  color: #f1f5f9;
+}
+.mainTabsNav > button.active {
+  background: rgba(37,99,235,0.15);
+  color: #60a5fa;
+  font-weight: 600;
+}
+.mainTabsNav > button span {
+  font-size: 17px;
+  width: 24px;
+  text-align: center;
+  flex-shrink: 0;
+}
+.mainTabsNav > button b {
+  font-weight: 500;
+  flex: 1;
+}
+.mainTabsNav > button em {
+  font-size: 11px;
+  color: #64748b;
+}
+.mainTabsNav .groupHeader {
+  margin-top: 8px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255,255,255,0.08);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #64748b;
+}
+.mainTabsNav .groupHeader.open {
+  color: #94a3b8;
+}
+.mainTabsNav .subNav {
+  padding-left: 32px;
+  font-size: 13px;
+}
+
+/* Sidebar polish */
+.studioNav {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow-y: auto;
+}
+.navTopRow {
+  padding: 16px 14px 8px;
+}
+.miniStatus {
+  margin-top: auto;
+  padding: 12px 14px;
+  border-top: 1px solid rgba(255,255,255,0.06);
+  font-size: 12px;
+}
