@@ -1,0 +1,20 @@
+﻿# CPU Open-Source TTS experiment requirements
+# Install on Ubuntu 22.04+ with Python 3.10+
+
+# Core
+fastapi>=0.100.0
+uvicorn[standard]>=0.23.0
+pydantic>=2.0.0
+
+# Audio
+torch>=2.1.0
+torchaudio>=2.1.0
+numpy>=1.24.0
+soundfile>=0.12.0
+
+# ChatTTS
+ChatTTS>=0.1.0
+transformers>=4.38.0
+
+# OpenVoice (clone from GitHub, not pip)
+# See install.sh for manual steps
