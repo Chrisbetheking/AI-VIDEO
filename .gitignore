@@ -1,0 +1,70 @@
+# === Environment & Secrets ===
+.env
+.env.local
+.env.production
+.env.development
+.env.*.local
+
+# === Python ===
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+*.egg
+
+# === Backend ===
+backend/.venv/
+backend/data/
+backend/outputs/
+backend/uploads/
+backend/*.log
+backend/**/*.log
+backend/*.sqlite3
+backend/**/*.sqlite3
+backend/*.db
+backend/**/*.db
+backend/*.bak
+
+# === Frontend ===
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+frontend/.cache/
+frontend/tsconfig.tsbuildinfo
+frontend/*.log
+
+# === Worker / Collector ===
+tools/collector-local/.env
+tools/collector-local/.venv/
+tools/collector-local/profiles/
+tools/collector-local/output/
+tools/collector-local/downloads/
+tools/collector-local/douyin_cookies.txt
+tools/collector-local/collector_state.sqlite3
+tools/collector-local/collector.lock
+tools/collector-local/*.log
+tools/collector-local/__pycache__/
+tools/collector-local/**/__pycache__/
+
+# === OS & Editor ===
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+*.user
+*.suo
+
+# === Other ===
+*.log
+*.lock
+*.sqlite3
+*.db
+
+*.bak
