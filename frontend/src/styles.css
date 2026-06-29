@@ -492,19 +492,87 @@ input:focus,textarea:focus,select:focus{
 @media(max-width:760px){.uploadSide{width:100%}.uploadSide select{width:100%}}
 
 
-.navDivider {
-  margin: 14px 10px 8px;
-  padding-top: 10px;
-  border-top: 1px solid rgba(148, 163, 184, 0.22);
-  color: rgba(226, 232, 240, 0.56);
-  font-size: 12px;
-  letter-spacing: 0.08em;
+/* 自动化采集中心：保留原功能，减少手工表单 */
+.autoStatsGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin: 14px 0 18px;
 }
-
-.studioNav nav button b {
-  white-space: nowrap;
+.autoStatsGrid > div {
+  border: 1px solid rgba(37, 99, 235, .16);
+  border-radius: 18px;
+  padding: 14px 16px;
+  background: linear-gradient(180deg, #ffffff, #f8fbff);
+  box-shadow: 0 12px 28px rgba(37,99,235,.06);
+  min-width: 0;
 }
-
-.studioNav .subNav {
-  display: none;
+.autoStatsGrid span { display:block; color:#64748b; font-size:12px; font-weight:900; margin-bottom:6px; }
+.autoStatsGrid strong { display:block; color:#0f172a; font-size:24px; line-height:1.1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.autoStatsGrid em { display:block; color:#64748b; font-style:normal; font-size:12px; line-height:1.35; margin-top:6px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.collectorTopStats { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.autoCollectorPanel {
+  display:grid;
+  grid-template-columns:minmax(0, 1.2fr) minmax(280px, .8fr);
+  gap:16px;
+  align-items:stretch;
+  border:1px solid rgba(79,70,229,.20);
+  border-radius:24px;
+  padding:18px;
+  background:linear-gradient(135deg,#eef4ff 0%,#fff 55%,#f5f3ff 100%);
+  margin:16px 0;
+}
+.autoCollectorCopy h3 { margin:0 0 8px; color:#0f172a; font-size:22px; }
+.autoCollectorCopy p { margin:0; color:#475569; line-height:1.65; font-weight:750; }
+.autoCollectorCopy small { display:block; margin-top:10px; color:#2563eb; font-weight:850; line-height:1.5; }
+.autoCollectorControls { display:grid; gap:10px; }
+.autoCollectorControls .btn { width:100%; }
+.collectorLogPanel {
+  border:1px solid rgba(15,23,42,.12);
+  border-radius:22px;
+  padding:16px;
+  background:#ffffff;
+  margin:16px 0;
+}
+.collectorTerminalBody {
+  display:grid;
+  gap:8px;
+  max-height:260px;
+  overflow:auto;
+  border-radius:16px;
+  background:#0f172a;
+  padding:12px;
+}
+.collectorTerminalBody pre {
+  margin:0;
+  white-space:pre-wrap;
+  word-break:break-word;
+  color:#dbeafe;
+  font-size:12px;
+  line-height:1.5;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+.collectorTerminalBody pre.error { color:#fecaca; }
+.fallbackPanel {
+  border:1px dashed rgba(37,99,235,.28);
+  border-radius:20px;
+  padding:14px 16px;
+  background:#fbfdff;
+  margin:14px 0;
+}
+.fallbackPanel summary {
+  cursor:pointer;
+  color:#1d4ed8;
+  font-weight:950;
+  list-style:none;
+}
+.fallbackPanel summary::-webkit-details-marker { display:none; }
+.fallbackPanel[open] summary { margin-bottom:14px; }
+.autoCompetitorCard .buttonRow { margin-top:12px; }
+@media(max-width:980px){
+  .autoStatsGrid,.collectorTopStats{grid-template-columns:1fr 1fr}
+  .autoCollectorPanel{grid-template-columns:1fr}
+}
+@media(max-width:640px){
+  .autoStatsGrid,.collectorTopStats{grid-template-columns:1fr}
 }

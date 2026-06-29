@@ -39,6 +39,8 @@ import {
 } from './api'
 
 type ModuleKey = 'dashboard' | 'monitor' | 'lead' | 'oneClick' | 'collector' | 'copy' | 'voice' | 'digitalHuman' | 'assets' | 'video' | 'subtitleCover' | 'publish' | 'strategy' | 'competitor' | 'trend' | 'shooting' | 'growth'
+type CollectorProgressEvent = { id?: string; level?: string; stage?: string; message?: string; video_url?: string; account_url?: string; created_at?: string; [key: string]: any }
+type CollectorProgressState = { run?: any; events?: CollectorProgressEvent[]; [key: string]: any }
 type AssetClipSetting = { order: number; image_seconds: number; video_start: number; video_end: number }
 type AssetFolderKey = 'all' | 'self' | 'provided' | 'image' | 'collected' | 'ai'
 
@@ -228,6 +230,14 @@ function formatBytes(size: number) {
   return `${(size / 1024 / 1024).toFixed(1)}MB`
 }
 
+function formatCollectorEventLine(ev: CollectorProgressEvent, index = 0) {
+  const stage = safeText(ev?.stage, '采集')
+  const message = safeText(ev?.message, '')
+  const target = safeText(ev?.video_url, safeText(ev?.account_url, ''))
+  const prefix = index ? `#${index + 1} ` : ''
+  return `${prefix}${stage}${message ? `：${message}` : ''}${target ? ` ｜ ${target}` : ''}`
+}
+
 function readMediaDuration(event: any, fallback = 0) {
   const el = event?.currentTarget || event?.target
   const value = Number(el?.duration)
@@ -281,6 +291,9 @@ function AppInner() {
   const [agentResult, setAgentResult] = useState<AutoCollectorRunResponse | null>(null)
   const [agentSeedLinks, setAgentSeedLinks] = useState('')
   const [agentLearnGoal, setAgentLearnGoal] = useState('学习这个博主的视频办法：钩子公式、情绪推进、镜头节奏、转化逻辑。只迁移方法，不模仿具体文案、不搬运素材。')
+  const [collectorProgress, setCollectorProgress] = useState<CollectorProgressState | null>(null)
+  const [collectorAccountLimit, setCollectorAccountLimit] = useState('3')
+  const [collectorSingleAccount, setCollectorSingleAccount] = useState('')
 
   const [copy, setCopy] = useState<GeneratedCopy>(emptyCopy)
   const [oneClick, setOneClick] = useState<OneClickGenerateResponse | null>(null)
@@ -371,6 +384,13 @@ function AppInner() {
     .map((a, i) => normalizeAsset(a, i)), [materialAssets, selectedMaterialIds])
   const referenceText = useMemo(() => extract?.transcript || manualText || sourceUrl, [extract, manualText, sourceUrl])
   const competitorNotes = useMemo(() => competitors.map(c => `${c.platform}｜${c.name}｜${c.positioning}｜${c.notes}`).join('\n'), [competitors])
+  const readyCompetitors = useMemo(() => competitors.filter(c => safeText(c.url) || safeText(c.name)), [competitors])
+  const readyCompetitorCount = readyCompetitors.length
+  const collectorEvents = useMemo(() => (collectorProgress?.events || []).slice(0, 40), [collectorProgress])
+  const latestCollectorEvent = collectorEvents[0]
+  const collectorRun = collectorProgress?.run || {}
+  const collectorStatusText = safeText(collectorRun?.status, collectorEvents.length ? '运行中/有日志' : '等待任务')
+  const collectorLogLine = latestCollectorEvent ? formatCollectorEventLine(latestCollectorEvent, 0) : '等待 worker 领取任务。请确认 ECS 上 command_worker.py 正在运行。'
   const learningSummary = memoryContext?.learning_summary || '保存客户定位、竞品账号和采集结果后，AI 会在文案、雷达、投流建议里自动读取。'
   const currentScript = copy.script || ''
   const currentVideoName = video?.video_name || extract?.collected_video_name || ''
@@ -598,6 +618,44 @@ function AppInner() {
     return status
   }
 
+  async function reloadCollectorProgress() {
+    const status = await apiGet<CollectorProgressState>('/api/collector/runs/latest?events_limit=40').catch(() => null)
+    if (status) setCollectorProgress(status)
+    return status
+  }
+
+  async function createCollectorCommand(limitOverride?: number, accountOverride = '') {
+    const limit = Math.max(1, Math.min(120, Number(limitOverride || collectorAccountLimit) || 3))
+    const account = safeText(accountOverride || collectorSingleAccount)
+    const command = await run('创建 ECS 采集命令', () => apiPost<any>('/api/collector/commands', {
+      source: 'frontend_auto_collector',
+      mode: 'run_now',
+      limit,
+      account,
+      no_delay: true,
+      learn_goal: agentLearnGoal,
+      message: `网页自动采集：${account || '账号库顺序'} / ${limit} 个账号 / 快速模式`
+    }))
+    setLastHandoff(`已下发自动采集任务：${account || '账号库顺序'} / ${limit} 个账号。worker 领取后会回传实时日志。`)
+    await reloadCollectorProgress().catch(() => null)
+    await reloadAgentStatus().catch(() => null)
+    return command
+  }
+
+  async function collectSingleCompetitor(c: CompetitorAccount) {
+    const target = safeText(c.url, c.name)
+    if (!target) { setError('这个账号缺少主页/链接，先补 URL 或账号名。'); return }
+    setActive('collector')
+    setCollectorSingleAccount(target)
+    await createCollectorCommand(1, target)
+  }
+
+  async function runAutoCollectAndLearn(limitOverride?: number) {
+    if (!readyCompetitorCount) { setError('账号库为空：请先在竞品账号库导入或添加同行账号。'); setActive('competitor'); return }
+    await createCollectorCommand(limitOverride || Number(collectorAccountLimit) || 3)
+    await runAutoAgent().catch(() => null)
+  }
+
   async function runAutoAgent() {
     const res = await run('自动采集/学习同行打法', () => apiPost<AutoCollectorRunResponse>('/api/agent/run-now', {
       seed_links: agentSeedLinks,
@@ -627,6 +685,7 @@ function AppInner() {
     reloadAssets().catch(() => null)
     reloadCollectorStatus().catch(() => null)
     reloadAgentStatus().catch(() => null)
+    reloadCollectorProgress().catch(() => null)
     reloadMemoryContext(true).catch(() => null)
   }, [])
 
@@ -682,6 +741,13 @@ function AppInner() {
     }, 20000)
     return () => window.clearInterval(timer)
   }, [active, digitalHuman?.job_id, digitalHuman?.video_url, digitalHuman?.status, digitalHuman?.engine, digitalHumanJimengModel])
+
+  useEffect(() => {
+    if (!['collector', 'competitor', 'monitor'].includes(active)) return
+    reloadCollectorProgress().catch(() => null)
+    const timer = window.setInterval(() => reloadCollectorProgress().catch(() => null), 4000)
+    return () => window.clearInterval(timer)
+  }, [active])
 
   async function handleUpload(files: FileList | null) {
     if (!files?.length) return
@@ -1185,7 +1251,7 @@ ${manualText || ''}`.trim()
   const digitalHumanStatus = String(digitalHuman?.status || '').toLowerCase()
   const hasRunningDigitalHumanTask = Boolean(digitalHuman?.job_id && !digitalHuman?.video_url && !['failed', 'error', 'done'].includes(digitalHumanStatus))
   const digitalHumanPrimaryLabel = hasRunningDigitalHumanTask ? '查询当前数字人任务' : '生成数字人片段'
-  const contentNavKeys: ModuleKey[] = ['collector','trend','competitor','oneClick','copy','voice','assets','video','subtitleCover']
+  const contentNavKeys: ModuleKey[] = ['collector','competitor','trend','oneClick','assets','copy','voice','digitalHuman','video','subtitleCover','publish']
 
   return <div className="appShell">
     <aside className="studioNav">
@@ -1195,11 +1261,16 @@ ${manualText || ''}`.trim()
       </div>
       <button className="startButton" onClick={() => setActive('collector')}>开始采集</button>
       <nav>
-        {modules.filter(item => ['collector','trend','competitor','oneClick','assets','video','monitor'].includes(item.key)).map(item => <button key={item.key} className={active === item.key ? 'active' : ''} onClick={() => setActive(item.key)}>
+        {modules.filter(item => ['dashboard','monitor','lead'].includes(item.key)).map(item => <button key={item.key} className={active === item.key ? 'active' : ''} onClick={() => setActive(item.key)}>
           <span>{item.icon}</span><b>{item.title}</b><em>{item.tag}</em>
         </button>)}
-        <div className="navDivider">常用流程</div>
-        {modules.filter(item => ['lead','strategy','shooting','growth','digitalHuman','publish'].includes(item.key)).map(item => <button key={item.key} className={active === item.key ? 'active' : ''} onClick={() => setActive(item.key)}>
+        <button className={contentNavOpen ? 'groupHeader open' : 'groupHeader'} onClick={() => setContentNavOpen(!contentNavOpen)}>
+          <span>生</span><b>内容生产</b><em>{contentNavOpen ? '收起' : '展开'}</em>
+        </button>
+        {contentNavOpen && contentNavKeys.map(key => modules.find(item => item.key === key)).filter(Boolean).map(item => <button key={item!.key} className={`subNav ${active === item!.key ? 'active' : ''}`} onClick={() => setActive(item!.key)}>
+          <span>{item!.icon}</span><b>{item!.title}</b><em>{item!.tag}</em>
+        </button>)}
+        {modules.filter(item => ['strategy','competitor','trend','shooting','growth'].includes(item.key)).map(item => <button key={item.key} className={active === item.key ? 'active' : ''} onClick={() => setActive(item.key)}>
           <span>{item.icon}</span><b>{item.title}</b><em>{item.tag}</em>
         </button>)}
       </nav>
@@ -1371,18 +1442,52 @@ ${manualText || ''}`.trim()
       </section>}
 
       {active === 'competitor' && <section className="card modulePanel">
-        <div className="sectionHeader"><div><h2>竞品账号库</h2><p>把同行账号、定位、爆款特点沉淀到数据库。行业雷达、仿写改写、投流决策都会读取这些信息。</p></div><div className="headerActions"><Button label="刷新账号库" onClick={() => reloadMemoryContext()} kind="ghost" /><Button busy={busy === '保存竞品账号' ? busy : ''} label="加入账号库" onClick={addCompetitor} kind="soft" /></div></div>
-        <div className="grid4"><Field label="账号名称"><input value={competitorDraft.name} onChange={e => setCompetitorDraft({ ...competitorDraft, name: e.target.value })} placeholder="例如：天诺老吴" /></Field><Field label="平台"><select value={competitorDraft.platform} onChange={e => setCompetitorDraft({ ...competitorDraft, platform: e.target.value })}><option value="douyin">抖音</option><option value="shipinhao">视频号</option><option value="kuaishou">快手</option><option value="xiaohongshu">小红书</option></select></Field><Field label="主页/视频链接"><input value={competitorDraft.url} onChange={e => setCompetitorDraft({ ...competitorDraft, url: e.target.value })} placeholder="账号主页或爆款链接" /></Field><Field label="账号定位"><input value={competitorDraft.positioning} onChange={e => setCompetitorDraft({ ...competitorDraft, positioning: e.target.value })} placeholder="同城获客/投流/电商创业" /></Field></div>
-        <Field label="爆款特点 / 观察备注"><textarea value={competitorDraft.notes} onChange={e => setCompetitorDraft({ ...competitorDraft, notes: e.target.value })} placeholder="常用钩子、客户痛点、封面风格、评论区反馈、发布时间等" /></Field>
-        <div className="competitorList">{competitors.length === 0 && <Empty>还没有竞品账号。先加 3-5 个同行账号，系统会更懂行业。</Empty>}{competitors.map((c, i) => <div className="competitorCard" key={`${c.name}-${i}`}><div><strong>{c.name || '未命名账号'}</strong><Pill tone="purple">{c.platform}</Pill></div><p>{c.positioning || '未填写定位'}</p><small>{c.url}</small><em>{c.notes}</em><button onClick={() => setCompetitors(prev => prev.filter((_, idx) => idx !== i))}>删除</button></div>)}</div>
+        <div className="sectionHeader"><div><h2>竞品账号池</h2><p>这里不是手工记录本，而是自动采集的账号池。系统会按账号库顺序抓近期视频、归类同行内容、学习钩子结构。</p></div><div className="headerActions"><Button label="刷新账号库" onClick={() => reloadMemoryContext()} kind="ghost" /><Button busy={busy === '创建 ECS 采集命令' ? busy : ''} label="采集全部账号" onClick={() => runAutoCollectAndLearn(Math.max(1, readyCompetitorCount || 3))} kind="primary" /><Button busy={busy === '保存竞品账号' ? busy : ''} label="加入账号库" onClick={addCompetitor} kind="soft" /></div></div>
+        <div className="autoStatsGrid">
+          <div><span>账号池</span><strong>{readyCompetitorCount}</strong><em>{readyCompetitorCount ? '可直接自动采集' : '先导入同行账号'}</em></div>
+          <div><span>已采集内容</span><strong>{(memoryContext?.videos || []).length}</strong><em>自动归入同行内容库</em></div>
+          <div><span>worker 状态</span><strong>{collectorStatusText}</strong><em>{collectorLogLine}</em></div>
+        </div>
+        <details className="fallbackPanel" open={competitors.length === 0}>
+          <summary>手动补充账号（账号库为空或需要加新同行时使用）</summary>
+          <div className="grid4"><Field label="账号名称"><input value={competitorDraft.name} onChange={e => setCompetitorDraft({ ...competitorDraft, name: e.target.value })} placeholder="例如：天诺老吴" /></Field><Field label="平台"><select value={competitorDraft.platform} onChange={e => setCompetitorDraft({ ...competitorDraft, platform: e.target.value })}><option value="douyin">抖音</option><option value="shipinhao">视频号</option><option value="kuaishou">快手</option><option value="xiaohongshu">小红书</option></select></Field><Field label="主页/视频链接"><input value={competitorDraft.url} onChange={e => setCompetitorDraft({ ...competitorDraft, url: e.target.value })} placeholder="账号主页或爆款链接" /></Field><Field label="账号定位"><input value={competitorDraft.positioning} onChange={e => setCompetitorDraft({ ...competitorDraft, positioning: e.target.value })} placeholder="同城获客/投流/电商创业" /></Field></div>
+          <Field label="爆款特点 / 观察备注"><textarea value={competitorDraft.notes} onChange={e => setCompetitorDraft({ ...competitorDraft, notes: e.target.value })} placeholder="常用钩子、客户痛点、封面风格、评论区反馈、发布时间等" /></Field>
+        </details>
+        <div className="competitorList">{competitors.length === 0 && <Empty>账号池为空。导入账号后，系统会自动按账号库采集，不需要每条视频手填。</Empty>}{competitors.map((c, i) => <div className="competitorCard autoCompetitorCard" key={`${c.url || c.name}-${i}`}><div><strong>{c.name || '未命名账号'}</strong><Pill tone="purple">{c.platform}</Pill><Pill tone={c.url ? 'green' : 'orange'}>{c.url ? '可采集' : '缺链接'}</Pill></div><p>{c.positioning || '未填写定位'}</p><small>{c.url || '暂无主页/视频链接'}</small><em>{c.notes || '系统会在采集后自动补充钩子、评论需求和爆款结构。'}</em><div className="buttonRow mini"><Button busy={busy === '创建 ECS 采集命令' ? busy : ''} label="采集此账号" onClick={() => collectSingleCompetitor(c)} kind="soft" disabled={!Boolean(c.url || c.name)} /><button onClick={() => setCompetitors(prev => prev.filter((_, idx) => idx !== i))}>删除</button></div></div>)}</div>
       </section>}
 
       {active === 'collector' && <section className="card modulePanel">
-        <div className="sectionHeader"><div><h2>第一步：采集同行视频</h2><p>文件上传后先采集同行视频。可以上传 MP4，也可以粘抖音分享口令；采不到视频时先拆标题、钩子和话题。</p></div><Button busy={busy === '采集/拆解同行内容' ? busy : ''} label="采集同行视频/口令" onClick={collectCompetitor} /></div>
-        <div className="grid2">
-          <Field label="抖音分享口令 / 视频链接"><textarea value={sourceUrl} onChange={e => setSourceUrl(e.target.value)} placeholder="直接粘贴：1.58 ... https://v.douyin.com/... 复制此链接..." /></Field>
-          <Field label="手动粘贴竞品文案 / 豆包 App 识别稿"><textarea value={manualText} onChange={e => setManualText(e.target.value)} placeholder="如果已经有真实口播稿，粘这里。" /></Field>
+        <div className="sectionHeader"><div><h2>自动化同行采集中心</h2><p>优先读取竞品账号库自动跑，不再要求你手工粘每条链接。采集后会归入同行内容库，再学习钩子公式、评论需求和转化结构。</p></div><div className="headerActions"><Button busy={busy === '创建 ECS 采集命令' ? busy : ''} label="一键采集全部账号" onClick={() => runAutoCollectAndLearn(Math.max(1, readyCompetitorCount || 3))} /><Button busy={busy === '自动采集/学习同行打法' ? busy : ''} label="学习已采集内容" onClick={runAutoAgent} kind="soft" /><Button label="刷新日志" onClick={() => { reloadCollectorProgress(); reloadMemoryContext(); }} kind="ghost" /></div></div>
+        <div className="autoStatsGrid collectorTopStats">
+          <div><span>账号库</span><strong>{readyCompetitorCount}</strong><em>{readyCompetitorCount ? '已准备，可自动采集' : '为空，请先加同行账号'}</em></div>
+          <div><span>采集器</span><strong>{collectorStatus?.enabled ? '已启用' : '待确认'}</strong><em>{collectorStatus?.cookie_exists ? 'Cookies 已配置' : '未配置 Cookies，可先跑公开内容'}</em></div>
+          <div><span>当前任务</span><strong>{collectorStatusText}</strong><em>{safeText(collectorRun?.stage, '等待 worker')}</em></div>
+          <div><span>同行内容库</span><strong>{(memoryContext?.videos || []).length}</strong><em>采集后自动沉淀</em></div>
         </div>
+
+        <div className="autoCollectorPanel">
+          <div className="autoCollectorCopy"><h3>全自动流程</h3><p>系统会按账号库顺序打开同行账号，抓最近视频、点赞/评论等指标，同行内容归为同行，只学习钩子、节奏、评论需求和转化结构，不复制原文。</p><small>{collectorLogLine}</small></div>
+          <div className="autoCollectorControls">
+            <Field label="本次采集账号数"><input type="number" min="1" max="120" value={collectorAccountLimit} onChange={e => setCollectorAccountLimit(e.target.value)} /></Field>
+            <Field label="单独采集某个账号，可选"><input value={collectorSingleAccount} onChange={e => setCollectorSingleAccount(e.target.value)} placeholder="留空则按账号库顺序" /></Field>
+            <Button busy={busy === '创建 ECS 采集命令' ? busy : ''} label="下发采集任务" onClick={() => createCollectorCommand()} kind="primary" disabled={!readyCompetitorCount && !collectorSingleAccount.trim()} />
+          </div>
+        </div>
+
+        <div className="collectorLogPanel">
+          <div className="miniHeader"><div><h3>实时采集日志</h3><p>worker 领取任务后，这里会自动刷新打开账号、抓视频、AI 判断、入库和失败原因。</p></div><Pill tone={collectorEvents.length ? 'green' : 'orange'}>{collectorEvents.length ? `${collectorEvents.length} 条日志` : '等待日志'}</Pill></div>
+          <div className="collectorTerminalBody">{collectorEvents.length === 0 ? <pre>[waiting] 等待 worker 领取任务。请确认 ECS 上 command_worker.py 正在运行。</pre> : collectorEvents.slice(0, 18).map((ev, index) => <pre key={ev.id || `${ev.created_at}_${index}`} className={ev.level === 'error' ? 'error' : ''}>[{safeText(ev.created_at, '--').slice(11, 19) || '--'}] {formatCollectorEventLine(ev, index)}</pre>)}</div>
+        </div>
+
+        <details className="fallbackPanel">
+          <summary>备用导入：采不到时再手动粘口令 / 视频链接 / 文案</summary>
+          <div className="sectionHeader compact"><div><h3>手动备用采集</h3><p>只在账号库自动采集失败时使用。正常情况优先让系统从账号库跑。</p></div><Button busy={busy === '采集/拆解同行内容' ? busy : ''} label="手动采集/拆解" onClick={collectCompetitor} kind="soft" /></div>
+          <div className="grid2">
+            <Field label="抖音分享口令 / 视频链接"><textarea value={sourceUrl} onChange={e => setSourceUrl(e.target.value)} placeholder="直接粘贴：1.58 ... https://v.douyin.com/... 复制此链接..." /></Field>
+            <Field label="手动粘贴竞品文案 / 豆包 App 识别稿"><textarea value={manualText} onChange={e => setManualText(e.target.value)} placeholder="如果已经有真实口播稿，粘这里。" /></Field>
+          </div>
+        </details>
+
         <div className="collectorAssist">
           <div>
             <strong>视频采集增强</strong>
@@ -1394,13 +1499,10 @@ ${manualText || ''}`.trim()
             <Button label={showCookiePanel ? '收起 Cookies' : '上传 Cookies'} onClick={() => setShowCookiePanel(v => !v)} kind="soft" />
           </div>
         </div>
+
         <div className="agentPanel">
-          <div className="sectionHeader compact"><div><h3>后台自动学习智能体</h3><p>它会读取竞品账号库和种子链接，尽力发现/采集新视频，然后只学习钩子公式、节奏和转化结构，不复制原文。</p></div><div className="buttonRow mini"><Button label="刷新智能体" onClick={() => reloadAgentStatus()} kind="ghost" /><Button busy={busy === '自动采集/学习同行打法' ? busy : ''} label="立即跑一轮" onClick={runAutoAgent} kind="soft" /></div></div>
-          <div className="grid2">
-            <Field label="种子链接（可选，一行一个）" hint="可以填某个博主的主页/爆款视频链接；空着时会自动读取竞品账号库 URL。"><textarea value={agentSeedLinks} onChange={e => setAgentSeedLinks(e.target.value)} placeholder="https://v.douyin.com/...
-https://www.douyin.com/user/..." /></Field>
-            <Field label="学习目标" hint="强调学习打法，不要复制文案。"><textarea value={agentLearnGoal} onChange={e => setAgentLearnGoal(e.target.value)} /></Field>
-          </div>
+          <div className="sectionHeader compact"><div><h3>自动学习钩子智能体</h3><p>采集完成后，它会读取同行内容库，输出钩子公式、情绪推进、镜头节奏、评论需求和迁移规则。</p></div><div className="buttonRow mini"><Button label="刷新智能体" onClick={() => reloadAgentStatus()} kind="ghost" /><Button busy={busy === '自动采集/学习同行打法' ? busy : ''} label="立即学习已采集内容" onClick={runAutoAgent} kind="soft" /></div></div>
+          <Field label="学习目标（默认即可）" hint="强调学习打法，不复制文案。"><textarea value={agentLearnGoal} onChange={e => setAgentLearnGoal(e.target.value)} /></Field>
           <div className="agentStats">
             <Pill tone={agentStatus?.enabled ? 'green' : 'orange'}>{agentStatus?.enabled ? '后台定时已启用' : '后台定时未启用'}</Pill>
             <Pill>竞品账号 {agentStatus?.competitors_count ?? competitors.length}</Pill>
@@ -1412,7 +1514,7 @@ https://www.douyin.com/user/..." /></Field>
         {showCookiePanel && <div className="cookiePanel">
           <h4>上传 douyin_cookies.txt</h4>
           <p>遇到 “Fresh cookies needed” 时，需要导出你自己浏览器里的抖音 cookies。只用于你的后端采集公开可访问内容，不会提交到前端展示。</p>
-          <textarea value={collectorCookieText} onChange={e => setCollectorCookieText(e.target.value)} placeholder="# Netscape HTTP Cookie File\n.douyin.com\tTRUE\t/\tTRUE\t..." />
+          <textarea value={collectorCookieText} onChange={e => setCollectorCookieText(e.target.value)} placeholder={"# Netscape HTTP Cookie File\n.douyin.com\tTRUE\t/\tTRUE\t..."} />
           <div className="buttonRow">
             <Button busy={busy === '上传抖音 Cookies' ? busy : ''} label="保存 Cookies 到后端" onClick={saveCollectorCookies} disabled={!collectorCookieText.trim()} />
             <Button label="取消" onClick={() => setShowCookiePanel(false)} kind="ghost" />
@@ -1427,6 +1529,7 @@ https://www.douyin.com/user/..." /></Field>
         <div className="memoryList"><h3>数据库已采集同行内容</h3>{(memoryContext?.videos || []).slice(0, 6).map((v: any) => <div className="memoryItem" key={v.id || v.created_at}><strong>{v.source_name || v.summary || '同行采集记录'}</strong><p>{v.summary || v.transcript || v.manual_text}</p><small>{v.status} · {v.collector_status} · {v.created_at}</small></div>)}{!(memoryContext?.videos || []).length && <Empty>还没有入库采集记录。每次采集会自动保存，后续 AI 会读取。</Empty>}</div>
         <div className="memoryList"><h3>自动学习到的博主打法</h3>{(memoryContext?.events || []).filter((e: any) => e.event_type === 'auto_creator_learning').slice(0, 5).map((e: any) => <div className="memoryItem" key={e.id || e.created_at}><strong>{e.payload?.learning?.summary || e.title || '自动学习记录'}</strong><p>{(e.payload?.learning?.creator_methods || []).slice(0, 3).join('；')}</p><small>只学习结构方法，不照抄文案 · {e.created_at}</small></div>)}{!(memoryContext?.events || []).filter((e: any) => e.event_type === 'auto_creator_learning').length && <Empty>自动智能体跑过后，会把钩子公式、情绪推进和迁移规则沉淀到这里。</Empty>}</div>
       </section>}
+
 
       {active === 'copy' && <section className="card modulePanel">
         <div className="sectionHeader"><div><h2>第二步：文案生产</h2><p>文案不再手填时长，系统会按已选素材和最终配音自动决定长度。这里专注改标题、开头、口播稿和发布简介。</p></div></div>
