@@ -12,6 +12,7 @@ from typing import Optional, Tuple, Iterable, Any
 import httpx
 
 from app.config import Settings
+from app.services.volcengine_voice_clone import load_voice_type
 from app.schemas import TTSVoice, VoiceSegment
 
 
@@ -77,8 +78,8 @@ def _configured_voices(settings: Settings) -> list[TTSVoice]:
                     ))
         except Exception:
             pass
-    if settings.volcengine_voice_type.strip() and not any(v.id == settings.volcengine_voice_type for v in voices):
-        voices.append(TTSVoice(id=settings.volcengine_voice_type, name='豆包默认音色 / 复刻音色', provider='volcengine', note='来自 VOLCENGINE_VOICE_TYPE'))
+    if (settings.volcengine_voice_type.strip() or load_voice_type()) and not any(v.id == (settings.volcengine_voice_type or load_voice_type()) for v in voices):
+        voices.append(TTSVoice(id=settings.volcengine_voice_type or load_voice_type() or '', name='豆包默认音色 / 复刻音色', provider='volcengine', note='来自 VOLCENGINE_VOICE_TYPE 或已训练复刻音色'))
     if not voices:
         voices.append(TTSVoice(id='default', name='未配置云端音色', provider=settings.tts_provider, note='请配置 VOLCENGINE_VOICE_TYPE 或 TTS_VOICES_JSON'))
     return voices
@@ -95,7 +96,7 @@ async def synthesize_volcengine_v1(settings: Settings, text: str, voice: Optiona
     # 前端/测试请求经常会传 voice='default'，不能让它覆盖环境变量里的复刻音色。
     requested_voice = (voice or '').strip()
     if requested_voice.lower() in {'', 'default', 'auto', 'cloned'}:
-        voice_type = (settings.volcengine_voice_type or settings.tts_voice or '').strip()
+        voice_type = (settings.volcengine_voice_type or load_voice_type() or settings.tts_voice or '').strip()
     else:
         voice_type = requested_voice
     if voice_type.lower() in {'', 'default', 'auto', 'cloned'}:

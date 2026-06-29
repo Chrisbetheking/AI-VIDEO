@@ -112,6 +112,7 @@ from app.services.memory import MemoryStore, MemoryWriteError
 from app.services.publisher import create_publish_package
 from app.services.storage import maybe_upload_to_r2, maybe_delete_from_r2, maybe_list_r2_objects, read_last_storage_error, test_r2_connection
 from app.services.tts import get_tts_voices, synthesize_tts, synthesize_tts_segments
+from app.services.volcengine_voice_clone import get_voice_clone_status, upload_and_train_voice, save_voice_data, load_voice_data, load_voice_type
 from app.services.assets_store import read_assets, upsert_asset, remove_asset, now_iso
 from app.services.video import IMAGE_EXTS, VIDEO_EXTS, MediaClip, compose_video
 from app.services.video_edit import apply_video_edit
@@ -304,6 +305,64 @@ def api_minimax_status(settings: Settings = Depends(get_settings)) -> dict:
             "foreign_trade": broll_foreign_trade,
         },
     }
+
+
+# ===== Voice Clone V3 =====
+
+@app.get("/api/volcengine/voice-clone/status")
+def api_voice_clone_status(settings: Settings = Depends(get_settings)) -> dict:
+    """Return Volcengine voice clone status."""
+    status = get_voice_clone_status(settings)
+    return {
+        "ok": status.ok,
+        "has_app_id": status.has_app_id,
+        "has_access_token": status.has_access_token,
+        "has_voice_type": status.has_voice_type,
+        "voice_type_masked": status.voice_type_masked,
+        "voice_name": status.voice_name,
+        "cluster": status.cluster,
+        "resource_id": status.resource_id,
+        "created_at": status.created_at,
+        "message": status.message,
+    }
+
+
+@app.post("/api/volcengine/voice-clone/upload")
+async def api_voice_clone_upload(
+    file: UploadFile = File(...),
+    voice_name: str = Form(""),
+    settings: Settings = Depends(get_settings),
+) -> dict:
+    """Upload reference audio and train Volcengine voice clone V3."""
+    filename = (file.filename or "reference.mp3").lower()
+    if not any(filename.endswith(ext) for ext in (".mp3", ".wav", ".m4a", ".mpeg")):
+        return {"ok": False, "message": "Unsupported audio format. Use mp3, wav, or m4a."}
+
+    try:
+        file_bytes = await file.read()
+        if len(file_bytes) < 1024:
+            return {"ok": False, "message": "Audio file too small (< 1KB)"}
+        if len(file_bytes) > 20 * 1024 * 1024:
+            return {"ok": False, "message": "Audio file too large (> 20MB)"}
+    except Exception as exc:
+        return {"ok": False, "message": f"Failed to read uploaded file: {exc}"}
+
+    result = await upload_and_train_voice(settings, file_bytes, filename, voice_name=voice_name)
+    if result.ok:
+        save_voice_data(
+            result.voice_type,
+            voice_name=voice_name or result.voice_name,
+            resource_id=getattr(settings, "volcengine_resource_id", "seed-icl-2.0") or "",
+            cluster=getattr(settings, "volcengine_cluster", "volcano_icl") or "",
+        )
+    return {
+        "ok": result.ok,
+        "voice_type": result.voice_type,
+        "voice_name": result.voice_name or voice_name,
+        "message": result.message,
+        "raw_preview": result.raw_preview,
+    }
+
 
 
 # ===== MVP: Lead Capture =====
