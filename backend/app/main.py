@@ -121,7 +121,7 @@ from app.services.one_click import generate_one_click, revise_one_click
 from app.services.industry_packs import list_packs, get_pack, INDUSTRY_PACKS
 from app.services.human_overlay import overlay_human_on_video, build_human_overlay_filter
 from app.services.minimax_provider import get_minimax_status, text_to_video, image_to_video, query_video_status, get_broll_prompts
-from app.services.minimax_tts import get_minimax_tts_status, synthesize_minimax, upload_reference_audio, create_voice_clone, save_voice_id, load_voice_id
+from app.services.minimax_tts import get_minimax_tts_status, synthesize_minimax, upload_reference_audio, create_voice_clone, save_voice_id, load_voice_id, load_voice_data
 from app.services.reply_assistant import suggest_reply, store_lead, list_leads, get_lead, update_lead
 from app.services.graphic_post import create_graphic_post
 from app.services.heat_radar import run_public_heat_radar, generate_heat_radar_rewrite, ingest_openclaw_heat_radar, audit_heat_radar_accounts, analyze_heat_radar_video_intake
@@ -314,7 +314,10 @@ def api_minimax_status(settings: Settings = Depends(get_settings)) -> dict:
 def api_minimax_tts_status(settings: Settings = Depends(get_settings)) -> dict:
     """Return MiniMax TTS provider status with rich info."""
     status = get_minimax_tts_status(settings)
-    saved = load_voice_data()
+    try:
+        saved = load_voice_data()
+    except Exception:
+        saved = {}
     return {
         "ok": True,
         "enabled": status.enabled,

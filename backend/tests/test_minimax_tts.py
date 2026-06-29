@@ -187,3 +187,27 @@ class TestVoiceIdPersistence:
         assert load_voice_id() == ""
         assert load_voice_data() == {}
 
+
+class TestStatusEndpoint:
+    """Verify /api/minimax/tts/status returns 200 even without voice file."""
+
+    def test_status_200_without_voice_json(self, tmp_path, monkeypatch):
+        """Returns 200 and has_voice_id=false when no saved voice file."""
+        from app.services.minimax_tts import get_minimax_tts_status
+        from app.config import Settings
+        import app.services.minimax_tts as mm_tts
+
+        monkeypatch.setattr(mm_tts, "VOICE_JSON_PATH", tmp_path / "no_such_file.json")
+
+        settings = Settings(
+            minimax_tts_enabled=True,
+            minimax_api_key="key123",
+            minimax_voice_id="",
+            outputs_dir=Path("/tmp"),
+        )
+        status = get_minimax_tts_status(settings)
+        assert status.has_api_key is True
+        assert status.has_voice_id is False
+        assert status.configured is False
+        assert "***" not in status.voice_id_masked  # empty
+
