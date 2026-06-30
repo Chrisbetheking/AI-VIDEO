@@ -5099,3 +5099,50 @@ async def _video_timeline_render_plan(req: _TimelineRenderPlanRequest):
 async def _video_timeline_render_plan_self_test():
     return _timeline_render_plan_self_test()
 # ===== /TIMELINE RENDER PLAN API HOTFIX =====
+
+
+# ===== COMMENT LEAD ENGINE API HOTFIX =====
+from fastapi import HTTPException as _CommentLeadHTTPException
+from pydantic import BaseModel as _CommentLeadBaseModel
+from app.services.comment_lead_provider import (
+    analyze_comments as _comment_lead_analyze,
+    health as _comment_lead_health,
+    recent_leads as _comment_lead_recent,
+    self_test as _comment_lead_self_test,
+)
+
+
+class _CommentLeadAnalyzeRequest(_CommentLeadBaseModel):
+    comments: list
+    campaign_context: dict = {}
+    save: bool = True
+    max_items: int = 200
+
+
+@app.get("/api/video/comment-leads/health")
+async def _video_comment_leads_health():
+    return _comment_lead_health()
+
+
+@app.post("/api/video/comment-leads/analyze")
+async def _video_comment_leads_analyze(req: _CommentLeadAnalyzeRequest):
+    try:
+        return _comment_lead_analyze(
+            comments=req.comments,
+            campaign_context=req.campaign_context,
+            save=req.save,
+            max_items=req.max_items,
+        )
+    except ValueError as exc:
+        raise _CommentLeadHTTPException(status_code=400, detail=str(exc))
+
+
+@app.get("/api/video/comment-leads/recent")
+async def _video_comment_leads_recent(limit: int = 50):
+    return _comment_lead_recent(limit=limit)
+
+
+@app.get("/api/video/comment-leads/self-test")
+async def _video_comment_leads_self_test():
+    return _comment_lead_self_test()
+# ===== /COMMENT LEAD ENGINE API HOTFIX =====

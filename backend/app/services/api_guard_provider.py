@@ -56,6 +56,7 @@ PUBLIC_PREFIXES = (
     "/api/video/timeline/health",
     "/api/video/timeline/tts-align/health",
     "/api/video/timeline/render-plan/health",
+    "/api/video/comment-leads/health",
 )
 
 ADMIN_PREFIXES = (
@@ -65,6 +66,8 @@ ADMIN_PREFIXES = (
     "/api/video/timeline/self-test",
     "/api/video/timeline/tts-align/self-test",
     "/api/video/timeline/render-plan/self-test",
+    "/api/video/comment-leads/self-test",
+    "/api/video/comment-leads/recent",
 )
 
 WRITE_PROTECTED_PREFIXES = (
@@ -82,6 +85,7 @@ WRITE_PROTECTED_PREFIXES = (
     "/api/video/watermark/check",
     "/api/video/timeline/build",
     "/api/video/timeline/render-plan",
+    "/api/video/comment-leads/analyze",
 )
 
 
