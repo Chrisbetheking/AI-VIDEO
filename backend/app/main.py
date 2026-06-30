@@ -5453,3 +5453,98 @@ async def _api_notify_video_job(req: _NotifyVideoJobRequest):
 async def _api_notify_self_test(dry_run: bool = True):
     return _notify_self_test(dry_run=dry_run)
 # ===== /NOTIFICATION CENTER API HOTFIX =====
+
+
+# ===== DOUYIN ACCOUNT LIBRARY API HOTFIX =====
+import asyncio as _DouyinAccountAsyncio
+from fastapi import HTTPException as _DouyinAccountHTTPException
+from pydantic import BaseModel as _DouyinAccountBaseModel, Field as _DouyinAccountField
+from app.services.douyin_account_library_provider import (
+    health as _douyin_account_health,
+    self_test as _douyin_account_self_test,
+    upsert_account as _douyin_account_upsert,
+    bulk_upsert_accounts as _douyin_account_bulk_upsert,
+    list_accounts as _douyin_account_list,
+    traffic_learning as _douyin_account_traffic_learning,
+    competitor_benchmarks as _douyin_account_competitor_benchmarks,
+    seed_mission_targets as _douyin_account_seed_targets,
+)
+
+
+class _DouyinAccountUpsertRequest(_DouyinAccountBaseModel):
+    account: dict
+
+
+class _DouyinAccountBulkRequest(_DouyinAccountBaseModel):
+    accounts: list = _DouyinAccountField(default_factory=list)
+
+
+class _DouyinAccountTrafficLearnRequest(_DouyinAccountBaseModel):
+    dry_run: bool = True
+    min_score: int = 50
+    limit: int = 30
+
+
+class _DouyinAccountBenchmarkRequest(_DouyinAccountBaseModel):
+    min_score: int = 60
+    limit: int = 30
+
+
+@app.get("/api/collector/douyin/accounts/health")
+async def _api_douyin_accounts_health():
+    return _douyin_account_health()
+
+
+@app.post("/api/collector/douyin/accounts/upsert")
+async def _api_douyin_accounts_upsert(req: _DouyinAccountUpsertRequest):
+    try:
+        return await _DouyinAccountAsyncio.to_thread(_douyin_account_upsert, req.account)
+    except ValueError as exc:
+        raise _DouyinAccountHTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        raise _DouyinAccountHTTPException(status_code=502, detail=f"douyin account upsert failed: {exc}")
+
+
+@app.post("/api/collector/douyin/accounts/bulk-upsert")
+async def _api_douyin_accounts_bulk_upsert(req: _DouyinAccountBulkRequest):
+    try:
+        return await _DouyinAccountAsyncio.to_thread(_douyin_account_bulk_upsert, req.accounts)
+    except ValueError as exc:
+        raise _DouyinAccountHTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        raise _DouyinAccountHTTPException(status_code=502, detail=f"douyin account bulk upsert failed: {exc}")
+
+
+@app.get("/api/collector/douyin/accounts/list")
+async def _api_douyin_accounts_list(category: str | None = None, min_score: int = 0, limit: int = 100):
+    return _douyin_account_list(category=category, min_score=min_score, limit=limit)
+
+
+@app.post("/api/collector/douyin/accounts/learn-traffic")
+async def _api_douyin_accounts_learn_traffic(req: _DouyinAccountTrafficLearnRequest):
+    return await _DouyinAccountAsyncio.to_thread(
+        _douyin_account_traffic_learning,
+        dry_run=req.dry_run,
+        min_score=req.min_score,
+        limit=req.limit,
+    )
+
+
+@app.post("/api/collector/douyin/accounts/benchmark-competitors")
+async def _api_douyin_accounts_benchmark_competitors(req: _DouyinAccountBenchmarkRequest):
+    return await _DouyinAccountAsyncio.to_thread(
+        _douyin_account_competitor_benchmarks,
+        min_score=req.min_score,
+        limit=req.limit,
+    )
+
+
+@app.get("/api/collector/douyin/accounts/seed-targets")
+async def _api_douyin_accounts_seed_targets(market: str = "马来西亚"):
+    return _douyin_account_seed_targets(market=market)
+
+
+@app.get("/api/collector/douyin/accounts/self-test")
+async def _api_douyin_accounts_self_test():
+    return _douyin_account_self_test()
+# ===== /DOUYIN ACCOUNT LIBRARY API HOTFIX =====

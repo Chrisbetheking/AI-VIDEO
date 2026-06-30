@@ -62,6 +62,7 @@ PUBLIC_PREFIXES = (
     "/api/video/openclaw/timeline/health",
     "/api/video/openclaw/llm-enhance/health",
     "/api/notify/health",
+    "/api/collector/douyin/accounts/health",
 )
 
 ADMIN_PREFIXES = (
@@ -78,6 +79,9 @@ ADMIN_PREFIXES = (
     "/api/video/openclaw/timeline/self-test",
     "/api/video/openclaw/llm-enhance/self-test",
     "/api/notify/self-test",
+    "/api/collector/douyin/accounts/self-test",
+    "/api/collector/douyin/accounts/list",
+    "/api/collector/douyin/accounts/seed-targets",
 )
 
 WRITE_PROTECTED_PREFIXES = (
@@ -104,6 +108,10 @@ WRITE_PROTECTED_PREFIXES = (
     "/api/notify/send",
     "/api/notify/openclaw-lead",
     "/api/notify/video-job",
+    "/api/collector/douyin/accounts/upsert",
+    "/api/collector/douyin/accounts/bulk-upsert",
+    "/api/collector/douyin/accounts/learn-traffic",
+    "/api/collector/douyin/accounts/benchmark-competitors",
 )
 
 

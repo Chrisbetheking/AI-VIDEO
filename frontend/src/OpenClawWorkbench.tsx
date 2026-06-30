@@ -162,10 +162,10 @@ function ResultCard({ result }: { result: JsonValue }) {
 
 export default function OpenClawWorkbench() {
   const [rawExport, setRawExport] = useState(
-    'author,title,likes,comments,shares,views,platform,url\\nagent_a,马来西亚买房千万别只看价格，这三个区域最容易踩坑,1200,88,42,56000,tiktok,https://example.com/v1\\nagent_b,海外房产投资租金回报到底怎么算？很多人第一步就错了,850,66,25,43000,tiktok,https://example.com/v2'
+    'author,title,likes,comments,shares,views,platform,url\\nagent_a,马来西亚买房千万别只看价格，这三个区域最容易踩坑,1200,88,42,56000,douyin,https://example.com/v1\\nagent_b,海外房产投资租金回报到底怎么算？很多人第一步就错了,850,66,25,43000,douyin,https://example.com/v2'
   )
   const [market, setMarket] = useState('马来西亚')
-  const [platform, setPlatform] = useState('tiktok')
+  const [platform, setPlatform] = useState('douyin')
   const [targetDuration, setTargetDuration] = useState(28)
   const [realDeepSeek, setRealDeepSeek] = useState(false)
   const [busy, setBusy] = useState('')
@@ -256,10 +256,10 @@ export default function OpenClawWorkbench() {
     <section className="openclawWorkbench">
       <div className="openclawTitleRow">
         <div>
-          <p className="openclawEyebrow">OpenClaw / DeepSeek / Timeline</p>
+          <p className="openclawEyebrow">抖音 / OpenClaw / DeepSeek / Timeline</p>
           <h2>OpenClaw 获客与选题工作台</h2>
           <p>
-            粘贴 OpenClaw 导出的评论、视频标题、CSV 或 JSON，直接分析线索、拆爆点、DeepSeek 增强、转 Timeline。
+            粘贴抖音/OpenClaw 导出的评论、视频标题、CSV 或 JSON，直接分析线索、拆爆点、DeepSeek 增强、转 Timeline。
           </p>
         </div>
         <div className="openclawBadge">不调用 fal.ai</div>

@@ -1401,3 +1401,269 @@ input:focus,textarea:focus,select:focus{
   }
 }
 /* ===== /OpenClaw Workbench ===== */
+
+/* ===== Douyin Account Library ===== */
+.douyinSideDock {
+  position: fixed;
+  left: 16px;
+  top: 160px;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.douyinSideDock a {
+  display: block;
+  padding: 10px 12px;
+  border-radius: 999px;
+  background: #0f172a;
+  color: #fff;
+  text-decoration: none;
+  font-weight: 900;
+  font-size: 13px;
+  box-shadow: 0 12px 25px rgba(15, 23, 42, 0.18);
+}
+
+.douyinAccountLibrary {
+  max-width: 1180px;
+  margin: 28px auto;
+  padding: 24px;
+  border: 1px solid rgba(15, 23, 42, 0.1);
+  border-radius: 24px;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+  box-shadow: 0 20px 45px rgba(15, 23, 42, 0.08);
+}
+
+.douyinTitleRow {
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+  align-items: flex-start;
+  margin-bottom: 18px;
+}
+
+.douyinTitleRow h2 {
+  margin: 4px 0 8px;
+  color: #0f172a;
+  font-size: 26px;
+}
+
+.douyinTitleRow p {
+  margin: 0;
+  color: #475569;
+  line-height: 1.7;
+}
+
+.douyinEyebrow {
+  font-size: 13px;
+  font-weight: 900;
+  color: #dc2626 !important;
+  letter-spacing: 0.06em;
+}
+
+.douyinBadge {
+  white-space: nowrap;
+  border-radius: 999px;
+  padding: 8px 12px;
+  background: #fee2e2;
+  color: #991b1b;
+  font-weight: 900;
+}
+
+.douyinTabs,
+.douyinButtonRow,
+.douyinControlRow {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 14px 0;
+}
+
+.douyinTabs button,
+.douyinButtonRow button,
+.douyinControlRow button {
+  border: 0;
+  border-radius: 13px;
+  padding: 11px 15px;
+  background: #334155;
+  color: #fff;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.douyinTabs button.active {
+  background: #dc2626;
+}
+
+.douyinButtonRow button:nth-child(2) {
+  background: #2563eb;
+}
+
+.douyinButtonRow button:nth-child(3) {
+  background: #7c3aed;
+}
+
+.douyinControlRow label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: #334155;
+  font-weight: 900;
+  font-size: 13px;
+}
+
+.douyinControlRow input {
+  border: 1px solid #cbd5e1;
+  border-radius: 12px;
+  padding: 10px 12px;
+  min-width: 180px;
+}
+
+.douyinBulkText {
+  width: 100%;
+  min-height: 120px;
+  resize: vertical;
+  border: 1px solid #cbd5e1;
+  border-radius: 18px;
+  padding: 16px;
+  box-sizing: border-box;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.douyinLoading,
+.douyinError {
+  margin: 12px 0;
+  padding: 12px 14px;
+  border-radius: 14px;
+  font-weight: 900;
+}
+
+.douyinLoading {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
+.douyinError {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.douyinAccountGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  margin-top: 16px;
+}
+
+.douyinAccountCard,
+.douyinLearningBox,
+.douyinBenchmark {
+  border: 1px solid #e2e8f0;
+  border-radius: 18px;
+  background: #fff;
+  padding: 16px;
+}
+
+.douyinAccountCard p,
+.douyinLearningBox p,
+.douyinBenchmark p {
+  color: #475569;
+  line-height: 1.65;
+}
+
+.douyinAccountTop {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.douyinAccountTop b {
+  color: #0f172a;
+}
+
+.douyinAccountTop span {
+  border-radius: 999px;
+  background: #fee2e2;
+  color: #991b1b;
+  padding: 4px 9px;
+  font-weight: 900;
+}
+
+.douyinTags {
+  display: flex;
+  gap: 7px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+
+.douyinTags em {
+  font-style: normal;
+  border-radius: 999px;
+  background: #eff6ff;
+  color: #1d4ed8;
+  padding: 4px 8px;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.douyinLearningBox {
+  margin-top: 16px;
+}
+
+.douyinLearningBox h3 {
+  margin-top: 0;
+}
+
+.douyinLearningBox li {
+  margin: 7px 0;
+  color: #334155;
+}
+
+.douyinBenchmark {
+  margin-top: 10px;
+}
+
+.douyinBenchmark span {
+  margin-left: 8px;
+  color: #dc2626;
+  font-weight: 900;
+}
+
+.douyinJsonBox {
+  margin-top: 14px;
+}
+
+.douyinJsonBox summary {
+  cursor: pointer;
+  font-weight: 900;
+  color: #2563eb;
+}
+
+.douyinJsonBox pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+  border-radius: 14px;
+  background: #0f172a;
+  color: #e2e8f0;
+  padding: 14px;
+  font-size: 12px;
+  line-height: 1.65;
+  overflow-x: auto;
+}
+
+@media (max-width: 860px) {
+  .douyinSideDock {
+    position: static;
+    flex-direction: row;
+    justify-content: center;
+    margin: 16px;
+  }
+  .douyinAccountGrid {
+    grid-template-columns: 1fr;
+  }
+  .douyinTitleRow {
+    flex-direction: column;
+  }
+}
+/* ===== /Douyin Account Library ===== */
