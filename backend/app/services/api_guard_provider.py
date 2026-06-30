@@ -54,6 +54,7 @@ PUBLIC_PREFIXES = (
     "/api/collector/commands/next",
     "/api/video/watermark/health",
     "/api/video/timeline/health",
+    "/api/video/timeline/tts-align/health",
 )
 
 ADMIN_PREFIXES = (
@@ -61,6 +62,7 @@ ADMIN_PREFIXES = (
     "/api/video/production/security",
     "/api/video/watermark/self-test",
     "/api/video/timeline/self-test",
+    "/api/video/timeline/tts-align/self-test",
 )
 
 WRITE_PROTECTED_PREFIXES = (

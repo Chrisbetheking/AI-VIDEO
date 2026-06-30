@@ -4965,3 +4965,68 @@ async def _video_timeline_build(req: _TimelineBuildRequest):
 async def _video_timeline_self_test():
     return _timeline_self_test()
 # ===== /TIMELINE ENGINE V1 API HOTFIX =====
+
+
+# ===== TIMELINE TTS ALIGN API HOTFIX =====
+from pydantic import BaseModel as _TimelineTTSBaseModel
+from app.services.timeline_tts_align_provider import (
+    build_tts_aligned_timeline as _timeline_tts_align_build,
+    health as _timeline_tts_align_health,
+    self_test as _timeline_tts_align_self_test,
+)
+
+try:
+    from app.services.job_persistence_provider import save_job_response as _timeline_tts_save_job_response
+except Exception:
+    _timeline_tts_save_job_response = None
+
+
+class _TimelineTTSAlignRequest(_TimelineTTSBaseModel):
+    text: str
+    voice: str = "default"
+    overall_rate: str = "0%"
+    tts_provider: str | None = None
+    target_duration: float | None = None
+    dry_run: bool = True
+    speech_rate_cps: float = 4.2
+    min_segment_duration: float = 1.8
+    max_segment_duration: float = 6.5
+
+
+@app.get("/api/video/timeline/tts-align/health")
+async def _video_timeline_tts_align_health():
+    return _timeline_tts_align_health()
+
+
+@app.post("/api/video/timeline/tts-align")
+async def _video_timeline_tts_align(req: _TimelineTTSAlignRequest):
+    response_data = _timeline_tts_align_build(
+        text=req.text,
+        voice=req.voice,
+        overall_rate=req.overall_rate,
+        tts_provider=req.tts_provider,
+        target_duration=req.target_duration,
+        dry_run=req.dry_run,
+        speech_rate_cps=req.speech_rate_cps,
+        min_segment_duration=req.min_segment_duration,
+        max_segment_duration=req.max_segment_duration,
+    )
+
+    if _timeline_tts_save_job_response:
+        try:
+            _timeline_tts_save_job_response(
+                job_id=response_data.get("align_id", ""),
+                job_type="timeline_tts_align",
+                response_data=response_data,
+                source_path="/api/video/timeline/tts-align",
+            )
+        except Exception as exc:
+            print(f"[timeline-tts-align] persist failed: {exc}")
+
+    return response_data
+
+
+@app.get("/api/video/timeline/tts-align/self-test")
+async def _video_timeline_tts_align_self_test(dry_run: bool = True):
+    return _timeline_tts_align_self_test(dry_run=dry_run)
+# ===== /TIMELINE TTS ALIGN API HOTFIX =====
