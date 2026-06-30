@@ -5366,3 +5366,90 @@ async def _video_openclaw_llm_enhance_content(req: _OpenClawLLMContentRequest):
 async def _video_openclaw_llm_enhance_self_test():
     return _openclaw_llm_enhance_self_test()
 # ===== /OPENCLAW LLM ENHANCE API HOTFIX =====
+
+
+# ===== NOTIFICATION CENTER API HOTFIX =====
+import asyncio as _NotifyAsyncio
+from fastapi import HTTPException as _NotifyHTTPException
+from pydantic import BaseModel as _NotifyBaseModel, Field as _NotifyField
+from app.services.notification_provider import (
+    health as _notify_health,
+    self_test as _notify_self_test,
+    send_message as _notify_send_message,
+    send_openclaw_lead as _notify_openclaw_lead,
+    send_video_job as _notify_video_job,
+)
+
+
+class _NotifySendRequest(_NotifyBaseModel):
+    title: str = "AI-VIDEO 通知"
+    message: str
+    level: str = "info"
+    channels: list[str] = _NotifyField(default_factory=list)
+    dry_run: bool = False
+    metadata: dict = _NotifyField(default_factory=dict)
+
+
+class _NotifyOpenClawLeadRequest(_NotifyBaseModel):
+    lead: dict
+    channels: list[str] = _NotifyField(default_factory=list)
+    dry_run: bool = False
+
+
+class _NotifyVideoJobRequest(_NotifyBaseModel):
+    job: dict
+    channels: list[str] = _NotifyField(default_factory=list)
+    dry_run: bool = False
+
+
+@app.get("/api/notify/health")
+async def _api_notify_health():
+    return _notify_health()
+
+
+@app.post("/api/notify/send")
+async def _api_notify_send(req: _NotifySendRequest):
+    try:
+        return await _NotifyAsyncio.to_thread(
+            _notify_send_message,
+            title=req.title,
+            message=req.message,
+            level=req.level,
+            channels=req.channels or None,
+            dry_run=req.dry_run,
+            metadata=req.metadata,
+        )
+    except Exception as exc:
+        raise _NotifyHTTPException(status_code=502, detail=f"notify send failed: {exc}")
+
+
+@app.post("/api/notify/openclaw-lead")
+async def _api_notify_openclaw_lead(req: _NotifyOpenClawLeadRequest):
+    try:
+        return await _NotifyAsyncio.to_thread(
+            _notify_openclaw_lead,
+            lead=req.lead,
+            channels=req.channels or None,
+            dry_run=req.dry_run,
+        )
+    except Exception as exc:
+        raise _NotifyHTTPException(status_code=502, detail=f"notify lead failed: {exc}")
+
+
+@app.post("/api/notify/video-job")
+async def _api_notify_video_job(req: _NotifyVideoJobRequest):
+    try:
+        return await _NotifyAsyncio.to_thread(
+            _notify_video_job,
+            job=req.job,
+            channels=req.channels or None,
+            dry_run=req.dry_run,
+        )
+    except Exception as exc:
+        raise _NotifyHTTPException(status_code=502, detail=f"notify video job failed: {exc}")
+
+
+@app.get("/api/notify/self-test")
+async def _api_notify_self_test(dry_run: bool = True):
+    return _notify_self_test(dry_run=dry_run)
+# ===== /NOTIFICATION CENTER API HOTFIX =====
