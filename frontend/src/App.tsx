@@ -1,7 +1,6 @@
 import { Component, useEffect, useMemo, useState, type ErrorInfo, type ReactNode } from 'react'
 import './styles.css'
 import {
-import FullAIConsole from './FullAIConsole'
   AdAnalysisResponse,
   AssetItem,
   ComposeResponse,
@@ -38,6 +37,7 @@ import FullAIConsole from './FullAIConsole'
   uploadAssets,
   deleteAsset
 } from './api'
+import FullAIConsole from './FullAIConsole'
 
 type ModuleKey = 'dashboard' | 'monitor' | 'lead' | 'fullAi'
   | 'oneClick' | 'collector' | 'copy' | 'voice' | 'digitalHuman' | 'assets' | 'video' | 'subtitleCover' | 'publish' | 'strategy' | 'competitor' | 'trend' | 'shooting' | 'growth'
