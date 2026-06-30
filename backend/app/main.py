@@ -4908,3 +4908,60 @@ async def _video_watermark_self_test(with_logo: bool = True):
         prefix="watermark_self_test",
     )
 # ===== /WATERMARK CHECK API HOTFIX =====
+
+
+# ===== TIMELINE ENGINE V1 API HOTFIX =====
+from pydantic import BaseModel as _TimelineBaseModel
+from app.services.timeline_engine_provider import (
+    build_timeline as _timeline_build,
+    health as _timeline_health,
+    self_test as _timeline_self_test,
+)
+
+try:
+    from app.services.job_persistence_provider import save_job_response as _timeline_save_job_response
+except Exception:
+    _timeline_save_job_response = None
+
+
+class _TimelineBuildRequest(_TimelineBaseModel):
+    text: str
+    target_duration: float | None = None
+    speech_rate_cps: float = 4.2
+    min_segment_duration: float = 1.8
+    max_segment_duration: float = 6.5
+
+
+@app.get("/api/video/timeline/health")
+async def _video_timeline_health():
+    return _timeline_health()
+
+
+@app.post("/api/video/timeline/build")
+async def _video_timeline_build(req: _TimelineBuildRequest):
+    response_data = _timeline_build(
+        text=req.text,
+        target_duration=req.target_duration,
+        speech_rate_cps=req.speech_rate_cps,
+        min_segment_duration=req.min_segment_duration,
+        max_segment_duration=req.max_segment_duration,
+    )
+
+    if _timeline_save_job_response:
+        try:
+            _timeline_save_job_response(
+                job_id=response_data.get("timeline_id", ""),
+                job_type="timeline",
+                response_data=response_data,
+                source_path="/api/video/timeline/build",
+            )
+        except Exception as exc:
+            print(f"[timeline] persist failed: {exc}")
+
+    return response_data
+
+
+@app.get("/api/video/timeline/self-test")
+async def _video_timeline_self_test():
+    return _timeline_self_test()
+# ===== /TIMELINE ENGINE V1 API HOTFIX =====
