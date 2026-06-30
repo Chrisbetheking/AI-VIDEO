@@ -4662,3 +4662,85 @@ async def _video_real_shot_self_test(dry_run: bool = True):
         prefix="real_shot_self_test",
     )
 # ===== /REAL SHOT VIDEO API HOTFIX =====
+
+
+# ===== HYBRID VIDEO API HOTFIX =====
+from pydantic import BaseModel as _HybridBaseModel
+from app.services.hybrid_video_provider import (
+    create_test_video as _hybrid_create_test_video,
+    health as _hybrid_health,
+    process_hybrid_video as _hybrid_process_video,
+)
+
+try:
+    from app.services.job_persistence_provider import save_job_response as _hybrid_save_job_response
+except Exception:
+    _hybrid_save_job_response = None
+
+
+class _HybridProcessRequest(_HybridBaseModel):
+    real_video_path: str = ""
+    real_video_url: str = ""
+    ai_video_paths: list[str] | None = None
+    ai_video_urls: list[str] | None = None
+    order: str = "ai_first"
+    text: str = ""
+    burn_subtitle: bool = False
+    upload_r2: bool = False
+    dry_run: bool = True
+    max_chars: int = 18
+    prefix: str = "hybrid"
+
+
+@app.get("/api/video/hybrid/health")
+async def _video_hybrid_health():
+    return _hybrid_health()
+
+
+@app.post("/api/video/hybrid/process")
+async def _video_hybrid_process(req: _HybridProcessRequest):
+    response_data = _hybrid_process_video(
+        real_video_path=req.real_video_path,
+        real_video_url=req.real_video_url,
+        ai_video_paths=req.ai_video_paths,
+        ai_video_urls=req.ai_video_urls,
+        order=req.order,
+        text=req.text,
+        burn_subtitle=req.burn_subtitle,
+        upload_r2=req.upload_r2,
+        dry_run=req.dry_run,
+        max_chars=req.max_chars,
+        prefix=req.prefix,
+    )
+
+    if _hybrid_save_job_response:
+        try:
+            _hybrid_save_job_response(
+                job_id=response_data.get("job_id", ""),
+                job_type="hybrid",
+                response_data=response_data,
+                source_path="/api/video/hybrid/process",
+            )
+        except Exception as exc:
+            print(f"[hybrid] persist failed: {exc}")
+
+    return response_data
+
+
+@app.get("/api/video/hybrid/self-test")
+async def _video_hybrid_self_test(dry_run: bool = True):
+    real_path = _hybrid_create_test_video(label="REAL_SHOT", color="green", duration=3.0)
+    ai_path = _hybrid_create_test_video(label="AI_OPENING", color="blue", duration=2.0)
+
+    return _hybrid_process_video(
+        real_video_path=str(real_path),
+        ai_video_paths=[str(ai_path)],
+        order="ai_first",
+        text="这是混合成片自测。AI 镜头只作为开头，实拍素材为主。",
+        burn_subtitle=False,
+        upload_r2=False,
+        dry_run=dry_run,
+        max_chars=16,
+        prefix="hybrid_self_test",
+    )
+# ===== /HYBRID VIDEO API HOTFIX =====

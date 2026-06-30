@@ -100,3 +100,6 @@ backend/data/subtitle-test/
 
 # AI-VIDEO real-shot runtime artifacts
 backend/data/real-shot/
+
+# AI-VIDEO hybrid runtime artifacts
+backend/data/hybrid/
