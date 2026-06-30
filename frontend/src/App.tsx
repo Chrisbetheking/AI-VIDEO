@@ -1,6 +1,7 @@
 import { Component, useEffect, useMemo, useState, type ErrorInfo, type ReactNode } from 'react'
 import './styles.css'
 import {
+import FullAIConsole from './FullAIConsole'
   AdAnalysisResponse,
   AssetItem,
   ComposeResponse,
@@ -38,7 +39,8 @@ import {
   deleteAsset
 } from './api'
 
-type ModuleKey = 'dashboard' | 'monitor' | 'lead' | 'oneClick' | 'collector' | 'copy' | 'voice' | 'digitalHuman' | 'assets' | 'video' | 'subtitleCover' | 'publish' | 'strategy' | 'competitor' | 'trend' | 'shooting' | 'growth'
+type ModuleKey = 'dashboard' | 'monitor' | 'lead' | 'fullAi'
+  | 'oneClick' | 'collector' | 'copy' | 'voice' | 'digitalHuman' | 'assets' | 'video' | 'subtitleCover' | 'publish' | 'strategy' | 'competitor' | 'trend' | 'shooting' | 'growth'
 type CollectorProgressEvent = { id?: string; level?: string; stage?: string; message?: string; video_url?: string; account_url?: string; created_at?: string; [key: string]: any }
 type CollectorProgressState = { run?: any; events?: CollectorProgressEvent[]; [key: string]: any }
 type AssetClipSetting = { order: number; image_seconds: number; video_start: number; video_end: number }
@@ -168,6 +170,13 @@ const modules: { key: ModuleKey; icon: string; title: string; desc: string; tag:
   { key: 'dashboard', icon: '总', title: '流程总览', desc: '一条视频从采集到发布的主流程', tag: '总览' },
   { key: 'monitor', icon: '控', title: '运营中控台', desc: '总览进度、数据库、插件和待办', tag: '监控' },
   { key: 'lead', icon: '获', title: '获客自动化', desc: '截留、联动、监听、回复、私域承接', tag: '获客' },
+  {
+    key: 'fullAi',
+    icon: 'AI',
+    title: 'AI 视频生产中心',
+    desc: '全 AI、实拍处理、混合成片',
+    tag: 'AI视频',
+  },
   { key: 'oneClick', icon: '生', title: '一键生成中心', desc: '在一个窗口完成文案、配音分段、字幕、图文和发布草稿', tag: '一键' },
   { key: 'assets', icon: '素', title: '1. 素材选择', desc: '先选/上传素材，确定图片停留和视频截取区间', tag: '素材' },
   { key: 'copy', icon: '文', title: '2. 文案生产', desc: '根据素材和客户目标生成口播文案', tag: '文案' },
@@ -1311,7 +1320,9 @@ ${manualText || ''}`.trim()
         </div>)}
       </section>
 
-      {active === 'oneClick' && <section className="card modulePanel oneClickPanel">
+      {active === 'fullAi' && <FullAIConsole />}
+
+          {active === 'oneClick' && <section className="card modulePanel oneClickPanel">
         <div className="sectionHeader"><div><h2>一键生成中心</h2><p>不跳步骤，也能在一个窗口里生成和修改完整项目；同步后仍可去文案、配音、数字人、素材、剪辑等单独步骤精修。</p></div><Button busy={busy === '一键生成完整方案' ? busy : ''} label="一键生成方案" onClick={runOneClickGenerate} /></div>
         <div className="oneClickIntro">
           <strong>推荐顺序</strong>
