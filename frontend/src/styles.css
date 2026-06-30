@@ -1024,3 +1024,18 @@ input:focus,textarea:focus,select:focus{
   cursor: not-allowed;
 }
 
+
+/* ===== WATERMARK FRONTEND PATCH ===== */
+.fullAiWatermarkPanel {
+  margin-top: 22px;
+  display: grid;
+  grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.05fr);
+  gap: 18px;
+}
+
+@media (max-width: 900px) {
+  .fullAiWatermarkPanel {
+    grid-template-columns: 1fr;
+  }
+}
+

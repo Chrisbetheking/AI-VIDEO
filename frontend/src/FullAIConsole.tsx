@@ -108,6 +108,28 @@ type HybridJob = {
   [key: string]: any
 }
 
+type WatermarkJob = {
+  ok?: boolean
+  job_id?: string
+  type?: string
+  status?: string
+  stage?: string
+  message?: string
+  video_path?: string
+  sample_count?: number
+  frames?: string[]
+  contact_sheet?: string
+  metadata?: Record<string, any>
+  risk?: {
+    risk_level?: string
+    suspected_regions?: string[]
+    region_scores?: Record<string, any>
+    note?: string
+  }
+  error?: string
+  [key: string]: any
+}
+
 type ShotConfig = {
   shot_id: string
   prompt: string
@@ -215,6 +237,12 @@ export default function FullAIConsole() {
   const [hybridBusy, setHybridBusy] = useState(false)
   const [hybridJob, setHybridJob] = useState<HybridJob | null>(null)
   const [hybridError, setHybridError] = useState('')
+  const [watermarkVideoPath, setWatermarkVideoPath] = useState('')
+  const [watermarkVideoUrl, setWatermarkVideoUrl] = useState('')
+  const [watermarkSampleCount, setWatermarkSampleCount] = useState(6)
+  const [watermarkBusy, setWatermarkBusy] = useState(false)
+  const [watermarkJob, setWatermarkJob] = useState<WatermarkJob | null>(null)
+  const [watermarkError, setWatermarkError] = useState('')
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [riskChecked, setRiskChecked] = useState(false)
   const [cooldownLeft, setCooldownLeft] = useState(0)
@@ -547,6 +575,41 @@ export default function FullAIConsole() {
       setHybridError(e instanceof Error ? e.message : String(e))
     } finally {
       setHybridBusy(false)
+    }
+  }
+
+
+  async function checkWatermarkRisk() {
+    const videoPath = watermarkVideoPath.trim()
+    const videoUrl = watermarkVideoUrl.trim()
+
+    if (!videoPath && !videoUrl) {
+      setWatermarkError('请填写视频本地路径或公开视频 URL。')
+      return
+    }
+
+    if (videoPath && videoUrl) {
+      setWatermarkError('video_path 和 video_url 二选一即可，不要同时填写。')
+      return
+    }
+
+    setWatermarkBusy(true)
+    setWatermarkError('')
+    setWatermarkJob(null)
+
+    try {
+      const data = await postJson<WatermarkJob>('/api/video/watermark/check', {
+        video_path: videoPath,
+        video_url: videoUrl,
+        sample_count: watermarkSampleCount,
+        prefix: 'watermark_console',
+      })
+
+      setWatermarkJob(data)
+    } catch (e) {
+      setWatermarkError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setWatermarkBusy(false)
     }
   }
 
@@ -970,6 +1033,98 @@ export default function FullAIConsole() {
           </div>
         </div>
       )}
+
+
+      <div className="fullAiWatermarkPanel">
+        <div className="fullAiCard">
+          <div className="fullAiCardTitle">
+            <h2>水印 / Logo 抽帧检测</h2>
+            <span>检测已有视频角落高对比 Logo 风险，不调用 fal.ai</span>
+          </div>
+
+          <label>
+            视频本地路径
+            <input
+              value={watermarkVideoPath}
+              onChange={e => setWatermarkVideoPath(e.target.value)}
+              placeholder="/opt/ai-video/backend/data/real-shot/uploads/xxx.mp4"
+            />
+          </label>
+
+          <label>
+            或公开视频 URL
+            <input
+              value={watermarkVideoUrl}
+              onChange={e => setWatermarkVideoUrl(e.target.value)}
+              placeholder="https://..."
+            />
+          </label>
+
+          <label>
+            抽帧数量
+            <input
+              type="number"
+              min={1}
+              max={12}
+              value={watermarkSampleCount}
+              onChange={e => setWatermarkSampleCount(Number(e.target.value) || 6)}
+            />
+          </label>
+
+          <button className="fullAiPrimaryButton" onClick={checkWatermarkRisk} disabled={watermarkBusy}>
+            {watermarkBusy ? '正在检测水印风险...' : '检测水印 / Logo 风险'}
+          </button>
+
+          <p className="fullAiSmallNote">
+            这是启发式检测：会抽帧并分析四个角落的高对比 / 边缘复杂度。结果用于初筛，最终仍建议人工看样片确认。
+          </p>
+
+          {watermarkError && <div className="fullAiError">{watermarkError}</div>}
+        </div>
+
+        <div className="fullAiCard fullAiResultCard">
+          <div className="fullAiCardTitle">
+            <h2>水印检测结果</h2>
+            <span>{watermarkJob?.job_id || '还没有检测任务'}</span>
+          </div>
+
+          {watermarkJob ? (
+            <>
+              <div className="fullAiProgress">
+                <p>
+                  状态：<strong className={watermarkJob.status === 'done' ? 'good' : ''}>{watermarkJob.status || '-'}</strong>
+                </p>
+                <p>阶段：{watermarkJob.stage || '-'}</p>
+                <p>风险等级：<strong>{watermarkJob.risk?.risk_level || '-'}</strong></p>
+                <p>疑似区域：{watermarkJob.risk?.suspected_regions?.length ? watermarkJob.risk.suspected_regions.join(', ') : '无明显疑似区域'}</p>
+                <p>抽帧数量：{watermarkJob.sample_count ?? '-'}</p>
+                <p>Contact Sheet：{watermarkJob.contact_sheet || '-'}</p>
+              </div>
+
+              <pre className="fullAiJson">
+                {JSON.stringify(
+                  {
+                    job_id: watermarkJob.job_id,
+                    status: watermarkJob.status,
+                    stage: watermarkJob.stage,
+                    risk: watermarkJob.risk,
+                    contact_sheet: watermarkJob.contact_sheet,
+                    frames: watermarkJob.frames,
+                    message: watermarkJob.message,
+                  },
+                  null,
+                  2
+                )}
+              </pre>
+            </>
+          ) : (
+            <div className="fullAiPlaceholder">
+              <h2>等待检测</h2>
+              <p>填入实拍、混合成片或全 AI 成片的视频路径 / URL 后，点击检测即可。</p>
+            </div>
+          )}
+        </div>
+      </div>
 
       {confirmOpen && (
         <div className="fullAiModalMask" role="dialog" aria-modal="true">
