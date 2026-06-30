@@ -978,3 +978,26 @@ input:focus,textarea:focus,select:focus{
   cursor: not-allowed;
 }
 
+
+/* ===== REAL SHOT FRONTEND PATCH ===== */
+.fullAiFileInput {
+  border: 1px dashed rgba(37, 99, 235, 0.35);
+  background: rgba(37, 99, 235, 0.04);
+  cursor: pointer;
+}
+
+.fullAiMetaGrid {
+  margin: 14px 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.fullAiMetaGrid span {
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(15, 23, 42, 0.04);
+  color: #475569;
+  font-size: 13px;
+}
+

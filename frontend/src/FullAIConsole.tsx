@@ -21,6 +21,29 @@ type FullAIJob = {
   }
 }
 
+type RealShotJob = {
+  ok?: boolean
+  job_id?: string
+  type?: string
+  status?: string
+  stage?: string
+  message?: string
+  filename?: string
+  video_path?: string
+  video_url?: string
+  size?: number
+  metadata?: Record<string, any>
+  plan?: Record<string, any>
+  result?: {
+    video_url?: string
+    url?: string
+    output_path?: string
+    [key: string]: any
+  }
+  error?: string
+  [key: string]: any
+}
+
 type ShotConfig = {
   shot_id: string
   prompt: string
@@ -114,6 +137,13 @@ export default function FullAIConsole() {
   const [subtitleBusy, setSubtitleBusy] = useState(false)
   const [subtitleJob, setSubtitleJob] = useState<FullAIJob | null>(null)
   const [subtitleError, setSubtitleError] = useState('')
+  const [realShotFile, setRealShotFile] = useState<File | null>(null)
+  const [realShotText, setRealShotText] = useState('这是实拍视频字幕示例。真实楼盘内容以实拍素材为准，AI 不虚构楼盘信息。')
+  const [realShotBusy, setRealShotBusy] = useState(false)
+  const [realShotSubtitleBusy, setRealShotSubtitleBusy] = useState(false)
+  const [realShotJob, setRealShotJob] = useState<RealShotJob | null>(null)
+  const [realShotProcessJob, setRealShotProcessJob] = useState<RealShotJob | null>(null)
+  const [realShotError, setRealShotError] = useState('')
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [riskChecked, setRiskChecked] = useState(false)
   const [cooldownLeft, setCooldownLeft] = useState(0)
@@ -323,8 +353,91 @@ export default function FullAIConsole() {
     }
   }
 
+
+  async function uploadRealShotVideo() {
+    if (!realShotFile) {
+      setRealShotError('请先选择一个实拍视频文件。')
+      return
+    }
+
+    setRealShotBusy(true)
+    setRealShotError('')
+    setRealShotJob(null)
+    setRealShotProcessJob(null)
+
+    try {
+      const form = new FormData()
+      form.append('source', 'real_shot_console')
+      form.append('file', realShotFile)
+
+      const res = await fetch(`${API_BASE}/api/video/real-shot/upload`, {
+        method: 'POST',
+        body: form,
+      })
+
+      const text = await res.text()
+      let data: RealShotJob | null = null
+
+      try {
+        data = text ? JSON.parse(text) : null
+      } catch {
+        throw new Error(text || `HTTP ${res.status}`)
+      }
+
+      if (!res.ok) {
+        throw new Error(JSON.stringify(data))
+      }
+
+      setRealShotJob(data)
+    } catch (e) {
+      setRealShotError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setRealShotBusy(false)
+    }
+  }
+
+  async function createRealShotSubtitledVideo() {
+    const videoPath = realShotJob?.video_path || ''
+
+    if (!videoPath) {
+      setRealShotError('还没有上传成功的视频路径，请先上传并分析实拍视频。')
+      return
+    }
+
+    if (!realShotText.trim()) {
+      setRealShotError('字幕文案为空，请先填写字幕文本。')
+      return
+    }
+
+    const ok = window.confirm('确认生成实拍字幕版并上传 R2？这一步不会调用 fal.ai，但会烧录字幕并上传视频到 R2。')
+    if (!ok) {
+      return
+    }
+
+    setRealShotSubtitleBusy(true)
+    setRealShotError('')
+
+    try {
+      const data = await postJson<RealShotJob>('/api/video/real-shot/process', {
+        video_path: videoPath,
+        text: realShotText.trim(),
+        burn_subtitle: true,
+        upload_r2: true,
+        dry_run: false,
+        max_chars: 18,
+        prefix: 'real_shot_subtitled',
+      })
+      setRealShotProcessJob(data)
+    } catch (e) {
+      setRealShotError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setRealShotSubtitleBusy(false)
+    }
+  }
+
   const finalVideoUrl = job?.video_url || job?.result?.video_url || ''
   const finalAudioUrl = job?.audio_url || job?.result?.audio_url || ''
+  const realShotOutputUrl = realShotProcessJob?.video_url || realShotProcessJob?.result?.video_url || realShotProcessJob?.result?.url || ''
   const isDone = job?.status === 'done'
   const isFailed = job?.status === 'failed'
 
@@ -497,10 +610,130 @@ export default function FullAIConsole() {
       )}
 
       {mode === 'real-shot' && (
-        <div className="fullAiPlaceholder">
-          <h2>实拍视频处理</h2>
-          <p>这里后面接：上传自拍视频/房产视频 → 自动字幕 → 标题封面 → 剪废话/空白/口误 → 多版本短视频。</p>
-          <p>这条线不要删，你叔他们以后拍真实楼盘、样板间、门店口播，都走这里。</p>
+        <div className="fullAiGrid">
+          <div className="fullAiCard">
+            <div className="fullAiCardTitle">
+              <h2>实拍视频处理</h2>
+              <span>上传真实楼盘 / 样板间 / 探房视频，不调用 fal.ai</span>
+            </div>
+
+            <label>
+              选择实拍视频
+              <input
+                className="fullAiFileInput"
+                type="file"
+                accept="video/*"
+                onChange={e => setRealShotFile(e.target.files?.[0] || null)}
+              />
+            </label>
+
+            {realShotFile && (
+              <div className="fullAiCostHint">
+                已选择：{realShotFile.name}，大小约 {(realShotFile.size / 1024 / 1024).toFixed(2)} MB。上传分析不会调用 fal.ai。
+              </div>
+            )}
+
+            <label>
+              字幕文案
+              <textarea
+                value={realShotText}
+                onChange={e => setRealShotText(e.target.value)}
+                rows={4}
+                placeholder="输入要烧录到实拍视频里的字幕文案"
+              />
+            </label>
+
+            <button className="fullAiPrimaryButton" onClick={uploadRealShotVideo} disabled={realShotBusy || !realShotFile}>
+              {realShotBusy ? '正在上传分析...' : '上传并分析实拍视频'}
+            </button>
+
+            <p className="fullAiSmallNote">这一步只上传到服务器并读取视频信息，不会调用 fal.ai，也不会上传 R2。</p>
+
+            {realShotError && <div className="fullAiError">{realShotError}</div>}
+          </div>
+
+          <div className="fullAiCard fullAiResultCard">
+            <div className="fullAiCardTitle">
+              <h2>实拍处理结果</h2>
+              <span>{realShotJob?.job_id || '还没有上传任务'}</span>
+            </div>
+
+            {realShotJob ? (
+              <>
+                <div className="fullAiProgress">
+                  <p>
+                    状态：<strong className="good">{realShotJob.status || '-'}</strong>
+                  </p>
+                  <p>阶段：{realShotJob.stage || '-'}</p>
+                  <p>消息：{realShotJob.message || '-'}</p>
+                  <p>文件：{realShotJob.filename || '-'}</p>
+                </div>
+
+                <div className="fullAiMetaGrid">
+                  <span>时长：{realShotJob.metadata?.duration ? `${realShotJob.metadata.duration}s` : '-'}</span>
+                  <span>尺寸：{realShotJob.metadata?.width || '-'} × {realShotJob.metadata?.height || '-'}</span>
+                  <span>视频编码：{realShotJob.metadata?.video_codec || '-'}</span>
+                  <span>音频：{realShotJob.metadata?.has_audio ? '有' : '无'}</span>
+                </div>
+
+                {realShotJob.video_path && (
+                  <div className="fullAiSubtitleBox">
+                    <div>
+                      <strong>生成实拍字幕版</strong>
+                      <p>烧录字幕并上传 R2，返回可公开访问的视频 URL。不会调用 fal.ai。</p>
+                    </div>
+                    <button className="fullAiSubtitleButton" onClick={createRealShotSubtitledVideo} disabled={realShotSubtitleBusy}>
+                      {realShotSubtitleBusy ? '正在生成实拍字幕版...' : '生成实拍字幕版并上传 R2'}
+                    </button>
+                  </div>
+                )}
+
+                {realShotOutputUrl && realShotOutputUrl.startsWith('http') && (
+                  <div className="fullAiPreview">
+                    <video src={realShotOutputUrl} controls playsInline />
+                    <a href={realShotOutputUrl} target="_blank" rel="noreferrer">
+                      打开实拍字幕版视频
+                    </a>
+                  </div>
+                )}
+
+                {realShotProcessJob && (
+                  <pre className="fullAiJson">
+                    {JSON.stringify(
+                      {
+                        job_id: realShotProcessJob.job_id,
+                        status: realShotProcessJob.status,
+                        stage: realShotProcessJob.stage,
+                        video_url: realShotOutputUrl,
+                        message: realShotProcessJob.message,
+                      },
+                      null,
+                      2
+                    )}
+                  </pre>
+                )}
+
+                <pre className="fullAiJson">
+                  {JSON.stringify(
+                    {
+                      job_id: realShotJob.job_id,
+                      status: realShotJob.status,
+                      stage: realShotJob.stage,
+                      video_path: realShotJob.video_path,
+                      metadata: realShotJob.metadata,
+                    },
+                    null,
+                    2
+                  )}
+                </pre>
+              </>
+            ) : (
+              <div className="fullAiPlaceholder">
+                <h2>等待上传</h2>
+                <p>上传后会显示视频时长、分辨率、编码和后续字幕处理入口。</p>
+              </div>
+            )}
+          </div>
         </div>
       )}
 
