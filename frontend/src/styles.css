@@ -1039,3 +1039,78 @@ input:focus,textarea:focus,select:focus{
   }
 }
 
+
+/* ===== JOBS HISTORY FRONTEND PATCH ===== */
+.fullAiJobsPanel {
+  margin-top: 22px;
+}
+
+.fullAiJobsList {
+  margin-top: 16px;
+  display: grid;
+  gap: 12px;
+}
+
+.fullAiJobItem {
+  padding: 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  background: rgba(248, 250, 252, 0.72);
+}
+
+.fullAiJobHeader {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+}
+
+.fullAiJobHeader strong {
+  color: #0f172a;
+  font-size: 14px;
+  word-break: break-all;
+}
+
+.fullAiJobHeader span {
+  color: #2563eb;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.fullAiJobMeta {
+  margin-top: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.fullAiJobMessage {
+  margin: 8px 0 0;
+  color: #475569;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.fullAiJobError {
+  margin: 8px 0 0;
+  color: #b91c1c;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.fullAiJobLinks {
+  margin-top: 10px;
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.fullAiJobLinks a {
+  color: #2563eb;
+  font-weight: 800;
+  font-size: 13px;
+  text-decoration: none;
+}
+

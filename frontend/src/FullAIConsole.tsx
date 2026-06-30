@@ -43,6 +43,55 @@ function buildAuthHeaders(): HeadersInit | undefined {
   }
 }
 
+function parseMaybeJson(value: any): any {
+  if (!value) {
+    return null
+  }
+
+  if (typeof value === 'object') {
+    return value
+  }
+
+  if (typeof value !== 'string') {
+    return null
+  }
+
+  try {
+    return JSON.parse(value)
+  } catch {
+    return null
+  }
+}
+
+function getRecentJobVideoUrl(job: RecentVideoJob): string {
+  const result = parseMaybeJson(job.result_json) || parseMaybeJson(job.result) || {}
+  const response = parseMaybeJson(job.response_json) || {}
+
+  return (
+    job.video_url ||
+    result.video_url ||
+    result?.result?.video_url ||
+    response.video_url ||
+    response?.result?.video_url ||
+    ''
+  )
+}
+
+function getRecentJobAudioUrl(job: RecentVideoJob): string {
+  const result = parseMaybeJson(job.result_json) || parseMaybeJson(job.result) || {}
+  const response = parseMaybeJson(job.response_json) || {}
+
+  return (
+    job.audio_url ||
+    result.audio_url ||
+    result?.result?.audio_url ||
+    response.audio_url ||
+    response?.result?.audio_url ||
+    ''
+  )
+}
+
+
 
 type WorkMode = 'full-ai' | 'real-shot' | 'hybrid'
 
@@ -127,6 +176,26 @@ type WatermarkJob = {
     note?: string
   }
   error?: string
+  [key: string]: any
+}
+
+type RecentVideoJob = {
+  job_id?: string
+  job_type?: string
+  type?: string
+  status?: string
+  stage?: string
+  message?: string
+  source_path?: string
+  video_url?: string
+  audio_url?: string
+  result?: Record<string, any>
+  request_json?: string | Record<string, any>
+  response_json?: string | Record<string, any>
+  result_json?: string | Record<string, any>
+  error?: string
+  created_at?: string
+  updated_at?: string
   [key: string]: any
 }
 
@@ -243,6 +312,9 @@ export default function FullAIConsole() {
   const [watermarkBusy, setWatermarkBusy] = useState(false)
   const [watermarkJob, setWatermarkJob] = useState<WatermarkJob | null>(null)
   const [watermarkError, setWatermarkError] = useState('')
+  const [recentJobs, setRecentJobs] = useState<RecentVideoJob[]>([])
+  const [recentJobsBusy, setRecentJobsBusy] = useState(false)
+  const [recentJobsError, setRecentJobsError] = useState('')
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [riskChecked, setRiskChecked] = useState(false)
   const [cooldownLeft, setCooldownLeft] = useState(0)
@@ -610,6 +682,38 @@ export default function FullAIConsole() {
       setWatermarkError(e instanceof Error ? e.message : String(e))
     } finally {
       setWatermarkBusy(false)
+    }
+  }
+
+
+  async function loadRecentJobs() {
+    setRecentJobsBusy(true)
+    setRecentJobsError('')
+
+    try {
+      const res = await fetch(`${API_BASE}/api/video/jobs/recent?limit=30`)
+      const text = await res.text()
+
+      let data: any = null
+      try {
+        data = text ? JSON.parse(text) : null
+      } catch {
+        throw new Error(text || `HTTP ${res.status}`)
+      }
+
+      if (!res.ok) {
+        throw new Error(JSON.stringify(data))
+      }
+
+      const jobs = Array.isArray(data)
+        ? data
+        : data?.jobs || data?.items || data?.recent_jobs || data?.data || []
+
+      setRecentJobs(Array.isArray(jobs) ? jobs : [])
+    } catch (e) {
+      setRecentJobsError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setRecentJobsBusy(false)
     }
   }
 
@@ -1034,6 +1138,67 @@ export default function FullAIConsole() {
         </div>
       )}
 
+
+
+      <div className="fullAiJobsPanel">
+        <div className="fullAiCard">
+          <div className="fullAiCardTitle">
+            <h2>任务历史 / 最近任务</h2>
+            <span>查看 full-ai、实拍、混合成片、字幕、水印检测等历史任务</span>
+          </div>
+
+          <button className="fullAiPrimaryButton" onClick={loadRecentJobs} disabled={recentJobsBusy}>
+            {recentJobsBusy ? '正在读取任务历史...' : '刷新任务历史'}
+          </button>
+
+          <p className="fullAiSmallNote">
+            读取 SQLite 持久化任务记录，不调用 fal.ai，不生成视频，不上传 R2。
+          </p>
+
+          {recentJobsError && <div className="fullAiError">{recentJobsError}</div>}
+
+          {recentJobs.length > 0 ? (
+            <div className="fullAiJobsList">
+              {recentJobs.map((item, index) => {
+                const videoUrl = getRecentJobVideoUrl(item)
+                const audioUrl = getRecentJobAudioUrl(item)
+
+                return (
+                  <div className="fullAiJobItem" key={`${item.job_id || index}`}>
+                    <div className="fullAiJobHeader">
+                      <strong>{item.job_id || `job_${index + 1}`}</strong>
+                      <span>{item.job_type || item.type || '-'}</span>
+                    </div>
+
+                    <div className="fullAiJobMeta">
+                      <span>状态：{item.status || '-'}</span>
+                      <span>阶段：{item.stage || '-'}</span>
+                      <span>更新时间：{item.updated_at || item.created_at || '-'}</span>
+                    </div>
+
+                    {item.message && <p className="fullAiJobMessage">{item.message}</p>}
+                    {item.error && <p className="fullAiJobError">{item.error}</p>}
+
+                    <div className="fullAiJobLinks">
+                      {videoUrl && videoUrl.startsWith('http') && (
+                        <a href={videoUrl} target="_blank" rel="noreferrer">打开视频</a>
+                      )}
+                      {audioUrl && audioUrl.startsWith('http') && (
+                        <a href={audioUrl} target="_blank" rel="noreferrer">打开音频</a>
+                      )}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          ) : (
+            <div className="fullAiPlaceholder">
+              <h2>还没有加载任务</h2>
+              <p>点击“刷新任务历史”后，会显示最近的持久化任务记录。</p>
+            </div>
+          )}
+        </div>
+      </div>
 
       <div className="fullAiWatermarkPanel">
         <div className="fullAiCard">
