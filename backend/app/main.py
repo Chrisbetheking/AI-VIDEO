@@ -5146,3 +5146,48 @@ async def _video_comment_leads_recent(limit: int = 50):
 async def _video_comment_leads_self_test():
     return _comment_lead_self_test()
 # ===== /COMMENT LEAD ENGINE API HOTFIX =====
+
+
+# ===== OPENCLAW COMMENT ADAPTER API HOTFIX =====
+from fastapi import HTTPException as _OpenClawHTTPException
+from pydantic import BaseModel as _OpenClawBaseModel, Field as _OpenClawField
+from app.services.openclaw_comment_adapter_provider import (
+    analyze_openclaw_comments as _openclaw_comment_analyze,
+    health as _openclaw_comment_health,
+    self_test as _openclaw_comment_self_test,
+)
+
+
+class _OpenClawCommentAnalyzeRequest(_OpenClawBaseModel):
+    raw_export: object | None = None
+    comments: list = _OpenClawField(default_factory=list)
+    campaign_context: dict = _OpenClawField(default_factory=dict)
+    default_platform: str = ""
+    save: bool = True
+    max_items: int = 500
+
+
+@app.get("/api/video/openclaw/comments/health")
+async def _video_openclaw_comments_health():
+    return _openclaw_comment_health()
+
+
+@app.post("/api/video/openclaw/comments/analyze")
+async def _video_openclaw_comments_analyze(req: _OpenClawCommentAnalyzeRequest):
+    try:
+        return _openclaw_comment_analyze(
+            raw_export=req.raw_export,
+            comments=req.comments,
+            campaign_context=req.campaign_context,
+            default_platform=req.default_platform,
+            save=req.save,
+            max_items=req.max_items,
+        )
+    except ValueError as exc:
+        raise _OpenClawHTTPException(status_code=400, detail=str(exc))
+
+
+@app.get("/api/video/openclaw/comments/self-test")
+async def _video_openclaw_comments_self_test():
+    return _openclaw_comment_self_test()
+# ===== /OPENCLAW COMMENT ADAPTER API HOTFIX =====
