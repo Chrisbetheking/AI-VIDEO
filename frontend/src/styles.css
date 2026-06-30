@@ -816,3 +816,124 @@ input:focus,textarea:focus,select:focus{
   }
 }
 /* ===== FULL AI CONSOLE END ===== */
+
+
+/* ===== FULL AI COST GUARD PATCH ===== */
+.fullAiSafetyPanel {
+  margin: 16px 0;
+  padding: 14px 16px;
+  border: 1px solid rgba(245, 158, 11, 0.28);
+  border-radius: 16px;
+  background: rgba(245, 158, 11, 0.08);
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.fullAiSafetyPanel strong {
+  color: #92400e;
+}
+
+.fullAiSafetyPanel span {
+  color: #6b7280;
+  font-size: 14px;
+}
+
+.fullAiCostHint {
+  margin: -4px 0 10px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(59, 130, 246, 0.08);
+  color: #1d4ed8;
+  font-size: 14px;
+}
+
+.fullAiSmallNote {
+  margin: 8px 0 0;
+  color: #6b7280;
+  font-size: 13px;
+}
+
+.fullAiModalMask {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background: rgba(15, 23, 42, 0.62);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+.fullAiModal {
+  width: min(520px, 100%);
+  border-radius: 22px;
+  background: #fff;
+  box-shadow: 0 24px 80px rgba(15, 23, 42, 0.28);
+  padding: 24px;
+}
+
+.fullAiModal h2 {
+  margin: 0 0 12px;
+  font-size: 22px;
+  color: #111827;
+}
+
+.fullAiModal p,
+.fullAiModal li {
+  color: #4b5563;
+  line-height: 1.7;
+}
+
+.fullAiModal ul {
+  padding-left: 20px;
+  margin: 12px 0;
+}
+
+.fullAiConfirmCheck {
+  margin-top: 14px;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  color: #111827;
+  font-weight: 600;
+}
+
+.fullAiConfirmCheck input {
+  width: auto;
+  margin-top: 4px;
+}
+
+.fullAiModalActions {
+  margin-top: 20px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+}
+
+.fullAiCancelButton,
+.fullAiDangerButton {
+  border: 0;
+  border-radius: 12px;
+  padding: 11px 18px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.fullAiCancelButton {
+  background: #f3f4f6;
+  color: #374151;
+}
+
+.fullAiDangerButton {
+  background: #dc2626;
+  color: #fff;
+}
+
+.fullAiDangerButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+

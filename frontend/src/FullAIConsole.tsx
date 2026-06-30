@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
-const API_BASE = 'https://ai-video.47-76-143-158.sslip.io'
+const API_BASE = (((import.meta as any).env?.VITE_API_BASE as string | undefined) || 'https://ai-video.47-76-143-158.sslip.io').replace(/\/$/, '')
 
 type WorkMode = 'full-ai' | 'real-shot' | 'hybrid'
 
@@ -21,7 +21,12 @@ type FullAIJob = {
   }
 }
 
-const DEFAULT_SHOTS = [
+type ShotConfig = {
+  shot_id: string
+  prompt: string
+}
+
+const DEFAULT_SHOTS: ShotConfig[] = [
   {
     shot_id: 'shot_01',
     prompt:
@@ -38,6 +43,21 @@ const DEFAULT_SHOTS = [
       '9:16 vertical video, premium condominium lobby in Malaysia, marble floor, warm lighting, luxury property investment atmosphere, smooth camera movement, no text, no logo, no watermark',
   },
 ]
+
+const COOLDOWN_KEY = 'ai_video_full_ai_cooldown_until_v1'
+const LAST_PAYLOAD_HASH_KEY = 'ai_video_full_ai_last_payload_hash_v1'
+const LAST_PAYLOAD_TIME_KEY = 'ai_video_full_ai_last_payload_time_v1'
+const COOLDOWN_SECONDS = 60
+const DUPLICATE_WINDOW_SECONDS = 120
+
+function simpleHash(input: string) {
+  let hash = 0
+  for (let i = 0; i < input.length; i += 1) {
+    hash = (hash << 5) - hash + input.charCodeAt(i)
+    hash |= 0
+  }
+  return String(hash)
+}
 
 async function postJson<T>(path: string, body: unknown): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
@@ -87,22 +107,100 @@ export default function FullAIConsole() {
     '来马来西亚买房，千万别只看价格。真正要看的是地段、租金回报，还有未来转手难度。很多人踩坑，不是因为房子不好，而是买错了区域。'
   )
   const [shotCount, setShotCount] = useState(1)
-  const [shots, setShots] = useState(DEFAULT_SHOTS)
+  const [shots, setShots] = useState<ShotConfig[]>(DEFAULT_SHOTS)
   const [busy, setBusy] = useState(false)
   const [job, setJob] = useState<FullAIJob | null>(null)
   const [error, setError] = useState('')
+  const [confirmOpen, setConfirmOpen] = useState(false)
+  const [riskChecked, setRiskChecked] = useState(false)
+  const [cooldownLeft, setCooldownLeft] = useState(0)
+
   const timerRef = useRef<number | null>(null)
+  const cooldownTimerRef = useRef<number | null>(null)
+
+  const payload = useMemo(() => {
+    return {
+      title: title.trim(),
+      script_text: scriptText.trim(),
+      mode: 'quick',
+      resolution: '720p',
+      num_frames: 81,
+      frames_per_second: 16,
+      max_shots: shotCount,
+      voice: 'default',
+      overall_rate: '0%',
+      shots: shots.slice(0, shotCount).map((shot, index) => ({
+        shot_id: shot.shot_id || `shot_${String(index + 1).padStart(2, '0')}`,
+        prompt: shot.prompt.trim(),
+      })),
+    }
+  }, [title, scriptText, shotCount, shots])
+
+  const estimatedCostLevel = shotCount === 1 ? '低成本测试' : shotCount === 2 ? '中等成本' : '较高成本小样'
 
   useEffect(() => {
+    function updateCooldown() {
+      const until = Number(window.localStorage.getItem(COOLDOWN_KEY) || 0)
+      const left = Math.max(0, Math.ceil((until - Date.now()) / 1000))
+      setCooldownLeft(left)
+    }
+
+    updateCooldown()
+    cooldownTimerRef.current = window.setInterval(updateCooldown, 1000)
+
     return () => {
       if (timerRef.current) {
         window.clearInterval(timerRef.current)
+      }
+      if (cooldownTimerRef.current) {
+        window.clearInterval(cooldownTimerRef.current)
       }
     }
   }, [])
 
   function updateShot(index: number, value: string) {
     setShots(prev => prev.map((item, i) => (i === index ? { ...item, prompt: value } : item)))
+  }
+
+  function validateBeforeConfirm() {
+    if (busy) {
+      setError('已有任务正在生成，请等待当前任务完成。')
+      return false
+    }
+
+    if (cooldownLeft > 0) {
+      setError(`刚刚已经提交过生成任务，请 ${cooldownLeft} 秒后再试，避免重复烧费用。`)
+      return false
+    }
+
+    if (!payload.title) {
+      setError('请先填写视频标题。')
+      return false
+    }
+
+    if (!payload.script_text || payload.script_text.length < 8) {
+      setError('口播文案太短，请至少写一句完整内容。')
+      return false
+    }
+
+    const emptyShot = payload.shots.find(shot => !shot.prompt || shot.prompt.length < 12)
+    if (emptyShot) {
+      setError('镜头 Prompt 太短，请补充完整画面描述。')
+      return false
+    }
+
+    return true
+  }
+
+  function openConfirmDialog() {
+    setError('')
+
+    if (!validateBeforeConfirm()) {
+      return
+    }
+
+    setRiskChecked(false)
+    setConfirmOpen(true)
   }
 
   async function pollJob(jobId: string) {
@@ -117,6 +215,7 @@ export default function FullAIConsole() {
 
         if (data.status === 'done' || data.status === 'failed') {
           setBusy(false)
+
           if (timerRef.current) {
             window.clearInterval(timerRef.current)
             timerRef.current = null
@@ -125,6 +224,7 @@ export default function FullAIConsole() {
       } catch (e) {
         setBusy(false)
         setError(e instanceof Error ? e.message : String(e))
+
         if (timerRef.current) {
           window.clearInterval(timerRef.current)
           timerRef.current = null
@@ -133,28 +233,35 @@ export default function FullAIConsole() {
     }, 5000)
   }
 
-  async function startFullAI() {
+  async function confirmAndStartFullAI() {
+    if (!riskChecked) {
+      setError('请先勾选费用确认，避免误触发 fal.ai 生成费用。')
+      return
+    }
+
+    const payloadText = JSON.stringify(payload)
+    const payloadHash = simpleHash(payloadText)
+    const lastHash = window.localStorage.getItem(LAST_PAYLOAD_HASH_KEY)
+    const lastTime = Number(window.localStorage.getItem(LAST_PAYLOAD_TIME_KEY) || 0)
+    const duplicateWindowMs = DUPLICATE_WINDOW_SECONDS * 1000
+
+    if (lastHash === payloadHash && Date.now() - lastTime < duplicateWindowMs) {
+      const ok = window.confirm('检测到你刚刚提交过完全相同的生成内容。继续提交可能重复产生费用，确定还要再次生成吗？')
+      if (!ok) {
+        return
+      }
+    }
+
+    setConfirmOpen(false)
     setError('')
     setBusy(true)
     setJob(null)
 
-    try {
-      const payload = {
-        title,
-        script_text: scriptText,
-        mode: 'quick',
-        resolution: '720p',
-        num_frames: 81,
-        frames_per_second: 16,
-        max_shots: shotCount,
-        voice: 'default',
-        overall_rate: '0%',
-        shots: shots.slice(0, shotCount).map((shot, index) => ({
-          shot_id: shot.shot_id || `shot_${String(index + 1).padStart(2, '0')}`,
-          prompt: shot.prompt,
-        })),
-      }
+    window.localStorage.setItem(COOLDOWN_KEY, String(Date.now() + COOLDOWN_SECONDS * 1000))
+    window.localStorage.setItem(LAST_PAYLOAD_HASH_KEY, payloadHash)
+    window.localStorage.setItem(LAST_PAYLOAD_TIME_KEY, String(Date.now()))
 
+    try {
       const data = await postJson<FullAIJob>('/api/video/full-ai/start', payload)
       setJob(data)
 
@@ -176,19 +283,23 @@ export default function FullAIConsole() {
 
   return (
     <section className="fullAiConsole">
-      <div className="fullAiHero">
+      <div className="fullAiHeader">
         <div>
-          <p className="fullAiEyebrow">AI 视频生产中心</p>
+          <span className="fullAiEyebrow">AI 视频生产中心</span>
           <h1>全 AI / 实拍处理 / 混合成片</h1>
           <p>
             这里是新版入口。全 AI 走 fal.ai 分镜视频 + 字节 TTS + ffmpeg 合成；实拍和混合成片先保留入口，后面继续接上传、剪辑和素材库。
           </p>
         </div>
-        <div className="fullAiStatusBox">
+        <div className="fullAiStatusCard">
           <span>后端链路</span>
-          <strong>已打通</strong>
-          <small>/api/video/full-ai/start</small>
+          <strong>已打通 /api/video/full-ai/start</strong>
         </div>
+      </div>
+
+      <div className="fullAiSafetyPanel">
+        <strong>费用保护已开启</strong>
+        <span>点击生成前会二次确认；提交后 {COOLDOWN_SECONDS} 秒内不能再次提交；相同内容 {DUPLICATE_WINDOW_SECONDS} 秒内会提示重复风险。</span>
       </div>
 
       <div className="fullAiTabs">
@@ -208,7 +319,7 @@ export default function FullAIConsole() {
           <div className="fullAiCard">
             <div className="fullAiCardTitle">
               <h2>全 AI 生成视频</h2>
-              <span>会调用 fal.ai，点击才会产生生成费用</span>
+              <span>会调用 fal.ai，确认后才会产生生成费用</span>
             </div>
 
             <label>
@@ -230,6 +341,10 @@ export default function FullAIConsole() {
               </select>
             </label>
 
+            <div className="fullAiCostHint">
+              当前选择：{shotCount} 个镜头，{estimatedCostLevel}。建议测试阶段只用 1 个镜头。
+            </div>
+
             {shots.slice(0, shotCount).map((shot, index) => (
               <label key={shot.shot_id}>
                 镜头 {index + 1} Prompt
@@ -237,9 +352,11 @@ export default function FullAIConsole() {
               </label>
             ))}
 
-            <button className="fullAiPrimaryButton" onClick={startFullAI} disabled={busy}>
-              {busy ? '正在生成，请稍等...' : '开始生成全 AI 带口播视频'}
+            <button className="fullAiPrimaryButton" onClick={openConfirmDialog} disabled={busy || cooldownLeft > 0}>
+              {busy ? '正在生成，请勿重复点击...' : cooldownLeft > 0 ? `${cooldownLeft} 秒后可再次生成` : '开始生成全 AI 带口播视频'}
             </button>
+
+            <p className="fullAiSmallNote">按钮不会直接生成，会先弹出费用确认窗口。</p>
 
             {error && <div className="fullAiError">{error}</div>}
           </div>
@@ -306,6 +423,38 @@ export default function FullAIConsole() {
           <h2>混合成片</h2>
           <p>这里后面接：实拍/图片素材 + AI 补开头、转场、氛围镜头 + 字节 TTS + 字幕合成。</p>
           <p>适合具体楼盘：真实素材为主，AI 只补泛化镜头，避免虚假宣传风险。</p>
+        </div>
+      )}
+
+      {confirmOpen && (
+        <div className="fullAiModalMask" role="dialog" aria-modal="true">
+          <div className="fullAiModal">
+            <h2>确认生成全 AI 视频？</h2>
+            <p>
+              这次会真实调用 fal.ai 视频生成、TTS 和合成链路，可能产生接口费用。当前设置为 <strong>{shotCount}</strong> 个镜头，
+              建议测试阶段优先使用 1 个镜头。
+            </p>
+
+            <ul>
+              <li>请确认不是误点。</li>
+              <li>请确认当前文案和 Prompt 已经检查过。</li>
+              <li>提交后按钮会进入冷却，避免重复烧费用。</li>
+            </ul>
+
+            <label className="fullAiConfirmCheck">
+              <input type="checkbox" checked={riskChecked} onChange={e => setRiskChecked(e.target.checked)} />
+              我确认本次生成会产生调用成本，并且不是重复误点。
+            </label>
+
+            <div className="fullAiModalActions">
+              <button className="fullAiCancelButton" onClick={() => setConfirmOpen(false)}>
+                取消
+              </button>
+              <button className="fullAiDangerButton" onClick={confirmAndStartFullAI} disabled={!riskChecked}>
+                确认生成
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </section>
