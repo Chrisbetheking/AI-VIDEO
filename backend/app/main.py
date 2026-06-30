@@ -4530,3 +4530,135 @@ async def _full_ai_subtitle_bridge(job_id: str, req: _FullAISubtitleBridgeReques
 
     return response_data
 # ===== /FULL AI SUBTITLE BRIDGE HOTFIX =====
+
+
+# ===== REAL SHOT VIDEO API HOTFIX =====
+from pathlib import Path as _RealShotPath
+from typing import Any as _RealShotAny
+from fastapi import UploadFile as _RealShotUploadFile, File as _RealShotFile, Form as _RealShotForm
+from pydantic import BaseModel as _RealShotBaseModel
+from app.services.real_shot_provider import (
+    UPLOAD_DIR as _real_shot_upload_dir,
+    create_self_test_video as _real_shot_create_self_test_video,
+    health as _real_shot_health,
+    make_job_id as _real_shot_make_job_id,
+    probe_video as _real_shot_probe_video,
+    process_real_shot as _real_shot_process_real_shot,
+    sanitize_filename as _real_shot_sanitize_filename,
+)
+
+try:
+    from app.services.job_persistence_provider import save_job_response as _real_shot_save_job_response
+except Exception:
+    _real_shot_save_job_response = None
+
+
+class _RealShotProcessRequest(_RealShotBaseModel):
+    video_path: str = ""
+    video_url: str = ""
+    text: str = ""
+    segments: list[dict[str, _RealShotAny]] | None = None
+    burn_subtitle: bool = False
+    upload_r2: bool = False
+    dry_run: bool = True
+    max_chars: int = 18
+    prefix: str = "real_shot"
+
+
+@app.get("/api/video/real-shot/health")
+async def _video_real_shot_health():
+    return _real_shot_health()
+
+
+@app.post("/api/video/real-shot/upload")
+async def _video_real_shot_upload(
+    file: _RealShotUploadFile = _RealShotFile(...),
+    source: str = _RealShotForm("upload"),
+):
+    safe_name = _real_shot_sanitize_filename(file.filename or "real_shot_upload.mp4")
+    job_id = _real_shot_make_job_id("real_shot_upload")
+    target = _RealShotPath(_real_shot_upload_dir) / f"{job_id}_{safe_name}"
+
+    target.parent.mkdir(parents=True, exist_ok=True)
+
+    size = 0
+    with target.open("wb") as f:
+        while True:
+            chunk = await file.read(1024 * 1024)
+            if not chunk:
+                break
+            size += len(chunk)
+            f.write(chunk)
+
+    metadata = _real_shot_probe_video(target)
+
+    response_data = {
+        "ok": True,
+        "job_id": job_id,
+        "type": "real_shot_upload",
+        "status": "done",
+        "stage": "uploaded",
+        "message": "实拍视频已上传到服务器，未调用 fal.ai。",
+        "source": source,
+        "filename": safe_name,
+        "video_path": str(target),
+        "size": size,
+        "metadata": metadata,
+    }
+
+    if _real_shot_save_job_response:
+        try:
+            _real_shot_save_job_response(
+                job_id=job_id,
+                job_type="real_shot_upload",
+                response_data=response_data,
+                source_path="/api/video/real-shot/upload",
+            )
+        except Exception as exc:
+            print(f"[real-shot] persist upload failed: {exc}")
+
+    return response_data
+
+
+@app.post("/api/video/real-shot/process")
+async def _video_real_shot_process(req: _RealShotProcessRequest):
+    response_data = _real_shot_process_real_shot(
+        video_path=req.video_path,
+        video_url=req.video_url,
+        text=req.text,
+        segments=req.segments,
+        burn_subtitle=req.burn_subtitle,
+        upload_r2=req.upload_r2,
+        dry_run=req.dry_run,
+        max_chars=req.max_chars,
+        prefix=req.prefix,
+    )
+
+    if _real_shot_save_job_response:
+        try:
+            _real_shot_save_job_response(
+                job_id=response_data.get("job_id", ""),
+                job_type="real_shot",
+                response_data=response_data,
+                source_path="/api/video/real-shot/process",
+            )
+        except Exception as exc:
+            print(f"[real-shot] persist process failed: {exc}")
+
+    return response_data
+
+
+@app.get("/api/video/real-shot/self-test")
+async def _video_real_shot_self_test(dry_run: bool = True):
+    video_path = _real_shot_create_self_test_video()
+
+    return _real_shot_process_real_shot(
+        video_path=str(video_path),
+        text="这是实拍视频处理自测。不调用 fal.ai。",
+        burn_subtitle=False,
+        upload_r2=False,
+        dry_run=dry_run,
+        max_chars=16,
+        prefix="real_shot_self_test",
+    )
+# ===== /REAL SHOT VIDEO API HOTFIX =====
