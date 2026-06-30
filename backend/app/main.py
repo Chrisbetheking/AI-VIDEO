@@ -4969,6 +4969,7 @@ async def _video_timeline_self_test():
 
 # ===== TIMELINE TTS ALIGN API HOTFIX =====
 from pydantic import BaseModel as _TimelineTTSBaseModel
+import asyncio as _timeline_tts_asyncio
 from app.services.timeline_tts_align_provider import (
     build_tts_aligned_timeline as _timeline_tts_align_build,
     health as _timeline_tts_align_health,
@@ -5000,7 +5001,10 @@ async def _video_timeline_tts_align_health():
 
 @app.post("/api/video/timeline/tts-align")
 async def _video_timeline_tts_align(req: _TimelineTTSAlignRequest):
-    response_data = _timeline_tts_align_build(
+    # 真实 TTS 会在 provider 内部通过本机 HTTP 调 /api/tts-segments。
+    # 这里必须放到线程里，否则同步 urllib 会阻塞当前 uvicorn event loop，导致本机自调用卡死/空响应。
+    response_data = await _timeline_tts_asyncio.to_thread(
+        _timeline_tts_align_build,
         text=req.text,
         voice=req.voice,
         overall_rate=req.overall_rate,
