@@ -151,6 +151,12 @@ class Settings(BaseSettings):
     jimeng_video30_req_key: str = 'jimeng_i2v_first_v30'
 
 
+    # MiniMax / Hailuo experimental provider (optional B-roll generation)
+    minimax_enabled: bool = False
+    minimax_api_key: str = ''
+    minimax_video_model: str = 'MiniMax-Hailuo-2.3'
+    minimax_tts_model: str = ''
+
     # Supabase / AI 记忆库
     supabase_url: str = ''
     supabase_service_role_key: str = ''

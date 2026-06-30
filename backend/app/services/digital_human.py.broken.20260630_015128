@@ -12,7 +12,6 @@ class DigitalHumanResult:
     warnings: list[str] = field(default_factory=list)
     raw: dict = field(default_factory=dict)
 
-
 import asyncio
 import base64
 import hashlib
@@ -41,7 +40,8 @@ def extract_hook_text(script: str, max_chars: int = 24) -> str:
     import re
     if not script or not script.strip():
         return ""
-    parts = re.split(r'[。！？!?\n]', script.strip())
+    parts = re.split(r'[。！？!?
+]', script.strip())
     first = parts[0].strip() if parts else script.strip()
     first = re.sub(r'[，。！？、；：,!.?;:]', '', first)
     first = re.sub(r'\s+', ' ', first).strip()
@@ -548,12 +548,17 @@ def _volc_auth_headers(settings: Settings, action: str, body: dict[str, Any]) ->
     method = 'POST'
     canonical_uri = path
     canonical_query = query
-    canonical_headers = f'content-type:application/json\nhost:{host}\nx-date:{x_date}\n'
+    canonical_headers = f'content-type:application/json
+host:{host}
+x-date:{x_date}
+'
     signed_headers = 'content-type;host;x-date'
     payload_hash = _hash_sha256(body_bytes)
-    canonical_request = '\n'.join([method, canonical_uri, canonical_query, canonical_headers, signed_headers, payload_hash])
+    canonical_request = '
+'.join([method, canonical_uri, canonical_query, canonical_headers, signed_headers, payload_hash])
     credential_scope = f'{short_date}/{settings.jimeng_region}/{settings.jimeng_service}/request'
-    string_to_sign = '\n'.join(['HMAC-SHA256', x_date, credential_scope, _hash_sha256(canonical_request.encode('utf-8'))])
+    string_to_sign = '
+'.join(['HMAC-SHA256', x_date, credential_scope, _hash_sha256(canonical_request.encode('utf-8'))])
 
     k_date = _hmac_sha256(settings.jimeng_secret_access_key.encode('utf-8'), short_date)
     k_region = hmac.new(k_date, settings.jimeng_region.encode('utf-8'), hashlib.sha256).digest()

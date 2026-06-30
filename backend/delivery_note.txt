@@ -1,0 +1,19 @@
+【AI-VIDEO 样片交付】
+
+项目：马来西亚房产避坑正式样片
+状态：已生成完成
+类型：真人数字人口播视频
+存储：Cloudflare R2 稳定链接
+视频地址：
+https://pub-a3095081e0ae4df1a0a9a4dab664089b.r2.dev/digital-human/final/digital_human_fal019f14a3-c3db-7a22-a4dd-09150d6815d1.mp4
+
+当前已验证：
+- 链接可访问
+- 返回 200 OK
+- Content-Type: video/mp4
+- 已转存 R2，非 fal 临时链接
+
+建议用途：
+- 可直接发送客户预览
+- 可作为一键生成链路的演示样片
+- 后续可继续叠加 B-roll、字幕、封面和成片包装

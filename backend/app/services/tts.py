@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import os
 import subprocess
 import tempfile
 import uuid
@@ -12,6 +13,7 @@ from typing import Optional, Tuple, Iterable, Any
 import httpx
 
 from app.config import Settings
+from app.services.volcengine_voice_clone import load_voice_type
 from app.schemas import TTSVoice, VoiceSegment
 
 
@@ -77,8 +79,10 @@ def _configured_voices(settings: Settings) -> list[TTSVoice]:
                     ))
         except Exception:
             pass
-    if settings.volcengine_voice_type.strip() and not any(v.id == settings.volcengine_voice_type for v in voices):
-        voices.append(TTSVoice(id=settings.volcengine_voice_type, name='豆包默认音色 / 复刻音色', provider='volcengine', note='来自 VOLCENGINE_VOICE_TYPE'))
+    env_voice_type = (os.environ.get('VOLC_TTS_VOICE_TYPE') or os.environ.get('VOLCENGINE_VOICE_TYPE') or '').strip()
+    configured_voice_type = (env_voice_type or settings.volcengine_voice_type or load_voice_type() or '').strip()
+    if configured_voice_type and not any(v.id == configured_voice_type for v in voices):
+        voices.append(TTSVoice(id=configured_voice_type, name='豆包默认音色 / 复刻音色', provider='volcengine', note='来自 VOLC_TTS_VOICE_TYPE / VOLCENGINE_VOICE_TYPE 或已训练复刻音色'))
     if not voices:
         voices.append(TTSVoice(id='default', name='未配置云端音色', provider=settings.tts_provider, note='请配置 VOLCENGINE_VOICE_TYPE 或 TTS_VOICES_JSON'))
     return voices
@@ -90,71 +94,121 @@ def get_tts_voices(settings: Settings) -> list[TTSVoice]:
 
 
 async def synthesize_volcengine_v1(settings: Settings, text: str, voice: Optional[str], rate: Optional[str], speed_ratio: Optional[float] = None, volume_ratio: float = 1.0, pitch_ratio: float = 1.0) -> Path:
-    if not settings.volcengine_app_id.strip() or not settings.volcengine_access_token.strip():
-        raise RuntimeError('缺少豆包语音配置：VOLCENGINE_APP_ID / VOLCENGINE_ACCESS_TOKEN。')
-    # 前端/测试请求经常会传 voice='default'，不能让它覆盖环境变量里的复刻音色。
+    """
+    火山新版 API Key 接入优先：
+    - header: x-api-key
+    - app.cluster: volcano_icl
+    - audio.voice_type: 复刻音色 ID，例如 S_toaCOKs32
+
+    若未配置 VOLC_TTS_API_KEY，则保留旧版 AppID + AccessToken 兼容逻辑。
+    """
     requested_voice = (voice or '').strip()
+    env_api_key = (os.environ.get('VOLC_TTS_API_KEY') or '').strip()
+    env_cluster = (os.environ.get('VOLC_TTS_CLUSTER') or '').strip()
+    env_voice_type = (os.environ.get('VOLC_TTS_VOICE_TYPE') or os.environ.get('VOLCENGINE_VOICE_TYPE') or '').strip()
+    env_endpoint = (os.environ.get('VOLC_TTS_ENDPOINT') or '').strip()
+
     if requested_voice.lower() in {'', 'default', 'auto', 'cloned'}:
-        voice_type = (settings.volcengine_voice_type or settings.tts_voice or '').strip()
+        voice_type = (env_voice_type or settings.volcengine_voice_type or load_voice_type() or settings.tts_voice or '').strip()
     else:
         voice_type = requested_voice
+
     if voice_type.lower() in {'', 'default', 'auto', 'cloned'}:
-        raise RuntimeError('缺少 VOLCENGINE_VOICE_TYPE；请填火山控制台“声音ID/voice_type”，不要填 default。')
+        raise RuntimeError('缺少 VOLC_TTS_VOICE_TYPE；请填火山控制台“音色ID/voice_type”，不要填 default。')
+
+    cluster = (env_cluster or settings.volcengine_cluster or 'volcano_icl').strip()
+    endpoint = (env_endpoint or settings.volcengine_tts_endpoint or 'https://openspeech.bytedance.com/api/v1/tts').strip()
+
+    speed = max(0.5, min(2.0, float(speed_ratio if speed_ratio is not None else _speed_ratio(rate))))
+    volume = max(0.2, min(3.0, float(volume_ratio)))
+    pitch = max(0.5, min(2.0, float(pitch_ratio)))
 
     reqid = uuid.uuid4().hex
-    body = {
-        'app': {
-            'appid': settings.volcengine_app_id,
-            'token': settings.volcengine_access_token,
-            'cluster': settings.volcengine_cluster,
-        },
-        'user': {'uid': settings.volcengine_uid},
-        'audio': {
-            'voice_type': voice_type,
-            'encoding': 'mp3',
-            'speed_ratio': max(0.5, min(2.0, float(speed_ratio if speed_ratio is not None else _speed_ratio(rate)))),
-            'volume_ratio': max(0.2, min(3.0, float(volume_ratio))),
-            'pitch_ratio': max(0.5, min(2.0, float(pitch_ratio))),
-            'language': 'cn',
-        },
-        'request': {
-            'reqid': reqid,
-            'text': text,
-            'text_type': 'plain',
-            'operation': 'query',
-            'silence_duration': 125,
-            'split_sentence': 1,
-            'with_frontend': 1,
-            'frontend_type': 'unitTson',
-        },
-    }
-    headers = {
-        'Authorization': f'Bearer;{settings.volcengine_access_token}',
-        'Content-Type': 'application/json',
-    }
-    resource_id = getattr(settings, 'volcengine_resource_id', '').strip()
-    if resource_id:
-        # V3 大模型语音合成/声音复刻接口需要用 X-Api-Resource-Id 选择版本效果，例如 seed-icl-2.0。
-        headers['X-Api-Resource-Id'] = resource_id
+
+    if env_api_key:
+        # 新版 API Key 模式：与你刚刚 test_volc_apikey_tts.py 跑通的结构一致
+        body = {
+            'app': {
+                'cluster': cluster,
+            },
+            'user': {
+                'uid': getattr(settings, 'volcengine_uid', '') or 'ai-video-growth-studio',
+            },
+            'audio': {
+                'voice_type': voice_type,
+                'encoding': 'mp3',
+                'speed_ratio': speed,
+                'volume_ratio': volume,
+                'pitch_ratio': pitch,
+            },
+            'request': {
+                'reqid': reqid,
+                'text': text,
+                'text_type': 'plain',
+                'operation': 'query',
+            },
+        }
+        headers = {
+            'x-api-key': env_api_key,
+            'Content-Type': 'application/json',
+        }
+    else:
+        # 旧版 AppID + AccessToken 兼容模式
+        if not settings.volcengine_app_id.strip() or not settings.volcengine_access_token.strip():
+            raise RuntimeError('缺少豆包语音配置：请配置 VOLC_TTS_API_KEY，或旧版 VOLCENGINE_APP_ID / VOLCENGINE_ACCESS_TOKEN。')
+
+        body = {
+            'app': {
+                'appid': settings.volcengine_app_id,
+                'token': settings.volcengine_access_token,
+                'cluster': cluster,
+            },
+            'user': {
+                'uid': settings.volcengine_uid,
+            },
+            'audio': {
+                'voice_type': voice_type,
+                'encoding': 'mp3',
+                'speed_ratio': speed,
+                'volume_ratio': volume,
+                'pitch_ratio': pitch,
+            },
+            'request': {
+                'reqid': reqid,
+                'text': text,
+                'text_type': 'plain',
+                'operation': 'query',
+            },
+        }
+        headers = {
+            'Authorization': f'Bearer;{settings.volcengine_access_token}',
+            'Content-Type': 'application/json',
+        }
+
     async with httpx.AsyncClient(timeout=180) as client:
-        resp = await client.post(settings.volcengine_tts_endpoint, headers=headers, json=body)
+        resp = await client.post(endpoint, headers=headers, json=body)
+
     if resp.status_code >= 400:
-        raise RuntimeError(f'豆包语音合成失败 HTTP {resp.status_code}：{resp.text[:1000]}')
-    data = resp.json()
-    # 常见成功码 3000；兼容部分网关只返回 data/audio 字段
+        raise RuntimeError(f'豆包语音合成失败 HTTP {resp.status_code} (cluster={cluster}, voice_type={voice_type})：{resp.text[:1000]}')
+
+    try:
+        data = resp.json()
+    except Exception:
+        raise RuntimeError(f'豆包语音返回不是 JSON：{resp.text[:1000]}')
+
     code = str(data.get('code', '3000'))
-    if code not in {'3000', '0', 'success'} and not data.get('data'):
-        message = str(data.get('message') or '')
-        hint = ''
-        if code in {'3031', '3050'} or 'Init Engine Instance failed' in message:
-            hint = '；请检查 VOLCENGINE_CLUSTER、VOLCENGINE_RESOURCE_ID、VOLCENGINE_VOICE_TYPE 是否匹配。声音复刻 ICL2.0 字符版通常是 CLUSTER=volcano_icl、RESOURCE_ID=seed-icl-2.0、VOICE_TYPE=控制台声音ID/speaker_id。不要把 Doubao-Seed 视频模型 ID 填到 VOICE_TYPE。'
-        raise RuntimeError(f'豆包语音合成失败：{json.dumps(data, ensure_ascii=False)[:1000]}{hint}')
+    if code not in {'3000', '0', 'success', 'Success'} and not data.get('data'):
+        raise RuntimeError(f'豆包语音合成失败：{json.dumps(data, ensure_ascii=False)[:1000]}')
+
     audio_b64 = data.get('data') or data.get('audio') or data.get('result', {}).get('audio')
     if not audio_b64:
         raise RuntimeError(f'豆包语音返回中没有音频 data 字段：{json.dumps(data, ensure_ascii=False)[:1000]}')
+
     output = settings.outputs_dir / f'tts_{uuid.uuid4().hex}.mp3'
+    output.parent.mkdir(parents=True, exist_ok=True)
     output.write_bytes(base64.b64decode(audio_b64))
     return output
+
 
 
 def parse_sapi_rate(rate: Optional[str]) -> int:
