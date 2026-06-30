@@ -5285,3 +5285,84 @@ async def _video_openclaw_timeline_plan(req: _OpenClawTimelinePlanRequest):
 async def _video_openclaw_timeline_self_test():
     return _openclaw_timeline_self_test()
 # ===== /OPENCLAW TO TIMELINE API HOTFIX =====
+
+
+# ===== OPENCLAW LLM ENHANCE API HOTFIX =====
+import asyncio as _OpenClawLLMAsyncio
+from fastapi import HTTPException as _OpenClawLLMHTTPException
+from pydantic import BaseModel as _OpenClawLLMBaseModel, Field as _OpenClawLLMField
+from app.services.openclaw_llm_enhance_provider import (
+    enhance_comments as _openclaw_llm_enhance_comments,
+    enhance_content as _openclaw_llm_enhance_content,
+    health as _openclaw_llm_enhance_health,
+    self_test as _openclaw_llm_enhance_self_test,
+)
+
+
+class _OpenClawLLMCommentsRequest(_OpenClawLLMBaseModel):
+    comments: list = _OpenClawLLMField(default_factory=list)
+    raw_export: object | None = None
+    campaign_context: dict = _OpenClawLLMField(default_factory=dict)
+    min_score: int = 55
+    max_llm_items: int = 5
+    dry_run: bool = True
+    save_rule_leads: bool = False
+
+
+class _OpenClawLLMContentRequest(_OpenClawLLMBaseModel):
+    raw_export: object | None = None
+    items: list = _OpenClawLLMField(default_factory=list)
+    campaign_context: dict = _OpenClawLLMField(default_factory=dict)
+    min_score: int = 55
+    max_llm_items: int = 5
+    dry_run: bool = True
+    save_rule_insights: bool = False
+
+
+@app.get("/api/video/openclaw/llm-enhance/health")
+async def _video_openclaw_llm_enhance_health():
+    return _openclaw_llm_enhance_health()
+
+
+@app.post("/api/video/openclaw/llm-enhance/comments")
+async def _video_openclaw_llm_enhance_comments(req: _OpenClawLLMCommentsRequest):
+    try:
+        return await _OpenClawLLMAsyncio.to_thread(
+            _openclaw_llm_enhance_comments,
+            comments=req.comments,
+            raw_export=req.raw_export,
+            campaign_context=req.campaign_context,
+            min_score=req.min_score,
+            max_llm_items=req.max_llm_items,
+            dry_run=req.dry_run,
+            save_rule_leads=req.save_rule_leads,
+        )
+    except ValueError as exc:
+        raise _OpenClawLLMHTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        raise _OpenClawLLMHTTPException(status_code=502, detail=f"openclaw llm comments enhance failed: {exc}")
+
+
+@app.post("/api/video/openclaw/llm-enhance/content")
+async def _video_openclaw_llm_enhance_content(req: _OpenClawLLMContentRequest):
+    try:
+        return await _OpenClawLLMAsyncio.to_thread(
+            _openclaw_llm_enhance_content,
+            raw_export=req.raw_export,
+            items=req.items,
+            campaign_context=req.campaign_context,
+            min_score=req.min_score,
+            max_llm_items=req.max_llm_items,
+            dry_run=req.dry_run,
+            save_rule_insights=req.save_rule_insights,
+        )
+    except ValueError as exc:
+        raise _OpenClawLLMHTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        raise _OpenClawLLMHTTPException(status_code=502, detail=f"openclaw llm content enhance failed: {exc}")
+
+
+@app.get("/api/video/openclaw/llm-enhance/self-test")
+async def _video_openclaw_llm_enhance_self_test():
+    return _openclaw_llm_enhance_self_test()
+# ===== /OPENCLAW LLM ENHANCE API HOTFIX =====
