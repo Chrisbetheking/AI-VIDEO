@@ -4744,3 +4744,61 @@ async def _video_hybrid_self_test(dry_run: bool = True):
         prefix="hybrid_self_test",
     )
 # ===== /HYBRID VIDEO API HOTFIX =====
+
+
+# ===== RUNTIME SAFETY API HOTFIX =====
+from starlette.responses import JSONResponse as _RuntimeSafetyJSONResponse
+from app.services.runtime_safety_provider import (
+    cleanup_runtime_files as _runtime_cleanup_files,
+    health as _runtime_safety_health,
+    is_upload_too_large as _runtime_is_upload_too_large,
+)
+
+
+def _runtime_safety_is_upload_path(path: str) -> bool:
+    return path in {
+        "/api/video/real-shot/upload",
+    }
+
+
+@app.middleware("http")
+async def _runtime_safety_upload_limit_middleware(request, call_next):
+    try:
+        if request.method.upper() == "POST" and _runtime_safety_is_upload_path(str(request.url.path)):
+            too_large, size, max_bytes = _runtime_is_upload_too_large(request.headers.get("content-length"))
+
+            if too_large:
+                return _RuntimeSafetyJSONResponse(
+                    {
+                        "ok": False,
+                        "status": "upload_too_large",
+                        "message": "上传文件过大，已被后端拦截，未写入磁盘。",
+                        "content_length": size,
+                        "max_upload_bytes": max_bytes,
+                        "max_upload_mb": int(max_bytes / 1024 / 1024),
+                    },
+                    status_code=413,
+                )
+    except Exception as exc:
+        print(f"[runtime-safety] upload limit middleware failed open: {exc}")
+
+    return await call_next(request)
+
+
+@app.get("/api/video/runtime-safety/health")
+async def _video_runtime_safety_health():
+    return _runtime_safety_health()
+
+
+@app.post("/api/video/runtime-safety/cleanup")
+async def _video_runtime_safety_cleanup(
+    max_age_hours: float = 24.0,
+    dry_run: bool = True,
+    max_delete_files: int = 200,
+):
+    return _runtime_cleanup_files(
+        max_age_hours=max_age_hours,
+        dry_run=dry_run,
+        max_delete_files=max_delete_files,
+    )
+# ===== /RUNTIME SAFETY API HOTFIX =====
