@@ -5234,3 +5234,54 @@ async def _video_openclaw_content_analyze(req: _OpenClawContentAnalyzeRequest):
 async def _video_openclaw_content_self_test():
     return _openclaw_content_self_test()
 # ===== /OPENCLAW CONTENT INTEL API HOTFIX =====
+
+
+# ===== OPENCLAW TO TIMELINE API HOTFIX =====
+from fastapi import HTTPException as _OpenClawTimelineHTTPException
+from pydantic import BaseModel as _OpenClawTimelineBaseModel, Field as _OpenClawTimelineField
+from app.services.openclaw_to_timeline_provider import (
+    build_openclaw_timeline_plan as _openclaw_timeline_plan,
+    health as _openclaw_timeline_health,
+    self_test as _openclaw_timeline_self_test,
+)
+
+
+class _OpenClawTimelinePlanRequest(_OpenClawTimelineBaseModel):
+    raw_export: object | None = None
+    items: list = _OpenClawTimelineField(default_factory=list)
+    campaign_context: dict = _OpenClawTimelineField(default_factory=dict)
+    save_insight: bool = False
+    target_duration: float | None = 28
+    min_score: int = 0
+    max_items: int = 300
+    bgm_policy: dict = _OpenClawTimelineField(default_factory=dict)
+    quality_policy: dict = _OpenClawTimelineField(default_factory=dict)
+
+
+@app.get("/api/video/openclaw/timeline/health")
+async def _video_openclaw_timeline_health():
+    return _openclaw_timeline_health()
+
+
+@app.post("/api/video/openclaw/timeline/plan")
+async def _video_openclaw_timeline_plan(req: _OpenClawTimelinePlanRequest):
+    try:
+        return _openclaw_timeline_plan(
+            raw_export=req.raw_export,
+            items=req.items,
+            campaign_context=req.campaign_context,
+            save_insight=req.save_insight,
+            target_duration=req.target_duration,
+            min_score=req.min_score,
+            max_items=req.max_items,
+            bgm_policy=req.bgm_policy,
+            quality_policy=req.quality_policy,
+        )
+    except ValueError as exc:
+        raise _OpenClawTimelineHTTPException(status_code=400, detail=str(exc))
+
+
+@app.get("/api/video/openclaw/timeline/self-test")
+async def _video_openclaw_timeline_self_test():
+    return _openclaw_timeline_self_test()
+# ===== /OPENCLAW TO TIMELINE API HOTFIX =====
