@@ -55,6 +55,7 @@ PUBLIC_PREFIXES = (
     "/api/video/watermark/health",
     "/api/video/timeline/health",
     "/api/video/timeline/tts-align/health",
+    "/api/video/timeline/render-plan/health",
 )
 
 ADMIN_PREFIXES = (
@@ -63,6 +64,7 @@ ADMIN_PREFIXES = (
     "/api/video/watermark/self-test",
     "/api/video/timeline/self-test",
     "/api/video/timeline/tts-align/self-test",
+    "/api/video/timeline/render-plan/self-test",
 )
 
 WRITE_PROTECTED_PREFIXES = (
@@ -79,6 +81,7 @@ WRITE_PROTECTED_PREFIXES = (
     "/api/video/hybrid/process",
     "/api/video/watermark/check",
     "/api/video/timeline/build",
+    "/api/video/timeline/render-plan",
 )
 
 

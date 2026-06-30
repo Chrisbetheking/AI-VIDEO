@@ -5034,3 +5034,68 @@ async def _video_timeline_tts_align(req: _TimelineTTSAlignRequest):
 async def _video_timeline_tts_align_self_test(dry_run: bool = True):
     return _timeline_tts_align_self_test(dry_run=dry_run)
 # ===== /TIMELINE TTS ALIGN API HOTFIX =====
+
+
+# ===== TIMELINE RENDER PLAN API HOTFIX =====
+from pydantic import BaseModel as _TimelineRenderBaseModel
+from fastapi import HTTPException as _TimelineRenderHTTPException
+from app.services.timeline_render_plan_provider import (
+    build_render_plan as _timeline_render_plan_build,
+    health as _timeline_render_plan_health,
+    self_test as _timeline_render_plan_self_test,
+)
+
+try:
+    from app.services.job_persistence_provider import save_job_response as _timeline_render_save_job_response
+except Exception:
+    _timeline_render_save_job_response = None
+
+
+class _TimelineRenderPlanRequest(_TimelineRenderBaseModel):
+    segments: list[dict]
+    materials: list[dict]
+    audio_url: str = ""
+    fit_mode: str = "loop"
+    material_strategy: str = "round_robin"
+    output_profile: str = "vertical_720x1280"
+    burn_subtitle: bool = True
+
+
+@app.get("/api/video/timeline/render-plan/health")
+async def _video_timeline_render_plan_health():
+    return _timeline_render_plan_health()
+
+
+@app.post("/api/video/timeline/render-plan")
+async def _video_timeline_render_plan(req: _TimelineRenderPlanRequest):
+    try:
+        response_data = _timeline_render_plan_build(
+            segments=req.segments,
+            materials=req.materials,
+            audio_url=req.audio_url,
+            fit_mode=req.fit_mode,
+            material_strategy=req.material_strategy,
+            output_profile=req.output_profile,
+            burn_subtitle=req.burn_subtitle,
+        )
+    except ValueError as exc:
+        raise _TimelineRenderHTTPException(status_code=400, detail=str(exc))
+
+    if _timeline_render_save_job_response:
+        try:
+            _timeline_render_save_job_response(
+                job_id=response_data.get("render_id", ""),
+                job_type="timeline_render_plan",
+                response_data=response_data,
+                source_path="/api/video/timeline/render-plan",
+            )
+        except Exception as exc:
+            print(f"[timeline-render-plan] persist failed: {exc}")
+
+    return response_data
+
+
+@app.get("/api/video/timeline/render-plan/self-test")
+async def _video_timeline_render_plan_self_test():
+    return _timeline_render_plan_self_test()
+# ===== /TIMELINE RENDER PLAN API HOTFIX =====
