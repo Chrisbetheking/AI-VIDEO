@@ -2,6 +2,48 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 
 const API_BASE = (((import.meta as any).env?.VITE_API_BASE as string | undefined) || 'https://ai-video.47-76-143-158.sslip.io').replace(/\/$/, '')
 
+const AI_VIDEO_API_TOKEN_STORAGE_KEY = 'ai_video_api_token'
+
+function getApiTokenForWrite(): string {
+  let token = window.localStorage.getItem(AI_VIDEO_API_TOKEN_STORAGE_KEY) || ''
+
+  if (!token) {
+    token = window.prompt('请输入 AI-VIDEO API Token。Token 保存在 ECS 的 /root/ai-video-admin-token.txt，不要发给任何人。')?.trim() || ''
+
+    if (token) {
+      window.localStorage.setItem(AI_VIDEO_API_TOKEN_STORAGE_KEY, token)
+    }
+  }
+
+  return token
+}
+
+function buildJsonHeaders(): HeadersInit {
+  const token = getApiTokenForWrite()
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+  }
+
+  if (token) {
+    headers['X-AI-Video-Token'] = token
+  }
+
+  return headers
+}
+
+function buildAuthHeaders(): HeadersInit | undefined {
+  const token = getApiTokenForWrite()
+
+  if (!token) {
+    return undefined
+  }
+
+  return {
+    'X-AI-Video-Token': token,
+  }
+}
+
+
 type WorkMode = 'full-ai' | 'real-shot' | 'hybrid'
 
 type FullAIJob = {
@@ -107,7 +149,7 @@ function simpleHash(input: string) {
 async function postJson<T>(path: string, body: unknown): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: buildJsonHeaders(),
     body: JSON.stringify(body),
   })
 
@@ -401,6 +443,7 @@ export default function FullAIConsole() {
 
       const res = await fetch(`${API_BASE}/api/video/real-shot/upload`, {
         method: 'POST',
+        headers: buildAuthHeaders(),
         body: form,
       })
 

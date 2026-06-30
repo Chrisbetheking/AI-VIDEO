@@ -4802,3 +4802,48 @@ async def _video_runtime_safety_cleanup(
         max_delete_files=max_delete_files,
     )
 # ===== /RUNTIME SAFETY API HOTFIX =====
+
+
+# ===== PRODUCTION HARDENING API HOTFIX =====
+from starlette.responses import JSONResponse as _ProductionJSONResponse
+from app.services.api_guard_provider import (
+    check_request as _api_guard_check_request,
+    security_status as _api_guard_security_status,
+)
+from app.services.production_health_provider import (
+    health as _production_health,
+)
+
+
+@app.middleware("http")
+async def _production_api_guard_middleware(request, call_next):
+    try:
+        headers = dict(request.headers)
+        client_ip = request.client.host if request.client else ""
+        blocked = _api_guard_check_request(
+            method=request.method,
+            path=str(request.url.path),
+            headers=headers,
+            client_ip=client_ip,
+        )
+
+        if blocked:
+            return _ProductionJSONResponse(
+                blocked.get("body", {"ok": False, "status": "blocked"}),
+                status_code=int(blocked.get("status_code", 403)),
+            )
+    except Exception as exc:
+        print(f"[production-hardening] api guard failed open: {exc}")
+
+    return await call_next(request)
+
+
+@app.get("/api/video/production/health")
+async def _video_production_health():
+    return _production_health()
+
+
+@app.get("/api/video/production/security")
+async def _video_production_security():
+    return _api_guard_security_status()
+# ===== /PRODUCTION HARDENING API HOTFIX =====
