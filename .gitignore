@@ -68,3 +68,20 @@ Thumbs.db
 *.db
 
 *.bak
+
+# AI-VIDEO generated backend artifacts
+backend/data/outputs/
+backend/uploads/
+backend/tmp/
+backend/temp/
+backend/logs/
+backend/*.mp3
+backend/*.mp4
+backend/*.wav
+backend/*.m4a
+backend/**/*.bak.*
+backend/**/__pycache__/
+backend/.env
+backend/.env.*
+backend/.venv/
+backend/venv/
