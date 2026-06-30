@@ -4333,3 +4333,200 @@ async def _video_subtitle_burn_upload(req: _SubtitleBurnUploadRequest):
 async def _video_subtitle_burn_upload_self_test():
     return _subtitle_create_self_test_burn_upload()
 # ===== /VIDEO SUBTITLE BURN UPLOAD API HOTFIX =====
+
+
+# ===== FULL AI SUBTITLE BRIDGE HOTFIX =====
+import time as _full_ai_subtitle_time
+from typing import Any as _FullAISubtitleAny
+from pydantic import BaseModel as _FullAISubtitleBaseModel
+from starlette.responses import JSONResponse as _FullAISubtitleJSONResponse
+from app.services.subtitle_provider import (
+    burn_subtitles_and_upload as _full_ai_subtitle_burn_upload,
+    upload_health as _full_ai_subtitle_upload_health,
+)
+
+try:
+    from app.services.job_persistence_provider import (
+        get_job as _full_ai_subtitle_get_persisted_job,
+        save_job_response as _full_ai_subtitle_save_job_response,
+    )
+except Exception:
+    _full_ai_subtitle_get_persisted_job = None
+    _full_ai_subtitle_save_job_response = None
+
+
+class _FullAISubtitleBridgeRequest(_FullAISubtitleBaseModel):
+    video_url: str = ""
+    text: str = ""
+    segments: list[dict[str, _FullAISubtitleAny]] | None = None
+    duration: float | None = None
+    max_chars: int = 18
+    prefix: str = "full_ai_subtitled"
+    object_key: str = ""
+    dry_run: bool = False
+
+
+def _full_ai_subtitle_memory_job(job_id: str):
+    try:
+        jobs = globals().get("_full_ai_jobs")
+        if isinstance(jobs, dict):
+            return jobs.get(job_id)
+    except Exception:
+        pass
+    return None
+
+
+def _full_ai_subtitle_find_job(job_id: str):
+    job = _full_ai_subtitle_memory_job(job_id)
+    if job:
+        return job
+
+    if _full_ai_subtitle_get_persisted_job:
+        try:
+            return _full_ai_subtitle_get_persisted_job(job_id)
+        except Exception:
+            return None
+
+    return None
+
+
+def _full_ai_subtitle_extract_video_url(job) -> str:
+    if not isinstance(job, dict):
+        return ""
+
+    result = job.get("result") if isinstance(job.get("result"), dict) else {}
+
+    return (
+        job.get("subtitled_video_url")
+        or job.get("video_url")
+        or job.get("final_video_url")
+        or result.get("video_url")
+        or result.get("final_video_url")
+        or ""
+    )
+
+
+def _full_ai_subtitle_extract_text(job) -> str:
+    if not isinstance(job, dict):
+        return ""
+
+    result = job.get("result") if isinstance(job.get("result"), dict) else {}
+    request = job.get("request") if isinstance(job.get("request"), dict) else {}
+    payload = job.get("payload") if isinstance(job.get("payload"), dict) else {}
+
+    return (
+        job.get("script_text")
+        or job.get("text")
+        or job.get("copy")
+        or request.get("script_text")
+        or request.get("text")
+        or payload.get("script_text")
+        or payload.get("text")
+        or result.get("script_text")
+        or result.get("text")
+        or ""
+    )
+
+
+@app.get("/api/video/full-ai/subtitle-bridge/health")
+async def _full_ai_subtitle_bridge_health():
+    data = _full_ai_subtitle_upload_health()
+    data.update(
+        {
+            "bridge": True,
+            "endpoint": "/api/video/full-ai/subtitle-bridge/{job_id}",
+            "message": "full-ai 字幕桥接接口可用",
+        }
+    )
+    return data
+
+
+@app.post("/api/video/full-ai/subtitle-bridge/{job_id}")
+async def _full_ai_subtitle_bridge(job_id: str, req: _FullAISubtitleBridgeRequest):
+    job = _full_ai_subtitle_find_job(job_id)
+
+    video_url = (req.video_url or _full_ai_subtitle_extract_video_url(job) or "").strip()
+    text = (req.text or _full_ai_subtitle_extract_text(job) or "").strip()
+    segments = req.segments or None
+
+    if not video_url:
+        return _FullAISubtitleJSONResponse(
+            {
+                "ok": False,
+                "status": "missing_video_url",
+                "message": "没有找到可烧录字幕的视频 URL。请传 video_url，或确认 full-ai job 已完成并有 video_url。",
+                "job_id": job_id,
+            },
+            status_code=400,
+        )
+
+    if not text and not segments:
+        return _FullAISubtitleJSONResponse(
+            {
+                "ok": False,
+                "status": "missing_subtitle_text",
+                "message": "没有找到字幕文本。请传 text，或传 segments。",
+                "job_id": job_id,
+                "video_url": video_url,
+            },
+            status_code=400,
+        )
+
+    subtitled_job_id = f"{job_id}_subtitled_{int(_full_ai_subtitle_time.time())}"
+
+    if req.dry_run:
+        return {
+            "ok": True,
+            "dry_run": True,
+            "job_id": job_id,
+            "subtitled_job_id": subtitled_job_id,
+            "video_url": video_url,
+            "text_length": len(text),
+            "segments_count": len(segments or []),
+            "message": "dry_run 已通过：真实执行时会下载 video_url、烧录字幕、上传 R2，不会调用 fal.ai。",
+        }
+
+    result = _full_ai_subtitle_burn_upload(
+        video_url=video_url,
+        text=text,
+        segments=segments,
+        duration=req.duration,
+        max_chars=req.max_chars,
+        prefix=req.prefix or "full_ai_subtitled",
+        object_key=req.object_key,
+    )
+
+    response_data = {
+        "ok": True,
+        "job_id": subtitled_job_id,
+        "original_job_id": job_id,
+        "type": "full_ai_subtitle",
+        "status": "done",
+        "stage": "subtitle_burn_uploaded",
+        "message": "full-ai 字幕版视频已生成并上传 R2",
+        "video_url": result.get("video_url") or result.get("url"),
+        "result": result,
+    }
+
+    try:
+        memory_jobs = globals().get("_full_ai_jobs")
+        if isinstance(memory_jobs, dict) and isinstance(job, dict):
+            job["subtitled_video_url"] = response_data["video_url"]
+            job["subtitled_job_id"] = subtitled_job_id
+            memory_jobs[job_id] = job
+    except Exception:
+        pass
+
+    if _full_ai_subtitle_save_job_response:
+        try:
+            _full_ai_subtitle_save_job_response(
+                job_id=subtitled_job_id,
+                job_type="full_ai_subtitle",
+                response_data=response_data,
+                source_path=f"/api/video/full-ai/subtitle-bridge/{job_id}",
+            )
+        except Exception as exc:
+            print(f"[full-ai-subtitle-bridge] persist failed: {exc}")
+
+    return response_data
+# ===== /FULL AI SUBTITLE BRIDGE HOTFIX =====
