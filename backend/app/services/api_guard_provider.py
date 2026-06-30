@@ -58,6 +58,7 @@ PUBLIC_PREFIXES = (
     "/api/video/timeline/render-plan/health",
     "/api/video/comment-leads/health",
     "/api/video/openclaw/comments/health",
+    "/api/video/openclaw/content/health",
 )
 
 ADMIN_PREFIXES = (
@@ -70,6 +71,7 @@ ADMIN_PREFIXES = (
     "/api/video/comment-leads/self-test",
     "/api/video/comment-leads/recent",
     "/api/video/openclaw/comments/self-test",
+    "/api/video/openclaw/content/self-test",
 )
 
 WRITE_PROTECTED_PREFIXES = (
@@ -89,6 +91,7 @@ WRITE_PROTECTED_PREFIXES = (
     "/api/video/timeline/render-plan",
     "/api/video/comment-leads/analyze",
     "/api/video/openclaw/comments/analyze",
+    "/api/video/openclaw/content/analyze",
 )
 
 

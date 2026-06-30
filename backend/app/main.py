@@ -5191,3 +5191,46 @@ async def _video_openclaw_comments_analyze(req: _OpenClawCommentAnalyzeRequest):
 async def _video_openclaw_comments_self_test():
     return _openclaw_comment_self_test()
 # ===== /OPENCLAW COMMENT ADAPTER API HOTFIX =====
+
+
+# ===== OPENCLAW CONTENT INTEL API HOTFIX =====
+from fastapi import HTTPException as _OpenClawContentHTTPException
+from pydantic import BaseModel as _OpenClawContentBaseModel, Field as _OpenClawContentField
+from app.services.openclaw_content_intel_provider import (
+    analyze_content as _openclaw_content_analyze,
+    health as _openclaw_content_health,
+    self_test as _openclaw_content_self_test,
+)
+
+
+class _OpenClawContentAnalyzeRequest(_OpenClawContentBaseModel):
+    raw_export: object | None = None
+    items: list = _OpenClawContentField(default_factory=list)
+    campaign_context: dict = _OpenClawContentField(default_factory=dict)
+    save: bool = True
+    max_items: int = 300
+
+
+@app.get("/api/video/openclaw/content/health")
+async def _video_openclaw_content_health():
+    return _openclaw_content_health()
+
+
+@app.post("/api/video/openclaw/content/analyze")
+async def _video_openclaw_content_analyze(req: _OpenClawContentAnalyzeRequest):
+    try:
+        return _openclaw_content_analyze(
+            raw_export=req.raw_export,
+            items=req.items,
+            campaign_context=req.campaign_context,
+            save=req.save,
+            max_items=req.max_items,
+        )
+    except ValueError as exc:
+        raise _OpenClawContentHTTPException(status_code=400, detail=str(exc))
+
+
+@app.get("/api/video/openclaw/content/self-test")
+async def _video_openclaw_content_self_test():
+    return _openclaw_content_self_test()
+# ===== /OPENCLAW CONTENT INTEL API HOTFIX =====
