@@ -44,6 +44,28 @@ type RealShotJob = {
   [key: string]: any
 }
 
+type HybridJob = {
+  ok?: boolean
+  job_id?: string
+  type?: string
+  status?: string
+  stage?: string
+  message?: string
+  video_path?: string
+  video_url?: string
+  clips?: string[]
+  metadata?: Record<string, any>[]
+  plan?: Record<string, any>
+  result?: {
+    output_path?: string
+    video_url?: string
+    url?: string
+    [key: string]: any
+  }
+  error?: string
+  [key: string]: any
+}
+
 type ShotConfig = {
   shot_id: string
   prompt: string
@@ -144,6 +166,13 @@ export default function FullAIConsole() {
   const [realShotJob, setRealShotJob] = useState<RealShotJob | null>(null)
   const [realShotProcessJob, setRealShotProcessJob] = useState<RealShotJob | null>(null)
   const [realShotError, setRealShotError] = useState('')
+  const [hybridRealPath, setHybridRealPath] = useState('')
+  const [hybridAiPath, setHybridAiPath] = useState('')
+  const [hybridText, setHybridText] = useState('这是混合成片字幕示例。AI 镜头只做开头或转场，实拍素材为主。')
+  const [hybridOrder, setHybridOrder] = useState<'ai_first' | 'real_first'>('ai_first')
+  const [hybridBusy, setHybridBusy] = useState(false)
+  const [hybridJob, setHybridJob] = useState<HybridJob | null>(null)
+  const [hybridError, setHybridError] = useState('')
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [riskChecked, setRiskChecked] = useState(false)
   const [cooldownLeft, setCooldownLeft] = useState(0)
@@ -435,9 +464,53 @@ export default function FullAIConsole() {
     }
   }
 
+
+  async function processHybridVideo(dryRun: boolean) {
+    if (!hybridRealPath.trim()) {
+      setHybridError('请先填写实拍视频路径。可以先在“实拍视频处理”上传视频，再复制返回的 video_path。')
+      return
+    }
+
+    if (!dryRun) {
+      const ok = window.confirm('确认生成混合成片？这一步不会调用 fal.ai，只处理已有视频素材；如果选择上传 R2，会产生少量 R2/服务器处理成本。')
+      if (!ok) {
+        return
+      }
+    }
+
+    setHybridBusy(true)
+    setHybridError('')
+
+    try {
+      const aiPaths = hybridAiPath
+        .split('\n')
+        .map(x => x.trim())
+        .filter(Boolean)
+
+      const data = await postJson<HybridJob>('/api/video/hybrid/process', {
+        real_video_path: hybridRealPath.trim(),
+        ai_video_paths: aiPaths,
+        order: hybridOrder,
+        text: hybridText.trim(),
+        burn_subtitle: !dryRun && Boolean(hybridText.trim()),
+        upload_r2: false,
+        dry_run: dryRun,
+        max_chars: 18,
+        prefix: 'hybrid_console',
+      })
+
+      setHybridJob(data)
+    } catch (e) {
+      setHybridError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setHybridBusy(false)
+    }
+  }
+
   const finalVideoUrl = job?.video_url || job?.result?.video_url || ''
   const finalAudioUrl = job?.audio_url || job?.result?.audio_url || ''
   const realShotOutputUrl = realShotProcessJob?.video_url || realShotProcessJob?.result?.video_url || realShotProcessJob?.result?.url || ''
+  const hybridOutputUrl = hybridJob?.video_url || hybridJob?.result?.video_url || hybridJob?.result?.url || hybridJob?.result?.output_path || ''
   const isDone = job?.status === 'done'
   const isFailed = job?.status === 'failed'
 
@@ -738,10 +811,120 @@ export default function FullAIConsole() {
       )}
 
       {mode === 'hybrid' && (
-        <div className="fullAiPlaceholder">
-          <h2>混合成片</h2>
-          <p>这里后面接：实拍/图片素材 + AI 补开头、转场、氛围镜头 + 字节 TTS + 字幕合成。</p>
-          <p>适合具体楼盘：真实素材为主，AI 只补泛化镜头，避免虚假宣传风险。</p>
+        <div className="fullAiGrid">
+          <div className="fullAiCard">
+            <div className="fullAiCardTitle">
+              <h2>混合成片</h2>
+              <span>实拍为主，AI 镜头只做开头 / 转场 / 氛围补镜头</span>
+            </div>
+
+            <label>
+              实拍视频路径
+              <input
+                value={hybridRealPath}
+                onChange={e => setHybridRealPath(e.target.value)}
+                placeholder="/opt/ai-video/backend/data/real-shot/uploads/xxx.mp4"
+              />
+            </label>
+
+            <label>
+              AI 补充镜头路径，可选，一行一个
+              <textarea
+                value={hybridAiPath}
+                onChange={e => setHybridAiPath(e.target.value)}
+                rows={4}
+                placeholder="/opt/ai-video/backend/data/hybrid/test/ai_opening.mp4"
+              />
+            </label>
+
+            <label>
+              拼接顺序
+              <select value={hybridOrder} onChange={e => setHybridOrder(e.target.value as 'ai_first' | 'real_first')}>
+                <option value="ai_first">AI 开头 / 转场在前，实拍在后</option>
+                <option value="real_first">实拍在前，AI 补充镜头在后</option>
+              </select>
+            </label>
+
+            <label>
+              字幕文案
+              <textarea
+                value={hybridText}
+                onChange={e => setHybridText(e.target.value)}
+                rows={4}
+                placeholder="输入要烧录到混合成片里的字幕文案"
+              />
+            </label>
+
+            <div className="fullAiButtonRow">
+              <button className="fullAiSecondaryButton" onClick={() => processHybridVideo(true)} disabled={hybridBusy}>
+                {hybridBusy ? '处理中...' : '先 dry_run 检查素材'}
+              </button>
+              <button className="fullAiPrimaryButton" onClick={() => processHybridVideo(false)} disabled={hybridBusy || !hybridRealPath.trim()}>
+                {hybridBusy ? '正在生成混合成片...' : '生成混合成片'}
+              </button>
+            </div>
+
+            <p className="fullAiSmallNote">这里不调用 fal.ai，只处理已有视频素材。真实楼盘信息必须来自实拍或官方素材，不能让 AI 胡编。</p>
+
+            {hybridError && <div className="fullAiError">{hybridError}</div>}
+          </div>
+
+          <div className="fullAiCard fullAiResultCard">
+            <div className="fullAiCardTitle">
+              <h2>混合成片结果</h2>
+              <span>{hybridJob?.job_id || '还没有混合任务'}</span>
+            </div>
+
+            {hybridJob ? (
+              <>
+                <div className="fullAiProgress">
+                  <p>
+                    状态：<strong className={hybridJob.status === 'done' ? 'good' : ''}>{hybridJob.status || '-'}</strong>
+                  </p>
+                  <p>阶段：{hybridJob.stage || '-'}</p>
+                  <p>消息：{hybridJob.message || '-'}</p>
+                  <p>片段数：{hybridJob.plan?.clips_count ?? '-'}</p>
+                  <p>AI 补镜头数：{hybridJob.plan?.ai_clips_count ?? '-'}</p>
+                </div>
+
+                {hybridOutputUrl && hybridOutputUrl.startsWith('http') && (
+                  <div className="fullAiPreview">
+                    <video src={hybridOutputUrl} controls playsInline />
+                    <a href={hybridOutputUrl} target="_blank" rel="noreferrer">
+                      打开混合成片视频
+                    </a>
+                  </div>
+                )}
+
+                {hybridOutputUrl && !hybridOutputUrl.startsWith('http') && (
+                  <div className="fullAiCostHint">
+                    本地输出路径：{hybridOutputUrl}
+                  </div>
+                )}
+
+                <pre className="fullAiJson">
+                  {JSON.stringify(
+                    {
+                      job_id: hybridJob.job_id,
+                      status: hybridJob.status,
+                      stage: hybridJob.stage,
+                      video_url: hybridOutputUrl,
+                      plan: hybridJob.plan,
+                      clips: hybridJob.clips,
+                      message: hybridJob.message,
+                    },
+                    null,
+                    2
+                  )}
+                </pre>
+              </>
+            ) : (
+              <div className="fullAiPlaceholder">
+                <h2>等待素材</h2>
+                <p>先填入实拍视频路径，再 dry_run 检查素材。AI 镜头是可选的，适合做开头、转场或氛围 B-roll。</p>
+              </div>
+            )}
+          </div>
         </div>
       )}
 

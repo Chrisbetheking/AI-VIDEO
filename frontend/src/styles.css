@@ -1001,3 +1001,26 @@ input:focus,textarea:focus,select:focus{
   font-size: 13px;
 }
 
+
+/* ===== HYBRID FRONTEND PATCH ===== */
+.fullAiButtonRow {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.fullAiSecondaryButton {
+  border: 1px solid rgba(37, 99, 235, 0.28);
+  border-radius: 12px;
+  padding: 12px 16px;
+  background: #fff;
+  color: #1d4ed8;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.fullAiSecondaryButton:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
