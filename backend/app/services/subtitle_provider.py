@@ -433,3 +433,158 @@ def health() -> dict[str, Any]:
         "subtitle_dir": str(SUBTITLE_DIR),
         "burn_dir": str(BURN_DIR),
     }
+
+
+# ===== SUBTITLE R2 UPLOAD HOTFIX =====
+def _first_env(*names: str) -> str:
+    for name in names:
+        value = os.getenv(name)
+        if value:
+            return value.strip()
+    return ""
+
+
+def _r2_config() -> dict[str, str]:
+    bucket = _first_env("R2_BUCKET", "R2_BUCKET_NAME", "CLOUDFLARE_R2_BUCKET")
+    access_key = _first_env("R2_ACCESS_KEY_ID", "CLOUDFLARE_R2_ACCESS_KEY_ID", "AWS_ACCESS_KEY_ID")
+    secret_key = _first_env("R2_SECRET_ACCESS_KEY", "CLOUDFLARE_R2_SECRET_ACCESS_KEY", "AWS_SECRET_ACCESS_KEY")
+    endpoint = _first_env("R2_ENDPOINT_URL", "CLOUDFLARE_R2_ENDPOINT")
+    account_id = _first_env("R2_ACCOUNT_ID", "CLOUDFLARE_ACCOUNT_ID")
+    public_base = _first_env("R2_PUBLIC_BASE_URL", "R2_PUBLIC_BASE", "PUBLIC_R2_BASE_URL", "R2_PUBLIC_URL")
+
+    if not endpoint and account_id:
+        endpoint = f"https://{account_id}.r2.cloudflarestorage.com"
+
+    return {
+        "bucket": bucket,
+        "access_key": access_key,
+        "secret_key": secret_key,
+        "endpoint": endpoint,
+        "public_base": public_base.rstrip("/"),
+    }
+
+
+def r2_upload_available() -> bool:
+    cfg = _r2_config()
+    return bool(cfg["bucket"] and cfg["access_key"] and cfg["secret_key"] and cfg["endpoint"] and cfg["public_base"])
+
+
+def upload_file_to_r2(local_path: str | Path, object_key: str = "") -> dict[str, Any]:
+    path = Path(local_path)
+
+    if not path.exists():
+        raise FileNotFoundError(f"文件不存在: {path}")
+
+    cfg = _r2_config()
+
+    missing = [
+        name
+        for name, value in {
+            "bucket": cfg["bucket"],
+            "access_key": cfg["access_key"],
+            "secret_key": cfg["secret_key"],
+            "endpoint": cfg["endpoint"],
+            "public_base": cfg["public_base"],
+        }.items()
+        if not value
+    ]
+
+    if missing:
+        raise RuntimeError(f"R2 配置不完整，缺少: {', '.join(missing)}")
+
+    import boto3
+    from botocore.config import Config
+
+    if not object_key:
+        object_key = f"videos/subtitled/{time.strftime('%Y/%m/%d')}/{uuid.uuid4().hex}_{path.name}"
+
+    content_type = mimetypes.guess_type(str(path))[0] or "application/octet-stream"
+
+    client = boto3.client(
+        "s3",
+        endpoint_url=cfg["endpoint"],
+        aws_access_key_id=cfg["access_key"],
+        aws_secret_access_key=cfg["secret_key"],
+        region_name="auto",
+        config=Config(signature_version="s3v4"),
+    )
+
+    client.upload_file(
+        str(path),
+        cfg["bucket"],
+        object_key,
+        ExtraArgs={"ContentType": content_type},
+    )
+
+    url = f"{cfg['public_base']}/{object_key}"
+
+    return {
+        "ok": True,
+        "uploaded": True,
+        "bucket": cfg["bucket"],
+        "object_key": object_key,
+        "url": url,
+        "content_type": content_type,
+        "size": path.stat().st_size,
+    }
+
+
+def burn_subtitles_and_upload(
+    video_url: str = "",
+    video_path: str = "",
+    text: str = "",
+    segments: Optional[list[dict[str, Any]]] = None,
+    duration: Optional[float] = None,
+    max_chars: int = 18,
+    prefix: str = "subtitle_burn_upload",
+    object_key: str = "",
+) -> dict[str, Any]:
+    burn_result = burn_subtitles(
+        video_url=video_url,
+        video_path=video_path,
+        text=text,
+        segments=segments,
+        duration=duration,
+        max_chars=max_chars,
+        prefix=prefix,
+    )
+
+    upload_result = upload_file_to_r2(
+        burn_result["output_path"],
+        object_key=object_key,
+    )
+
+    return {
+        "ok": True,
+        "video_url": upload_result["url"],
+        "url": upload_result["url"],
+        "r2": upload_result,
+        "burn": burn_result,
+        "message": "字幕版视频已烧录并上传到 R2",
+    }
+
+
+def create_self_test_burn_upload() -> dict[str, Any]:
+    video_path = create_self_test_video()
+    return burn_subtitles_and_upload(
+        video_path=str(video_path),
+        text="这是字幕烧录并上传 R2 的自测。不调用 fal.ai。",
+        duration=5.0,
+        max_chars=16,
+        prefix="subtitle_burn_upload_self_test",
+    )
+
+
+def upload_health() -> dict[str, Any]:
+    base = health()
+    cfg = _r2_config()
+    base.update(
+        {
+            "r2_configured": r2_upload_available(),
+            "r2_bucket": cfg["bucket"],
+            "r2_endpoint_configured": bool(cfg["endpoint"]),
+            "r2_public_base_configured": bool(cfg["public_base"]),
+        }
+    )
+    return base
+# ===== /SUBTITLE R2 UPLOAD HOTFIX =====

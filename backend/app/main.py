@@ -4289,3 +4289,47 @@ async def _video_subtitle_self_test():
         prefix="subtitle_self_test",
     )
 # ===== /VIDEO SUBTITLE API HOTFIX =====
+
+
+# ===== VIDEO SUBTITLE BURN UPLOAD API HOTFIX =====
+from app.services.subtitle_provider import (
+    burn_subtitles_and_upload as _subtitle_burn_subtitles_and_upload,
+    create_self_test_burn_upload as _subtitle_create_self_test_burn_upload,
+    upload_health as _subtitle_upload_health,
+)
+
+
+class _SubtitleBurnUploadRequest(_SubtitleBaseModel):
+    video_url: str = ""
+    video_path: str = ""
+    text: str = ""
+    segments: list[dict[str, _SubtitleAny]] | None = None
+    duration: _SubtitleOptional[float] = None
+    max_chars: int = 18
+    prefix: str = "subtitle_burn_upload"
+    object_key: str = ""
+
+
+@app.get("/api/video/subtitle/upload-health")
+async def _video_subtitle_upload_health():
+    return _subtitle_upload_health()
+
+
+@app.post("/api/video/subtitle/burn-upload")
+async def _video_subtitle_burn_upload(req: _SubtitleBurnUploadRequest):
+    return _subtitle_burn_subtitles_and_upload(
+        video_url=req.video_url,
+        video_path=req.video_path,
+        text=req.text,
+        segments=req.segments,
+        duration=req.duration,
+        max_chars=req.max_chars,
+        prefix=req.prefix,
+        object_key=req.object_key,
+    )
+
+
+@app.get("/api/video/subtitle/burn-upload-self-test")
+async def _video_subtitle_burn_upload_self_test():
+    return _subtitle_create_self_test_burn_upload()
+# ===== /VIDEO SUBTITLE BURN UPLOAD API HOTFIX =====
