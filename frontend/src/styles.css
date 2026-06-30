@@ -576,3 +576,243 @@ input:focus,textarea:focus,select:focus{
 @media(max-width:640px){
   .autoStatsGrid,.collectorTopStats{grid-template-columns:1fr}
 }
+
+
+/* ===== FULL AI CONSOLE START ===== */
+.fullAiConsole {
+  width: min(1180px, calc(100% - 32px));
+  margin: 24px auto;
+  padding: 22px;
+  border-radius: 28px;
+  background: linear-gradient(135deg, rgba(15, 23, 42, 0.96), rgba(30, 41, 59, 0.92));
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  color: #f8fafc;
+  box-shadow: 0 24px 80px rgba(15, 23, 42, 0.22);
+}
+
+.fullAiHero {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 220px;
+  gap: 20px;
+  align-items: center;
+}
+
+.fullAiEyebrow {
+  margin: 0 0 8px;
+  color: #93c5fd;
+  font-size: 13px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+.fullAiHero h1 {
+  margin: 0 0 10px;
+  font-size: clamp(26px, 4vw, 42px);
+  line-height: 1.05;
+}
+
+.fullAiHero p {
+  margin: 0;
+  max-width: 760px;
+  color: #cbd5e1;
+  line-height: 1.7;
+}
+
+.fullAiStatusBox {
+  padding: 18px;
+  border-radius: 22px;
+  background: rgba(15, 23, 42, 0.64);
+  border: 1px solid rgba(148, 163, 184, 0.22);
+}
+
+.fullAiStatusBox span,
+.fullAiStatusBox small {
+  display: block;
+  color: #94a3b8;
+}
+
+.fullAiStatusBox strong {
+  display: block;
+  margin: 8px 0;
+  color: #86efac;
+  font-size: 28px;
+}
+
+.fullAiTabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 22px 0;
+}
+
+.fullAiTabs button {
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  background: rgba(15, 23, 42, 0.5);
+  color: #e2e8f0;
+  border-radius: 999px;
+  padding: 10px 16px;
+  cursor: pointer;
+}
+
+.fullAiTabs button.active {
+  background: #f8fafc;
+  color: #0f172a;
+}
+
+.fullAiGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.08fr) minmax(320px, 0.92fr);
+  gap: 18px;
+}
+
+.fullAiCard,
+.fullAiPlaceholder {
+  padding: 18px;
+  border-radius: 24px;
+  background: rgba(15, 23, 42, 0.56);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+}
+
+.fullAiCardTitle {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+  margin-bottom: 16px;
+}
+
+.fullAiCardTitle h2 {
+  margin: 0;
+  font-size: 20px;
+}
+
+.fullAiCardTitle span {
+  color: #94a3b8;
+  font-size: 13px;
+  text-align: right;
+}
+
+.fullAiCard label {
+  display: block;
+  margin: 14px 0;
+  color: #cbd5e1;
+  font-size: 13px;
+}
+
+.fullAiCard input,
+.fullAiCard textarea,
+.fullAiCard select {
+  width: 100%;
+  box-sizing: border-box;
+  margin-top: 8px;
+  border-radius: 14px;
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  background: rgba(15, 23, 42, 0.72);
+  color: #f8fafc;
+  padding: 12px 13px;
+  outline: none;
+}
+
+.fullAiCard textarea {
+  resize: vertical;
+}
+
+.fullAiPrimaryButton {
+  width: 100%;
+  border: 0;
+  border-radius: 16px;
+  padding: 14px 16px;
+  background: linear-gradient(135deg, #60a5fa, #a78bfa);
+  color: white;
+  font-weight: 800;
+  cursor: pointer;
+  margin-top: 8px;
+}
+
+.fullAiPrimaryButton:disabled {
+  opacity: 0.62;
+  cursor: not-allowed;
+}
+
+.fullAiError {
+  margin-top: 12px;
+  padding: 12px;
+  border-radius: 14px;
+  background: rgba(239, 68, 68, 0.14);
+  color: #fecaca;
+  border: 1px solid rgba(248, 113, 113, 0.28);
+  white-space: pre-wrap;
+}
+
+.fullAiProgress {
+  border-radius: 16px;
+  background: rgba(15, 23, 42, 0.7);
+  padding: 12px 14px;
+  color: #cbd5e1;
+}
+
+.fullAiProgress p {
+  margin: 6px 0;
+}
+
+.fullAiProgress .good {
+  color: #86efac;
+}
+
+.fullAiProgress .bad {
+  color: #fca5a5;
+}
+
+.fullAiPreview {
+  margin-top: 14px;
+}
+
+.fullAiPreview video {
+  display: block;
+  width: 100%;
+  max-height: 480px;
+  border-radius: 18px;
+  background: #020617;
+}
+
+.fullAiPreview a,
+.fullAiLink {
+  display: inline-flex;
+  margin-top: 10px;
+  color: #93c5fd;
+  text-decoration: none;
+  font-weight: 700;
+}
+
+.fullAiJson {
+  margin-top: 14px;
+  max-height: 260px;
+  overflow: auto;
+  padding: 12px;
+  border-radius: 16px;
+  background: rgba(2, 6, 23, 0.76);
+  color: #dbeafe;
+  font-size: 12px;
+  white-space: pre-wrap;
+}
+
+.fullAiPlaceholder h2 {
+  margin-top: 0;
+}
+
+.fullAiPlaceholder p {
+  color: #cbd5e1;
+  line-height: 1.7;
+}
+
+@media (max-width: 860px) {
+  .fullAiHero,
+  .fullAiGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .fullAiStatusBox {
+    width: auto;
+  }
+}
+/* ===== FULL AI CONSOLE END ===== */
