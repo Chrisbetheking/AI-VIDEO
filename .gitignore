@@ -103,3 +103,6 @@ backend/data/real-shot/
 
 # AI-VIDEO hybrid runtime artifacts
 backend/data/hybrid/
+
+# AI-VIDEO watermark runtime artifacts
+backend/data/watermark-check/

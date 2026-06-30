@@ -52,11 +52,13 @@ PUBLIC_PREFIXES = (
     "/api/video/hybrid/health",
     "/api/video/jobs/persistence/health",
     "/api/collector/commands/next",
+    "/api/video/watermark/health",
 )
 
 ADMIN_PREFIXES = (
     "/api/video/runtime-safety/cleanup",
     "/api/video/production/security",
+    "/api/video/watermark/self-test",
 )
 
 WRITE_PROTECTED_PREFIXES = (
@@ -71,6 +73,7 @@ WRITE_PROTECTED_PREFIXES = (
     "/api/video/real-shot/upload",
     "/api/video/real-shot/process",
     "/api/video/hybrid/process",
+    "/api/video/watermark/check",
 )
 
 

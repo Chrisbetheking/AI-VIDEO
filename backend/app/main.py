@@ -4847,3 +4847,64 @@ async def _video_production_health():
 async def _video_production_security():
     return _api_guard_security_status()
 # ===== /PRODUCTION HARDENING API HOTFIX =====
+
+
+# ===== WATERMARK CHECK API HOTFIX =====
+from pydantic import BaseModel as _WatermarkBaseModel
+from app.services.watermark_provider import (
+    check_watermark as _watermark_check,
+    create_self_test_video as _watermark_create_self_test_video,
+    health as _watermark_health,
+)
+
+try:
+    from app.services.job_persistence_provider import save_job_response as _watermark_save_job_response
+except Exception:
+    _watermark_save_job_response = None
+
+
+class _WatermarkCheckRequest(_WatermarkBaseModel):
+    video_path: str = ""
+    video_url: str = ""
+    sample_count: int = 6
+    prefix: str = "watermark"
+
+
+@app.get("/api/video/watermark/health")
+async def _video_watermark_health():
+    return _watermark_health()
+
+
+@app.post("/api/video/watermark/check")
+async def _video_watermark_check(req: _WatermarkCheckRequest):
+    response_data = _watermark_check(
+        video_path=req.video_path,
+        video_url=req.video_url,
+        sample_count=req.sample_count,
+        prefix=req.prefix,
+    )
+
+    if _watermark_save_job_response:
+        try:
+            _watermark_save_job_response(
+                job_id=response_data.get("job_id", ""),
+                job_type="watermark_check",
+                response_data=response_data,
+                source_path="/api/video/watermark/check",
+            )
+        except Exception as exc:
+            print(f"[watermark] persist failed: {exc}")
+
+    return response_data
+
+
+@app.get("/api/video/watermark/self-test")
+async def _video_watermark_self_test(with_logo: bool = True):
+    video_path = _watermark_create_self_test_video(with_logo=with_logo)
+
+    return _watermark_check(
+        video_path=str(video_path),
+        sample_count=5,
+        prefix="watermark_self_test",
+    )
+# ===== /WATERMARK CHECK API HOTFIX =====
