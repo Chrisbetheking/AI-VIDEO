@@ -111,6 +111,9 @@ export default function FullAIConsole() {
   const [busy, setBusy] = useState(false)
   const [job, setJob] = useState<FullAIJob | null>(null)
   const [error, setError] = useState('')
+  const [subtitleBusy, setSubtitleBusy] = useState(false)
+  const [subtitleJob, setSubtitleJob] = useState<FullAIJob | null>(null)
+  const [subtitleError, setSubtitleError] = useState('')
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [riskChecked, setRiskChecked] = useState(false)
   const [cooldownLeft, setCooldownLeft] = useState(0)
@@ -256,6 +259,8 @@ export default function FullAIConsole() {
     setError('')
     setBusy(true)
     setJob(null)
+    setSubtitleJob(null)
+    setSubtitleError('')
 
     window.localStorage.setItem(COOLDOWN_KEY, String(Date.now() + COOLDOWN_SECONDS * 1000))
     window.localStorage.setItem(LAST_PAYLOAD_HASH_KEY, payloadHash)
@@ -273,6 +278,48 @@ export default function FullAIConsole() {
     } catch (e) {
       setBusy(false)
       setError(e instanceof Error ? e.message : String(e))
+    }
+  }
+
+
+  async function createSubtitledVideo() {
+    if (!job?.job_id) {
+      setSubtitleError('还没有可处理的 full-ai job_id。')
+      return
+    }
+
+    const sourceVideoUrl = job?.video_url || job?.result?.video_url || ''
+
+    if (!sourceVideoUrl) {
+      setSubtitleError('还没有找到最终视频 URL，请等全 AI 视频生成完成后再试。')
+      return
+    }
+
+    if (!scriptText.trim()) {
+      setSubtitleError('字幕文本为空，请先填写口播文案。')
+      return
+    }
+
+    const ok = window.confirm('确认生成字幕版视频？这一步不会调用 fal.ai，但会下载当前视频、烧录字幕并上传到 R2。')
+    if (!ok) {
+      return
+    }
+
+    setSubtitleBusy(true)
+    setSubtitleError('')
+
+    try {
+      const data = await postJson<FullAIJob>(`/api/video/full-ai/subtitle-bridge/${encodeURIComponent(job.job_id)}`, {
+        video_url: sourceVideoUrl,
+        text: scriptText.trim(),
+        max_chars: 18,
+        prefix: 'full_ai_subtitled',
+      })
+      setSubtitleJob(data)
+    } catch (e) {
+      setSubtitleError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setSubtitleBusy(false)
     }
   }
 
@@ -388,6 +435,45 @@ export default function FullAIConsole() {
               <a className="fullAiLink" href={finalAudioUrl} target="_blank" rel="noreferrer">
                 打开口播音频
               </a>
+            )}
+
+            {isDone && finalVideoUrl && job?.job_id && (
+              <div className="fullAiSubtitleBox">
+                <div>
+                  <strong>字幕版视频</strong>
+                  <p>生成完成后可一键烧录字幕并上传 R2，得到新的字幕版公开视频 URL。</p>
+                </div>
+                <button className="fullAiSubtitleButton" onClick={createSubtitledVideo} disabled={subtitleBusy}>
+                  {subtitleBusy ? '正在生成字幕版...' : '生成字幕版视频'}
+                </button>
+              </div>
+            )}
+
+            {subtitleError && <div className="fullAiError">{subtitleError}</div>}
+
+            {(subtitleJob?.video_url || subtitleJob?.result?.video_url) && (
+              <div className="fullAiPreview">
+                <video src={subtitleJob.video_url || subtitleJob.result?.video_url} controls playsInline />
+                <a href={subtitleJob.video_url || subtitleJob.result?.video_url} target="_blank" rel="noreferrer">
+                  打开字幕版视频
+                </a>
+              </div>
+            )}
+
+            {subtitleJob && (
+              <pre className="fullAiJson">
+                {JSON.stringify(
+                  {
+                    job_id: subtitleJob.job_id,
+                    status: subtitleJob.status,
+                    stage: subtitleJob.stage,
+                    video_url: subtitleJob.video_url || subtitleJob.result?.video_url,
+                    message: subtitleJob.message,
+                  },
+                  null,
+                  2
+                )}
+              </pre>
             )}
 
             {job && (

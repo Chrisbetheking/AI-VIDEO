@@ -937,3 +937,44 @@ input:focus,textarea:focus,select:focus{
   opacity: 0.45;
 }
 
+
+/* ===== FULL AI SUBTITLE BUTTON PATCH ===== */
+.fullAiSubtitleBox {
+  margin-top: 16px;
+  padding: 14px;
+  border-radius: 16px;
+  border: 1px solid rgba(37, 99, 235, 0.18);
+  background: rgba(37, 99, 235, 0.06);
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.fullAiSubtitleBox strong {
+  color: #1e3a8a;
+}
+
+.fullAiSubtitleBox p {
+  margin: 4px 0 0;
+  color: #64748b;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.fullAiSubtitleButton {
+  border: 0;
+  border-radius: 12px;
+  padding: 11px 16px;
+  background: #2563eb;
+  color: #fff;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.fullAiSubtitleButton:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
