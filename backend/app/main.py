@@ -4100,3 +4100,121 @@ async def _full_ai_cost_guard_middleware(request: _FullAIGuardRequest, call_next
 
     return response
 # ===== /FULL AI COST GUARD MIDDLEWARE HOTFIX =====
+
+
+# ===== VIDEO JOB PERSISTENCE HOTFIX =====
+import json as _job_persist_json
+from starlette.responses import Response as _JobPersistResponse
+from starlette.responses import JSONResponse as _JobPersistJSONResponse
+from app.services.job_persistence_provider import (
+    get_job as _job_persist_get_job,
+    health as _job_persist_health,
+    infer_job_type as _job_persist_infer_job_type,
+    list_recent_jobs as _job_persist_list_recent_jobs,
+    save_job_response as _job_persist_save_job_response,
+)
+
+
+def _job_persist_is_interested_path(path: str) -> bool:
+    return (
+        path == "/api/video/full-ai/start"
+        or path.startswith("/api/video/full-ai/job/")
+        or path.startswith("/api/video/fal/job/")
+        or path.startswith("/api/video/compose/job/")
+    )
+
+
+def _job_persist_extract_job_id(path: str, data) -> str:
+    if isinstance(data, dict):
+        for key in ("job_id", "id"):
+            value = data.get(key)
+            if isinstance(value, str) and value:
+                return value
+
+    parts = [x for x in path.split("/") if x]
+    return parts[-1] if parts else ""
+
+
+def _job_persist_is_not_found(data, status_code: int) -> bool:
+    if status_code == 404:
+        return True
+    if not isinstance(data, dict):
+        return False
+
+    status = str(data.get("status") or "").lower()
+    message = str(data.get("message") or "").lower()
+    error = str(data.get("error") or "").lower()
+
+    return (
+        status in {"not_found", "missing", "not found"}
+        or "not_found" in message
+        or "not found" in message
+        or "not_found" in error
+        or "not found" in error
+    )
+
+
+@app.middleware("http")
+async def _video_job_persistence_middleware(request, call_next):
+    path = request.url.path
+
+    if not _job_persist_is_interested_path(path):
+        return await call_next(request)
+
+    response = await call_next(request)
+
+    body = b""
+    async for chunk in response.body_iterator:
+        body += chunk
+
+    headers = {
+        k: v
+        for k, v in response.headers.items()
+        if k.lower() not in {"content-length", "content-encoding"}
+    }
+
+    data = None
+    try:
+        data = _job_persist_json.loads(body.decode("utf-8") or "{}")
+    except Exception:
+        data = None
+
+    job_id = _job_persist_extract_job_id(path, data)
+    job_type = _job_persist_infer_job_type(path, job_id)
+
+    if request.method.upper() == "GET" and job_id and _job_persist_is_not_found(data, response.status_code):
+        restored = _job_persist_get_job(job_id)
+        if restored:
+            return _JobPersistJSONResponse(restored)
+
+    if isinstance(data, dict) and job_id and not _job_persist_is_not_found(data, response.status_code):
+        try:
+            _job_persist_save_job_response(
+                job_id=job_id,
+                job_type=job_type,
+                response_data=data,
+                source_path=path,
+            )
+        except Exception as exc:
+            print(f"[job-persistence] save failed for {job_id}: {exc}")
+
+    return _JobPersistResponse(
+        content=body,
+        status_code=response.status_code,
+        headers=headers,
+        media_type=response.media_type,
+    )
+
+
+@app.get("/api/video/jobs/persistence/health")
+async def _video_job_persistence_health():
+    return _job_persist_health()
+
+
+@app.get("/api/video/jobs/recent")
+async def _video_job_persistence_recent(limit: int = 20):
+    return {
+        "ok": True,
+        "jobs": _job_persist_list_recent_jobs(limit),
+    }
+# ===== /VIDEO JOB PERSISTENCE HOTFIX =====
