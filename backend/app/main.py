@@ -4218,3 +4218,74 @@ async def _video_job_persistence_recent(limit: int = 20):
         "jobs": _job_persist_list_recent_jobs(limit),
     }
 # ===== /VIDEO JOB PERSISTENCE HOTFIX =====
+
+
+# ===== VIDEO SUBTITLE API HOTFIX =====
+from typing import Any as _SubtitleAny, Optional as _SubtitleOptional
+from pydantic import BaseModel as _SubtitleBaseModel
+from app.services.subtitle_provider import (
+    burn_subtitles as _subtitle_burn_subtitles,
+    create_self_test_video as _subtitle_create_self_test_video,
+    health as _subtitle_health,
+    make_srt as _subtitle_make_srt,
+)
+
+
+class _SubtitleSrtRequest(_SubtitleBaseModel):
+    text: str = ""
+    segments: list[dict[str, _SubtitleAny]] | None = None
+    duration: float = 12.0
+    max_chars: int = 18
+    prefix: str = "subtitle"
+
+
+class _SubtitleBurnRequest(_SubtitleBaseModel):
+    video_url: str = ""
+    video_path: str = ""
+    text: str = ""
+    segments: list[dict[str, _SubtitleAny]] | None = None
+    duration: _SubtitleOptional[float] = None
+    max_chars: int = 18
+    prefix: str = "subtitle_burn"
+
+
+@app.get("/api/video/subtitle/health")
+async def _video_subtitle_health():
+    return _subtitle_health()
+
+
+@app.post("/api/video/subtitle/srt")
+async def _video_subtitle_srt(req: _SubtitleSrtRequest):
+    return _subtitle_make_srt(
+        text=req.text,
+        segments=req.segments,
+        duration=req.duration,
+        max_chars=req.max_chars,
+        prefix=req.prefix,
+    )
+
+
+@app.post("/api/video/subtitle/burn")
+async def _video_subtitle_burn(req: _SubtitleBurnRequest):
+    return _subtitle_burn_subtitles(
+        video_url=req.video_url,
+        video_path=req.video_path,
+        text=req.text,
+        segments=req.segments,
+        duration=req.duration,
+        max_chars=req.max_chars,
+        prefix=req.prefix,
+    )
+
+
+@app.get("/api/video/subtitle/self-test")
+async def _video_subtitle_self_test():
+    video_path = _subtitle_create_self_test_video()
+    return _subtitle_burn_subtitles(
+        video_path=str(video_path),
+        text="这是字幕烧录自测。不调用 fal.ai，也不会产生生成费用。",
+        duration=5.0,
+        max_chars=16,
+        prefix="subtitle_self_test",
+    )
+# ===== /VIDEO SUBTITLE API HOTFIX =====
