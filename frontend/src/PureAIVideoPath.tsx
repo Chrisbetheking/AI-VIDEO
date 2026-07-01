@@ -7,6 +7,8 @@ import {
   extractJobId,
   extractVideoUrl,
   generateLocalScript,
+  generateAIScriptPlan,
+  projectFromAIScriptPlan,
   pollFullAiJob,
   progressFromJob,
   ProjectDraft,
@@ -80,26 +82,39 @@ export default function PureAIVideoPath({ project, setProject, goTab }: Props) {
     setProject({ ...project, ...next })
   }
 
-  function generateDraft() {
+  async function generateDraft() {
     setBusy('draft')
     setError('')
     setProgress(null)
 
     try {
-      const nonce = Date.now() + Math.round(Math.random() * 100000)
-      const script = generateLocalScript(project.topic, project.market, plan.duration, nonce)
-      const segments = splitScriptToSegments(script, plan.duration, plan.material, plan.shotSeconds)
+      setProgress({ status: 'script_ai', percent: 18, message: '正在结合行业爆点、同行打法和线索生成文稿...' })
 
-      const nextProject = {
-        ...project,
-        script,
-        segments,
-        title: project.topic,
-        targetDuration: plan.duration,
+      let nextProject: ProjectDraft
+      let data: any = null
+
+      try {
+        data = await generateAIScriptPlan(project, false)
+        nextProject = projectFromAIScriptPlan(project, data)
+      } catch (aiErr) {
+        const nonce = Date.now() + Math.round(Math.random() * 100000)
+        const script = generateLocalScript(project.topic, project.market, plan.duration, nonce)
+        const segments = splitScriptToSegments(script, plan.duration, plan.material, plan.shotSeconds)
+
+        nextProject = {
+          ...project,
+          script,
+          segments,
+          title: project.topic,
+          targetDuration: plan.duration,
+          scriptProvider: 'local_fallback_after_frontend_error',
+        }
+        data = { ok: false, provider: 'local_fallback_after_frontend_error', error: detailToText(aiErr), script, segments, plan }
       }
 
       setProject(nextProject)
-      setResult({ ok: true, mode: 'local_draft', script, segments, plan, creative_nonce: nonce })
+      setResult(data)
+      setProgress({ status: 'script_ready', percent: 35, message: '文稿和分镜已生成，可以进入视频生成。' })
     } catch (err) {
       setError(detailToText(err))
     } finally {
@@ -265,7 +280,7 @@ export default function PureAIVideoPath({ project, setProject, goTab }: Props) {
       </div>
 
       <div className="aiw-info">
-        按 {plan.duration}s 视频长度生成文稿；每段约 {plan.avgSegmentSeconds}s。点“生成文稿”每次会换一种表达和结构，不再固定同一套文案。
+        按 {plan.duration}s 视频长度生成文稿；每段约 {plan.avgSegmentSeconds}s。点“生成文稿”会优先调用 DeepSeek，结合行业爆点、同行打法和获客线索生成，不再固定同一套文案。
       </div>
 
       <div className="aiw-actions">

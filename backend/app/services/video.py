@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from app.config import Settings
+from app.services.video_quality_tools import build_input_video_filter, inspect_video_quality
 from app.services.effect_planner import (
     StickerCue,
     TimedSegment,
@@ -311,10 +312,7 @@ def build_video_base(asset_paths: List[Path], duration: float, output_path: Path
     for i, _path in enumerate(valid_paths):
         label = f"v{i}"
         # 9:16 full-screen crop. No random generated objects.
-        filter_parts.append(
-            f"[{i}:v]scale=1080:1920:force_original_aspect_ratio=increase,"
-            f"crop=1080:1920,setsar=1,fps=30,format=yuv420p[{label}]"
-        )
+        filter_parts.append(build_input_video_filter(i, _path, label))
         video_labels.append(f"[{label}]")
     filter_parts.append("".join(video_labels) + f"concat=n={len(valid_paths)}:v=1:a=0[outv]")
 
@@ -445,6 +443,10 @@ async def compose_video(
     base_video, base_warnings = build_video_base(list(asset_paths), duration, base_video)
     warnings.extend(base_warnings)
     warnings.extend(burn_ass_and_audio(base_video, ass_path, audio_path, output_video, duration))
+    quality = inspect_video_quality(output_video, max_black_ratio=0.15)
+    if not quality.get("ok"):
+        raise RuntimeError(f"视频质检失败：{quality.get('message')} | detail={quality}")
+    warnings.append(str(quality.get("message") or "9:16 质检通过"))
 
     try:
         base_video.unlink(missing_ok=True)
@@ -460,4 +462,12 @@ async def compose_video(
         audio_path=audio_path,
         duration_seconds=duration,
         warnings=warnings,
+    )
+
+
+def ai_video_vertical_cover_filter(width: int = 1080, height: int = 1920, fps: int = 30) -> str:
+    """Return ffmpeg filter that fills vertical canvas without black bars."""
+    return (
+        f"scale={width}:{height}:force_original_aspect_ratio=increase,"
+        f"crop={width}:{height},setsar=1,fps={fps},format=yuv420p"
     )

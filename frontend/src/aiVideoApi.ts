@@ -437,10 +437,10 @@ export function buildFullAiPayload(
       prompt: [
         `竖屏短视频通用氛围镜头，第 ${index + 1} 段。`,
         `主题：${project.topic}。`,
-        `口播：${text}`,
-        '画面要求：现代、干净、真实感、可用于房产知识类短视频。',
-        '禁止：不要编造具体楼盘、户型、价格、学校、交通、周边、收益率。',
-        '只生成通用城市/生活/看房/资料核验氛围镜头。',
+        `画面只表现通用房产咨询、城市生活、资料核验氛围，不出现任何文字。`,
+        '画面要求：竖屏9:16、铺满画面、现代、干净、真实感、可用于房产知识类短视频。no text, no subtitles, no captions, no logo, no watermark.',
+        '禁止：不要出现任何文字、字幕、logo、水印、UI、招牌、价格、楼盘名；不要编造具体楼盘、户型、价格、学校、交通、周边、收益率。',
+        '只生成竖屏 9:16 通用城市/生活/看房/资料核验氛围镜头，画面必须铺满竖屏，不要黑边。',
       ].join('\n'),
       shot_hint: index === 0 ? 'hook_city_lifestyle' : index === groups.length - 1 ? 'call_to_action' : 'explain_detail',
       source_segments: group.map((seg) => seg.index),
@@ -570,4 +570,59 @@ export async function pollFullAiJob(
   }
 
   throw new Error('轮询超时：任务可能还在后台生成，请稍后到任务历史查看。')
+}
+
+
+export async function generateAIScriptPlan(project: ProjectDraft, dryRun = false): Promise<any> {
+  return apiPost('/api/video/full-ai/script-ai/plan', {
+    market: project.market,
+    platform: project.platform || 'douyin',
+    topic: project.topic,
+    duration_seconds: project.targetDuration,
+    target_customer: project.targetCustomer || '海外房产潜在客户',
+    industry_notes: [
+      '海外房产避坑',
+      '预算、区域、用途三步判断',
+      '首付、贷款、租客来源',
+      '家庭资产配置、第二家园、养老度假',
+      ...(project.contentInsights || []).map((x: any) => x?.topic || x?.script_hook || JSON.stringify(x)).slice(0, 8),
+    ].join('\n'),
+    competitor_notes: [
+      '同行高分账号拆解：痛点标题、反差开头、评论区承接、私域引导',
+      ...(project.competitorNotes ? [project.competitorNotes] : []),
+    ].join('\n'),
+    lead_notes: [
+      ...(project.leads || []).map((x: any) => x?.text || x?.original_text || x?.script_hook || JSON.stringify(x)).slice(0, 8),
+    ].join('\n'),
+    style: '短、狠、直接、口语化、有转化、适合抖音',
+    dry_run: dryRun,
+  }, 180000)
+}
+
+export function projectFromAIScriptPlan(project: ProjectDraft, data: any): ProjectDraft {
+  const script = safeText(data?.script, generateLocalScript(project.topic, project.market, project.targetDuration))
+  const rawSegments = Array.isArray(data?.segments) ? data.segments : []
+
+  const fallbackSegments = splitScriptToSegments(script, project.targetDuration, project.materialSeconds, project.aiShotSeconds)
+  const segments = rawSegments.length
+    ? rawSegments.map((seg: any, i: number) => ({
+        index: i + 1,
+        text: safeText(seg.text, fallbackSegments[i]?.text || ''),
+        duration: safeNumber(seg.duration, fallbackSegments[i]?.duration || 3.8),
+        material: fallbackSegments[i]?.material || `fal.ai 补镜头 ${i + 1}`,
+        edit: safeText(seg.edit, fallbackSegments[i]?.edit || '按语义切镜'),
+      }))
+    : fallbackSegments
+
+  return {
+    ...project,
+    title: safeText(data?.title, project.topic),
+    script,
+    segments,
+    industryAngle: safeText(data?.industry_angle, project.industryAngle),
+    hook: safeText(data?.hook, project.hook),
+    cta: safeText(data?.cta, project.cta),
+    riskNote: safeText(data?.risk_note, project.riskNote),
+    scriptProvider: data?.provider || 'unknown',
+  }
 }

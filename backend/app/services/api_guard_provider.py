@@ -112,6 +112,7 @@ def _is_internal_backend_call(headers: dict[str, str], client_ip: str = "") -> b
     )
 
 WRITE_PROTECTED_PREFIXES = (
+    "/api/video/full-ai/script-ai/plan",
     "/api/video/full-ai/start",
     "/api/video/fal/shot/start",
     "/api/video/fal/storyboard/start",

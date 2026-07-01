@@ -3808,6 +3808,16 @@ def _run_full_ai_pipeline(job_id: str, req: _FullAIVideoRequest):
     job["updated_at"] = _full_ai_time.time()
 
     try:
+        # FULL_AI_SANITIZE_SHOTS_BEFORE_FAL
+        try:
+            _topic_for_visual = str(locals().get("title") or locals().get("topic") or "")
+            _shots_for_visual = locals().get("shots") or []
+            for _i, _shot in enumerate(_shots_for_visual, start=1):
+                if isinstance(_shot, dict):
+                    _shot["prompt"] = _ai_video_visual_prompt(_shot.get("prompt", ""), _topic_for_visual, _i)
+                    _shot["negative_prompt"] = AI_VIDEO_NEGATIVE_PROMPT
+        except Exception as _quality_exc:
+            print("FULL_AI_SANITIZE_SHOTS_BEFORE_FAL_FAILED", _quality_exc)
         storyboard_payload = {
             "title": req.title,
             "mode": req.mode,
@@ -5572,3 +5582,54 @@ try:
 except Exception as _cors_exc:
     print("FRONTEND_CORS_HOTFIX_FAILED", _cors_exc)
 # ===== /FRONTEND CORS HOTFIX =====
+
+
+# ===== FULL AI VISUAL QUALITY HOTFIX =====
+AI_VIDEO_VERTICAL_QUALITY_RULE = """
+Vertical 9:16 short video, full-screen composition, no black bars.
+Realistic clean real-estate/lifestyle B-roll.
+No text, no subtitles, no captions, no Chinese characters, no English words,
+no logo, no watermark, no UI, no signs, no price tag, no floorplan text.
+Do not invent specific property, project name, price, school, transport or ROI.
+Only generic atmosphere: city street, condo exterior, hands checking documents,
+consultation scene, lifestyle, skyline, neutral office, property viewing mood.
+"""
+
+AI_VIDEO_NEGATIVE_PROMPT = (
+    "text, subtitles, captions, words, letters, chinese characters, english words, "
+    "logo, watermark, typography, signboard, price, numbers, UI, poster, banner, "
+    "deformed hands, distorted face, extra fingers, low quality, blurry"
+)
+
+def _ai_video_visual_prompt(prompt: str = "", topic: str = "", index: int = 1) -> str:
+    # 不把口播文案喂给视频模型，避免模型把文案画成乱码。
+    base = str(prompt or "")
+    topic = str(topic or "")
+
+    visual_seed = "real estate consultation, city lifestyle, property documents, modern condo atmosphere"
+    if "区域" in base or "city" in base.lower():
+        visual_seed = "modern Southeast Asian city skyline, street, condo exterior, lifestyle atmosphere"
+    elif "预算" in base or "价格" in base or "price" in base.lower():
+        visual_seed = "hands reviewing property documents and calculator, clean office, realistic"
+    elif "出租" in base or "投资" in base or "rent" in base.lower():
+        visual_seed = "apartment exterior, rental lifestyle scene, city commute, realistic"
+    elif "家庭" in base or "养老" in base:
+        visual_seed = "family lifestyle, clean residential neighborhood, warm realistic atmosphere"
+
+    return (
+        f"{AI_VIDEO_VERTICAL_QUALITY_RULE}\n"
+        f"Shot {index}: {visual_seed}.\n"
+        f"Topic mood: {topic[:80]}.\n"
+        f"Camera: vertical 9:16, medium shot, slow push-in, clean lighting, realistic, cinematic.\n"
+        f"Negative prompt: {AI_VIDEO_NEGATIVE_PROMPT}"
+    )
+# ===== /FULL AI VISUAL QUALITY HOTFIX =====
+
+
+# ===== FULL AI SCRIPT AI PROVIDER HOTFIX =====
+try:
+    from app.services.full_ai_script_ai_provider import router as full_ai_script_ai_router
+    app.include_router(full_ai_script_ai_router)
+except Exception as _full_ai_script_ai_exc:
+    print("FULL_AI_SCRIPT_AI_PROVIDER_LOAD_FAILED", _full_ai_script_ai_exc)
+# ===== /FULL AI SCRIPT AI PROVIDER HOTFIX =====
