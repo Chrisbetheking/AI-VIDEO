@@ -249,3 +249,104 @@ def safe_error(e: Exception) -> Dict[str, Any]:
 
 def make_job_id(prefix: str = "fal_video") -> str:
     return prefix + "_" + uuid.uuid4().hex[:18]
+
+
+
+# ===== HARD OVERRIDE MALAYSIA REAL ESTATE FAL PROMPTS =====
+def _hard_malaysia_real_estate_prompt(index: int = 1) -> str:
+    scenes = [
+        "KLCC Twin Towers skyline with luxury high-rise condominium in the foreground, Kuala Lumpur premium real estate commercial, vertical 9:16 cinematic video",
+        "Kuala Lumpur city-view luxury condo balcony overlooking the Petronas Twin Towers, premium Malaysia property lifestyle, vertical 9:16",
+        "modern luxury condo living room with floor-to-ceiling windows and KLCC skyline outside, high-end real estate commercial, vertical 9:16",
+        "premium condominium lobby in Kuala Lumpur, elegant residential atmosphere, luxury property marketing video, vertical 9:16",
+        "infinity pool on a high-rise condo rooftop with Kuala Lumpur skyline and residential towers, premium Malaysia condo lifestyle, vertical 9:16",
+        "TRX financial district and luxury residential towers in Kuala Lumpur, cinematic city lifestyle, vertical 9:16",
+        "Mont Kiara upscale condominium neighborhood, family-friendly premium residential lifestyle, vertical 9:16",
+        "Penang ocean-view condominium balcony with elegant seaside second-home lifestyle, Malaysia real estate commercial, vertical 9:16",
+        "Langkawi tropical villa and resort-style residential pool, premium Malaysia second-home lifestyle, vertical 9:16",
+        "Sabah sunset ocean view with premium seaside apartment atmosphere, Malaysia property lifestyle, vertical 9:16",
+    ]
+    scene = scenes[(int(index) - 1) % len(scenes)]
+    return (
+        scene
+        + ". Ultra realistic, premium real estate commercial style, natural lighting, clean composition, high detail, smooth camera movement. "
+        + "No readable text, no logo, no watermark, no fake project name, no exact price, no exact ROI, no exact school name, no black borders."
+    )
+
+
+def _hard_rewrite_fal_arguments_for_malaysia(arguments):
+    try:
+        if not isinstance(arguments, dict):
+            return arguments
+
+        # 单镜头
+        if isinstance(arguments.get("prompt"), str):
+            arguments["prompt"] = _hard_malaysia_real_estate_prompt(1)
+
+        # 多镜头 storyboard
+        shots = arguments.get("shots")
+        if isinstance(shots, list):
+            for i, shot in enumerate(shots, start=1):
+                if isinstance(shot, dict):
+                    shot["prompt"] = _hard_malaysia_real_estate_prompt(i)
+
+        # 常见比例字段
+        for k in ("aspect_ratio", "ratio"):
+            if k in arguments:
+                arguments[k] = "9:16"
+        if "width" in arguments:
+            arguments["width"] = 1080
+        if "height" in arguments:
+            arguments["height"] = 1920
+
+        # 打日志，后面我们直接看最终到底喂给 fal 什么
+        try:
+            import json
+            print("MALAYSIA_FAL_FINAL_ARGUMENTS=" + json.dumps(arguments, ensure_ascii=False)[:3000])
+        except Exception:
+            pass
+
+    except Exception as exc:
+        print("MALAYSIA_FAL_HARD_REWRITE_FAILED", exc)
+
+    return arguments
+
+
+try:
+    import fal_client as _ai_video_fal_client_for_patch
+
+    if not getattr(_ai_video_fal_client_for_patch, "_malaysia_prompt_hard_patched", False):
+        if hasattr(_ai_video_fal_client_for_patch, "submit"):
+            _orig_submit = _ai_video_fal_client_for_patch.submit
+
+            def _malaysia_submit_patch(*args, **kwargs):
+                if "arguments" in kwargs:
+                    kwargs["arguments"] = _hard_rewrite_fal_arguments_for_malaysia(kwargs.get("arguments"))
+                elif len(args) >= 2 and isinstance(args[1], dict):
+                    args = list(args)
+                    args[1] = _hard_rewrite_fal_arguments_for_malaysia(args[1])
+                    args = tuple(args)
+                return _orig_submit(*args, **kwargs)
+
+            _ai_video_fal_client_for_patch.submit = _malaysia_submit_patch
+
+        if hasattr(_ai_video_fal_client_for_patch, "run"):
+            _orig_run = _ai_video_fal_client_for_patch.run
+
+            def _malaysia_run_patch(*args, **kwargs):
+                if "arguments" in kwargs:
+                    kwargs["arguments"] = _hard_rewrite_fal_arguments_for_malaysia(kwargs.get("arguments"))
+                elif len(args) >= 2 and isinstance(args[1], dict):
+                    args = list(args)
+                    args[1] = _hard_rewrite_fal_arguments_for_malaysia(args[1])
+                    args = tuple(args)
+                return _orig_run(*args, **kwargs)
+
+            _ai_video_fal_client_for_patch.run = _malaysia_run_patch
+
+        _ai_video_fal_client_for_patch._malaysia_prompt_hard_patched = True
+        print("MALAYSIA_FAL_HARD_PROMPT_PATCH_INSTALLED")
+except Exception as _fal_patch_exc:
+    print("MALAYSIA_FAL_HARD_PROMPT_PATCH_LOAD_FAILED", _fal_patch_exc)
+# ===== /HARD OVERRIDE MALAYSIA REAL ESTATE FAL PROMPTS =====
+
