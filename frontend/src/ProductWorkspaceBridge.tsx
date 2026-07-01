@@ -1,5 +1,5 @@
+import VideoCreationWizard from './VideoCreationWizard'
 import React, { useEffect, useMemo, useState } from 'react'
-import PureAIVideoPath from './PureAIVideoPath'
 import DouyinAccountLibrary from './DouyinAccountLibrary'
 import OpenClawWorkbench from './OpenClawWorkbench'
 import {
@@ -286,7 +286,7 @@ export default function ProductWorkspaceBridge() {
         </header>
 
         <main className="aiw-body">
-          {tab === 'pureai' && <PureAIVideoPath project={project} setProject={setProject} goTab={open} />}
+          {tab === 'pureai' && <VideoCreationWizard />}
           {tab === 'collect' && <DouyinAccountLibrary project={project} setProject={setProject} goTab={open} />}
           {tab === 'leads' && <OpenClawWorkbench project={project} setProject={setProject} goTab={open} />}
           {tab === 'digital' && <DigitalHumanPanel project={project} setProject={setProject} goTab={open} />}
