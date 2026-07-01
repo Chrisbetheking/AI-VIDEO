@@ -7,11 +7,7 @@ export function getApiToken(): string {
     localStorage.setItem(TOKEN_KEY, fromUrl.trim())
     return fromUrl.trim()
   }
-  return (
-    localStorage.getItem(TOKEN_KEY) ||
-    (import.meta as any).env?.VITE_AI_VIDEO_API_TOKEN ||
-    ''
-  ).trim()
+  return (localStorage.getItem(TOKEN_KEY) || (import.meta as any).env?.VITE_AI_VIDEO_API_TOKEN || '').trim()
 }
 
 export function saveApiToken(token: string) {
@@ -20,15 +16,24 @@ export function saveApiToken(token: string) {
   else localStorage.removeItem(TOKEN_KEY)
 }
 
+function parseResponse(text: string) {
+  try {
+    return text ? JSON.parse(text) : {}
+  } catch {
+    return { raw: text }
+  }
+}
+
 export async function apiGet(path: string): Promise<any> {
   const token = getApiToken()
   const headers: Record<string, string> = {}
   if (token) headers['X-AI-Video-Token'] = token
   const res = await fetch(`${API_BASE}${path}`, { headers })
-  const text = await res.text()
-  let data: any = {}
-  try { data = text ? JSON.parse(text) : {} } catch { data = { raw: text } }
-  if (!res.ok) throw new Error(data?.detail || data?.message || `HTTP ${res.status}`)
+  const data = parseResponse(await res.text())
+  if (!res.ok) {
+    if (res.status === 401) throw new Error('缺少或错误的 AI-VIDEO API Token：请在页面 Token 设置里保存后重试。')
+    throw new Error(data?.detail || data?.message || `HTTP ${res.status}`)
+  }
   return data
 }
 
@@ -41,10 +46,11 @@ export async function apiPost(path: string, body: any): Promise<any> {
     headers,
     body: JSON.stringify(body),
   })
-  const text = await res.text()
-  let data: any = {}
-  try { data = text ? JSON.parse(text) : {} } catch { data = { raw: text } }
-  if (!res.ok) throw new Error(data?.detail || data?.message || `HTTP ${res.status}`)
+  const data = parseResponse(await res.text())
+  if (!res.ok) {
+    if (res.status === 401) throw new Error('缺少或错误的 AI-VIDEO API Token：请在页面 Token 设置里保存后重试。')
+    throw new Error(data?.detail || data?.message || `HTTP ${res.status}`)
+  }
   return data
 }
 
