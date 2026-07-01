@@ -1,1 +1,342 @@
-.productExtraPanelRoot,.douyinSideDock,.openclawWorkbench,.douyinAccountLibrary{display:none!important}.internalDigitalHumanConsentHidden{display:none!important}.workspaceOverlay{position:fixed;inset:0;z-index:99999;background:rgba(15,23,42,.58);backdrop-filter:blur(5px);padding:28px;box-sizing:border-box}.workspaceShell{height:100%;background:#eef4ff;border:1px solid rgba(148,163,184,.5);border-radius:26px;overflow:hidden;box-shadow:0 32px 80px rgba(15,23,42,.38);display:flex;flex-direction:column}.workspaceHeader{height:88px;background:#fff;border-bottom:1px solid #dbe6f7;display:flex;justify-content:space-between;align-items:center;padding:0 28px;gap:18px}.workspaceHeader p{margin:0 0 6px;color:#2563eb;font-weight:900;letter-spacing:.08em}.workspaceHeader h1{margin:0;font-size:26px;color:#0f172a}.workspaceHeaderActions{display:flex;align-items:center;gap:10px;flex-wrap:wrap}.workspaceTopBtn,.workspaceCloseBtn{border:0;border-radius:14px;padding:12px 16px;font-weight:900;cursor:pointer;background:#2563eb;color:#fff}.workspaceTopBtn.active{background:#0f172a}.workspaceCloseBtn{background:#e8eef8;color:#0f172a}.workspaceTokenBox{position:relative}.workspaceTokenDrop{position:absolute;right:0;top:54px;width:360px;background:#fff;border:1px solid #cbd5e1;border-radius:18px;padding:14px;box-shadow:0 20px 45px rgba(15,23,42,.18);z-index:2}.workspaceTokenDrop label{display:block;font-weight:900;color:#334155;margin-bottom:8px}.workspaceTokenDrop input{width:100%;box-sizing:border-box;border:1px solid #cbd5e1;border-radius:12px;padding:11px}.workspaceTokenActions{display:flex;gap:8px;margin-top:10px}.workspaceTokenActions button{border:0;border-radius:10px;background:#2563eb;color:#fff;font-weight:900;padding:9px 12px}.workspaceTokenDrop p{margin:8px 0 0;color:#64748b;font-size:12px}.workspaceBody{overflow:auto;padding:26px}.workspacePanel{max-width:1320px;margin:0 auto 24px}.panelHero{border:1px solid #d9e7ff;background:#fff;border-radius:22px;padding:24px;display:flex;justify-content:space-between;gap:18px;align-items:flex-start;margin-bottom:22px}.panelHero p{margin:0 0 8px;font-weight:900;letter-spacing:.1em;color:#2563eb}.panelHero h2{font-size:29px;margin:0 0 12px;color:#0f172a}.panelHero span{display:block;color:#52627a;line-height:1.7}.panelHero b{border-radius:999px;padding:10px 14px;white-space:nowrap}.redHero b{background:#fee2e2;color:#991b1b}.greenHero b{background:#dcfce7;color:#166534}.aiHero b{background:#ede9fe;color:#5b21b6}.modeSwitch,.buttonRow{display:flex;gap:12px;flex-wrap:wrap;margin:16px 0}.modeSwitch button,.buttonRow button,.productBtn{border:0;border-radius:14px;background:#2563eb;color:#fff;padding:12px 17px;font-weight:900;cursor:pointer}.modeSwitch button.active,.buttonRow button.green{background:#0f766e}.modeSwitch button.red,.buttonRow button.red{background:#dc2626}.buttonRow button.purple{background:#7c3aed}.buttonRow button:disabled{opacity:.55;cursor:not-allowed}.inputGrid{display:grid;gap:14px;margin:16px 0}.inputGrid.two{grid-template-columns:repeat(2,minmax(0,1fr))}.inputGrid.four{grid-template-columns:repeat(4,minmax(0,1fr))}.inputGrid.five{grid-template-columns:repeat(5,minmax(0,1fr))}.inputGrid label,.wideLabel{display:flex;flex-direction:column;gap:8px;font-weight:900;color:#334155}.inputGrid input,.wideLabel textarea,.captureTextArea{border:1px solid #c7d7eb;border-radius:14px;background:#fff;padding:13px;font-size:15px;box-sizing:border-box}.wideLabel textarea,.captureTextArea{width:100%;min-height:150px;resize:vertical;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;line-height:1.65}.estimateStrip{display:flex;align-items:center;gap:16px;justify-content:space-between;border:1px solid #d9e7ff;background:#eef6ff;border-radius:18px;padding:16px 18px;margin:16px 0;flex-wrap:wrap}.estimateStrip b{color:#1d4ed8}.estimateStrip span{color:#475569}.statusBoard{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;margin:18px 0}.statusTile{background:#fff;border:1px solid #dbe6f7;border-radius:18px;padding:18px}.statusTile b{display:block;font-size:28px;color:#0f172a}.statusTile span{display:block;color:#64748b;font-weight:900}.leadPipeline,.productCardGrid,.planGrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-top:16px}.planGrid{grid-template-columns:repeat(3,minmax(0,1fr))}.leadCard,.productCard,.planCard{border:1px solid #dbe6f7;background:#fff;border-radius:18px;padding:16px}.leadTop{display:flex;justify-content:space-between;gap:10px}.leadTop span,.planCard em{border-radius:999px;background:#eff6ff;color:#1d4ed8;padding:4px 8px;font-style:normal;font-weight:900}.leadCard p,.productCard p,.planCard p{color:#334155;line-height:1.65}.leadStatusRow{display:flex;gap:8px;flex-wrap:wrap}.leadStatusRow em{font-style:normal;background:#f1f5f9;border-radius:999px;padding:5px 8px;color:#475569;font-weight:800}.replyBox{background:#f0fdf4;color:#166534!important;border-radius:12px;padding:10px}.warnBox{background:#fffbeb;color:#92400e!important;border-radius:12px;padding:10px}.hookBox{background:#f5f3ff;color:#5b21b6!important;border-radius:12px;padding:10px;font-weight:900}.productNotice,.productError{margin:12px 0;padding:13px 15px;border-radius:14px;font-weight:900}.productNotice{background:#dbeafe;color:#1d4ed8}.productError{background:#fee2e2;color:#991b1b}.productJsonBox{margin-top:16px}.productJsonBox summary{font-weight:900;color:#2563eb;cursor:pointer}.productJsonBox pre,.miniPre{white-space:pre-wrap;word-break:break-word;background:#0f172a;color:#e2e8f0;border-radius:14px;padding:14px;font-size:12px;line-height:1.65;overflow:auto}.wide{grid-column:1/-1}@media(max-width:920px){.workspaceOverlay{padding:8px}.workspaceHeader{height:auto;align-items:flex-start;flex-direction:column;padding:16px}.workspaceHeaderActions{width:100%}.workspaceBody{padding:14px}.inputGrid.two,.inputGrid.four,.inputGrid.five,.statusBoard,.leadPipeline,.productCardGrid,.planGrid{grid-template-columns:1fr}.panelHero{flex-direction:column}}
+/* AI-VIDEO product UX v6: no bottom append, modal-only workspaces */
+#douyin-account-library-root,
+#openclaw-workbench-root,
+.productExtraPanelRoot {
+  display: none !important;
+}
+
+.uxOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background: rgba(15, 23, 42, 0.58);
+  backdrop-filter: blur(8px);
+  padding: 28px;
+  overflow: auto;
+  box-sizing: border-box;
+}
+
+.uxModal {
+  max-width: 1560px;
+  min-height: calc(100vh - 56px);
+  margin: 0 auto;
+  border-radius: 24px;
+  background: #f6f9ff;
+  border: 1px solid rgba(148, 163, 184, 0.45);
+  box-shadow: 0 30px 90px rgba(15, 23, 42, 0.28);
+  overflow: hidden;
+}
+
+.uxModalHeader {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+  align-items: center;
+  padding: 18px 26px;
+  background: #fff;
+  border-bottom: 1px solid #dbe5f6;
+}
+
+.uxModalHeader p {
+  margin: 0 0 6px;
+  color: #2563eb;
+  font-weight: 900;
+  letter-spacing: .08em;
+  font-size: 13px;
+}
+
+.uxModalHeader h1 {
+  margin: 0;
+  color: #0f172a;
+  font-size: 26px;
+}
+
+.uxHeaderActions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.uxHeaderActions button,
+.uxButtonRow button,
+.uxTokenBar button {
+  border: 0;
+  border-radius: 14px;
+  padding: 11px 16px;
+  color: #fff;
+  background: #2563eb;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.uxHeaderActions button.active,
+.uxButtonRow button.active {
+  background: #0f172a;
+}
+
+.uxHeaderActions .close,
+.uxTokenBar .ghost {
+  background: #e2e8f0;
+  color: #0f172a;
+}
+
+.uxButtonRow button.danger,
+.uxBadge.danger {
+  background: #dc2626;
+  color: #fff;
+}
+
+.uxTokenBar {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 12px;
+  align-items: end;
+  padding: 14px 26px;
+  background: #eff6ff;
+  border-bottom: 1px solid #dbe5f6;
+}
+
+.uxTokenBar label,
+.uxGrid4 label,
+.uxBox {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  color: #334155;
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.uxTokenBar input,
+.uxGrid4 input,
+.uxGrid4 select,
+.uxBox textarea,
+.uxBigText {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid #cbd5e1;
+  border-radius: 14px;
+  padding: 12px 14px;
+  background: #fff;
+  color: #0f172a;
+  font: inherit;
+}
+
+.uxModalBody {
+  padding: 26px;
+}
+
+.uxPanelCard {
+  max-width: 1280px;
+  margin: 0 auto 26px;
+  padding: 24px;
+  border-radius: 24px;
+  background: #fff;
+  border: 1px solid #dbe5f6;
+  box-shadow: 0 18px 40px rgba(15, 23, 42, .06);
+}
+
+.uxHeroRow {
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+  align-items: flex-start;
+  margin-bottom: 20px;
+}
+
+.uxEyebrow {
+  margin: 0 0 6px;
+  color: #2563eb !important;
+  font-size: 13px;
+  font-weight: 900;
+  letter-spacing: .08em;
+}
+
+.uxHeroRow h2 {
+  margin: 0 0 10px;
+  color: #0f172a;
+  font-size: 28px;
+}
+
+.uxHeroRow p {
+  margin: 0;
+  color: #475569;
+  line-height: 1.7;
+}
+
+.uxBadge {
+  white-space: nowrap;
+  border-radius: 999px;
+  padding: 9px 14px;
+  background: #dcfce7;
+  color: #166534;
+  font-weight: 900;
+}
+
+.uxGrid4 {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+  margin: 16px 0;
+}
+
+.uxGrid3 {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.uxSplit {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin: 16px 0;
+}
+
+.uxButtonRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 16px 0;
+}
+
+.uxCheck,
+.uxInlineCheck {
+  flex-direction: row !important;
+  align-items: center;
+  gap: 8px !important;
+}
+
+.uxInlineCheck {
+  display: inline-flex;
+  margin-left: 18px;
+  color: #9a3412;
+  font-weight: 900;
+}
+
+.uxNotice,
+.uxError {
+  margin: 14px 0;
+  padding: 13px 15px;
+  border-radius: 16px;
+  font-weight: 800;
+}
+
+.uxNotice {
+  background: #eff6ff;
+  color: #1d4ed8;
+  border: 1px dashed #bfdbfe;
+}
+
+.uxError {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.uxStatsRow {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+  margin: 18px 0;
+}
+
+.uxStat,
+.uxBox,
+.uxLeadCard {
+  border: 1px solid #dbe5f6;
+  border-radius: 18px;
+  background: #fff;
+  padding: 16px;
+}
+
+.uxStat b {
+  display: block;
+  color: #0f172a;
+  font-size: 28px;
+}
+
+.uxStat span,
+.uxStat p {
+  color: #64748b;
+  margin: 4px 0 0;
+}
+
+.uxBox h3 {
+  margin: 0 0 10px;
+}
+
+.uxBox pre,
+.uxJson {
+  white-space: pre-wrap;
+  word-break: break-word;
+  border-radius: 14px;
+  background: #0f172a;
+  color: #e2e8f0;
+  padding: 14px;
+  line-height: 1.65;
+  overflow-x: auto;
+}
+
+.uxBigText {
+  min-height: 170px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  line-height: 1.65;
+}
+
+.uxMiniRow,
+.uxLeadCard {
+  margin: 10px 0;
+}
+
+.uxMiniRow b,
+.uxLeadCard b {
+  color: #0f172a;
+}
+
+.uxMiniRow span,
+.uxLeadCard span {
+  display: inline-block;
+  margin-left: 8px;
+  color: #2563eb;
+  font-weight: 900;
+}
+
+.uxMiniRow p,
+.uxLeadCard p {
+  color: #475569;
+  line-height: 1.65;
+}
+
+.uxMiniRow em,
+.uxLeadCard em,
+.uxLeadCard strong {
+  display: block;
+  margin-top: 8px;
+  font-style: normal;
+  color: #166534;
+  font-weight: 800;
+}
+
+.uxCards {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+/* 尽量把左侧导航变紧凑一些，不破坏主流程 */
+body.ai-video-compact-sidebar aside,
+body.ai-video-compact-sidebar nav {
+  scrollbar-width: thin;
+}
+
+@media (max-width: 900px) {
+  .uxOverlay { padding: 10px; }
+  .uxModal { min-height: calc(100vh - 20px); border-radius: 18px; }
+  .uxModalHeader, .uxHeroRow { flex-direction: column; align-items: stretch; }
+  .uxHeaderActions { justify-content: flex-start; }
+  .uxTokenBar, .uxGrid4, .uxGrid3, .uxSplit, .uxStatsRow, .uxCards { grid-template-columns: 1fr; }
+}

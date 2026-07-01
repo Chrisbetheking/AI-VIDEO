@@ -1,19 +1,17 @@
 export const API_BASE = 'https://ai-video.47-76-143-158.sslip.io'
 export const TOKEN_KEY = 'ai_video_api_token'
 
-export function getAiVideoToken(): string {
+export function getStoredToken(): string {
   return localStorage.getItem(TOKEN_KEY) || ''
 }
 
-export function saveAiVideoToken(token: string) {
-  const value = String(token || '').trim()
-  if (value) localStorage.setItem(TOKEN_KEY, value)
-  window.dispatchEvent(new Event('ai-video-token-updated'))
+export function setStoredToken(token: string) {
+  const clean = token.trim()
+  if (clean) localStorage.setItem(TOKEN_KEY, clean)
 }
 
-export function clearAiVideoToken() {
+export function clearStoredToken() {
   localStorage.removeItem(TOKEN_KEY)
-  window.dispatchEvent(new Event('ai-video-token-updated'))
 }
 
 export function maskToken(token: string) {
@@ -22,53 +20,48 @@ export function maskToken(token: string) {
   return `${token.slice(0, 4)}****${token.slice(-4)}`
 }
 
-function requireToken() {
-  const token = getAiVideoToken()
-  if (!token) throw new Error('缺少 AI-VIDEO API Token。请先在右上角 Token 里保存。')
-  return token
-}
+export async function apiRequest(path: string, options: RequestInit = {}) {
+  const token = getStoredToken()
+  const headers = new Headers(options.headers || {})
+  if (!headers.has('Content-Type') && options.body) headers.set('Content-Type', 'application/json')
+  if (token) headers.set('X-AI-Video-Token', token)
 
-export async function apiGet(path: string): Promise<any> {
-  const res = await fetch(`${API_BASE}${path}`, {
-    headers: { 'X-AI-Video-Token': requireToken() },
-  })
+  const res = await fetch(`${API_BASE}${path}`, { ...options, headers })
   const text = await res.text()
   let data: any = {}
-  try { data = text ? JSON.parse(text) : {} } catch { data = { raw: text } }
-  if (!res.ok) throw new Error(data?.detail || data?.message || `HTTP ${res.status}`)
+  try {
+    data = text ? JSON.parse(text) : {}
+  } catch {
+    data = { raw: text }
+  }
+
+  if (!res.ok) {
+    const message = data?.detail || data?.message || data?.raw || `HTTP ${res.status}`
+    throw new Error(String(message))
+  }
   return data
 }
 
-export async function apiPost(path: string, body: any): Promise<any> {
-  const res = await fetch(`${API_BASE}${path}`, {
+export function apiGet(path: string) {
+  return apiRequest(path)
+}
+
+export function apiPost(path: string, body: any) {
+  return apiRequest(path, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-AI-Video-Token': requireToken(),
-    },
     body: JSON.stringify(body || {}),
   })
-  const text = await res.text()
-  let data: any = {}
-  try { data = text ? JSON.parse(text) : {} } catch { data = { raw: text } }
-  if (!res.ok) throw new Error(data?.detail || data?.message || `HTTP ${res.status}`)
-  return data
 }
 
-export async function apiPostFirst(paths: string[], body: any): Promise<any> {
-  let last: unknown = null
+export async function tryPost(paths: string[], body: any) {
+  let lastError: unknown = null
   for (const path of paths) {
     try {
-      return await apiPost(path, body)
-    } catch (e: any) {
-      last = e
-      const msg = String(e?.message || e || '')
-      if (!msg.includes('404') && !msg.includes('Not Found') && !msg.includes('405')) throw e
+      const data = await apiPost(path, body)
+      return { ok: true, path, data }
+    } catch (err) {
+      lastError = err
     }
   }
-  throw last instanceof Error ? last : new Error(String(last || '所有接口都不可用'))
-}
-
-export function copyJson(data: any) {
-  navigator.clipboard?.writeText(JSON.stringify(data, null, 2)).catch(() => {})
+  throw lastError instanceof Error ? lastError : new Error(String(lastError || '请求失败'))
 }

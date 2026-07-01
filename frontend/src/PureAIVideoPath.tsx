@@ -1,149 +1,183 @@
 import React, { useMemo, useState } from 'react'
-import { apiPost, copyJson } from './aiVideoApi'
+import { apiPost, tryPost } from './aiVideoApi'
 
-type ShotPlan = {
-  index: number
-  start: number
-  end: number
-  duration: number
-  text: string
-  source: string
-  edit: string
+function splitLines(text: string) {
+  return text.split(/[\n。！？!?]+/).map((x) => x.trim()).filter(Boolean)
 }
 
-function splitTextByCount(text: string, count: number) {
-  const clean = text.replace(/\s+/g, ' ').trim()
-  if (!clean) return []
-  const size = Math.max(16, Math.ceil(clean.length / count))
-  const out: string[] = []
-  for (let i = 0; i < clean.length; i += size) out.push(clean.slice(i, i + size))
-  return out.slice(0, count)
+function estimateWords(seconds: number) {
+  return Math.max(30, Math.round(seconds * 4.2))
+}
+
+function estimateSegments(seconds: number) {
+  return Math.max(3, Math.ceil(seconds / 4.5))
+}
+
+function estimateShots(seconds: number, materialSeconds: number, shotSeconds: number) {
+  const missing = Math.max(0, seconds - materialSeconds)
+  return Math.ceil(missing / Math.max(3, shotSeconds || 5))
 }
 
 export default function PureAIVideoPath() {
   const [market, setMarket] = useState('马来西亚')
-  const [platform, setPlatform] = useState('douyin')
-  const [duration, setDuration] = useState(35)
-  const [materialSeconds, setMaterialSeconds] = useState(18)
-  const [singleClipSeconds, setSingleClipSeconds] = useState(6)
-  const [topic, setTopic] = useState('第二家园怎么选？不要只看房价，要看身份、教育、养老和资产配置。')
-  const [mode, setMode] = useState<'pure_ai' | 'material_plus_ai'>('pure_ai')
+  const [topic, setTopic] = useState('马来西亚买房，别只看价格')
+  const [targetSeconds, setTargetSeconds] = useState(28)
+  const [selectedMaterialSeconds, setSelectedMaterialSeconds] = useState(0)
+  const [singleMaterialSeconds, setSingleMaterialSeconds] = useState(7)
+  const [needFal, setNeedFal] = useState(true)
   const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
   const [result, setResult] = useState<any>(null)
 
   const plan = useMemo(() => {
-    const seconds = Math.max(8, Math.min(180, Number(duration) || 35))
-    const material = Math.max(0, Number(materialSeconds) || 0)
-    const clip = Math.max(3, Math.min(10, Number(singleClipSeconds) || 6))
-    const targetChars = Math.round(seconds * 4.2)
-    const voiceSegments = Math.max(3, Math.min(30, Math.ceil(seconds / 4.5)))
-    const baseParts = splitTextByCount(topic, voiceSegments)
-    const shotCount = Math.max(1, Math.ceil(seconds / clip))
-    const materialShotCount = Math.min(shotCount, Math.ceil(material / clip))
-    const needFalSeconds = Math.max(0, seconds - material)
-    const falShotCount = Math.ceil(needFalSeconds / clip)
-    const shots: ShotPlan[] = []
-    let cursor = 0
-    for (let i = 0; i < shotCount; i += 1) {
-      const shotDur = Math.min(clip, seconds - cursor)
-      if (shotDur <= 0) break
-      const isMaterial = mode === 'material_plus_ai' && i < materialShotCount
-      shots.push({
-        index: i + 1,
-        start: Number(cursor.toFixed(2)),
-        end: Number((cursor + shotDur).toFixed(2)),
-        duration: Number(shotDur.toFixed(2)),
-        text: baseParts[i % Math.max(1, baseParts.length)] || topic,
-        source: mode === 'pure_ai' ? 'fal.ai 生成镜头' : isMaterial ? '已选素材剪辑' : 'fal.ai 补足镜头',
-        edit: i === 0 ? '强钩子，快切进入主题' : i === shotCount - 1 ? '结尾收口，留私信/评论筛选问题' : '按口播情绪切换，风险点慢一点，结果点快一点',
-      })
-      cursor += shotDur
-    }
-    return { seconds, material, clip, targetChars, voiceSegments, shotCount, materialShotCount, needFalSeconds, falShotCount, shots }
-  }, [duration, materialSeconds, singleClipSeconds, topic, mode])
+    const words = estimateWords(targetSeconds)
+    const segments = estimateSegments(targetSeconds)
+    const missingSeconds = Math.max(0, targetSeconds - selectedMaterialSeconds)
+    const falShots = estimateShots(targetSeconds, selectedMaterialSeconds, singleMaterialSeconds)
+    const segmentSeconds = Number((targetSeconds / segments).toFixed(1))
+    return { words, segments, missingSeconds, falShots, segmentSeconds }
+  }, [targetSeconds, selectedMaterialSeconds, singleMaterialSeconds])
 
-  async function generateVideo() {
-    if (!window.confirm('确认调用生成视频接口？纯 AI 或补镜头会消耗 fal.ai/视频额度。')) return
-    setBusy('生成视频')
+  const generatedScript = useMemo(() => {
+    const lines = [
+      `${topic}，很多人第一步就错了。`,
+      `先看预算和用途，再看区域，不要一上来只问价格。`,
+      `自住看生活半径，投资看租客来源和未来转手。`,
+      `项目、户型、价格和周边必须以官方资料为准。`,
+      `想少踩坑，先把预算、城市和用途说清楚。`,
+    ]
+    return lines.slice(0, Math.max(3, Math.min(lines.length, plan.segments))).join('\n')
+  }, [topic, plan.segments])
+
+  const voicePlan = useMemo(() => {
+    const lines = splitLines(generatedScript)
+    return Array.from({ length: plan.segments }).map((_, index) => {
+      const text = lines[index % lines.length] || topic
+      return {
+        index: index + 1,
+        text,
+        duration: plan.segmentSeconds,
+        material: `素材/AI镜头 ${index + 1}`,
+        edit: index === 0 ? '强钩子快切 + 字幕加粗' : index === plan.segments - 1 ? '收口停顿 + 引导评论/私信' : '按语义切镜 + 轻推拉',
+      }
+    })
+  }, [generatedScript, plan.segments, plan.segmentSeconds, topic])
+
+  async function generateCopyOnly() {
+    setBusy('copy')
     setError('')
     try {
-      const prompt = `平台:${platform}\n市场:${market}\n模式:${mode}\n目标时长:${plan.seconds}秒\n文案目标:${plan.targetChars}字/${plan.voiceSegments}段\n主题:${topic}\n镜头计划:${plan.shots.map((x) => `${x.index}.${x.source}:${x.text}`).join('；')}`
-      const data = await apiPost('/api/video/full-ai/start', {
-        prompt,
+      const payload = {
+        topic,
         market,
-        platform,
-        target_duration: plan.seconds,
-        duration_seconds: plan.seconds,
-        max_shots: Math.min(3, Math.max(1, plan.falShotCount || plan.shotCount)),
-        source: 'pure_ai_or_material_plus_ai_path',
-        generation_mode: mode,
-        material_seconds: plan.material,
-        fal_fill_seconds: plan.needFalSeconds,
-        shot_plan: plan.shots,
-      })
+        duration_seconds: targetSeconds,
+        target_words: plan.words,
+        target_segments: plan.segments,
+        material_seconds: selectedMaterialSeconds,
+        mode: 'pure_ai_or_material_assisted',
+      }
+      const data = await tryPost([
+        '/api/video/copy/generate',
+        '/api/copy/generate',
+        '/api/video/timeline/build',
+      ], payload)
       setResult(data)
-    } catch (e: any) {
-      setError(e?.message || String(e))
+    } catch (err: any) {
+      setResult({ ok: true, local_plan: true, message: '后端文案接口未适配，先使用前端估算方案。', script: generatedScript, voicePlan })
+      setError(err?.message || '')
     } finally {
       setBusy('')
     }
   }
 
-  async function savePlanOnly() {
-    setResult({ ok: true, provider: 'frontend_pure_ai_path_v1', mode, market, platform, topic, plan })
+  async function startFullAi() {
+    if (!needFal && plan.missingSeconds > 0) {
+      setError('素材时长不够，但没有允许 fal.ai 补镜头。')
+      return
+    }
+    if (!window.confirm(`确认生成视频？目标 ${targetSeconds}s，缺口 ${plan.missingSeconds}s，预计 fal.ai 补 ${plan.falShots} 个镜头。`)) return
+    setBusy('full-ai')
+    setError('')
+    try {
+      const payload = {
+        topic,
+        prompt: `${market}房产短视频：${topic}`,
+        market,
+        duration_seconds: targetSeconds,
+        target_duration: targetSeconds,
+        target_words: plan.words,
+        max_shots: Math.max(1, plan.falShots || Math.ceil(targetSeconds / singleMaterialSeconds)),
+        shots: Array.from({ length: Math.max(1, plan.falShots || Math.ceil(targetSeconds / singleMaterialSeconds)) }).map((_, i) => ({
+          text: `${topic}，镜头 ${i + 1}`,
+          duration: singleMaterialSeconds,
+          prompt: `${market} real estate lifestyle b-roll, vertical short video, clean cinematic, no text, shot ${i + 1}`,
+        })),
+        copy: generatedScript,
+        voice_segments: voicePlan,
+        quality_policy: { enabled: true, output_profile: 'vertical_720x1280', fps: 30 },
+        bgm_policy: { music_type: 'instrumental_only', default_bgm_volume: 0.1, ducking_when_voice: true },
+      }
+      const data = await apiPost('/api/video/full-ai/start', payload)
+      setResult(data)
+    } catch (err: any) {
+      setError(err?.message || String(err))
+    } finally {
+      setBusy('')
+    }
   }
 
   return (
-    <section className="workspacePanel">
-      <div className="panelHero aiHero">
+    <section className="uxPanelCard">
+      <div className="uxHeroRow">
         <div>
-          <p>PURE AI VIDEO PATH</p>
-          <h2>纯 AI 生成 / 素材不够自动补镜头</h2>
-          <span>你输入视频时长，系统按时长算文案字数、口播段数、素材是否够用；素材不够就用 fal.ai 补 B-roll。</span>
+          <p className="uxEyebrow">PURE AI VIDEO PATH</p>
+          <h2>纯 AI 生成 / 素材不足自动补镜头</h2>
+          <p>先用视频长度决定文案字数和分段；素材不够时，用 fal.ai 补通用氛围镜头。真实房源、户型、价格和周边不允许 AI 编造。</p>
         </div>
-        <b>两套方案已合并</b>
+        <span className="uxBadge danger">可能调用 fal.ai</span>
       </div>
 
-      <div className="modeSwitch">
-        <button className={mode === 'pure_ai' ? 'active' : ''} onClick={() => setMode('pure_ai')}>方案 A：纯 AI 生成</button>
-        <button className={mode === 'material_plus_ai' ? 'active' : ''} onClick={() => setMode('material_plus_ai')}>方案 B：素材优先 + AI 补足</button>
-      </div>
-
-      <div className="inputGrid four">
+      <div className="uxGrid4">
         <label>市场<input value={market} onChange={(e) => setMarket(e.target.value)} /></label>
-        <label>平台<input value={platform} onChange={(e) => setPlatform(e.target.value)} /></label>
-        <label>视频长度/秒<input type="number" value={duration} onChange={(e) => setDuration(Number(e.target.value || 35))} /></label>
-        <label>单镜头建议/秒<input type="number" value={singleClipSeconds} onChange={(e) => setSingleClipSeconds(Number(e.target.value || 6))} /></label>
-      </div>
-      <div className="inputGrid two">
-        <label>已选素材总时长/秒<input type="number" value={materialSeconds} onChange={(e) => setMaterialSeconds(Number(e.target.value || 0))} /></label>
-        <label>主题 / 文案方向<input value={topic} onChange={(e) => setTopic(e.target.value)} /></label>
+        <label>主题<input value={topic} onChange={(e) => setTopic(e.target.value)} /></label>
+        <label>目标视频长度/秒<input type="number" value={targetSeconds} onChange={(e) => setTargetSeconds(Number(e.target.value || 28))} /></label>
+        <label>已选素材总时长/秒<input type="number" value={selectedMaterialSeconds} onChange={(e) => setSelectedMaterialSeconds(Number(e.target.value || 0))} /></label>
+        <label>单个 AI 镜头秒数<input type="number" value={singleMaterialSeconds} onChange={(e) => setSingleMaterialSeconds(Number(e.target.value || 7))} /></label>
+        <label className="uxCheck"><input type="checkbox" checked={needFal} onChange={(e) => setNeedFal(e.target.checked)} />素材不够时允许 fal.ai 补镜头</label>
       </div>
 
-      <div className="estimateStrip">
-        <b>{plan.seconds} 秒 ≈ {plan.targetChars} 字 / {plan.voiceSegments} 段口播 / {plan.shotCount} 个镜头</b>
-        <span>{mode === 'pure_ai' ? `全部 ${plan.shotCount} 个镜头走 fal.ai。` : plan.needFalSeconds > 0 ? `素材缺 ${plan.needFalSeconds} 秒，需要 fal.ai 补 ${plan.falShotCount} 个镜头。` : '素材时长足够，优先自动剪辑，不必补 fal.ai。'}</span>
+      <div className="uxStatsRow">
+        <div className="uxStat"><b>{plan.words}</b><span>建议文案字数</span></div>
+        <div className="uxStat"><b>{plan.segments}</b><span>口播段数</span></div>
+        <div className="uxStat"><b>{plan.missingSeconds}s</b><span>素材缺口</span></div>
+        <div className="uxStat"><b>{plan.falShots}</b><span>预计 AI 镜头</span></div>
       </div>
 
-      <div className="planGrid">
-        {plan.shots.map((shot) => (
-          <div className="planCard" key={shot.index}>
-            <b>#{shot.index} {shot.start}s - {shot.end}s</b>
-            <em>{shot.source}</em>
-            <p>{shot.text}</p>
-            <span>{shot.edit}</span>
-          </div>
-        ))}
+      <div className="uxButtonRow">
+        <button onClick={generateCopyOnly} disabled={!!busy}>按时长生成文案计划</button>
+        <button className="danger" onClick={startFullAi} disabled={!!busy}>直接生成纯 AI 视频</button>
       </div>
+      {busy && <div className="uxNotice">处理中：{busy}</div>}
+      {error && <div className="uxError">{error}</div>}
 
-      <div className="buttonRow">
-        <button onClick={savePlanOnly} disabled={!!busy}>只生成方案</button>
-        <button className="red" onClick={generateVideo} disabled={!!busy}>直接生成视频</button>
+      <div className="uxSplit">
+        <div className="uxBox">
+          <h3>文案草稿</h3>
+          <pre>{generatedScript}</pre>
+        </div>
+        <div className="uxBox">
+          <h3>配音 / 剪辑分配</h3>
+          {voicePlan.map((x) => (
+            <div className="uxMiniRow" key={x.index}>
+              <b>第{x.index}段 · {x.duration}s</b>
+              <span>{x.material}</span>
+              <p>{x.text}</p>
+              <em>{x.edit}</em>
+            </div>
+          ))}
+        </div>
       </div>
-      {busy && <div className="productNotice">处理中：{busy}</div>}
-      {error && <div className="productError">错误：{error}</div>}
-      {result && <details className="productJsonBox" open><summary>结果</summary><button className="productBtn" onClick={() => copyJson(result)}>复制 JSON</button><pre>{JSON.stringify(result, null, 2)}</pre></details>}
+      {result && <pre className="uxJson">{JSON.stringify(result, null, 2)}</pre>}
     </section>
   )
 }
