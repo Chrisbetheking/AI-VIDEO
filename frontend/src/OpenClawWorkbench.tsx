@@ -1,240 +1,224 @@
 import React, { useMemo, useState } from 'react'
-import { apiPost, errorText, normalizeCsvRows } from './aiVideoApi'
+import { apiPost, computeVideoPlan, csvRows, detailToText, generateLocalScript, ProjectDraft, splitScriptToSegments } from './aiVideoApi'
 
-function lines(text: string) {
-  return String(text || '').split(/\r?\n/).map((x) => x.trim()).filter(Boolean)
+type WorkspaceTab = 'pureai' | 'collect' | 'leads' | 'digital'
+
+type Props = {
+  project: ProjectDraft
+  setProject: (p: ProjectDraft) => void
+  goTab: (tab: WorkspaceTab) => void
 }
 
-function commentsFromCsv(raw: string) {
-  const rows = normalizeCsvRows(raw)
+const sample = `comment_author,comment_text,like_count,reply_count,video_title,platform,url
+用户A,马来西亚买房首付多少？哪个区域适合投资出租？,18,3,马来西亚买房避坑,douyin,https://example.com/video/1
+用户B,海外房产水很深怕踩坑，有没有靠谱核验清单？,9,1,海外房产避坑,douyin,https://example.com/video/2
+用户C,可以私信我吗？想了解预算和贷款。,5,2,第二家园,douyin,https://example.com/video/3`
+
+function normalizeComments(text: string, project: ProjectDraft) {
+  const rows = csvRows(text)
   if (rows.length) {
-    return rows.map((r: any) => ({
-      platform: r.platform || 'douyin',
-      author: r.comment_author || r.author || r.user || '',
-      text: r.comment_text || r.text || r.comment || r.content || r.title || '',
-      like_count: Number(r.like_count || r.likes || 0) || 0,
-      reply_count: Number(r.reply_count || r.replies || r.comments || 0) || 0,
-      video_title: r.video_title || r.title || '',
+    return rows.map((r) => ({
+      platform: r.platform || project.platform || 'douyin',
+      author: r.comment_author || r.author || r.username || '',
+      text: r.comment_text || r.text || r.comment || r.content || '',
+      like_count: Number(r.like_count || r.likes || 0),
+      reply_count: Number(r.reply_count || r.replies || 0),
+      video_title: r.video_title || r.title || project.topic,
       source_url: r.url || r.source_url || '',
-    })).filter((x: any) => x.text)
+    })).filter(x => x.text)
   }
-  return lines(raw).map((text, index) => ({ platform: 'douyin', author: `用户${index + 1}`, text }))
+  return text.split(/\r?\n/).map(x => x.trim()).filter(Boolean).map((line) => ({
+    platform: project.platform || 'douyin',
+    author: '',
+    text: line,
+    like_count: 0,
+    reply_count: 0,
+    video_title: project.topic,
+  }))
 }
 
-function contentRowsFromCsv(raw: string) {
-  const rows = normalizeCsvRows(raw)
-  if (rows.length) {
-    return rows.map((r: any) => ({
-      platform: r.platform || 'douyin',
-      author: r.author || r.account || '',
-      title: r.title || r.video_title || r.desc || '',
-      desc: r.desc || r.description || r.title || '',
-      like_count: Number(r.like_count || r.likes || 0) || 0,
-      comment_count: Number(r.comment_count || r.comments || 0) || 0,
-      share_count: Number(r.share_count || r.shares || 0) || 0,
-      view_count: Number(r.view_count || r.views || 0) || 0,
-      url: r.url || '',
-    })).filter((x: any) => x.title || x.desc)
-  }
-  return []
+function LeadList({ leads }: { leads: any[] }) {
+  if (!leads.length) return <div className="ux-empty">还没有截流结果。先分析评论流。</div>
+  return (
+    <div className="ux-lead-list">
+      {leads.slice(0, 10).map((lead, i) => (
+        <div className="ux-lead" key={lead.lead_id || i}>
+          <div><b>{lead.priority || '线索'} / {lead.lead_score ?? lead.score ?? '-'}</b><span>{lead.capture_angle || lead.buyer_stage || '待判断'}</span></div>
+          <p>{lead.original_text || lead.text}</p>
+          <em>回复建议：{lead.public_reply || lead.reply_draft || '待生成'}</em>
+          <strong>{(lead.priority === 'A' || Number(lead.lead_score || 0) >= 75) ? '需要人工上报/优先跟进' : '可公开回复/沉淀选题'}</strong>
+        </div>
+      ))}
+    </div>
+  )
 }
 
-function estimateChars(seconds: number) {
-  return Math.round(Math.max(8, Math.min(180, seconds)) * 4.2)
-}
-
-function estimateSegments(seconds: number) {
-  return Math.max(3, Math.ceil(Math.max(8, Math.min(180, seconds)) / 4))
-}
-
-export default function OpenClawWorkbench() {
-  const [market, setMarket] = useState('马来西亚')
-  const [platform, setPlatform] = useState('douyin')
-  const [targetSeconds, setTargetSeconds] = useState(28)
-  const [materialSeconds, setMaterialSeconds] = useState(0)
-  const [realDeepSeek, setRealDeepSeek] = useState(false)
-  const [raw, setRaw] = useState('comment_author,comment_text,like_count,reply_count,video_title,platform,url\n用户A,马来西亚买房首付多少？哪个区域适合投资出租？,18,3,马来西亚买房避坑,douyin,https://example.com/video/1\n用户B,海外房产水很深怕踩坑，有没有靠谱核验清单？,9,1,海外房产避坑,douyin,https://example.com/video/2\n用户C,可以私信我吗？想了解预算和贷款。,5,2,第二家园,douyin,https://example.com/video/3')
+export default function OpenClawWorkbench({ project, setProject, goTab }: Props) {
+  const [raw, setRaw] = useState(sample)
+  const [runDeepSeek, setRunDeepSeek] = useState(false)
   const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
-  const [leadResult, setLeadResult] = useState<any>(null)
-  const [contentResult, setContentResult] = useState<any>(null)
-  const [timelineResult, setTimelineResult] = useState<any>(null)
-  const [videoResult, setVideoResult] = useState<any>(null)
+  const [result, setResult] = useState<any>(null)
 
-  const comments = useMemo(() => commentsFromCsv(raw), [raw])
-  const contents = useMemo(() => contentRowsFromCsv(raw), [raw])
-  const aLeads = (leadResult?.enhanced_leads || leadResult?.leads || []).filter((x: any) => x.priority === 'A')
-  const reportLeads = (leadResult?.enhanced_leads || leadResult?.leads || []).filter((x: any) => x.priority === 'A' || x.lead_score >= 70)
-  const charAdvice = estimateChars(Number(targetSeconds) || 28)
-  const segmentAdvice = estimateSegments(Number(targetSeconds) || 28)
+  const comments = useMemo(() => normalizeComments(raw, project), [raw, project])
+  const plan = useMemo(() => computeVideoPlan(project.targetDuration, project.materialSeconds, project.aiShotSeconds), [project.targetDuration, project.materialSeconds, project.aiShotSeconds])
+  const leads = (result?.enhanced_leads || result?.leads || result?.analysis?.leads || project.leads || []) as any[]
+  const aCount = leads.filter((x) => x.priority === 'A' || Number(x.lead_score || x.score || 0) >= 75).length
+  const reportCount = leads.filter((x) => x.priority === 'A' || String(x.capture_angle || '').includes('主动联系')).length
 
-  const campaignContext = {
-    market,
-    platform,
-    audience: `准备在${market}买房、置业或投资的人`,
+  function patch(next: Partial<ProjectDraft>) {
+    setProject({ ...project, ...next })
   }
 
-  async function analyzeLeads() {
-    setBusy('leads')
+  async function analyzeComments() {
+    setBusy('comments')
     setError('')
     try {
-      const data = await apiPost('/api/video/openclaw/llm-enhance/comments', {
+      const body = {
         comments,
-        campaign_context: campaignContext,
-        min_score: 35,
-        max_llm_items: realDeepSeek ? 6 : 10,
-        dry_run: !realDeepSeek,
-        save_rule_leads: true,
-      })
-      setLeadResult(data)
-    } catch (e) {
-      try {
-        const data = await apiPost('/api/video/comment-leads/analyze', {
-          comments,
-          campaign_context: campaignContext,
-          save: true,
-        })
-        setLeadResult(data)
-      } catch (e2) {
-        setError(errorText(e2))
-      }
-    } finally {
-      setBusy('')
-    }
-  }
-
-  async function analyzeContent() {
-    setBusy('content')
-    setError('')
-    try {
-      const data = await apiPost('/api/video/openclaw/llm-enhance/content', {
-        items: contents,
         raw_export: raw,
-        campaign_context: campaignContext,
-        min_score: 30,
-        max_llm_items: realDeepSeek ? 5 : 8,
-        dry_run: !realDeepSeek,
-        save_rule_insights: true,
-      })
-      setContentResult(data)
-    } catch (e) {
-      setError(errorText(e))
+        campaign_context: { market: project.market, platform: project.platform, video_title: project.topic },
+        min_score: 40,
+        max_llm_items: runDeepSeek ? 10 : 5,
+        dry_run: !runDeepSeek,
+        save: true,
+      }
+      let data: any
+      try {
+        data = await apiPost(runDeepSeek ? '/api/video/openclaw/llm-enhance/comments' : '/api/video/comment-leads/analyze', body)
+      } catch (err) {
+        data = await apiPost('/api/video/comment-leads/analyze', { comments, campaign_context: body.campaign_context, save: true })
+      }
+      const nextLeads = data.enhanced_leads || data.leads || data.analysis?.leads || []
+      const top = nextLeads[0]
+      patch({ leads: nextLeads, topic: top?.script_hook || top?.capture_angle || project.topic, lastOutput: data })
+      setResult(data)
+    } catch (err) {
+      setError(detailToText(err))
     } finally {
       setBusy('')
     }
   }
 
-  async function generateTimeline() {
+  function buildScriptFromLeads() {
+    const top = leads[0]
+    const topic = top?.script_hook || project.topic
+    const script = top
+      ? [
+          top.script_hook || `${project.market}买房，别只看表面。`,
+          top.reply_draft || top.public_reply || '先看预算、用途和区域，别一上来只问价格。',
+          '真实房源、户型、价格和周边，都必须以官方资料为准。',
+          '想少踩坑，先把预算、目标城市和自住/投资用途说清楚。',
+        ].join('\n')
+      : generateLocalScript(project.topic, project.market, plan.duration)
+    const segments = splitScriptToSegments(script, plan.duration, project.materialSeconds, project.aiShotSeconds)
+    patch({ title: topic, topic, script, segments })
+    setResult({ ok: true, mode: 'lead_to_script', topic, script, segments })
+  }
+
+  async function buildTimeline() {
+    if (!project.script) buildScriptFromLeads()
+    const current = { ...project }
+    const script = current.script || generateLocalScript(current.topic, current.market, plan.duration)
+    const segments = current.segments?.length ? current.segments : splitScriptToSegments(script, plan.duration, current.materialSeconds, current.aiShotSeconds)
     setBusy('timeline')
     setError('')
     try {
-      const data = await apiPost('/api/video/openclaw/timeline/plan', {
-        raw_export: raw,
-        campaign_context: campaignContext,
-        target_duration: Number(targetSeconds) || 28,
-        selected_material_seconds: Number(materialSeconds) || 0,
-        min_score: 0,
-        max_items: 300,
-        save_insight: true,
-        quality_policy: { enabled: true, output_profile: 'vertical_720x1280', fps: 30 },
-        bgm_policy: { music_type: 'instrumental_only', default_bgm_volume: 0.12, ducking_when_voice: true },
-      })
-      setTimelineResult(data)
-    } catch (e) {
-      setError(errorText(e))
+      let data: any
+      try {
+        data = await apiPost('/api/video/timeline/build', { text: script, script_text: script, target_duration: plan.duration, platform: project.platform, market: project.market })
+      } catch (err) {
+        data = { ok: true, mode: 'local_timeline_fallback', segments, srt_preview: segments.map((x, i) => `${i + 1}\n${x.text}`).join('\n\n'), backend_error: detailToText(err) }
+      }
+      patch({ script, segments, timeline: data, lastOutput: data })
+      setResult(data)
+    } catch (err) {
+      setError(detailToText(err))
     } finally {
       setBusy('')
     }
   }
 
   async function generateVideo() {
-    if (!timelineResult) {
-      setError('先生成 Timeline / 文稿，再生成视频。')
+    if (!project.script || !project.segments?.length) {
+      setError('没有文稿/分镜，不能生成视频。先点“生成文稿/上报建议”或“生成 Timeline”。')
       return
     }
-    const ok = window.confirm('确认调用生成视频接口？这一步可能产生 fal.ai / TTS / 合成费用。')
+    const ok = window.confirm('将调用完整视频生成接口。确认继续？')
     if (!ok) return
     setBusy('video')
     setError('')
     try {
-      const script = timelineResult?.script?.script_text || timelineResult?.timeline?.script_text || timelineResult?.script_text || ''
       const data = await apiPost('/api/video/full-ai/start', {
-        market,
-        platform,
-        topic: timelineResult?.script?.topic_angle || `${market}房产短视频`,
-        script,
-        target_duration: Number(targetSeconds) || 28,
-        source: 'openclaw_capture_board',
-        openclaw_result: { leadResult, contentResult, timelineResult },
-      })
-      setVideoResult(data)
-    } catch (e) {
-      setError(errorText(e))
+        market: project.market,
+        platform: project.platform,
+        topic: project.topic,
+        title: project.title || project.topic,
+        target_duration: plan.duration,
+        script_text: project.script,
+        segments: project.segments,
+        leads: project.leads || leads,
+        timeline: project.timeline,
+        allow_fal_fill: project.allowFal,
+        fal_fill_shots: plan.aiShots,
+      }, 360000)
+      patch({ lastOutput: data })
+      setResult(data)
+    } catch (err) {
+      setError(detailToText(err))
     } finally {
       setBusy('')
     }
   }
 
-  const resultLeads = leadResult?.enhanced_leads || leadResult?.leads || []
-
   return (
-    <section className="uxPanel openclawCapturePanel">
-      <div className="uxHero">
-        <div>
-          <p className="uxEyebrow">OPENCLAW CAPTURE BOARD</p>
-          <h2>OpenClaw 获客截流看板</h2>
-          <p>体现截到了什么流、是否可回复、是否需要人工上报；生成视频前必须先得到文稿/Timeline。</p>
-        </div>
-        <span className="uxGreenBadge">不调用 fal.ai</span>
+    <section className="ux-card">
+      <div className="ux-card-hero">
+        <p className="ux-eyebrow">OPENCLAW CAPTURE / LEAD BOARD</p>
+        <h2>OpenClaw 获客截流看板</h2>
+        <p>这里显示 OpenClaw/采集器截到什么流、哪些可回复、哪些需要人工上报。不是空文字，也不是让你手动复制完就结束。</p>
+        <span className="ux-badge green">不调用 fal.ai</span>
       </div>
 
-      <div className="uxGrid four">
-        <label>市场<input value={market} onChange={(e) => setMarket(e.target.value)} /></label>
-        <label>平台<input value={platform} onChange={(e) => setPlatform(e.target.value)} /></label>
-        <label>目标视频长度/秒<input type="number" value={targetSeconds} onChange={(e) => setTargetSeconds(Number(e.target.value || 28))} /></label>
-        <label>已选素材时长/秒<input type="number" value={materialSeconds} onChange={(e) => setMaterialSeconds(Number(e.target.value || 0))} /></label>
+      <div className="ux-form-grid four">
+        <label>市场
+          <input value={project.market} onChange={(e) => patch({ market: e.target.value })} />
+        </label>
+        <label>平台
+          <input value={project.platform} onChange={(e) => patch({ platform: e.target.value })} />
+        </label>
+        <label>视频长度/秒
+          <input type="number" min={8} max={180} value={project.targetDuration} onChange={(e) => patch({ targetDuration: Number(e.target.value || 28) })} />
+        </label>
+        <label className="ux-check">
+          <input type="checkbox" checked={runDeepSeek} onChange={(e) => setRunDeepSeek(e.target.checked)} />
+          真实调用 DeepSeek
+        </label>
       </div>
 
-      <div className="uxNotice">
-        <b>文案长度建议：约 {charAdvice} 字 / {segmentAdvice} 段口播。</b>
-        <span> 先分析截流，再生成 Timeline，最后才能生成视频。</span>
-        <label className="uxInlineCheck"><input type="checkbox" checked={realDeepSeek} onChange={(e) => setRealDeepSeek(e.target.checked)} />真实调用 DeepSeek</label>
+      <div className="ux-info">文案建议：约 {plan.suggestedChars} 字 / {plan.segmentCount} 段口播。截流结果会转成文稿、Timeline、回复建议和人工上报项。</div>
+
+      <textarea className="ux-big-textarea" value={raw} onChange={(e) => setRaw(e.target.value)} />
+
+      <div className="ux-button-row">
+        <button className="ux-primary" onClick={analyzeComments} disabled={!!busy}>{busy === 'comments' ? '分析中...' : '分析截流评论'}</button>
+        <button className="ux-purple" onClick={buildScriptFromLeads}>生成文稿/上报建议</button>
+        <button className="ux-ghost" onClick={buildTimeline} disabled={!!busy}>{busy === 'timeline' ? '生成中...' : '生成 Timeline'}</button>
+        <button className="ux-danger" onClick={generateVideo} disabled={!project.script || !!busy}>{busy === 'video' ? '提交中...' : '生成完整视频'}</button>
+        <button className="ux-ghost" onClick={() => goTab('pureai')}>去纯 AI 路径</button>
       </div>
 
-      <textarea className="uxBigText" value={raw} onChange={(e) => setRaw(e.target.value)} />
-
-      <div className="uxButtonRow">
-        <button onClick={analyzeLeads} disabled={!!busy}>{busy === 'leads' ? '分析中...' : '分析截流评论'}</button>
-        <button onClick={analyzeContent} disabled={!!busy}>内容结构分析</button>
-        <button onClick={generateTimeline} disabled={!!busy}>生成文稿 / Timeline</button>
-        <button className="danger" onClick={generateVideo} disabled={!timelineResult || !!busy}>生成视频</button>
-      </div>
-
-      {error && <div className="uxError">{error}</div>}
-
-      <div className="uxStatGrid">
+      <div className="ux-metrics four">
         <div><b>{comments.length}</b><span>截流评论</span></div>
-        <div><b>{aLeads.length}</b><span>A 级线索</span></div>
-        <div><b>{reportLeads.length}</b><span>需人工上报</span></div>
-        <div><b>{realDeepSeek ? 'real' : 'dry-run'}</b><span>DeepSeek 模式</span></div>
+        <div><b>{aCount}</b><span>A 级线索</span></div>
+        <div><b>{reportCount}</b><span>需人工上报</span></div>
+        <div><b>{runDeepSeek ? 'real' : 'dry-run'}</b><span>DeepSeek 模式</span></div>
       </div>
 
-      {resultLeads.length > 0 && (
-        <div className="uxCard">
-          <h3>截流处理队列</h3>
-          {resultLeads.slice(0, 8).map((lead: any, index: number) => (
-            <div className="uxLead" key={lead.lead_id || index}>
-              <div><b>{lead.priority || '线索'} / {lead.lead_score || '-'}</b><span>{lead.capture_angle || lead.buyer_stage || '待判断'}</span></div>
-              <p>{lead.original_text || lead.text}</p>
-              <em>{lead.public_reply || lead.reply_draft || '等待生成回复建议'}</em>
-              <strong>{lead.priority === 'A' || lead.lead_score >= 70 ? '需要人工上报 / 可优先回复' : '进入观察池'}</strong>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {timelineResult && <pre className="uxJson">{JSON.stringify(timelineResult, null, 2)}</pre>}
-      {videoResult && <pre className="uxJson">{JSON.stringify(videoResult, null, 2)}</pre>}
+      {error && <div className="ux-error">{error}</div>}
+      <LeadList leads={leads} />
+      {project.script && <div className="ux-panel"><h3>已进入生产链路的文稿</h3><pre className="ux-script">{project.script}</pre></div>}
+      {result && <details className="ux-json"><summary>完整结果</summary><pre>{JSON.stringify(result, null, 2)}</pre></details>}
     </section>
   )
 }
