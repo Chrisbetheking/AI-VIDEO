@@ -10,7 +10,6 @@ import {
   pollFullAiJob,
   progressFromJob,
   ProjectDraft,
-  setStoredToken,
   splitScriptToSegments,
   WorkspaceTab,
 } from './aiVideoApi'
@@ -35,20 +34,20 @@ function findVideoUrl(data: any) {
 
 function ScriptPreview({ project }: { project: ProjectDraft }) {
   if (!project.script) {
-    return <div className="ux-info">还没有文稿。先按视频长度生成文稿和分镜，再生成视频。</div>
+    return <div className="aiw-info">还没有文稿。先按视频长度生成文稿和分镜，再生成视频。</div>
   }
 
   return (
-    <div className="ux-two-col">
-      <div className="ux-panel">
+    <div className="aiw-twoCol">
+      <div className="aiw-panel">
         <h3>文稿</h3>
-        <pre className="ux-script">{project.script}</pre>
+        <pre className="aiw-scriptBox">{project.script}</pre>
       </div>
-      <div className="ux-panel">
+      <div className="aiw-panel">
         <h3>配音 / 剪辑分配</h3>
-        <div className="ux-segment-list">
+        <div className="aiw-segmentList">
           {project.segments.map((seg) => (
-            <div className="ux-segment" key={seg.index}>
+            <div className="aiw-segment" key={seg.index}>
               <b>
                 第{seg.index}段 · {seg.duration}s
               </b>
@@ -68,7 +67,6 @@ export default function PureAIVideoPath({ project, setProject, goTab }: Props) {
   const [error, setError] = useState('')
   const [result, setResult] = useState<any>(null)
   const [progress, setProgress] = useState<any>(null)
-  const [creativeNonce, setCreativeNonce] = useState(Date.now())
 
   const plan = useMemo(
     () => computeVideoPlan(project.targetDuration, project.materialSeconds, project.aiShotSeconds),
@@ -89,8 +87,6 @@ export default function PureAIVideoPath({ project, setProject, goTab }: Props) {
 
     try {
       const nonce = Date.now() + Math.round(Math.random() * 100000)
-      setCreativeNonce(nonce)
-
       const script = generateLocalScript(project.topic, project.market, plan.duration, nonce)
       const segments = splitScriptToSegments(script, plan.duration, plan.material, plan.shotSeconds)
 
@@ -181,25 +177,25 @@ export default function PureAIVideoPath({ project, setProject, goTab }: Props) {
   }
 
   return (
-    <section className="ux-workspace-card">
-      <div className="ux-hero">
+    <section className="aiw-card">
+      <div className="aiw-hero">
         <div>
-          <p className="ux-eyebrow">PURE AI / SCRIPT FIRST / RENDER AFTER</p>
+          <p className="aiw-eyebrow">PURE AI / SCRIPT FIRST / RENDER AFTER</p>
           <h2>纯 AI 生成路径</h2>
           <p>
             先确定主题和视频长度，再生成文稿、分镜、配音/剪辑分配；没有文稿不能生成视频。真实房源、户型、价格和周边不允许 AI 编造。
           </p>
         </div>
-        <span className={plan.aiShotsRaw > 0 ? 'ux-badge red' : 'ux-badge green'}>
+        <span className={plan.aiShotsRaw > 0 ? 'aiw-badge danger' : 'aiw-badge ok'}>
           {plan.aiShotsRaw > 0 ? '素材不足会补 AI 镜头' : '素材够用'}
         </span>
       </div>
 
-      <div className="ux-topic-row">
+      <div className="aiw-chipRow">
         {topics.map((x) => (
           <button
             key={x}
-            className={project.topic === x ? 'ux-chip active' : 'ux-chip'}
+            className={project.topic === x ? 'aiw-chip active' : 'aiw-chip'}
             onClick={() => patch({ topic: x })}
           >
             {x}
@@ -207,7 +203,7 @@ export default function PureAIVideoPath({ project, setProject, goTab }: Props) {
         ))}
       </div>
 
-      <div className="ux-form-grid four">
+      <div className="aiw-form four">
         <label>
           市场
           <input value={project.market} onChange={(e) => patch({ market: e.target.value })} />
@@ -243,13 +239,13 @@ export default function PureAIVideoPath({ project, setProject, goTab }: Props) {
             onChange={(e) => patch({ aiShotSeconds: Number(e.target.value || 7) })}
           />
         </label>
-        <label className="ux-check">
+        <label className="aiw-check">
           <input type="checkbox" checked={project.allowFal} onChange={(e) => patch({ allowFal: e.target.checked })} />
           素材不足时允许 fal.ai 补通用氛围镜头
         </label>
       </div>
 
-      <div className="ux-metrics four">
+      <div className="aiw-metrics">
         <div>
           <b>{plan.suggestedChars}</b>
           <span>建议文案字数</span>
@@ -268,33 +264,33 @@ export default function PureAIVideoPath({ project, setProject, goTab }: Props) {
         </div>
       </div>
 
-      <div className="ux-info">
+      <div className="aiw-info">
         按 {plan.duration}s 视频长度生成文稿；每段约 {plan.avgSegmentSeconds}s。点“生成文稿”每次会换一种表达和结构，不再固定同一套文案。
       </div>
 
-      <div className="ux-button-row">
-        <button className="ux-primary" onClick={generateDraft} disabled={!!busy}>
+      <div className="aiw-actions">
+        <button className="aiw-primary" onClick={generateDraft} disabled={!!busy}>
           {busy === 'draft' ? '生成中...' : '按视频长度生成文稿/分镜'}
         </button>
-        <button className="ux-danger" onClick={generateVideo} disabled={!canGenerateVideo}>
+        <button className="aiw-danger" onClick={generateVideo} disabled={!canGenerateVideo}>
           {busy === 'video' ? '生成中...' : '生成完整 AI 视频'}
         </button>
-        <button className="ux-ghost" onClick={() => goTab('collect')}>
+        <button className="aiw-muted" onClick={() => goTab('collect')}>
           先去抖音采集选题
         </button>
-        <button className="ux-ghost" onClick={() => goTab('leads')}>
+        <button className="aiw-muted" onClick={() => goTab('leads')}>
           先看获客线索
         </button>
       </div>
 
       {progress && (
-        <div className="ux-progress-card">
-          <div className="ux-progress-top">
+        <div className="aiw-progressCard">
+          <div className="aiw-progressTop">
             <b>{progress.message || '生成中...'}</b>
             <span>{progress.percent || 0}%</span>
           </div>
-          <div className="ux-progress-track">
-            <div className="ux-progress-fill" style={{ width: `${Math.max(2, Math.min(100, progress.percent || 0))}%` }} />
+          <div className="aiw-progressTrack">
+            <div className="aiw-progressFill" style={{ width: `${Math.max(2, Math.min(100, progress.percent || 0))}%` }} />
           </div>
           <p>
             {progress.jobId ? `任务 ID：${progress.jobId}` : '正在等待后端返回任务编号'}
@@ -303,14 +299,14 @@ export default function PureAIVideoPath({ project, setProject, goTab }: Props) {
         </div>
       )}
 
-      {error && <div className="ux-error">{error}</div>}
+      {error && <div className="aiw-error">{error}</div>}
 
       {videoUrl && (
-        <div className="ux-panel">
+        <div className="aiw-panel">
           <h3>成片预览</h3>
-          <video className="ux-video-preview" src={videoUrl} controls playsInline />
-          <div className="ux-button-row">
-            <a className="ux-link-button" href={videoUrl} target="_blank" rel="noreferrer">
+          <video className="aiw-video" src={videoUrl} controls playsInline />
+          <div className="aiw-actions">
+            <a className="aiw-linkButton" href={videoUrl} target="_blank" rel="noreferrer">
               打开成片链接
             </a>
           </div>
@@ -320,7 +316,7 @@ export default function PureAIVideoPath({ project, setProject, goTab }: Props) {
       <ScriptPreview project={project} />
 
       {result && (
-        <details className="ux-json">
+        <details className="aiw-json">
           <summary>接口/生成结果</summary>
           <pre>{JSON.stringify(result, null, 2)}</pre>
         </details>

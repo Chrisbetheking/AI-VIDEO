@@ -1,36 +1,41 @@
 
-/* ===== AI-VIDEO engineering workspace v14 ===== */
-[data-ai-video-legacy-hidden="true"] {
+/* ===== AI-VIDEO workspace v15 unified overlay ===== */
+[data-ai-video-legacy-hidden="true"],
+.productExtraPanelRoot,
+.douyinSideDock,
+.openclawWorkbench,
+.douyinAccountLibrary {
   display: none !important;
 }
 
-.ux-workspace-backdrop {
+.aiw-overlay {
   position: fixed;
   inset: 0;
-  z-index: 9999;
+  z-index: 99999;
   background: rgba(15, 23, 42, 0.62);
   backdrop-filter: blur(6px);
+  padding: 22px;
+  box-sizing: border-box;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 22px;
 }
 
-.ux-workspace-modal {
+.aiw-shell {
   width: min(1680px, calc(100vw - 44px));
   height: min(930px, calc(100vh - 44px));
-  overflow: auto;
   border-radius: 28px;
   background: #f7fbff;
   border: 1px solid rgba(148, 163, 184, 0.55);
   box-shadow: 0 32px 90px rgba(15, 23, 42, 0.35);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
-.ux-workspace-header {
-  position: sticky;
-  top: 0;
-  z-index: 10;
-  background: rgba(255, 255, 255, 0.94);
+.aiw-header {
+  flex: 0 0 auto;
+  background: rgba(255, 255, 255, 0.96);
   border-bottom: 1px solid #dbeafe;
   padding: 20px 28px;
   display: flex;
@@ -39,35 +44,35 @@
   align-items: center;
 }
 
-.ux-workspace-header h1 {
+.aiw-header h1 {
   margin: 4px 0 0;
   color: #0f172a;
   font-size: 30px;
 }
 
-.ux-workspace-header p {
+.aiw-header p {
   margin: 0;
   color: #2563eb;
   font-weight: 900;
   letter-spacing: 0.08em;
 }
 
-.ux-workspace-tabs,
-.ux-button-row,
-.ux-topic-row {
+.aiw-tabs,
+.aiw-actions,
+.aiw-chipRow {
   display: flex;
   gap: 12px;
   flex-wrap: wrap;
   align-items: center;
 }
 
-.ux-workspace-tabs button,
-.ux-primary,
-.ux-danger,
-.ux-purple,
-.ux-ghost,
-.ux-chip,
-.ux-link-button {
+.aiw-tabs button,
+.aiw-primary,
+.aiw-danger,
+.aiw-purple,
+.aiw-muted,
+.aiw-chip,
+.aiw-linkButton {
   border: 0;
   border-radius: 14px;
   padding: 12px 18px;
@@ -79,50 +84,91 @@
   justify-content: center;
 }
 
-.ux-workspace-tabs button,
-.ux-primary,
-.ux-chip.active {
+.aiw-tabs button,
+.aiw-primary,
+.aiw-chip.active {
   background: #2563eb;
   color: #fff;
 }
 
-.ux-workspace-tabs button.active,
-.ux-chip.active:first-child {
+.aiw-tabs button.active,
+.aiw-chip.active:first-child {
   background: #0f172a;
 }
 
-.ux-danger {
-  background: #dc2626;
-  color: #fff;
+.aiw-close,
+.aiw-muted,
+.aiw-chip,
+.aiw-linkButton {
+  background: #e8eef6 !important;
+  color: #0f172a !important;
 }
 
-.ux-purple {
-  background: #7c3aed;
-  color: #fff;
+.aiw-danger {
+  background: #dc2626 !important;
+  color: #fff !important;
 }
 
-.ux-ghost,
-.ux-chip,
-.ux-link-button {
-  background: #e8eef6;
-  color: #0f172a;
+.aiw-purple {
+  background: #7c3aed !important;
+  color: #fff !important;
 }
 
-.ux-workspace-tabs button:disabled,
-.ux-primary:disabled,
-.ux-danger:disabled,
-.ux-purple:disabled,
-.ux-ghost:disabled {
+.aiw-tabs button:disabled,
+.aiw-primary:disabled,
+.aiw-danger:disabled,
+.aiw-purple:disabled,
+.aiw-muted:disabled {
   opacity: 0.55;
   cursor: not-allowed;
 }
 
-.ux-workspace-body {
+.aiw-token {
+  position: relative;
+}
+
+.aiw-tokenDrop {
+  position: absolute;
+  right: 0;
+  top: 54px;
+  width: 360px;
+  background: #fff;
+  border: 1px solid #cbd5e1;
+  border-radius: 18px;
+  padding: 14px;
+  box-shadow: 0 20px 45px rgba(15, 23, 42, 0.18);
+  z-index: 3;
+}
+
+.aiw-tokenDrop label {
+  display: block;
+  color: #334155;
+  font-weight: 900;
+}
+
+.aiw-tokenDrop input {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid #cbd5e1;
+  border-radius: 12px;
+  padding: 11px;
+  margin-top: 8px;
+}
+
+.aiw-tokenActions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.aiw-body {
+  flex: 1 1 auto;
+  overflow: auto;
   padding: 28px;
 }
 
-.ux-workspace-card,
-.ux-panel {
+.aiw-card,
+.aiw-panel {
   background: #fff;
   border: 1px solid #dbeafe;
   border-radius: 24px;
@@ -130,7 +176,7 @@
   box-shadow: 0 16px 35px rgba(15, 23, 42, 0.05);
 }
 
-.ux-hero {
+.aiw-hero {
   border: 1px solid #dbeafe;
   border-radius: 24px;
   padding: 24px;
@@ -140,26 +186,26 @@
   margin-bottom: 20px;
 }
 
-.ux-eyebrow {
+.aiw-eyebrow {
   color: #2563eb !important;
   font-weight: 900;
   letter-spacing: 0.18em;
   margin: 0 0 6px !important;
 }
 
-.ux-hero h2 {
+.aiw-hero h2 {
   margin: 0 0 10px;
   color: #0f172a;
   font-size: 30px;
 }
 
-.ux-hero p {
+.aiw-hero p {
   margin: 0;
   color: #475569;
   line-height: 1.8;
 }
 
-.ux-badge {
+.aiw-badge {
   white-space: nowrap;
   border-radius: 999px;
   padding: 10px 14px;
@@ -167,31 +213,31 @@
   height: fit-content;
 }
 
-.ux-badge.red {
+.aiw-badge.danger {
   background: #fee2e2;
   color: #991b1b;
 }
 
-.ux-badge.green {
+.aiw-badge.ok {
   background: #dcfce7;
   color: #166534;
 }
 
-.ux-form-grid {
+.aiw-form {
   display: grid;
   gap: 14px;
   margin: 16px 0;
 }
 
-.ux-form-grid.two {
+.aiw-form.two {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
-.ux-form-grid.four {
+.aiw-form.four {
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
-.ux-form-grid label {
+.aiw-form label {
   display: flex;
   flex-direction: column;
   gap: 7px;
@@ -200,9 +246,9 @@
   color: #334155;
 }
 
-.ux-form-grid input,
-.ux-form-grid textarea,
-.ux-form-grid select {
+.aiw-form input,
+.aiw-form textarea,
+.aiw-form select {
   border: 1px solid #cbd5e1;
   border-radius: 14px;
   padding: 12px 14px;
@@ -211,52 +257,49 @@
   color: #0f172a;
 }
 
-.ux-form-grid textarea {
+.aiw-form textarea {
   min-height: 130px;
   resize: vertical;
 }
 
-.ux-check {
+.aiw-check {
   background: #f8fafc;
   border-radius: 16px;
   padding: 12px;
   justify-content: center;
 }
 
-.ux-check input {
+.aiw-check input {
   width: 18px;
   height: 18px;
 }
 
-.ux-metrics {
+.aiw-metrics {
   display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 14px;
   margin: 18px 0;
 }
 
-.ux-metrics.four {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-}
-
-.ux-metrics div {
+.aiw-metrics div {
   border: 1px solid #dbeafe;
   border-radius: 20px;
   padding: 20px;
   background: #fff;
 }
 
-.ux-metrics b {
+.aiw-metrics b {
   display: block;
   font-size: 34px;
   color: #0f172a;
 }
 
-.ux-metrics span {
+.aiw-metrics span {
   color: #64748b;
   font-weight: 900;
 }
 
-.ux-info {
+.aiw-info {
   border: 1px dashed #93c5fd;
   background: #eff6ff;
   color: #1d4ed8;
@@ -266,7 +309,7 @@
   margin: 14px 0;
 }
 
-.ux-error {
+.aiw-error {
   border-radius: 16px;
   padding: 16px 18px;
   background: #fee2e2;
@@ -276,15 +319,15 @@
   margin: 14px 0;
 }
 
-.ux-two-col {
+.aiw-twoCol {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 18px;
   margin-top: 18px;
 }
 
-.ux-script,
-.ux-json pre {
+.aiw-scriptBox,
+.aiw-json pre {
   white-space: pre-wrap;
   word-break: break-word;
   border-radius: 16px;
@@ -295,43 +338,43 @@
   overflow: auto;
 }
 
-.ux-segment-list {
+.aiw-segmentList {
   display: flex;
   flex-direction: column;
   gap: 12px;
 }
 
-.ux-segment {
+.aiw-segment {
   border: 1px solid #e2e8f0;
   border-radius: 16px;
   padding: 14px;
   background: #f8fafc;
 }
 
-.ux-segment b {
+.aiw-segment b {
   display: block;
   color: #0f172a;
   margin-bottom: 6px;
 }
 
-.ux-segment em {
+.aiw-segment em {
   color: #2563eb;
   font-weight: 900;
   font-style: normal;
 }
 
-.ux-segment p {
+.aiw-segment p {
   color: #334155;
   line-height: 1.65;
   margin: 8px 0;
 }
 
-.ux-segment span {
+.aiw-segment span {
   color: #166534;
   font-weight: 900;
 }
 
-.ux-progress-card {
+.aiw-progressCard {
   margin: 16px 0;
   border: 1px solid #bfdbfe;
   border-radius: 18px;
@@ -339,7 +382,7 @@
   padding: 16px;
 }
 
-.ux-progress-top {
+.aiw-progressTop {
   display: flex;
   justify-content: space-between;
   gap: 14px;
@@ -347,7 +390,7 @@
   font-weight: 900;
 }
 
-.ux-progress-track {
+.aiw-progressTrack {
   height: 12px;
   border-radius: 999px;
   background: #dbeafe;
@@ -355,20 +398,20 @@
   margin-top: 12px;
 }
 
-.ux-progress-fill {
+.aiw-progressFill {
   height: 100%;
   border-radius: 999px;
   background: linear-gradient(90deg, #2563eb, #7c3aed);
   transition: width 0.45s ease;
 }
 
-.ux-progress-card p {
+.aiw-progressCard p {
   margin: 10px 0 0;
   color: #475569;
   font-weight: 700;
 }
 
-.ux-video-preview {
+.aiw-video {
   width: min(420px, 100%);
   max-height: 680px;
   border-radius: 18px;
@@ -376,28 +419,62 @@
   display: block;
 }
 
-.ux-json {
+.aiw-json {
   margin-top: 16px;
 }
 
-.ux-json summary {
+.aiw-json summary {
   cursor: pointer;
   color: #2563eb;
   font-weight: 900;
 }
 
+.aiw-flow {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+  margin: 18px 0;
+}
+
+.aiw-flow div {
+  border: 1px solid #dbeafe;
+  border-radius: 18px;
+  padding: 16px;
+  background: #fff;
+}
+
+.aiw-flow b,
+.aiw-flow span {
+  display: block;
+}
+
+.aiw-flow span {
+  margin-top: 8px;
+  color: #64748b;
+}
+
 @media (max-width: 980px) {
-  .ux-form-grid.four,
-  .ux-form-grid.two,
-  .ux-metrics.four,
-  .ux-two-col {
-    grid-template-columns: 1fr;
+  .aiw-overlay {
+    padding: 8px;
   }
 
-  .ux-workspace-header,
-  .ux-hero {
+  .aiw-shell {
+    width: calc(100vw - 16px);
+    height: calc(100vh - 16px);
+  }
+
+  .aiw-header,
+  .aiw-hero {
     flex-direction: column;
     align-items: flex-start;
   }
+
+  .aiw-form.four,
+  .aiw-form.two,
+  .aiw-metrics,
+  .aiw-twoCol,
+  .aiw-flow {
+    grid-template-columns: 1fr;
+  }
 }
-/* ===== /AI-VIDEO engineering workspace v14 ===== */
+/* ===== /AI-VIDEO workspace v15 unified overlay ===== */

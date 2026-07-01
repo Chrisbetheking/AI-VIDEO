@@ -5,8 +5,6 @@ const isLocal =
 
 export const API_BASE = envApiBase || (isLocal ? 'http://localhost:8000' : defaultApiBase)
 export const TOKEN_KEY = 'ai_video_api_token'
-
-// 后端已计划放开到 50；前端按 50 组织 shots，避免把口播段误当成 3 个镜头限制。
 export const BACKEND_MAX_FULL_AI_SHOTS = 50
 
 export type WorkspaceTab = 'pureai' | 'collect' | 'leads' | 'digital'
@@ -66,7 +64,7 @@ export function getStoredToken(): string {
   return (localStorage.getItem(TOKEN_KEY) || '').trim()
 }
 
-export function setStoredToken(token: string) {
+export function setStoredToken(token: string): string {
   const clean = String(token || '').trim()
   if (clean) localStorage.setItem(TOKEN_KEY, clean)
   return clean
@@ -76,7 +74,7 @@ export function clearStoredToken() {
   localStorage.removeItem(TOKEN_KEY)
 }
 
-export function maskToken(token: string) {
+export function maskToken(token: string): string {
   const t = String(token || '').trim()
   if (!t) return '未设置'
   if (t.length <= 10) return `${t.slice(0, 2)}****`
@@ -246,6 +244,8 @@ export function emptyProjectDraft(): ProjectDraft {
     script: '',
     title: '',
     segments: [],
+    leads: [],
+    contentInsights: [],
   }
 }
 
@@ -304,22 +304,19 @@ export function generateLocalScript(
     `很多人看${market}房产，一上来就看价格，其实这一步最容易错。`,
     `${topic}这件事，真正拉开差距的不是谁先下手，而是谁先把逻辑想清楚。`,
     `如果你准备看${market}房产，先别被样板间和宣传图带着走。`,
+    `今天不讲鸡血，直接讲${topic}最容易踩的判断误区。`,
   ]
 
-  const middleA = [
+  const points = [
     `先看预算和用途：自住、出租、第二居所和家庭配置，判断标准完全不一样。`,
     `再看区域和人群：谁会住、谁会租、未来谁来接手，这比单看总价更重要。`,
     `第三看资料真实性：户型、价格、交付、周边和管理费，都要回到官方文件核验。`,
     `别只问“值不值”，先问“适不适合我现在的用途和现金流”。`,
     `如果是投资，要把租客来源、空置风险和转手难度放在一起看。`,
     `如果是家庭配置，要把教育、养老、通勤和长期生活半径放在一起算。`,
-  ]
-
-  const middleB = [
     `同样预算，买错区域，后面的出租和转手都会很被动。`,
     `同样项目，买错户型，现金流和流动性也可能完全不一样。`,
     `真正靠谱的判断，不靠一句“推荐”，而是靠预算、用途、城市和退出路径。`,
-    `宣传可以参考，但最终要看文件、实地和你自己的使用场景。`,
   ]
 
   const endings = [
@@ -329,19 +326,11 @@ export function generateLocalScript(
     `真实房源、户型、价格和周边信息，最终都以官方资料和实地核验为准。`,
   ]
 
-  const pool = [
-    pick(openings, seed, 1),
-    pick(middleA, seed, 2),
-    pick(middleA, seed, 3),
-    pick(middleB, seed, 4),
-    pick(middleA, seed, 5),
-    pick(middleB, seed, 6),
-    pick(endings, seed, 7),
-  ]
-
-  const unique = Array.from(new Set(pool))
-  const count = Math.max(3, Math.min(plan.segmentCount, unique.length))
-  return unique.slice(0, count).join('\n')
+  const shuffledPoints = Array.from({ length: points.length }, (_, i) => pick(points, seed, i * 3 + 2))
+  const uniquePoints = Array.from(new Set(shuffledPoints))
+  const neededMiddle = Math.max(1, plan.segmentCount - 2)
+  const lines = [pick(openings, seed, 1), ...uniquePoints.slice(0, neededMiddle), pick(endings, seed, 99)]
+  return lines.slice(0, plan.segmentCount).join('\n')
 }
 
 export function splitScriptToSegments(
@@ -359,6 +348,7 @@ export function splitScriptToSegments(
   const fallback = generateLocalScript('马来西亚买房，别只看价格', '马来西亚', duration).split('\n')
   const lines = rough.length ? rough : fallback
   const picked = lines.slice(0, plan.segmentCount)
+
   while (picked.length < plan.segmentCount) {
     picked.push(lines[picked.length % lines.length] || '补充一个真实资料核验点')
   }
