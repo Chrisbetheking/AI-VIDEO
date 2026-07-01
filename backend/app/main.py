@@ -3980,7 +3980,7 @@ _full_ai_submit_guard = {}
 
 _FULL_AI_DUPLICATE_WINDOW_SECONDS = int(_full_ai_guard_os.getenv("FULL_AI_DUPLICATE_WINDOW_SECONDS", "120"))
 _FULL_AI_IP_COOLDOWN_SECONDS = int(_full_ai_guard_os.getenv("FULL_AI_IP_COOLDOWN_SECONDS", "45"))
-_FULL_AI_MAX_SHOTS = int(_full_ai_guard_os.getenv("FULL_AI_MAX_SHOTS", "3"))
+_FULL_AI_MAX_SHOTS = int(_full_ai_guard_os.getenv("FULL_AI_MAX_SHOTS", "50"))
 
 
 def _full_ai_guard_client_key(request: _FullAIGuardRequest) -> str:
@@ -5548,3 +5548,27 @@ async def _api_douyin_accounts_seed_targets(market: str = "马来西亚"):
 async def _api_douyin_accounts_self_test():
     return _douyin_account_self_test()
 # ===== /DOUYIN ACCOUNT LIBRARY API HOTFIX =====
+
+
+# ===== FRONTEND CORS HOTFIX =====
+try:
+    from fastapi.middleware.cors import CORSMiddleware as _FrontendCORSMiddleware
+
+    if not getattr(app.state, "ai_video_frontend_cors_hotfix", False):
+        app.add_middleware(
+            _FrontendCORSMiddleware,
+            allow_origins=[
+                "https://ai-video-s5v.pages.dev",
+                "http://localhost:5173",
+                "http://127.0.0.1:5173",
+            ],
+            allow_credentials=False,
+            allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+            allow_headers=["*"],
+            expose_headers=["*"],
+            max_age=86400,
+        )
+        app.state.ai_video_frontend_cors_hotfix = True
+except Exception as _cors_exc:
+    print("FRONTEND_CORS_HOTFIX_FAILED", _cors_exc)
+# ===== /FRONTEND CORS HOTFIX =====
