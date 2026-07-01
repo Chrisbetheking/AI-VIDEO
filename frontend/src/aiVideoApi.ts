@@ -462,7 +462,7 @@ export function buildFullAiPayload(
     ai_shot_seconds: plan.shotSeconds,
     allow_fal_fill: project.allowFal,
     fal_fill_shots_requested: plan.aiShotsRaw,
-    fal_fill_shots: shots.length,
+    fal_fill_shots: normalizeAiShotCountByDuration(shots.length, Number(payload?.duration_seconds || payload?.targetSeconds || payload?.duration || 20), Number(payload?.materialSeconds || payload?.material_seconds || 0)),
     backend_max_shots: plan.backendMaxShots,
     merged_for_backend: plan.willMergeShotsForBackend,
     segments,
@@ -626,3 +626,39 @@ export function projectFromAIScriptPlan(project: ProjectDraft, data: any): Proje
     scriptProvider: data?.provider || 'unknown',
   }
 }
+
+
+export function normalizeAiShotCountByDuration(inputShots: any[], targetSeconds: number, materialSeconds = 0) {
+  const shots = Array.isArray(inputShots) ? [...inputShots] : []
+  const missingSeconds = Math.max(0, Number(targetSeconds || 0) - Number(materialSeconds || 0))
+
+  // fal 一条 AI 视频通常按 5 秒左右规划；20s 至少 4 镜头
+  const required = Math.max(1, Math.ceil(missingSeconds / 5))
+
+  // 20 秒以上不要低于 4 个镜头，避免 3 镜头硬撑 20 秒导致画面重复/不搭
+  const minShots = Number(targetSeconds || 0) >= 20 ? 4 : required
+  const finalCount = Math.max(required, minShots)
+
+  if (shots.length === 0) {
+    for (let i = 0; i < finalCount; i += 1) {
+      shots.push({
+        prompt: `Malaysia real estate cinematic shot ${i + 1}, Kuala Lumpur condo, KLCC skyline, premium 9:16 vertical video`,
+      })
+    }
+    return shots
+  }
+
+  while (shots.length < finalCount) {
+    const base = shots[shots.length % Math.max(1, inputShots.length)] || shots[shots.length - 1] || {}
+    shots.push({
+      ...base,
+      prompt:
+        typeof base.prompt === 'string'
+          ? `${base.prompt}\nAdditional Malaysia real estate visual angle ${shots.length + 1}: KLCC skyline, luxury condo balcony, apartment interior, lobby, pool, or city skyline.`
+          : `Malaysia real estate cinematic shot ${shots.length + 1}, KLCC skyline, luxury condominium, 9:16 vertical video`,
+    })
+  }
+
+  return shots
+}
+
