@@ -462,7 +462,7 @@ export function buildFullAiPayload(
     ai_shot_seconds: plan.shotSeconds,
     allow_fal_fill: project.allowFal,
     fal_fill_shots_requested: plan.aiShotsRaw,
-    fal_fill_shots: normalizeAiShotCountByDuration(shots.length, Number(payload?.duration_seconds || payload?.targetSeconds || payload?.duration || 20), Number(payload?.materialSeconds || payload?.material_seconds || 0)),
+    fal_fill_shots: Math.max(4, Number(shots.length || 0)),
     backend_max_shots: plan.backendMaxShots,
     merged_for_backend: plan.willMergeShotsForBackend,
     segments,
