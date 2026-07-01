@@ -2085,7 +2085,7 @@ async def api_compose_video(req: ComposeRequest, request: Request, settings: Set
         result = await compose_video(
             settings=settings,
             script=req.script,
-            asset_paths=media_clips,
+            asset_paths=[getattr(c, "path", c) for c in media_clips],
             duration_seconds=req.duration_seconds,
             audio_path=audio_path,
             voice=req.voice,

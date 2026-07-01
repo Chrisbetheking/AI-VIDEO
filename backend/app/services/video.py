@@ -253,8 +253,30 @@ def estimate_segments_for_existing_audio(script: str, total_duration: float) -> 
     return segments
 
 
+
+
+def _media_like_to_path(item) -> Path:
+    """Accept Path or MediaClip-like objects and return a Path.
+
+    Older /api/compose-video passes MediaClip objects into compose_video.
+    build_video_base expects Path and calls .exists(), so normalize here.
+    """
+    if isinstance(item, Path):
+        return item
+
+    value = getattr(item, "path", None)
+    if value is None:
+        value = getattr(item, "file_path", None)
+    if value is None:
+        value = getattr(item, "local_path", None)
+    if value is None:
+        value = item
+
+    return value if isinstance(value, Path) else Path(str(value))
+
 def build_video_base(asset_paths: List[Path], duration: float, output_path: Path) -> Tuple[Path, List[str]]:
     warnings: List[str] = []
+    asset_paths = [_media_like_to_path(p) for p in asset_paths]
     duration = max(3.0, duration)
     if not asset_paths:
         cmd = [
