@@ -478,3 +478,305 @@
   }
 }
 /* ===== /AI-VIDEO workspace v15 unified overlay ===== */
+
+/* ===== AI-VIDEO v17 native linked console ===== */
+.aiw-consoleRoot {
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: 286px minmax(0, 1fr);
+  background:
+    radial-gradient(circle at top right, rgba(124, 58, 237, 0.18), transparent 36%),
+    linear-gradient(135deg, #ffffff 0%, #fbfaff 48%, #f6f8ff 100%);
+  color: #111827;
+}
+
+.aiw-sideNav {
+  position: sticky;
+  top: 0;
+  min-height: 100vh;
+  padding: 34px 24px;
+  box-sizing: border-box;
+  border-right: 1px solid rgba(124, 58, 237, 0.14);
+  background: rgba(255, 255, 255, 0.72);
+  backdrop-filter: blur(16px);
+}
+
+.aiw-brand {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 52px;
+}
+
+.aiw-brand strong {
+  font-size: 26px;
+  letter-spacing: 0.02em;
+  color: #7c3aed;
+  font-weight: 950;
+}
+
+.aiw-brand span {
+  color: #a78bfa;
+  font-weight: 800;
+}
+
+.aiw-sideNav nav {
+  display: grid;
+  gap: 10px;
+}
+
+.aiw-sideNav nav button {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  padding: 16px 18px;
+  border: 0;
+  border-radius: 18px;
+  text-align: left;
+  background: transparent;
+  color: #6b7280;
+  cursor: pointer;
+}
+
+.aiw-sideNav nav button strong {
+  font-size: 16px;
+}
+
+.aiw-sideNav nav button span {
+  font-size: 12px;
+  color: #9ca3af;
+}
+
+.aiw-sideNav nav button.active {
+  color: #6d28d9;
+  background: #f1e9ff;
+  box-shadow: inset 4px 0 0 #7c3aed;
+}
+
+.aiw-sideCard {
+  display: grid;
+  gap: 10px;
+  margin-top: 64px;
+  padding: 18px;
+  border: 1px solid rgba(124, 58, 237, 0.16);
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.78);
+  box-shadow: 0 20px 55px rgba(76, 29, 149, 0.08);
+}
+
+.aiw-sideCard b {
+  color: #111827;
+}
+
+.aiw-sideCard span {
+  color: #6b7280;
+  line-height: 1.6;
+  font-size: 13px;
+}
+
+.aiw-consoleMain {
+  min-width: 0;
+  padding: 34px 42px 60px;
+}
+
+.aiw-consoleHeader {
+  display: flex;
+  justify-content: space-between;
+  gap: 24px;
+  align-items: flex-start;
+  margin-bottom: 24px;
+}
+
+.aiw-consoleHeader p {
+  margin: 0 0 6px;
+  color: #7c3aed;
+  font-weight: 950;
+  letter-spacing: 0.08em;
+}
+
+.aiw-consoleHeader h1 {
+  margin: 0 0 8px;
+  font-size: 38px;
+  line-height: 1.12;
+  color: #111827;
+}
+
+.aiw-consoleHeader span {
+  color: #7b8192;
+  font-weight: 700;
+}
+
+.aiw-consoleStatus {
+  min-width: 190px;
+  display: grid;
+  gap: 5px;
+  padding: 14px 18px;
+  border: 1px solid rgba(124, 58, 237, 0.14);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.8);
+  text-align: right;
+}
+
+.aiw-consoleStatus b {
+  color: #6d28d9;
+}
+
+.aiw-consoleStatus span {
+  font-size: 12px;
+  color: #9ca3af;
+  word-break: break-all;
+}
+
+.aiw-consoleBody .aiw-card {
+  border-color: rgba(124, 58, 237, 0.14);
+  box-shadow: 0 20px 58px rgba(76, 29, 149, 0.08);
+}
+
+.aiw-native-panel .aiw-hero {
+  background: linear-gradient(135deg, rgba(124, 58, 237, 0.06), rgba(255, 255, 255, 0.94));
+  border-color: rgba(124, 58, 237, 0.13);
+}
+
+.aiw-uploadButton {
+  position: relative;
+  overflow: hidden;
+}
+
+.aiw-uploadButton input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.aiw-actions.small {
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.aiw-actions.small .aiw-muted,
+.aiw-actions.small .aiw-purple,
+.aiw-actions.small .aiw-danger,
+.aiw-actions.small .aiw-linkButton {
+  padding: 8px 10px;
+  font-size: 12px;
+  border-radius: 10px;
+}
+
+.aiw-assetGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 14px;
+  max-height: 650px;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.aiw-assetGrid.compact {
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  max-height: 560px;
+}
+
+.aiw-assetCard {
+  display: grid;
+  gap: 9px;
+  padding: 12px;
+  border: 1px solid #e9d5ff;
+  border-radius: 18px;
+  background: #fff;
+}
+
+.aiw-assetCard.selected {
+  border-color: #7c3aed;
+  box-shadow: 0 0 0 3px rgba(124, 58, 237, 0.12);
+}
+
+.aiw-assetPreview {
+  width: 100%;
+  aspect-ratio: 16 / 10;
+  overflow: hidden;
+  border: 0;
+  border-radius: 14px;
+  background: #f3f0ff;
+  cursor: pointer;
+}
+
+.aiw-assetPreview img,
+.aiw-assetPreview video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.aiw-assetCard strong {
+  color: #111827;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.aiw-assetCard span,
+.aiw-mutedText {
+  color: #7b8192;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.aiw-avatarPreview {
+  display: grid;
+  gap: 12px;
+}
+
+.aiw-avatarPreview img,
+.aiw-avatarPreview video {
+  width: min(360px, 100%);
+  max-height: 520px;
+  border-radius: 22px;
+  object-fit: cover;
+  background: #0f172a;
+}
+
+.aiw-topNotice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 18px;
+  padding: 13px 16px;
+  border-radius: 16px;
+  color: #5b21b6;
+  background: #f1e9ff;
+  font-weight: 900;
+}
+
+.aiw-topNotice button {
+  border: 0;
+  background: transparent;
+  color: #5b21b6;
+  font-size: 20px;
+  cursor: pointer;
+}
+
+@media (max-width: 1040px) {
+  .aiw-consoleRoot {
+    grid-template-columns: 1fr;
+  }
+  .aiw-sideNav {
+    position: static;
+    min-height: auto;
+  }
+  .aiw-sideNav nav {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .aiw-consoleMain {
+    padding: 24px 16px 40px;
+  }
+  .aiw-consoleHeader {
+    flex-direction: column;
+  }
+  .aiw-consoleStatus {
+    text-align: left;
+    width: 100%;
+  }
+}
+/* ===== /AI-VIDEO v17 native linked console ===== */

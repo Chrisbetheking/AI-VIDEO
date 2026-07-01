@@ -7,7 +7,7 @@ export const API_BASE = envApiBase || (isLocal ? 'http://localhost:8000' : defau
 export const TOKEN_KEY = 'ai_video_api_token'
 export const BACKEND_MAX_FULL_AI_SHOTS = 50
 
-export type WorkspaceTab = 'pureai' | 'collect' | 'leads' | 'digital'
+export type WorkspaceTab = 'pureai' | 'collect' | 'assets' | 'digital' | 'leads' | 'settings'
 
 export type ProjectSegment = {
   index: number
