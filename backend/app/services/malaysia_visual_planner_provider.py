@@ -10,7 +10,7 @@ from starlette.requests import Request
 router = APIRouter(prefix="/api/video/malaysia-visual", tags=["malaysia-visual-planner"])
 
 NEGATIVE = (
-    "document-only close-up, calculator-only close-up, paper-only tabletop scene, plain desk with documents, generic office meeting, random business conference, unrelated corporate people, "
+    "irrelevant close-up, irrelevant close-up, irrelevant close-up, irrelevant indoor scene, generic office meeting, random business conference, unrelated corporate people, "
     "plain office room, abstract background, talking head interview, unrelated factory, "
     "text, subtitles, captions, readable words, logo, watermark, signboard, price tag, "
     "fake UI, poster, banner, floorplan text, black bars, letterbox, pillarbox, cartoon, anime, blurry"
@@ -97,23 +97,57 @@ def _anchors_for(text: str, index: int) -> List[str]:
 
     return anchors
 
+
 def build_prompt(raw_prompt: str, topic: str = "", index: int = 1) -> str:
     text = f"{topic}\n{raw_prompt}"
     typ = _scene_type(text)
-    anchors = _anchors_for(text, index)
+
+    kl_scenes = [
+        "KLCC Twin Towers skyline with luxury high-rise condominium in the foreground",
+        "Kuala Lumpur city-view condo balcony overlooking the Petronas Twin Towers",
+        "modern luxury condo living room with floor-to-ceiling windows and KLCC skyline outside",
+        "premium condominium lobby in Kuala Lumpur, elegant residential atmosphere",
+        "infinity pool on a high-rise condo rooftop with Kuala Lumpur skyline",
+        "TRX financial district and luxury residential towers, cinematic city lifestyle",
+        "Mont Kiara upscale condominium neighborhood, premium family living atmosphere",
+        "night skyline of Kuala Lumpur with high-rise residential towers and city lights",
+    ]
+
+    sea_scenes = [
+        "Penang ocean-view condominium balcony with elegant seaside lifestyle",
+        "Gurney Drive coastal skyline with modern residential tower atmosphere",
+        "Langkawi tropical villa and resort-style residential pool",
+        "Sabah sunset ocean view with premium seaside apartment atmosphere",
+        "modern apartment interior facing the sea, warm tropical daylight",
+        "coastal residential pool with palm trees and premium Malaysia lifestyle",
+    ]
+
+    family_scenes = [
+        "Mont Kiara family-friendly condominium community with premium residential facilities",
+        "modern condo living room for family own-stay lifestyle in Kuala Lumpur",
+        "safe upscale residential neighborhood with condo amenities and greenery",
+        "family-oriented high-rise condominium facilities in Kuala Lumpur",
+    ]
+
+    if typ == "second_home_seaside":
+        scene = sea_scenes[(index - 1) % len(sea_scenes)]
+        extra = "seaside second-home lifestyle, ocean view, tropical Malaysia atmosphere"
+    elif typ == "family_own_stay":
+        scene = family_scenes[(index - 1) % len(family_scenes)]
+        extra = "family own-stay, education planning, comfortable long-term living"
+    else:
+        scene = kl_scenes[(index - 1) % len(kl_scenes)]
+        extra = "Kuala Lumpur property investment, location value, premium condo lifestyle"
 
     return (
-        "Create a premium 9:16 cinematic vertical video shot for Malaysia real-estate content.\n"
-        "Market: Malaysia real estate.\n"
-        f"Content type: {typ}.\n"
-        f"Visual anchors: {', '.join(anchors)}.\n"
-        "Scene: Malaysia property context must dominate at least 70 percent of the frame: KLCC Twin Towers skyline, Kuala Lumpur city-view balcony, luxury condominium exterior, modern apartment interior with floor-to-ceiling windows, condo lobby, "
-        "swimming pool, skyline, seaside lifestyle, ocean-view balcony, or residential amenities depending on the script.\n"
-        "Style: ultra realistic, premium, polished, high-end real estate commercial, natural lighting, "
-        "clean composition, cinematic movement, mobile-first vertical framing.\n"
-        "Visual priority rule: never make documents, papers, calculators, laptops, or office desks the main subject. They may appear only as small foreground props. The main subject must be Malaysia real estate: KLCC skyline, Twin Towers view, luxury condo balcony, apartment interior, condo lobby, pool, or Kuala Lumpur city skyline.\nTruth rule: do not invent specific project name, exact price, exact ROI, exact school name, exact floorplan, "
-        "or official surrounding data. Use generic Malaysia real-estate atmosphere only.\n"
-        f"Avoid: {NEGATIVE}.\n"
+        "Premium 9:16 cinematic vertical video for Malaysia real-estate content.\n"
+        f"Main scene: {scene}.\n"
+        f"Theme: {extra}.\n"
+        "The frame must be dominated by Malaysia property visuals: skyline, condominium exterior, balcony view, "
+        "apartment interior, lobby, pool, or residential lifestyle.\n"
+        "Ultra realistic, premium real estate commercial style, natural lighting, clean composition, high detail, "
+        "smooth camera movement, mobile-first vertical framing, no black borders.\n"
+        "No readable text, no logo, no watermark, no fake project name, no exact price, no exact ROI, no exact school name.\n"
     )
 
 def rewrite_fal_payload(data: Dict[str, Any]) -> Dict[str, Any]:
