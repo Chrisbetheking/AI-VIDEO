@@ -5633,3 +5633,12 @@ try:
 except Exception as _full_ai_script_ai_exc:
     print("FULL_AI_SCRIPT_AI_PROVIDER_LOAD_FAILED", _full_ai_script_ai_exc)
 # ===== /FULL AI SCRIPT AI PROVIDER HOTFIX =====
+
+
+# ===== MALAYSIA REAL ESTATE VISUAL PLANNER =====
+try:
+    from app.services.malaysia_visual_planner_provider import install_malaysia_visual_planner
+    install_malaysia_visual_planner(app)
+except Exception as _malaysia_visual_exc:
+    print("MALAYSIA_VISUAL_PLANNER_LOAD_FAILED", _malaysia_visual_exc)
+# ===== /MALAYSIA REAL ESTATE VISUAL PLANNER =====
