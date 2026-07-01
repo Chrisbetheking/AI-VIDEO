@@ -1,159 +1,140 @@
 import React, { useEffect, useMemo, useState } from 'react'
+import PureAIVideoPath from './PureAIVideoPath'
 import DouyinAccountLibrary from './DouyinAccountLibrary'
 import OpenClawWorkbench from './OpenClawWorkbench'
-import PureAIVideoPath from './PureAIVideoPath'
-import { getStoredToken, setStoredToken, clearStoredToken, maskToken } from './aiVideoApi'
+import { clearToken, getToken, maskToken, saveToken } from './aiVideoApi'
 
-type PanelKey = 'none' | 'douyin' | 'openclaw' | 'pureai' | 'digitalHuman'
+type Mode = 'none' | 'pure' | 'collector' | 'capture' | 'digital'
 
-const HASH_TO_PANEL: Record<string, PanelKey> = {
-  '#douyin-account-library': 'douyin',
-  '#douyin-collector': 'douyin',
-  '#openclaw-workbench': 'openclaw',
-  '#openclaw-capture': 'openclaw',
-  '#pure-ai-video': 'pureai',
-  '#full-ai-video': 'pureai',
-  '#digital-human-safe': 'digitalHuman',
-}
-
-function matchPanelFromText(text: string): PanelKey {
+function targetModeFromText(text: string): Mode {
   const t = text.replace(/\s+/g, '')
-  if (t.includes('竞品账号库') || t.includes('同行采集') || t.includes('抖音账号库')) return 'douyin'
-  if (t.includes('获客自动化') || t.includes('OpenClaw') || t.includes('截流')) return 'openclaw'
-  if (t.includes('AI视频生产中心') || t.includes('一键生成中心') || t.includes('纯AI生成')) return 'pureai'
-  if (t.includes('数字人')) return 'digitalHuman'
+  if (/(AI视频生产中心|一键生成中心|纯AI|AI视频)/.test(t)) return 'pure'
+  if (/(同行采集|竞品账号库|行业爆点|抖音账号库)/.test(t)) return 'collector'
+  if (/(获客自动化|OpenClaw|截流)/.test(t)) return 'capture'
+  if (/(数字人)/.test(t)) return 'digital'
   return 'none'
 }
 
-function InternalDigitalHumanPanel() {
+function nearestSmallMenuText(target: HTMLElement | null) {
+  if (!target) return ''
+  if (['INPUT', 'TEXTAREA', 'SELECT', 'OPTION'].includes(target.tagName)) return ''
+  let el: HTMLElement | null = target
+  for (let i = 0; i < 6 && el; i += 1) {
+    const txt = (el.textContent || '').replace(/\s+/g, ' ').trim()
+    if (txt && txt.length <= 80) return txt
+    el = el.parentElement
+  }
+  return ''
+}
+
+function DigitalHumanInternalPanel() {
+  const [script, setScript] = useState('这是内部自用数字人口播片段，用来承接前面生成的文稿。')
+  const seconds = Math.max(5, Math.ceil(script.length / 4.2))
   return (
-    <section className="uxPanelCard">
-      <div className="uxHeroRow">
+    <section className="uxPanel digitalInternalPanel">
+      <div className="uxHero">
         <div>
-          <p className="uxEyebrow">DIGITAL HUMAN / INTERNAL MODE</p>
+          <p className="uxEyebrow">DIGITAL HUMAN INTERNAL</p>
           <h2>数字人内部素材工作台</h2>
-          <p>这里改成自用素材逻辑，不再拿“本人授权”做阻断。上传形象素材、配音脚本后，系统优先走内部数字人片段；如果当前后端数字人接口异常，先不让页面白屏。</p>
+          <p>按内部自用素材处理，不再用“本人授权”作为阻断流程。这里负责把已生成文稿切成数字人口播片段，后续接数字人接口。</p>
         </div>
-        <span className="uxBadge">内部自用</span>
+        <span className="uxGreenBadge">内部自用</span>
       </div>
-      <div className="uxGrid3">
-        <div className="uxStat"><b>1</b><span>选择形象素材</span><p>上传照片/口播视频，作为内部素材。</p></div>
-        <div className="uxStat"><b>2</b><span>绑定配音分段</span><p>按文案段落生成数字人口播。</p></div>
-        <div className="uxStat"><b>3</b><span>进入剪辑合成</span><p>数字人片段作为素材进入合成。</p></div>
+      <div className="uxTwoCol">
+        <label className="uxCard">数字人口播文稿<textarea value={script} onChange={(e) => setScript(e.target.value)} /></label>
+        <div className="uxCard">
+          <h3>生成建议</h3>
+          <p>预计口播时长：{seconds}s</p>
+          <p>建议：先用纯 AI / OpenClaw 面板生成文稿，再复制到这里生成数字人片段。</p>
+          <p>素材来源：内部自用形象素材 / 已上传照片视频 / 已生成数字人片段。</p>
+        </div>
       </div>
-      <div className="uxNotice">当前先接管白屏入口。后续要做后端数字人真实任务状态、失败重试和素材版本管理。</div>
+      <div className="uxNotice">后端数字人接口当前仍按已有能力调用。下一步应把这里接入数字人生成接口并把产物自动回填素材库。</div>
     </section>
   )
 }
 
-function panelTitle(panel: PanelKey) {
-  if (panel === 'douyin') return '抖音自动采集任务中心'
-  if (panel === 'openclaw') return 'OpenClaw 获客截流面板'
-  if (panel === 'pureai') return '纯 AI 视频生成路径'
-  if (panel === 'digitalHuman') return '数字人内部素材工作台'
-  return ''
+function modeTitle(mode: Mode) {
+  if (mode === 'pure') return 'AI 自动生成中控'
+  if (mode === 'collector') return '抖音自动采集'
+  if (mode === 'capture') return 'OpenClaw 获客截流'
+  if (mode === 'digital') return '数字人内部素材'
+  return 'AI-VIDEO 自动化工作台'
 }
 
 export default function ProductWorkspaceBridge() {
-  const [panel, setPanel] = useState<PanelKey>(() => HASH_TO_PANEL[window.location.hash] || 'none')
-  const [token, setToken] = useState(getStoredToken())
-  const [showToken, setShowToken] = useState(false)
-
-  const headerToken = useMemo(() => maskToken(token), [token])
-
-  function openPanel(next: PanelKey) {
-    if (next === 'none') return
-    setPanel(next)
-    const hash = next === 'douyin' ? '#douyin-collector' : next === 'openclaw' ? '#openclaw-capture' : next === 'pureai' ? '#pure-ai-video' : '#digital-human-safe'
-    if (window.location.hash !== hash) window.history.replaceState(null, '', hash)
-  }
-
-  function closePanel() {
-    setPanel('none')
-    if (window.location.hash) window.history.replaceState(null, '', window.location.pathname)
-  }
+  const [mode, setMode] = useState<Mode>('none')
+  const [tokenBox, setTokenBox] = useState(false)
+  const [tokenInput, setTokenInput] = useState(getToken())
 
   useEffect(() => {
-    const onHash = () => {
-      const next = HASH_TO_PANEL[window.location.hash] || 'none'
-      setPanel(next)
+    function applyHashMode() {
+      const hash = window.location.hash || ''
+      if (hash.includes('douyin-account-library')) setMode('collector')
+      if (hash.includes('openclaw-workbench')) setMode('capture')
+      if (hash.includes('pure-ai-video')) setMode('pure')
+      if (hash.includes('digital-human')) setMode('digital')
     }
-    window.addEventListener('hashchange', onHash)
-    return () => window.removeEventListener('hashchange', onHash)
+    applyHashMode()
+    window.addEventListener('hashchange', applyHashMode)
+    return () => window.removeEventListener('hashchange', applyHashMode)
   }, [])
 
   useEffect(() => {
-    const onClick = (event: MouseEvent) => {
+    function onClick(event: MouseEvent) {
       const target = event.target as HTMLElement | null
-      if (!target) return
-
-      const interactive = target.closest('button, a, [role="button"], .module-card, .nav-item, .sidebar-item, li, div') as HTMLElement | null
-      if (!interactive) return
-
-      // 只拦截左侧栏点击：防止点主内容区任何窗口都跳弹层。
-      if (event.clientX > 420) return
-
-      const text = (interactive.textContent || '').trim()
-      const next = matchPanelFromText(text)
+      const text = nearestSmallMenuText(target)
+      const next = targetModeFromText(text)
       if (next === 'none') return
-
       event.preventDefault()
       event.stopPropagation()
-      openPanel(next)
+      setMode(next)
     }
-
     document.addEventListener('click', onClick, true)
     return () => document.removeEventListener('click', onClick, true)
   }, [])
 
   useEffect(() => {
-    const tick = () => setToken(getStoredToken())
-    window.addEventListener('storage', tick)
-    return () => window.removeEventListener('storage', tick)
-  }, [])
+    document.body.classList.toggle('uxModalOpen', mode !== 'none')
+  }, [mode])
 
-  if (panel === 'none') return null
+  const content = useMemo(() => {
+    if (mode === 'pure') return <PureAIVideoPath />
+    if (mode === 'collector') return <DouyinAccountLibrary />
+    if (mode === 'capture') return <OpenClawWorkbench />
+    if (mode === 'digital') return <DigitalHumanInternalPanel />
+    return null
+  }, [mode])
+
+  if (mode === 'none') return null
 
   return (
     <div className="uxOverlay" role="dialog" aria-modal="true">
-      <div className="uxModal">
-        <header className="uxModalHeader">
+      <div className="uxShell">
+        <header className="uxShellHeader">
           <div>
             <p>AI-VIDEO 自动化工作台</p>
-            <h1>{panelTitle(panel)}</h1>
+            <h1>{modeTitle(mode)}</h1>
           </div>
-          <div className="uxHeaderActions">
-            <button className={panel === 'pureai' ? 'active' : ''} onClick={() => openPanel('pureai')}>纯 AI 生成</button>
-            <button className={panel === 'douyin' ? 'active' : ''} onClick={() => openPanel('douyin')}>抖音采集</button>
-            <button className={panel === 'openclaw' ? 'active' : ''} onClick={() => openPanel('openclaw')}>OpenClaw 截流</button>
-            <button className={panel === 'digitalHuman' ? 'active' : ''} onClick={() => openPanel('digitalHuman')}>数字人</button>
-            <button onClick={() => setShowToken((v) => !v)}>Token：{headerToken}</button>
-            <button className="close" onClick={closePanel}>关闭</button>
+          <div className="uxTopActions">
+            <button className={mode === 'pure' ? 'active' : ''} onClick={() => setMode('pure')}>纯 AI 生成</button>
+            <button className={mode === 'collector' ? 'active' : ''} onClick={() => setMode('collector')}>抖音采集</button>
+            <button className={mode === 'capture' ? 'active' : ''} onClick={() => setMode('capture')}>OpenClaw 截流</button>
+            <button className={mode === 'digital' ? 'active' : ''} onClick={() => setMode('digital')}>数字人</button>
+            <button onClick={() => setTokenBox((v) => !v)}>Token：{maskToken()}</button>
+            <button className="ghost" onClick={() => { setMode('none'); if (window.location.hash) window.history.replaceState(null, '', window.location.pathname) }}>关闭</button>
           </div>
         </header>
 
-        {showToken && (
-          <div className="uxTokenBar">
-            <label>
-              AI-VIDEO API Token
-              <input
-                type="password"
-                value={token}
-                onChange={(e) => setToken(e.target.value)}
-                placeholder="粘贴 /root/ai-video-admin-token.txt 里的后台 Token"
-              />
-            </label>
-            <button onClick={() => { setStoredToken(token); setToken(getStoredToken()); setShowToken(false) }}>保存 Token</button>
-            <button className="ghost" onClick={() => { clearStoredToken(); setToken('') }}>清空</button>
+        {tokenBox && (
+          <div className="uxTokenPanel">
+            <label>AI-VIDEO API Token<input value={tokenInput} onChange={(e) => setTokenInput(e.target.value)} placeholder="粘贴 /root/ai-video-admin-token.txt 的内容" /></label>
+            <button onClick={() => { saveToken(tokenInput); setTokenBox(false) }}>保存 Token</button>
+            <button className="ghost" onClick={() => { clearToken(); setTokenInput('') }}>清空</button>
           </div>
         )}
 
-        <main className="uxModalBody">
-          {panel === 'pureai' && <PureAIVideoPath />}
-          {panel === 'douyin' && <DouyinAccountLibrary />}
-          {panel === 'openclaw' && <OpenClawWorkbench />}
-          {panel === 'digitalHuman' && <InternalDigitalHumanPanel />}
-        </main>
+        <main className="uxShellMain">{content}</main>
       </div>
     </div>
   )

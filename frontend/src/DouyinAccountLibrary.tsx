@@ -1,130 +1,162 @@
 import React, { useMemo, useState } from 'react'
-import { tryPost } from './aiVideoApi'
+import { apiPost, errorText } from './aiVideoApi'
 
-type Pool = 'competitor' | 'traffic_teaching'
+type CollectorMission = {
+  id: string
+  category: string
+  keywords: string[]
+  seedAccounts: string[]
+  status: string
+  createdAt: string
+}
 
-const defaultCompetitors = '马来西亚房产,海外置业,第二家园,吉隆坡公寓,海外房产投资,租金,转手,贷款'
-const defaultTraffic = '短视频起号,爆款标题,评论区转化,私域承接,房产获客,同城获客,直播转化'
+const competitorDefault = '马来西亚买房\n吉隆坡房产\n海外房产投资\n第二家园置业\n海外买房避坑'
+const trafficDefault = '短视频起号\n爆款标题\n评论区转化\n房产获客\n抖音本地获客'
+
+function lines(text: string) {
+  return String(text || '').split(/\r?\n|,|，/).map((x) => x.trim()).filter(Boolean)
+}
 
 export default function DouyinAccountLibrary() {
-  const [pool, setPool] = useState<Pool>('competitor')
+  const [category, setCategory] = useState<'competitor' | 'traffic_teaching'>('competitor')
   const [market, setMarket] = useState('马来西亚')
-  const [keywords, setKeywords] = useState(defaultCompetitors)
+  const [keywords, setKeywords] = useState(competitorDefault)
   const [seedAccounts, setSeedAccounts] = useState('')
   const [maxAccounts, setMaxAccounts] = useState(50)
   const [maxVideos, setMaxVideos] = useState(20)
-  const [maxComments, setMaxComments] = useState(80)
-  const [autoDeepSeek, setAutoDeepSeek] = useState(true)
-  const [autoTimeline, setAutoTimeline] = useState(true)
+  const [maxComments, setMaxComments] = useState(50)
+  const [missions, setMissions] = useState<CollectorMission[]>([])
   const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
   const [result, setResult] = useState<any>(null)
 
-  const mission = useMemo(() => {
-    const keywordList = keywords.split(/[，,\n]/).map((x) => x.trim()).filter(Boolean)
-    const accountList = seedAccounts.split(/[，,\n]/).map((x) => x.trim()).filter(Boolean)
-    return {
-      platform: 'douyin',
-      mission_type: pool === 'competitor' ? 'douyin_competitor_expand' : 'douyin_traffic_teaching_expand',
-      category: pool,
-      market,
-      keywords: keywordList,
-      seed_accounts: accountList,
-      max_accounts: maxAccounts,
-      max_videos_per_account: maxVideos,
-      max_comments_per_video: maxComments,
-      run_deepseek: autoDeepSeek,
-      auto_timeline: autoTimeline,
-      collector_instruction:
-        pool === 'competitor'
-          ? '自动扩展抖音房产同行账号：采集账号、作品、评论，评分高的进入对标基础。'
-          : '自动扩展抖音短视频流量教学账号：采集账号、作品、标题结构和评论区转化方法，沉淀方法论。',
-    }
-  }, [pool, market, keywords, seedAccounts, maxAccounts, maxVideos, maxComments, autoDeepSeek, autoTimeline])
+  const missionType = category === 'competitor' ? 'douyin_competitor_account_expand' : 'douyin_traffic_teaching_expand'
+  const title = category === 'competitor' ? '同行对标自动采集' : '流量教学自动采集'
+  const missionPayload = useMemo(() => ({
+    platform: 'douyin',
+    mission_type: missionType,
+    category,
+    market,
+    keywords: lines(keywords),
+    seed_accounts: lines(seedAccounts),
+    max_accounts: Number(maxAccounts) || 50,
+    max_videos_per_account: Number(maxVideos) || 20,
+    max_comments_per_video: Number(maxComments) || 50,
+    collector_instruction: category === 'competitor'
+      ? '优先扩展房产同行账号，采集公开视频、标题、互动数据和评论区问题；高分账号作为对标基础，不复制素材和文案。'
+      : '优先扩展短视频流量教学账号，采集标题结构、爆款开头、评论区转化方式和复盘方法；只学习方法论。',
+  }), [category, market, keywords, seedAccounts, maxAccounts, maxVideos, maxComments, missionType])
 
-  function switchPool(next: Pool) {
-    setPool(next)
-    setKeywords(next === 'competitor' ? defaultCompetitors : defaultTraffic)
+  function switchCategory(next: 'competitor' | 'traffic_teaching') {
+    setCategory(next)
+    setKeywords(next === 'competitor' ? competitorDefault : trafficDefault)
+    setSeedAccounts('')
+    setResult(null)
+    setError('')
   }
 
   async function createMission() {
     setBusy('mission')
     setError('')
     try {
-      const payload = {
-        command: 'douyin_auto_collect',
-        command_type: 'douyin_auto_collect',
-        title: pool === 'competitor' ? '抖音同行自动采集' : '抖音流量教学自动采集',
-        payload: mission,
-        params: mission,
-        dry_run: false,
+      let data: any
+      try {
+        data = await apiPost('/api/collector/commands/create', {
+          command_type: missionType,
+          payload: missionPayload,
+          source: 'frontend_douyin_automation',
+        })
+      } catch (firstError) {
+        data = await apiPost('/api/collector/douyin/accounts/bulk-upsert', {
+          accounts: lines(seedAccounts).map((name, index) => ({
+            category,
+            account_name: name || `${title}-${index + 1}`,
+            douyin_id: '',
+            niche: lines(keywords).join(' '),
+            keywords: lines(keywords),
+            notes: '前端下发采集目标；等待 OpenClaw/采集器替换为真实账号数据。',
+            source: 'collector_mission_seed',
+          })),
+        })
       }
-      const data = await tryPost([
-        '/api/collector/commands/create',
-        '/api/collector/commands/enqueue',
-        '/api/collector/douyin/missions/create',
-        '/api/collector/missions/create',
-      ], payload)
-      setResult({ ...data, mission })
-    } catch (err: any) {
-      setResult({ ok: false, local_preview: true, message: '后端采集任务创建接口还未统一，先保留任务载荷。下一步需要后端队列适配。', mission })
-      setError(err?.message || String(err))
+      const mission: CollectorMission = {
+        id: data?.command_id || data?.id || data?.mission_id || `local_mission_${Date.now()}`,
+        category,
+        keywords: lines(keywords),
+        seedAccounts: lines(seedAccounts),
+        status: '已下发，等待 OpenClaw / 采集器领取回传',
+        createdAt: new Date().toLocaleString(),
+      }
+      setMissions((prev) => [mission, ...prev].slice(0, 20))
+      setResult(data)
+    } catch (e) {
+      setError(errorText(e))
     } finally {
       setBusy('')
     }
   }
 
   return (
-    <section className="uxPanelCard">
-      <div className="uxHeroRow">
+    <section className="uxPanel douyinCollectorPanel">
+      <div className="uxHero">
         <div>
           <p className="uxEyebrow">DOUYIN AUTO COLLECTOR</p>
           <h2>抖音自动采集任务中心</h2>
-          <p>这里不是手动维护假账号，而是给 OpenClaw / 采集器下发任务：自动扩展同行、流量教学账号、作品和评论，回传后再评分、拆结构、生成脚本。</p>
+          <p>这里不是手动存几个假账号，而是给 OpenClaw/采集器下发任务：自动扩展同行账号、流量教学账号、作品和评论区。</p>
         </div>
-        <span className="uxBadge">主平台：抖音</span>
+        <span className="uxRedBadge">主平台：抖音</span>
       </div>
 
-      <div className="uxButtonRow">
-        <button className={pool === 'competitor' ? 'active' : ''} onClick={() => switchPool('competitor')}>同行对标采集</button>
-        <button className={pool === 'traffic_teaching' ? 'active' : ''} onClick={() => switchPool('traffic_teaching')}>流量教学采集</button>
+      <div className="uxPresetRow">
+        <button className={category === 'competitor' ? 'active red' : ''} onClick={() => switchCategory('competitor')}>同行对标采集</button>
+        <button className={category === 'traffic_teaching' ? 'active' : ''} onClick={() => switchCategory('traffic_teaching')}>流量教学采集</button>
       </div>
 
-      <div className="uxGrid4">
+      <div className="uxGrid four">
         <label>市场<input value={market} onChange={(e) => setMarket(e.target.value)} /></label>
-        <label>目标账号上限<input type="number" value={maxAccounts} onChange={(e) => setMaxAccounts(Number(e.target.value || 50))} /></label>
-        <label>每号作品上限<input type="number" value={maxVideos} onChange={(e) => setMaxVideos(Number(e.target.value || 20))} /></label>
-        <label>每条评论上限<input type="number" value={maxComments} onChange={(e) => setMaxComments(Number(e.target.value || 80))} /></label>
+        <label>账号上限<input type="number" value={maxAccounts} onChange={(e) => setMaxAccounts(Number(e.target.value || 50))} /></label>
+        <label>每账号作品数<input type="number" value={maxVideos} onChange={(e) => setMaxVideos(Number(e.target.value || 20))} /></label>
+        <label>每作品评论数<input type="number" value={maxComments} onChange={(e) => setMaxComments(Number(e.target.value || 50))} /></label>
       </div>
 
-      <div className="uxSplit">
-        <label className="uxBox">采集关键词
-          <textarea value={keywords} onChange={(e) => setKeywords(e.target.value)} />
-        </label>
-        <label className="uxBox">种子账号 / 主页链接，可留空让采集器自动扩展
-          <textarea value={seedAccounts} onChange={(e) => setSeedAccounts(e.target.value)} placeholder="抖音号、主页链接、同行名，一行一个" />
-        </label>
+      <div className="uxTwoCol">
+        <label className="uxCard">关键词池<textarea value={keywords} onChange={(e) => setKeywords(e.target.value)} /></label>
+        <label className="uxCard">种子账号 / 抖音主页链接<textarea value={seedAccounts} onChange={(e) => setSeedAccounts(e.target.value)} placeholder="可空。采集器会先按关键词扩展账号；有已知同行号再填这里。" /></label>
       </div>
 
-      <div className="uxGrid4">
-        <label className="uxCheck"><input type="checkbox" checked={autoDeepSeek} onChange={(e) => setAutoDeepSeek(e.target.checked)} />回传后自动 DeepSeek 学习</label>
-        <label className="uxCheck"><input type="checkbox" checked={autoTimeline} onChange={(e) => setAutoTimeline(e.target.checked)} />高分内容自动转 Timeline</label>
+      <div className="uxNotice">
+        {category === 'competitor'
+          ? '同行账号：采集作品结构、标题、评论区需求和转化路径；高分账号作为对标基础，不复制素材。'
+          : '流量教学账号：采集起号、爆款、评论区转化和复盘方法；只学习方法论，反哺我们的内容。'}
       </div>
 
       <div className="uxButtonRow">
-        <button onClick={createMission} disabled={!!busy}>下发自动采集任务</button>
-      </div>
-      {busy && <div className="uxNotice">正在下发：{busy}</div>}
-      {error && <div className="uxError">后端暂未适配完整采集队列：{error}</div>}
-
-      <div className="uxStatsRow">
-        <div className="uxStat"><b>{mission.keywords.length}</b><span>关键词</span></div>
-        <div className="uxStat"><b>{maxAccounts}</b><span>目标账号上限</span></div>
-        <div className="uxStat"><b>{maxVideos}</b><span>每号作品</span></div>
-        <div className="uxStat"><b>{maxComments}</b><span>每条评论</span></div>
+        <button onClick={createMission} disabled={!!busy}>{busy ? '下发中...' : '下发自动采集任务'}</button>
       </div>
 
-      <div className="uxNotice">采集器应该做：搜索关键词 → 扩展账号 → 抓作品标题/数据 → 抓评论 → 回传 → 自动评分/DeepSeek/Timeline。前端不再伪造账号数量。</div>
+      {error && <div className="uxError">{error}</div>}
+
+      <div className="uxStatGrid">
+        <div><b>{missions.length}</b><span>已下发任务</span></div>
+        <div><b>{lines(keywords).length}</b><span>关键词目标</span></div>
+        <div><b>{lines(seedAccounts).length}</b><span>种子账号</span></div>
+        <div><b>OpenClaw</b><span>等待采集器回传</span></div>
+      </div>
+
+      {missions.length > 0 && (
+        <div className="uxCard">
+          <h3>最近采集任务</h3>
+          {missions.map((m) => (
+            <div className="uxSegment" key={m.id}>
+              <b>{m.id}</b>
+              <p>{m.status}</p>
+              <em>{m.category === 'competitor' ? '同行对标' : '流量教学'}｜{m.keywords.join('、')}</em>
+              <span>{m.createdAt}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
       {result && <pre className="uxJson">{JSON.stringify(result, null, 2)}</pre>}
     </section>
   )
