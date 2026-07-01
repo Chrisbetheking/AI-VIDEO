@@ -1,220 +1,280 @@
 import React, { useEffect, useMemo, useState } from 'react'
+import {
+  clearStoredToken,
+  emptyProjectDraft,
+  getStoredToken,
+  maskToken,
+  ProjectDraft,
+  setStoredToken,
+} from './aiVideoApi'
 import PureAIVideoPath from './PureAIVideoPath'
 import DouyinAccountLibrary from './DouyinAccountLibrary'
 import OpenClawWorkbench from './OpenClawWorkbench'
-import { clearStoredToken, emptyProjectDraft, getStoredToken, maskToken, ProjectDraft, setStoredToken } from './aiVideoApi'
 
-type WorkspaceTab = 'pureai' | 'collect' | 'leads' | 'digital'
-type PanelState = 'closed' | 'open'
+type WorkspaceTab = 'pure' | 'douyin' | 'openclaw' | 'digital'
 
-const DRAFT_KEY = 'ai_video_engineering_project_draft_v8'
-
-function loadDraft(): ProjectDraft {
-  try {
-    const raw = localStorage.getItem(DRAFT_KEY)
-    if (!raw) return emptyProjectDraft()
-    return { ...emptyProjectDraft(), ...JSON.parse(raw) }
-  } catch {
-    return emptyProjectDraft()
-  }
+const WORKSPACE_HASHES: Record<string, WorkspaceTab> = {
+  '#ai-video-workspace': 'pure',
+  '#pure-ai-video': 'pure',
+  '#douyin-account-library': 'douyin',
+  '#douyin-collector': 'douyin',
+  '#openclaw-workbench': 'openclaw',
+  '#openclaw-capture': 'openclaw',
+  '#digital-human-workspace': 'digital',
 }
 
-function saveDraft(draft: ProjectDraft) {
-  localStorage.setItem(DRAFT_KEY, JSON.stringify(draft))
-}
-
-function tabFromHash(hash: string): WorkspaceTab | null {
-  if (['#pure-ai-video', '#full-ai-video', '#one-click-video'].includes(hash)) return 'pureai'
-  if (['#douyin-collector', '#douyin-account-library', '#competitor-collector'].includes(hash)) return 'collect'
-  if (['#openclaw-capture', '#openclaw-workbench', '#lead-acquisition'].includes(hash)) return 'leads'
-  if (['#digital-human-safe', '#digital-human-workspace'].includes(hash)) return 'digital'
-  return null
-}
-
-function matchTabFromText(text: string): WorkspaceTab | null {
+function targetTabFromText(text: string): WorkspaceTab | null {
   const t = text.replace(/\s+/g, '')
-  if (t.includes('AI视频生产中心') || t.includes('一键生成中心') || t.includes('纯AI生成')) return 'pureai'
-  if (t.includes('同行采集') || t.includes('竞品账号库') || t.includes('抖音账号库')) return 'collect'
-  if (t.includes('获客自动化') || t.includes('OpenClaw') || t.includes('截流')) return 'leads'
-  if (t.includes('数字人')) return 'digital'
+  if (!t) return null
+
+  if (
+    t.includes('AI视频生产中心') ||
+    t.includes('一键生成中心') ||
+    t.includes('纯AI') ||
+    t.includes('生成中心')
+  ) {
+    return 'pure'
+  }
+
+  if (
+    t.includes('同行采集') ||
+    t.includes('竞品账号库') ||
+    t.includes('抖音账号库') ||
+    t.includes('抖音采集')
+  ) {
+    return 'douyin'
+  }
+
+  if (t.includes('获客自动化') || t.includes('OpenClaw') || t.includes('获客承接')) {
+    return 'openclaw'
+  }
+
+  if (t.includes('数字人')) {
+    return 'digital'
+  }
+
   return null
 }
 
-function tabHash(tab: WorkspaceTab) {
-  if (tab === 'pureai') return '#pure-ai-video'
-  if (tab === 'collect') return '#douyin-collector'
-  if (tab === 'leads') return '#openclaw-capture'
-  return '#digital-human-workspace'
+function shouldInterceptClick(target: HTMLElement): WorkspaceTab | null {
+  const candidate = target.closest('button, a, [role="button"], .nav-item, .sidebar-item, li, div')
+  if (!(candidate instanceof HTMLElement)) return null
+
+  const rect = candidate.getBoundingClientRect()
+  const looksLikeLeftNav = rect.left < 420 && rect.width < 420
+  const isHashLink = candidate instanceof HTMLAnchorElement && candidate.hash in WORKSPACE_HASHES
+
+  if (!looksLikeLeftNav && !isHashLink) return null
+
+  const text = candidate.innerText || candidate.textContent || ''
+  return targetTabFromText(text)
 }
 
-function tabTitle(tab: WorkspaceTab) {
-  if (tab === 'pureai') return 'AI 自动生成中控'
-  if (tab === 'collect') return '抖音自动采集中控'
-  if (tab === 'leads') return 'OpenClaw 获客承接中控'
-  return '数字人素材中控'
-}
+function TokenPill() {
+  const [token, setToken] = useState(getStoredToken())
+  const [open, setOpen] = useState(false)
 
-function isLikelyLeftRailNode(el: HTMLElement) {
-  const rect = el.getBoundingClientRect()
-  if (rect.left > 430) return false
-  if (rect.width > 460) return false
-  return true
-}
-
-function normalizeLegacyLeftRail() {
-  const nodes = Array.from(document.querySelectorAll<HTMLElement>('button, a, li, div'))
-  for (const el of nodes) {
-    if (!isLikelyLeftRailNode(el)) continue
-    const text = (el.textContent || '').replace(/\s+/g, '')
-    if (!text) continue
-
-    if (text.includes('行业爆点')) {
-      const card = el.closest<HTMLElement>('li, button, a, .module-card, .nav-item, .sidebar-item, div')
-      if (card && card !== document.body) card.dataset.aiVideoLegacyHidden = 'true'
-    }
-
-    if (text.includes('AI视频生产中心')) el.dataset.aiVideoBridgeEntry = 'pureai'
-    if (text.includes('一键生成中心')) el.dataset.aiVideoBridgeEntry = 'pureai'
-    if (text.includes('同行采集')) el.dataset.aiVideoBridgeEntry = 'collect'
-    if (text.includes('竞品账号库')) el.dataset.aiVideoBridgeEntry = 'collect'
-    if (text.includes('获客自动化')) el.dataset.aiVideoBridgeEntry = 'leads'
-    if (text.includes('数字人')) el.dataset.aiVideoBridgeEntry = 'digital'
+  function save() {
+    const clean = setStoredToken(token)
+    setToken(clean)
+    setOpen(false)
   }
+
+  function clear() {
+    clearStoredToken()
+    setToken('')
+  }
+
+  return (
+    <div className="workspaceToken">
+      <button type="button" onClick={() => setOpen((x) => !x)}>
+        Token：{maskToken(token)}
+      </button>
+      {open && (
+        <div className="workspaceTokenPanel">
+          <label>
+            AI-VIDEO API Token
+            <input
+              value={token}
+              onChange={(event) => setToken(event.target.value)}
+              placeholder="粘贴 /root/ai-video-admin-token.txt 里的管理 Token"
+            />
+          </label>
+          <p>只保存在当前浏览器 localStorage，不再弹系统输入框。</p>
+          <div>
+            <button type="button" onClick={save}>
+              保存
+            </button>
+            <button type="button" onClick={clear}>
+              清空
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
 }
 
-function DigitalHumanPanel({ project, setProject, goTab }: { project: ProjectDraft; setProject: (p: ProjectDraft) => void; goTab: (t: WorkspaceTab) => void }) {
+function DigitalHumanInternalPanel({
+  project,
+  setProject,
+  goTab,
+}: {
+  project: ProjectDraft
+  setProject: (next: ProjectDraft) => void
+  goTab: (next: WorkspaceTab) => void
+}) {
+  const canContinue = Boolean(project.script && project.segments.length)
+
   return (
-    <section className="ux-card">
-      <div className="ux-card-hero">
-        <p className="ux-eyebrow">DIGITAL HUMAN / INTERNAL MATERIAL MODE</p>
-        <h2>数字人内部素材路径</h2>
-        <p>数字人片段按内部素材使用，不再做“本人授权”阻断。流程是：先有文稿和分镜，再生成或选择数字人口播片段，最后进入剪辑合成。</p>
-        <span className="ux-badge blue">内部自用素材</span>
+    <section className="productPanel">
+      <div className="productHero">
+        <div>
+          <p className="productEyebrow">DIGITAL HUMAN INTERNAL MODE</p>
+          <h2>数字人内部素材工作台</h2>
+          <p>
+            这里按内部自用素材处理：先有文稿和分镜，再生成数字人口播片段，最后进入剪辑合成。不是空白页，也不再阻断式弹授权。
+          </p>
+        </div>
+        <span className="productBadge">内部自用</span>
       </div>
 
-      <div className="ux-grid three">
-        <div className="ux-mini-card"><b>1. 文稿前置</b><span>{project.script ? '已有文稿' : '先去纯 AI 生成文稿'}</span></div>
-        <div className="ux-mini-card"><b>2. 形象素材</b><span>上传照片/口播视频，作为内部素材源</span></div>
-        <div className="ux-mini-card"><b>3. 剪辑承接</b><span>数字人片段进入素材序列，不单独孤立</span></div>
+      <div className="productGrid four">
+        <div className="metricCard">
+          <b>{project.script ? '已生成' : '未生成'}</b>
+          <span>文稿状态</span>
+        </div>
+        <div className="metricCard">
+          <b>{project.segments.length}</b>
+          <span>口播分段</span>
+        </div>
+        <div className="metricCard">
+          <b>{project.targetDuration}s</b>
+          <span>目标长度</span>
+        </div>
+        <div className="metricCard">
+          <b>{canContinue ? '可进入' : '先文稿'}</b>
+          <span>下一步</span>
+        </div>
       </div>
 
-      <div className="ux-form-grid two">
-        <label>数字人角色备注
-          <input value={(project as any).digitalHumanRole || '老板口播 / 顾问口播'} onChange={(e) => setProject({ ...project, digitalHumanRole: e.target.value } as any)} />
-        </label>
-        <label>生成模式
-          <select value={(project as any).digitalHumanMode || 'internal'} onChange={(e) => setProject({ ...project, digitalHumanMode: e.target.value } as any)}>
-            <option value="internal">内部素材片段</option>
-            <option value="placeholder">先生成占位片段</option>
-            <option value="disabled">本条视频不用数字人</option>
-          </select>
-        </label>
+      <div className="productButtonRow">
+        <button type="button" onClick={() => goTab('pure')}>
+          去生成文稿/分镜
+        </button>
+        <button type="button" className="green" disabled={!canContinue}>
+          生成数字人口播片段
+        </button>
       </div>
 
-      {!project.script && <div className="ux-warning">没有文稿时不生成数字人片段。先到「纯 AI 生成」把文稿和分镜出来。</div>}
-      <div className="ux-button-row">
-        <button className="ux-primary" onClick={() => goTab('pureai')}>去生成文稿/分镜</button>
-        <button className="ux-ghost" disabled={!project.script}>把数字人加入剪辑素材</button>
+      {project.script && (
+        <div className="resultCard">
+          <h3>当前文稿</h3>
+          <pre>{project.script}</pre>
+        </div>
+      )}
+
+      <div className="productNotice">
+        数字人这一步暂时先作为内部素材节点：输出片段后进入“配音/剪辑/字幕”链路，不单独跳出成片。
       </div>
     </section>
   )
 }
 
 export default function ProductWorkspaceBridge() {
-  const initialTab = tabFromHash(window.location.hash) || 'pureai'
-  const [panel, setPanel] = useState<PanelState>(() => tabFromHash(window.location.hash) ? 'open' : 'closed')
-  const [tab, setTab] = useState<WorkspaceTab>(initialTab)
-  const [project, setProjectState] = useState<ProjectDraft>(loadDraft())
-  const [token, setToken] = useState(getStoredToken())
-  const [showToken, setShowToken] = useState(false)
+  const [open, setOpen] = useState(false)
+  const [tab, setTab] = useState<WorkspaceTab>('pure')
+  const [project, setProjectState] = useState<ProjectDraft>(() => {
+    try {
+      const raw = localStorage.getItem('ai_video_project_draft')
+      return raw ? { ...emptyProjectDraft(), ...JSON.parse(raw) } : emptyProjectDraft()
+    } catch {
+      return emptyProjectDraft()
+    }
+  })
 
-  const tokenLabel = useMemo(() => maskToken(token), [token])
+  const title = useMemo(() => {
+    if (tab === 'pure') return 'AI 自动生成中控'
+    if (tab === 'douyin') return '抖音自动采集任务中心'
+    if (tab === 'openclaw') return 'OpenClaw 获客承接'
+    return '数字人内部素材'
+  }, [tab])
 
   function setProject(next: ProjectDraft) {
     setProjectState(next)
-    saveDraft(next)
+    localStorage.setItem('ai_video_project_draft', JSON.stringify(next))
   }
 
-  function open(next: WorkspaceTab) {
+  function openTab(next: WorkspaceTab) {
     setTab(next)
-    setPanel('open')
-    const hash = tabHash(next)
-    if (window.location.hash !== hash) window.history.replaceState(null, '', hash)
-  }
-
-  function close() {
-    setPanel('closed')
-    if (window.location.hash) window.history.replaceState(null, '', window.location.pathname)
+    setOpen(true)
   }
 
   useEffect(() => {
-    normalizeLegacyLeftRail()
-    const timer = window.setInterval(normalizeLegacyLeftRail, 1200)
-    return () => window.clearInterval(timer)
-  }, [])
+    const hashTab = WORKSPACE_HASHES[window.location.hash]
+    if (hashTab) openTab(hashTab)
 
-  useEffect(() => {
     const onHash = () => {
-      const next = tabFromHash(window.location.hash)
-      if (next) open(next)
+      const next = WORKSPACE_HASHES[window.location.hash]
+      if (next) openTab(next)
     }
-    window.addEventListener('hashchange', onHash)
-    return () => window.removeEventListener('hashchange', onHash)
-  }, [])
 
-  useEffect(() => {
     const onClick = (event: MouseEvent) => {
-      const target = event.target as HTMLElement | null
-      if (!target) return
-      if (event.clientX > 430) return
-      const candidate = target.closest<HTMLElement>('[data-ai-video-bridge-entry], button, a, [role="button"], li, .module-card, .nav-item, .sidebar-item')
-      if (!candidate || !isLikelyLeftRailNode(candidate)) return
-      const explicit = candidate.dataset.aiVideoBridgeEntry as WorkspaceTab | undefined
-      const next = explicit || matchTabFromText(candidate.textContent || '')
+      const target = event.target
+      if (!(target instanceof HTMLElement)) return
+
+      const next = shouldInterceptClick(target)
       if (!next) return
+
       event.preventDefault()
       event.stopPropagation()
-      open(next)
+      openTab(next)
     }
+
+    window.addEventListener('hashchange', onHash)
     document.addEventListener('click', onClick, true)
-    return () => document.removeEventListener('click', onClick, true)
+
+    return () => {
+      window.removeEventListener('hashchange', onHash)
+      document.removeEventListener('click', onClick, true)
+    }
   }, [])
 
-  if (panel === 'closed') return null
+  if (!open) return null
 
   return (
-    <div className="ux-overlay" role="dialog" aria-modal="true">
-      <div className="ux-shell">
-        <header className="ux-header">
+    <div className="workspaceOverlay" role="dialog" aria-modal="true">
+      <div className="workspaceShell">
+        <header className="workspaceHeader">
           <div>
             <p>AI-VIDEO 工程化工作台</p>
-            <h1>{tabTitle(tab)}</h1>
+            <h1>{title}</h1>
           </div>
-          <div className="ux-top-actions">
-            <button className={tab === 'pureai' ? 'active' : ''} onClick={() => open('pureai')}>纯 AI / 生成</button>
-            <button className={tab === 'collect' ? 'active' : ''} onClick={() => open('collect')}>抖音采集</button>
-            <button className={tab === 'leads' ? 'active' : ''} onClick={() => open('leads')}>获客承接</button>
-            <button className={tab === 'digital' ? 'active' : ''} onClick={() => open('digital')}>数字人</button>
-            <button onClick={() => setShowToken(v => !v)}>Token：{tokenLabel}</button>
-            <button className="soft" onClick={close}>关闭</button>
+          <div className="workspaceTabs">
+            <button type="button" className={tab === 'pure' ? 'active' : ''} onClick={() => setTab('pure')}>
+              纯 AI / 生成
+            </button>
+            <button type="button" className={tab === 'douyin' ? 'active' : ''} onClick={() => setTab('douyin')}>
+              抖音采集
+            </button>
+            <button type="button" className={tab === 'openclaw' ? 'active' : ''} onClick={() => setTab('openclaw')}>
+              获客承接
+            </button>
+            <button type="button" className={tab === 'digital' ? 'active' : ''} onClick={() => setTab('digital')}>
+              数字人
+            </button>
+            <TokenPill />
+            <button type="button" className="ghost" onClick={() => setOpen(false)}>
+              关闭
+            </button>
           </div>
         </header>
 
-        {showToken && (
-          <div className="ux-token-panel">
-            <label>AI-VIDEO API Token
-              <input value={token} onChange={(e) => setToken(e.target.value)} placeholder="粘贴后台 Token" />
-            </label>
-            <button onClick={() => { setStoredToken(token); setToken(getStoredToken()); setShowToken(false) }}>保存 Token</button>
-            <button className="soft" onClick={() => { clearStoredToken(); setToken('') }}>清空</button>
-          </div>
-        )}
-
-        <main className="ux-main">
-          {tab === 'pureai' && <PureAIVideoPath project={project} setProject={setProject} goTab={open} />}
-          {tab === 'collect' && <DouyinAccountLibrary project={project} setProject={setProject} goTab={open} />}
-          {tab === 'leads' && <OpenClawWorkbench project={project} setProject={setProject} goTab={open} />}
-          {tab === 'digital' && <DigitalHumanPanel project={project} setProject={setProject} goTab={open} />}
+        <main className="workspaceBody">
+          {tab === 'pure' && <PureAIVideoPath project={project} setProject={setProject} goTab={openTab} />}
+          {tab === 'douyin' && <DouyinAccountLibrary project={project} setProject={setProject} goTab={openTab} />}
+          {tab === 'openclaw' && <OpenClawWorkbench project={project} setProject={setProject} goTab={openTab} />}
+          {tab === 'digital' && <DigitalHumanInternalPanel project={project} setProject={setProject} goTab={openTab} />}
         </main>
       </div>
     </div>
