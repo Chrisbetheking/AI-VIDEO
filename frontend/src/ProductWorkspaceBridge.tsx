@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react'
-import PureAIVideoPath from './PureAIVideoPath'
+import VideoCreationWizard from './VideoCreationWizard'
 import DouyinAccountLibrary from './DouyinAccountLibrary'
 import OpenClawWorkbench from './OpenClawWorkbench'
 import {
@@ -24,7 +24,7 @@ type NavItem = {
 }
 
 const NAV_ITEMS: NavItem[] = [
-  { key: 'pureai', label: '视频创作', desc: '文案、配音、镜头、成片' },
+  { key: 'pureai', label: '视频创作', desc: '四步向导 · 文案/配音/镜头/成片' },
   { key: 'collect', label: '同行采集', desc: '账号库与爆款参考' },
   { key: 'assets', label: '素材库', desc: 'R2 / 自有素材' },
   { key: 'digital', label: '数字人库', desc: '选择照片/视频出镜' },
@@ -544,7 +544,7 @@ export default function ProductWorkspaceBridge() {
   }, [tab])
 
   function renderBody() {
-    if (tab === 'pureai') return <PureAIVideoPath project={project} setProject={setProject} goTab={open} />
+    if (tab === 'pureai') return <VideoCreationWizard project={project} setProject={setProject} goTab={open} />
     if (tab === 'collect') return <DouyinAccountLibrary project={project} setProject={setProject} goTab={open} />
     if (tab === 'assets') return <AssetLibraryPanel project={project} setProject={setProject} goTab={open} />
     if (tab === 'digital') return <DigitalHumanLibraryPanel project={project} setProject={setProject} goTab={open} />

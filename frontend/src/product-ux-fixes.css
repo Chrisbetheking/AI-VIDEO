@@ -780,3 +780,436 @@
   }
 }
 /* ===== /AI-VIDEO v17 native linked console ===== */
+
+/* ===== V6 restore true step-by-step video wizard while keeping original backend modules ===== */
+.aiw-stepWizard {
+  padding: 24px;
+  padding-bottom: 92px;
+  position: relative;
+  min-height: calc(100vh - 170px);
+}
+
+.aiw-stepHero {
+  background: linear-gradient(135deg, #ffffff, #f4ecff);
+}
+
+.aiw-stepNav {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+  margin: 18px 0 22px;
+}
+
+.aiw-stepNav button {
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr);
+  grid-template-areas: "num title" "num desc";
+  gap: 4px 12px;
+  text-align: left;
+  border: 1px solid #e9d5ff;
+  border-radius: 20px;
+  background: #fff;
+  padding: 16px;
+  cursor: pointer;
+  box-shadow: 0 12px 28px rgba(124, 58, 237, 0.06);
+}
+
+.aiw-stepNav button b {
+  grid-area: num;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 999px;
+  background: #ede9fe;
+  color: #6d28d9;
+  font-size: 16px;
+}
+
+.aiw-stepNav button span {
+  grid-area: title;
+  color: #111827;
+  font-size: 15px;
+  font-weight: 900;
+}
+
+.aiw-stepNav button em {
+  grid-area: desc;
+  color: #8b95a7;
+  font-style: normal;
+  line-height: 1.45;
+  font-size: 12px;
+}
+
+.aiw-stepNav button.active {
+  border-color: #7c3aed;
+  box-shadow: 0 18px 42px rgba(124, 58, 237, 0.16);
+}
+
+.aiw-stepNav button.active b,
+.aiw-stepNav button.done b {
+  color: #fff;
+  background: linear-gradient(135deg, #8b5cf6, #6d28d9);
+}
+
+.aiw-stepBody {
+  min-height: 560px;
+}
+
+.aiw-stepGrid {
+  display: grid;
+  gap: 18px;
+}
+
+.aiw-stepGrid.two {
+  grid-template-columns: minmax(0, 1.1fr) minmax(360px, 0.8fr);
+}
+
+.aiw-stepGrid.three {
+  grid-template-columns: minmax(320px, 0.9fr) minmax(360px, 0.9fr) minmax(360px, 0.9fr);
+}
+
+.aiw-stepCard {
+  border: 1px solid #e9d5ff;
+  background: rgba(255, 255, 255, 0.94);
+  border-radius: 24px;
+  padding: 22px;
+  box-shadow: 0 18px 48px rgba(76, 29, 149, 0.06);
+  min-width: 0;
+}
+
+.aiw-stepCard h3 {
+  margin: 0 0 8px;
+  color: #111827;
+  font-size: 22px;
+}
+
+.aiw-stepCard h4 {
+  margin: 18px 0 10px;
+  color: #374151;
+}
+
+.aiw-stepCard p {
+  color: #7b8496;
+  line-height: 1.7;
+  margin: 0 0 16px;
+}
+
+.aiw-stepTabs {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  padding: 8px;
+  margin-bottom: 16px;
+  border-radius: 18px;
+  background: #f3e8ff;
+}
+
+.aiw-stepTabs button {
+  height: 44px;
+  border: 0;
+  border-radius: 14px;
+  background: transparent;
+  color: #6b7280;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.aiw-stepTabs button.active {
+  color: #6d28d9;
+  background: #fff;
+  box-shadow: 0 8px 20px rgba(124, 58, 237, 0.12);
+}
+
+.aiw-wideField {
+  display: grid;
+  gap: 8px;
+  margin: 12px 0;
+  color: #334155;
+  font-weight: 900;
+}
+
+.aiw-wideField textarea,
+.aiw-scriptTextarea,
+.aiw-promptBox {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid #e9d5ff;
+  border-radius: 18px;
+  background: #fff;
+  color: #111827;
+  padding: 14px;
+  font: inherit;
+  line-height: 1.7;
+  outline: none;
+}
+
+.aiw-wideField textarea { min-height: 86px; }
+.aiw-scriptTextarea { min-height: 430px; resize: vertical; }
+.aiw-promptBox { min-height: 330px; resize: vertical; font-size: 13px; }
+
+.aiw-keywordPill,
+.aiw-badPill {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 7px 12px;
+  font-weight: 900;
+  font-size: 13px;
+}
+
+.aiw-keywordPill {
+  color: #6d28d9;
+  background: #f3e8ff;
+}
+
+.aiw-badPill {
+  color: #991b1b;
+  background: #fee2e2;
+}
+
+.aiw-keywordGrid {
+  display: grid;
+  gap: 10px;
+  max-height: 330px;
+  overflow: auto;
+  padding-right: 6px;
+}
+
+.aiw-keywordCard {
+  display: grid;
+  gap: 4px;
+  padding: 12px 14px;
+  border: 1px solid #e9d5ff;
+  border-radius: 16px;
+  background: #fcfbff;
+}
+
+.aiw-keywordCard.high { border-color: #f59e0b; background: #fffbeb; }
+.aiw-keywordCard.medium { border-color: #c4b5fd; }
+.aiw-keywordCard.low { opacity: 0.82; }
+.aiw-keywordCard b { color: #111827; }
+.aiw-keywordCard span { color: #6d28d9; font-size: 12px; font-weight: 900; }
+.aiw-keywordCard em { color: #6b7280; font-style: normal; font-size: 12px; line-height: 1.4; }
+
+.aiw-scriptPreview {
+  line-height: 2;
+  color: #1f2937;
+  background: #f8fafc;
+  border: 1px solid #e5e7eb;
+  border-radius: 18px;
+  padding: 16px;
+}
+
+.aiw-stepWizard mark {
+  background: #fde68a;
+  color: #92400e;
+  border-radius: 8px;
+  padding: 1px 4px;
+  font-weight: 900;
+}
+
+.aiw-segmentPicker,
+.aiw-shotPicker {
+  display: grid;
+  gap: 12px;
+  max-height: 500px;
+  overflow: auto;
+  padding-right: 6px;
+}
+
+.aiw-segmentPicker button,
+.aiw-shotPicker button {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr);
+  gap: 12px;
+  text-align: left;
+  border: 1px solid #e9d5ff;
+  background: #fbfaff;
+  border-radius: 18px;
+  padding: 14px;
+  cursor: pointer;
+}
+
+.aiw-segmentPicker button.active,
+.aiw-shotPicker button.active {
+  border-color: #7c3aed;
+  box-shadow: 0 14px 30px rgba(124, 58, 237, 0.13);
+  background: #fff;
+}
+
+.aiw-segmentPicker button span,
+.aiw-shotPicker button span {
+  color: #9ca3af;
+  font-weight: 900;
+}
+
+.aiw-segmentPicker button b,
+.aiw-shotPicker button b {
+  color: #1f2937;
+  line-height: 1.6;
+}
+
+.aiw-shotPicker button em {
+  grid-column: 2;
+  color: #8b95a7;
+  font-style: normal;
+}
+
+.aiw-shotEditor .aiw-form textarea {
+  min-height: 88px;
+}
+
+.aiw-miniList {
+  display: grid;
+  gap: 8px;
+  max-height: 160px;
+  overflow: auto;
+}
+
+.aiw-miniList div {
+  padding: 9px 11px;
+  border-radius: 12px;
+  background: #f8fafc;
+  color: #475569;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.aiw-previewVideo {
+  width: min(100%, 330px);
+  aspect-ratio: 9/16;
+  border-radius: 22px;
+  background: #0f172a;
+  display: block;
+}
+
+.aiw-videoPlaceholder {
+  min-height: 520px;
+  display: grid;
+  place-items: center;
+  gap: 10px;
+  text-align: center;
+  border-radius: 22px;
+  background: repeating-linear-gradient(45deg, #faf5ff 0 12px, #f8fafc 12px 24px);
+  color: #64748b;
+}
+
+.aiw-videoPlaceholder b { font-size: 44px; }
+
+.aiw-statusRows {
+  display: grid;
+  gap: 8px;
+}
+
+.aiw-statusRows div {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  border-bottom: 1px solid #ede9fe;
+  padding: 12px 0;
+}
+
+.aiw-statusRows span {
+  color: #8b95a7;
+  font-weight: 900;
+}
+
+.aiw-statusRows b {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.aiw-miniProgress {
+  height: 10px;
+  margin-top: 16px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: #f3e8ff;
+}
+
+.aiw-miniProgress span {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, #a855f7, #2563eb);
+}
+
+.aiw-actions.vertical {
+  align-items: stretch;
+  flex-direction: column;
+}
+
+.aiw-stepFooter {
+  position: sticky;
+  bottom: -24px;
+  z-index: 8;
+  margin: 22px -24px -24px;
+  padding: 18px 24px;
+  border-top: 1px solid #e9d5ff;
+  background: rgba(255, 255, 255, 0.92);
+  backdrop-filter: blur(12px);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.aiw-stepFooter > div:first-child {
+  display: grid;
+  grid-template-columns: auto auto 240px;
+  gap: 12px;
+  align-items: center;
+}
+
+.aiw-stepFooter span {
+  color: #8b95a7;
+  font-weight: 900;
+}
+
+.aiw-stepFooter b {
+  color: #6d28d9;
+}
+
+.aiw-stepFooter i {
+  display: block;
+  height: 10px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #f3e8ff;
+}
+
+.aiw-stepFooter i strong {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, #8b5cf6, #2563eb);
+}
+
+.aiw-form.one {
+  grid-template-columns: 1fr;
+}
+
+@media (max-width: 1400px) {
+  .aiw-stepGrid.three {
+    grid-template-columns: 1fr;
+  }
+  .aiw-stepGrid.two {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 900px) {
+  .aiw-stepNav {
+    grid-template-columns: 1fr;
+  }
+  .aiw-stepFooter {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .aiw-stepFooter > div:first-child {
+    grid-template-columns: auto auto 1fr;
+  }
+}
