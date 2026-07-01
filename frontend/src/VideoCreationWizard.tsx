@@ -725,7 +725,7 @@ export default function VideoCreationWizard() {
         transition_plan: plannedShots.map((shot) => ({ index: shot.index, transition: shot.transition, camera: shot.camera })),
         asset_context: selectedAssets,
         r2_material_context: selectedAssets.filter((asset) => asset.source === 'r2'),
-        avatar_config: selectedAvatar ? { enabled: true, ...selectedAvatar } : { enabled: false },
+        avatar_config: selectedAvatar ? { ...selectedAvatar, enabled: true } : { enabled: false },
         openclaw_leads: leads.filter((lead) => lead.status === 'pending_human' || lead.status === 'qualified'),
         safety_policy: {
           no_hallucinated_project: true,
