@@ -1,59 +1,73 @@
-export const API_BASE = 'https://ai-video.47-76-143-158.sslip.io'
-export const TOKEN_KEY = 'ai_video_api_token'
+export const AI_VIDEO_API_BASE = 'https://ai-video.47-76-143-158.sslip.io'
+export const AI_VIDEO_TOKEN_KEY = 'ai_video_api_token'
 
-export function getApiToken(): string {
-  const fromUrl = new URLSearchParams(window.location.search).get('token') || ''
-  if (fromUrl.trim()) {
-    localStorage.setItem(TOKEN_KEY, fromUrl.trim())
-    return fromUrl.trim()
-  }
-  return (localStorage.getItem(TOKEN_KEY) || (import.meta as any).env?.VITE_AI_VIDEO_API_TOKEN || '').trim()
+export function getAiVideoToken(): string {
+  return window.localStorage.getItem(AI_VIDEO_TOKEN_KEY) || ''
 }
 
-export function saveApiToken(token: string) {
-  const value = token.trim()
-  if (value) localStorage.setItem(TOKEN_KEY, value)
-  else localStorage.removeItem(TOKEN_KEY)
+export function saveAiVideoToken(token: string) {
+  const next = token.trim()
+  if (!next) return
+  window.localStorage.setItem(AI_VIDEO_TOKEN_KEY, next)
+  window.dispatchEvent(new CustomEvent('ai-video-token-updated'))
 }
 
-function parseResponse(text: string) {
+export function clearAiVideoToken() {
+  window.localStorage.removeItem(AI_VIDEO_TOKEN_KEY)
+  window.dispatchEvent(new CustomEvent('ai-video-token-updated'))
+}
+
+export function maskToken(token: string) {
+  if (!token) return '未设置'
+  if (token.length <= 10) return '已设置'
+  return `${token.slice(0, 4)}****${token.slice(-4)}`
+}
+
+async function parseResponse(res: Response) {
+  const text = await res.text()
+  let data: any = {}
   try {
-    return text ? JSON.parse(text) : {}
+    data = text ? JSON.parse(text) : {}
   } catch {
-    return { raw: text }
+    data = { raw: text }
   }
-}
-
-export async function apiGet(path: string): Promise<any> {
-  const token = getApiToken()
-  const headers: Record<string, string> = {}
-  if (token) headers['X-AI-Video-Token'] = token
-  const res = await fetch(`${API_BASE}${path}`, { headers })
-  const data = parseResponse(await res.text())
   if (!res.ok) {
-    if (res.status === 401) throw new Error('缺少或错误的 AI-VIDEO API Token：请在页面 Token 设置里保存后重试。')
-    throw new Error(data?.detail || data?.message || `HTTP ${res.status}`)
+    const message = data?.detail || data?.message || data?.error || `HTTP ${res.status}`
+    throw new Error(typeof message === 'string' ? message : JSON.stringify(message))
   }
   return data
 }
 
-export async function apiPost(path: string, body: any): Promise<any> {
-  const token = getApiToken()
+export async function apiGet(path: string, requireToken = true): Promise<any> {
+  const token = getAiVideoToken()
+  if (requireToken && !token) throw new Error('缺少 AI-VIDEO API Token。请在右上角“设置 Token”里保存。')
+
+  const headers: Record<string, string> = {}
+  if (token) headers['X-AI-Video-Token'] = token
+
+  const res = await fetch(`${AI_VIDEO_API_BASE}${path}`, { headers })
+  return parseResponse(res)
+}
+
+export async function apiPost(path: string, body: any, requireToken = true): Promise<any> {
+  const token = getAiVideoToken()
+  if (requireToken && !token) throw new Error('缺少 AI-VIDEO API Token。请在右上角“设置 Token”里保存。')
+
   const headers: Record<string, string> = { 'Content-Type': 'application/json' }
   if (token) headers['X-AI-Video-Token'] = token
-  const res = await fetch(`${API_BASE}${path}`, {
+
+  const res = await fetch(`${AI_VIDEO_API_BASE}${path}`, {
     method: 'POST',
     headers,
     body: JSON.stringify(body),
   })
-  const data = parseResponse(await res.text())
-  if (!res.ok) {
-    if (res.status === 401) throw new Error('缺少或错误的 AI-VIDEO API Token：请在页面 Token 设置里保存后重试。')
-    throw new Error(data?.detail || data?.message || `HTTP ${res.status}`)
-  }
-  return data
+  return parseResponse(res)
 }
 
-export function copyJson(data: any) {
-  navigator.clipboard?.writeText(JSON.stringify(data, null, 2)).catch(() => {})
+export function safeJson(data: any) {
+  try {
+    return JSON.stringify(data, null, 2)
+  } catch {
+    return String(data)
+  }
 }
