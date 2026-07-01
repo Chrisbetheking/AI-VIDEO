@@ -84,6 +84,33 @@ ADMIN_PREFIXES = (
     "/api/collector/douyin/accounts/seed-targets",
 )
 
+
+INTERNAL_BACKEND_PREFIXES = (
+    "/api/video/fal/shot/start",
+    "/api/video/fal/storyboard/start",
+    "/api/video/compose/urls/start",
+    "/api/video/compose/fal-storyboard/start",
+    "/api/video/subtitle/burn",
+    "/api/video/subtitle/burn-upload",
+    "/api/tts-segments",
+)
+
+def _is_internal_backend_call(headers: dict[str, str], client_ip: str = "") -> bool:
+    host = headers.get("host") or headers.get("Host") or ""
+    xff = headers.get("x-forwarded-for") or headers.get("X-Forwarded-For") or ""
+    xreal = headers.get("x-real-ip") or headers.get("X-Real-IP") or ""
+    cfip = headers.get("cf-connecting-ip") or headers.get("CF-Connecting-IP") or ""
+
+    # 只允许后端进程直接访问 127.0.0.1:8000 / localhost:8000。
+    # 经过 Nginx / Cloudflare 的公网请求通常会带 x-forwarded-for 或 Host 为公网域名，不会命中这里。
+    return (
+        client_ip in {"127.0.0.1", "::1", "localhost"}
+        and (host.startswith("127.0.0.1:") or host.startswith("localhost:"))
+        and not xff
+        and not xreal
+        and not cfip
+    )
+
 WRITE_PROTECTED_PREFIXES = (
     "/api/video/full-ai/start",
     "/api/video/fal/shot/start",
@@ -181,6 +208,9 @@ def check_request(
         return None
 
     if not path.startswith("/api/"):
+        return None
+
+    if _is_internal_backend_call(headers, client_ip) and _path_matches(path, INTERNAL_BACKEND_PREFIXES):
         return None
 
     is_public = _path_matches(path, PUBLIC_PREFIXES)
