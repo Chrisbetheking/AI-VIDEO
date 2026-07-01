@@ -1,18 +1,11 @@
 import React from 'react'
-import { createRoot } from 'react-dom/client'
-import App from './App'
-import ProductWorkspaceBridge from './ProductWorkspaceBridge'
+import ReactDOM from 'react-dom/client'
 import './styles.css'
-import './product-ux-fixes.css'
+import VideoCreationWizard from './VideoCreationWizard'
+import './video-creation-wizard.css'
 
-const root = document.getElementById('root')
-if (!root) {
-  throw new Error('Root element #root not found')
-}
-
-createRoot(root).render(
+ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <App />
-    <ProductWorkspaceBridge />
+    <VideoCreationWizard />
   </React.StrictMode>,
 )
