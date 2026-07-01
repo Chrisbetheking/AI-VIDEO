@@ -10,56 +10,44 @@ from starlette.requests import Request
 router = APIRouter(prefix="/api/video/malaysia-visual", tags=["malaysia-visual-planner"])
 
 NEGATIVE = (
-    "generic office meeting, random business conference, unrelated corporate people, "
+    "document-only close-up, calculator-only close-up, paper-only tabletop scene, plain desk with documents, generic office meeting, random business conference, unrelated corporate people, "
     "plain office room, abstract background, talking head interview, unrelated factory, "
     "text, subtitles, captions, readable words, logo, watermark, signboard, price tag, "
-    "fake UI, poster, banner, floorplan text, black bars, low quality, cartoon, anime, blurry"
+    "fake UI, poster, banner, floorplan text, black bars, letterbox, pillarbox, cartoon, anime, blurry"
 )
 
-CITY_ANCHORS = {
-    "kuala_lumpur": [
-        "KLCC Twin Towers skyline",
-        "Petronas Twin Towers visible in the distance",
-        "TRX financial district",
-        "Mont Kiara luxury condominium area",
-        "premium high-rise condominium exterior",
-        "floor-to-ceiling window apartment interior",
-        "city-view balcony",
-        "modern condo lobby",
-        "infinity pool with Kuala Lumpur skyline",
-        "night skyline of Kuala Lumpur",
-    ],
-    "penang": [
-        "Penang seaside condominium",
-        "Gurney Drive coastal skyline",
-        "ocean-view balcony",
-        "modern apartment interior facing the sea",
-        "beachfront lifestyle",
-        "coastal swimming pool",
-        "sunset over the ocean",
-    ],
-    "johor": [
-        "Johor Bahru waterfront condominium",
-        "modern high-rise apartment near city center",
-        "cross-border lifestyle atmosphere",
-        "family-oriented condo facilities",
-        "shopping mall and city commute mood",
-    ],
-    "langkawi": [
-        "Langkawi resort villa",
-        "tropical beach villa",
-        "oceanfront balcony",
-        "island resort pool",
-        "palm trees and sunset beach",
-    ],
-    "sabah": [
-        "Kota Kinabalu seaside apartment",
-        "Sabah sunset ocean view",
-        "marina lifestyle",
-        "sea-view balcony",
-        "resort-style pool and tropical landscape",
-    ],
-}
+KL_ANCHORS = [
+    "KLCC Twin Towers skyline",
+    "Petronas Twin Towers visible in the distance",
+    "TRX financial district",
+    "Mont Kiara luxury condominium area",
+    "premium Kuala Lumpur high-rise condominium exterior",
+    "floor-to-ceiling window apartment interior",
+    "city-view balcony",
+    "modern condo lobby",
+    "infinity pool with Kuala Lumpur skyline",
+    "night skyline of Kuala Lumpur",
+]
+
+SEA_ANCHORS = [
+    "Penang seaside condominium",
+    "Gurney Drive coastal skyline",
+    "ocean-view balcony",
+    "modern apartment interior facing the sea",
+    "beachfront lifestyle",
+    "Langkawi tropical beach villa",
+    "Sabah sunset ocean view",
+    "resort-style pool and tropical landscape",
+]
+
+FAMILY_ANCHORS = [
+    "family-friendly condominium community",
+    "modern apartment living room",
+    "condo children playground",
+    "Mont Kiara residential lifestyle",
+    "nearby mall and daily amenities",
+    "safe residential neighborhood amenities",
+]
 
 class MalaysiaVisualPlanRequest(BaseModel):
     topic: str = "马来西亚吉隆坡买房，别只看价格"
@@ -73,65 +61,57 @@ def _txt(v: Any) -> str:
         return v
     return json.dumps(v, ensure_ascii=False)
 
-def infer_city(text: str) -> str:
+def _scene_type(text: str) -> str:
     t = text.lower()
-    if any(k in t for k in ["海边", "海景", "第二家园", "养老", "度假", "penang", "槟城", "seaside", "ocean", "beach"]):
-        return "penang"
-    if any(k in t for k in ["新山", "johor", "jb"]):
-        return "johor"
-    if any(k in t for k in ["兰卡威", "langkawi"]):
-        return "langkawi"
-    if any(k in t for k in ["沙巴", "sabah", "kota kinabalu"]):
-        return "sabah"
-    return "kuala_lumpur"
-
-def infer_type(text: str) -> str:
-    t = text.lower()
+    if any(k in t for k in ["海边", "海景", "第二家园", "养老", "度假", "penang", "槟城", "seaside", "ocean", "beach", "langkawi", "sabah"]):
+        return "second_home_seaside"
+    if any(k in t for k in ["家庭", "孩子", "教育", "学校", "自住", "family", "school", "own stay"]):
+        return "family_own_stay"
     if any(k in t for k in ["出租", "租金", "回报", "转手", "投资", "rental", "roi", "investment"]):
         return "investment"
-    if any(k in t for k in ["海边", "海景", "第二家园", "养老", "度假", "retirement", "second home"]):
-        return "second_home"
-    if any(k in t for k in ["家庭", "孩子", "教育", "学校", "自住", "family", "school"]):
-        return "family"
-    if any(k in t for k in ["预算", "价格", "首付", "贷款", "budget", "price"]):
-        return "budget"
-    return "location"
+    return "kuala_lumpur_location"
 
-def pick_anchors(city: str, content_type: str, index: int) -> List[str]:
-    base = CITY_ANCHORS.get(city) or CITY_ANCHORS["kuala_lumpur"]
+def _anchors_for(text: str, index: int) -> List[str]:
+    typ = _scene_type(text)
+
+    if typ == "second_home_seaside":
+        base = SEA_ANCHORS
+    elif typ == "family_own_stay":
+        base = FAMILY_ANCHORS + KL_ANCHORS
+    else:
+        base = KL_ANCHORS
+
     anchors = [
         base[(index - 1) % len(base)],
         base[(index + 1) % len(base)],
         base[(index + 3) % len(base)],
     ]
-    if content_type == "investment":
-        anchors.append("premium condo lobby, swimming pool and high-rise facilities")
-    elif content_type == "second_home":
-        anchors.append("seaside lifestyle, ocean-view balcony, resort-style pool")
-    elif content_type == "family":
-        anchors.append("family-friendly condo community, living room and neighborhood amenities")
-    elif content_type == "budget":
-        anchors.append("buyer reviewing generic property documents, no readable text")
-    else:
-        anchors.append("clear Malaysia city location and real-estate context")
+
+    # 兜底永远保留马来西亚房产语义，不让它跑成普通办公室。
+    if not any("KLCC" in x or "Twin Towers" in x or "Petronas" in x for x in anchors):
+        anchors.append("KLCC Twin Towers skyline")
+    if typ == "second_home_seaside":
+        anchors.append("Penang seaside condominium and ocean-view balcony")
+    if typ == "family_own_stay":
+        anchors.append("Mont Kiara family-friendly condominium lifestyle")
+
     return anchors
 
 def build_prompt(raw_prompt: str, topic: str = "", index: int = 1) -> str:
-    text = f"{raw_prompt}\n{topic}"
-    city = infer_city(text)
-    content_type = infer_type(text)
-    anchors = pick_anchors(city, content_type, index)
+    text = f"{topic}\n{raw_prompt}"
+    typ = _scene_type(text)
+    anchors = _anchors_for(text, index)
 
     return (
         "Create a premium 9:16 cinematic vertical video shot for Malaysia real-estate content.\n"
-        f"Location: {city.replace('_', ' ').title()}, Malaysia.\n"
-        f"Content type: {content_type}.\n"
+        "Market: Malaysia real estate.\n"
+        f"Content type: {typ}.\n"
         f"Visual anchors: {', '.join(anchors)}.\n"
-        "Scene: luxury condominium exterior, city-view balcony, modern apartment interior, condo lobby, "
-        "swimming pool, skyline, seaside lifestyle, or residential amenities depending on the script.\n"
+        "Scene: Malaysia property context must dominate at least 70 percent of the frame: KLCC Twin Towers skyline, Kuala Lumpur city-view balcony, luxury condominium exterior, modern apartment interior with floor-to-ceiling windows, condo lobby, "
+        "swimming pool, skyline, seaside lifestyle, ocean-view balcony, or residential amenities depending on the script.\n"
         "Style: ultra realistic, premium, polished, high-end real estate commercial, natural lighting, "
         "clean composition, cinematic movement, mobile-first vertical framing.\n"
-        "Truth rule: do not invent specific project name, exact price, exact ROI, exact school name, exact floorplan, "
+        "Visual priority rule: never make documents, papers, calculators, laptops, or office desks the main subject. They may appear only as small foreground props. The main subject must be Malaysia real estate: KLCC skyline, Twin Towers view, luxury condo balcony, apartment interior, condo lobby, pool, or Kuala Lumpur city skyline.\nTruth rule: do not invent specific project name, exact price, exact ROI, exact school name, exact floorplan, "
         "or official surrounding data. Use generic Malaysia real-estate atmosphere only.\n"
         f"Avoid: {NEGATIVE}.\n"
     )
@@ -172,11 +152,15 @@ def make_plan(req: MalaysiaVisualPlanRequest):
         raw = _txt(shot.get("prompt") or req.topic)
         prompt = build_prompt(raw, f"{req.topic}\n{req.script_text}", i)
         planned.append({"index": i, "prompt": prompt})
-    return {"ok": True, "provider": "malaysia_visual_planner_miniv1", "shots": planned}
+    return {"ok": True, "provider": "malaysia_visual_planner_direct_v1", "shots": planned}
 
 @router.get("/health")
 def health():
-    return {"ok": True, "provider": "malaysia_visual_planner_miniv1", "cities": list(CITY_ANCHORS.keys())}
+    return {
+        "ok": True,
+        "provider": "malaysia_visual_planner_direct_v1",
+        "anchors": ["KLCC Twin Towers", "TRX", "Mont Kiara", "Penang seaside", "Langkawi", "Sabah"],
+    }
 
 @router.get("/self-test")
 def self_test():
@@ -216,5 +200,5 @@ def install_malaysia_visual_planner(app: FastAPI) -> None:
         scope["headers"] = headers
 
         response = await call_next(Request(scope, receive))
-        response.headers["x-ai-video-visual-planner"] = "malaysia-miniv1"
+        response.headers["x-ai-video-visual-planner"] = "malaysia-direct-v1"
         return response
