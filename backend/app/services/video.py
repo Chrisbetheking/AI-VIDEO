@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from app.config import Settings
-from app.services.video_quality_tools import build_input_video_filter, inspect_video_quality
+from app.services.video_quality_tools import build_input_video_filter, inspect_video_quality, polish_final_vertical_no_edge
 from app.services.effect_planner import (
     StickerCue,
     TimedSegment,
@@ -443,7 +443,8 @@ async def compose_video(
     base_video, base_warnings = build_video_base(list(asset_paths), duration, base_video)
     warnings.extend(base_warnings)
     warnings.extend(burn_ass_and_audio(base_video, ass_path, audio_path, output_video, duration))
-    quality = inspect_video_quality(output_video, max_black_ratio=0.15)
+    polish_final_vertical_no_edge(output_video)
+    quality = inspect_video_quality(output_video, max_black_ratio=0.002)
     if not quality.get("ok"):
         raise RuntimeError(f"视频质检失败：{quality.get('message')} | detail={quality}")
     warnings.append(str(quality.get("message") or "9:16 质检通过"))

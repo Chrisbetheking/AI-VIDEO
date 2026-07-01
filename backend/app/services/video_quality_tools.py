@@ -44,7 +44,7 @@ def detect_crop(path: Path) -> Optional[Dict[str, float]]:
         "-ss", "0",
         "-i", str(path),
         "-t", "2.5",
-        "-vf", "cropdetect=24:16:0",
+        "-vf", "cropdetect=24:2:0",
         "-f", "null", "-"
     ], timeout=90)
 
@@ -88,7 +88,7 @@ def build_input_video_filter(input_index: int, path: Path, label: str, width: in
 
     if crop:
         content_ratio = float(crop.get("content_ratio") or 1.0)
-        if 0.08 < content_ratio < 0.92:
+        if 0.08 < content_ratio < 0.999:
             prefix = f"{crop['crop_filter']},"
 
     return (
@@ -108,7 +108,7 @@ def normalize_to_vertical(input_path: Path, output_path: Path, duration: Optiona
 
     if crop:
         content_ratio = float(crop.get("content_ratio") or 1.0)
-        if 0.08 < content_ratio < 0.92:
+        if 0.08 < content_ratio < 0.999:
             prefix = f"{crop['crop_filter']},"
 
     vf = (
@@ -178,3 +178,63 @@ def inspect_video_quality(path: Path, max_black_ratio: float = 0.15) -> Dict[str
         "height": h,
         "crop": crop,
     }
+
+
+def polish_final_vertical_no_edge(input_path: Path, output_path: Path | None = None) -> Path:
+    """Final polish: remove even tiny black edge bars, then scale back to 1080x1920.
+
+    Example:
+    1080x1920 video with cropdetect=1072:1920:4:0
+    -> crop left/right 4px
+    -> scale back to 1080x1920
+    """
+    input_path = Path(input_path)
+    output_path = Path(output_path) if output_path else input_path
+
+    crop = detect_crop(input_path)
+    if not crop:
+        return input_path
+
+    full_w = int(crop.get("full_w") or 0)
+    full_h = int(crop.get("full_h") or 0)
+    crop_w = int(crop.get("crop_w") or 0)
+    crop_h = int(crop.get("crop_h") or 0)
+    content_ratio = float(crop.get("content_ratio") or 1.0)
+
+    if full_w <= 0 or full_h <= 0 or crop_w <= 0 or crop_h <= 0:
+        return input_path
+
+    # 只要检测到不是完整画布，就最终裁一次。
+    # content_ratio 低于 0.08 通常是误检，跳过。
+    if not (0.08 < content_ratio < 0.9999):
+        return input_path
+
+    tmp_out = output_path.with_suffix(".zero_edge_tmp.mp4")
+
+    vf = (
+        f"{crop['crop_filter']},"
+        f"scale={TARGET_W}:{TARGET_H}:flags=lanczos,"
+        f"setsar=1,fps={TARGET_FPS},format=yuv420p"
+    )
+
+    cmd = [
+        "ffmpeg", "-y",
+        "-i", str(input_path),
+        "-vf", vf,
+        "-c:v", "libx264",
+        "-preset", "veryfast",
+        "-crf", "18",
+        "-c:a", "copy",
+        str(tmp_out),
+    ]
+
+    proc = _run(cmd, timeout=900)
+    if proc.returncode != 0:
+        raise RuntimeError(f"最终去边失败：{proc.stderr[-1800:]}")
+
+    if output_path == input_path:
+        tmp_out.replace(input_path)
+        return input_path
+
+    tmp_out.replace(output_path)
+    return output_path
