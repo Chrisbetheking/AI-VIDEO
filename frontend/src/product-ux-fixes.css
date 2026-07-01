@@ -1213,3 +1213,91 @@
     grid-template-columns: auto auto 1fr;
   }
 }
+
+/* ===== V7 real-source / real OpenClaw fixes ===== */
+.aiw-realSourceTabs button {
+  display: grid;
+  gap: 6px;
+  text-align: left;
+  min-height: 74px;
+}
+
+.aiw-realSourceTabs button b {
+  color: inherit;
+  font-size: 15px;
+}
+
+.aiw-realSourceTabs button span {
+  color: #8b95a7;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.aiw-realSourceTabs button.active span {
+  color: #6d28d9;
+}
+
+.aiw-sourceModePanel {
+  margin: 16px 0;
+  padding: 18px;
+  border: 1px solid #e9d5ff;
+  border-radius: 20px;
+  background: linear-gradient(135deg, #fbf7ff, #ffffff);
+}
+
+.aiw-sourceModePanel > b {
+  display: block;
+  color: #111827;
+  font-size: 16px;
+  margin-bottom: 6px;
+}
+
+.aiw-sourceModePanel p {
+  margin: 0 0 12px;
+  color: #6b7280;
+  line-height: 1.7;
+}
+
+.aiw-sourceModePanel label {
+  display: grid;
+  gap: 8px;
+  color: #6b7280;
+  font-weight: 900;
+}
+
+.aiw-sourceModePanel textarea {
+  min-height: 86px;
+  width: 100%;
+  border: 1px solid #e9d5ff;
+  border-radius: 16px;
+  padding: 12px 14px;
+  color: #111827;
+  background: #fff;
+  outline: none;
+  resize: vertical;
+}
+
+.aiw-sourceModePanel textarea:focus {
+  border-color: #8b5cf6;
+  box-shadow: 0 0 0 4px rgba(139, 92, 246, 0.1);
+}
+
+.aiw-empty {
+  padding: 18px;
+  border: 1px dashed #d8b4fe;
+  border-radius: 16px;
+  color: #7c3aed;
+  background: #faf5ff;
+  font-weight: 900;
+  line-height: 1.7;
+}
+
+.aiw-real-openclaw .aiw-segmentList.compact {
+  max-height: 360px;
+  overflow: auto;
+}
+
+.aiw-badge.warn {
+  color: #92400e;
+  background: #fef3c7;
+}

@@ -361,6 +361,9 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
   const [job, setJob] = useState<JobPayload | null>(null)
   const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
+  const [sourceBusy, setSourceBusy] = useState('')
+  const [sourceError, setSourceError] = useState('')
+  const [sourceResult, setSourceResult] = useState<any>(null)
 
   const keywords = useMemo(() => extractKeywords(`${topic}\n${script}\n${competitorSource}`, manualKeywords), [topic, script, competitorSource, manualKeywords])
   const segments = useMemo(() => attachSegmentKeywords(splitScript(script || generateScript(topic, city, targetDuration, contentType, keywords)), keywords), [script, topic, city, targetDuration, contentType, keywords])
@@ -421,6 +424,106 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
       window.clearInterval(timer)
     }
   }, [jobId, busy])
+
+
+  function applySourceMode(nextMode: SourceMode) {
+    setSourceMode(nextMode)
+    setSourceError('')
+    setSourceResult(null)
+    if (nextMode === 'account' && !competitorSource.trim()) {
+      setCompetitorSource(project.competitorSource || '')
+    }
+    if (nextMode === 'viral' && !competitorSource.trim()) {
+      setCompetitorSource(project.viralLink || project.competitorSource || '')
+    }
+  }
+
+  function sourceHelpText() {
+    if (sourceMode === 'account') return '输入真实抖音主页、账号名或种子账号。系统会下发采集任务，拿到评论/视频结果后再带入文案和 OpenClaw。'
+    if (sourceMode === 'viral') return '输入真实爆款视频链接。系统优先拉取该视频评论和内容信息，用于选题、文案和截流。'
+    return '不调用采集，直接按你输入的主题、城市、关键词生成文案。'
+  }
+
+  async function runSourceAction() {
+    setSourceError('')
+    setSourceResult(null)
+
+    if (sourceMode === 'custom') {
+      rebuildScript()
+      return
+    }
+
+    if (!competitorSource.trim()) {
+      setSourceError(sourceMode === 'account' ? '请先填写真实抖音主页、账号名或种子账号。' : '请先填写真实爆款视频链接。')
+      return
+    }
+
+    setSourceBusy(sourceMode === 'account' ? 'account_collect' : 'viral_collect')
+    const sourcePayload = {
+      source: 'video_creation_wizard_source_step',
+      platform: 'douyin',
+      mission_type: sourceMode === 'account' ? 'competitor' : 'comments',
+      market,
+      keyword: competitorSource,
+      keywords: [competitorSource, topic, market].filter(Boolean),
+      seed_accounts: sourceMode === 'account' ? competitorSource.split(/[，,\n]/).map((x) => x.trim()).filter(Boolean) : [],
+      video_urls: sourceMode === 'viral' ? competitorSource.split(/[，,\n]/).map((x) => x.trim()).filter(Boolean) : [],
+      max_accounts: sourceMode === 'account' ? 20 : 5,
+      max_videos_per_account: sourceMode === 'account' ? 12 : 3,
+      max_comments_per_video: 80,
+      run_openclaw_analysis: true,
+      auto_timeline: true,
+      payload: {
+        source_mode: sourceMode,
+        target: sourceMode === 'account' ? 'account_videos_comments' : 'viral_video_comments',
+        competitor_source: competitorSource,
+        topic,
+        market,
+        run_openclaw_analysis: true,
+      },
+    }
+
+    try {
+      let data: any
+      try {
+        data = await apiPost('/api/collector/commands', { type: sourceMode === 'account' ? 'douyin_account_collect' : 'openclaw_collect_comments', ...sourcePayload }, 120000)
+      } catch {
+        try {
+          data = await apiPost('/api/collector/commands/create', sourcePayload, 120000)
+        } catch {
+          data = await apiPost('/api/collector/douyin/accounts/bulk-upsert', {
+            accounts: (sourcePayload.seed_accounts.length ? sourcePayload.seed_accounts : sourcePayload.keywords).map((name: string) => ({
+              category: sourceMode === 'account' ? 'competitor' : 'viral_video',
+              account_name: name,
+              url: sourceMode === 'viral' ? competitorSource : '',
+              niche: topic || market,
+              source: 'video_creation_wizard_source_step',
+            })),
+          }, 120000)
+        }
+      }
+
+      setSourceResult(data)
+      const sourceNote = sourceMode === 'account'
+        ? `基于同行主页/账号「${competitorSource}」采集后生成：${topic}`
+        : `基于爆款链接「${competitorSource}」评论和内容生成：${topic}`
+      setProject({
+        ...project,
+        market,
+        topic,
+        city,
+        sourceMode,
+        competitorSource,
+        collector_source_result: data,
+        contentInsights: [...asArray(project.contentInsights), { source_mode: sourceMode, source: competitorSource, result: data, note: sourceNote }],
+      })
+      rebuildScript()
+    } catch (err: any) {
+      setSourceError(err?.message || String(err))
+    } finally {
+      setSourceBusy('')
+    }
+  }
 
   function syncProject(extra: Record<string, any> = {}) {
     const next: ProjectDraft = {
@@ -562,29 +665,46 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
       <div className="aiw-stepGrid two">
         <section className="aiw-stepCard">
           <h3>第一步：搞定内容</h3>
-          <p>先确定来源、主题、城市、目标时长和核心关键词，再进入逐句配音。</p>
-          <div className="aiw-stepTabs">
+          <p>先选真实来源：抖音主页会下发账号采集，爆款链接会下发评论采集，自定义主题不调用采集。</p>
+          <div className="aiw-stepTabs aiw-realSourceTabs">
             {(Object.keys(SOURCE_LABELS) as SourceMode[]).map((key) => (
-              <button key={key} className={sourceMode === key ? 'active' : ''} onClick={() => setSourceMode(key)}>{SOURCE_LABELS[key]}</button>
+              <button key={key} className={sourceMode === key ? 'active' : ''} onClick={() => applySourceMode(key)} type="button">
+                <b>{SOURCE_LABELS[key]}</b>
+                <span>{key === 'account' ? '真实账号/主页采集' : key === 'viral' ? '真实视频评论采集' : '直接写主题'}</span>
+              </button>
             ))}
           </div>
+
+          <div className="aiw-sourceModePanel">
+            <b>{SOURCE_LABELS[sourceMode]}模式</b>
+            <p>{sourceHelpText()}</p>
+            {sourceMode !== 'custom' && (
+              <label>
+                {sourceMode === 'account' ? '真实抖音主页 / 账号名 / 种子账号' : '真实爆款视频链接 / 评论来源'}
+                <textarea value={competitorSource} onChange={(e) => setCompetitorSource(e.target.value)} placeholder={sourceMode === 'account' ? '一行一个账号主页、账号名或备注' : '一行一个真实视频链接'} />
+              </label>
+            )}
+          </div>
+
           <div className="aiw-form two">
             <label>市场<input value={market} onChange={(e) => setMarket(e.target.value)} /></label>
             <label>城市<select value={city} onChange={(e) => setCity(e.target.value)}>{CITY_OPTIONS.map((item) => <option key={item.key} value={item.key}>{item.label}</option>)}</select></label>
-            <label>主题/选题<input value={topic} onChange={(e) => setTopic(e.target.value)} /></label>
+            <label>主题/选题<input value={topic} onChange={(e) => setTopic(e.target.value)} placeholder={sourceMode === 'custom' ? '直接输入要生成的视频主题' : '采集结果会结合这个主题生成文案'} /></label>
             <label>目标时长<select value={targetDuration} onChange={(e) => setTargetDuration(Number(e.target.value))}><option value={15}>15 秒</option><option value={20}>20 秒</option><option value={30}>30 秒</option><option value={45}>45 秒</option><option value={60}>60 秒</option></select></label>
             <label>内容方向<select value={contentType} onChange={(e) => setContentType(e.target.value as ContentType)}>{Object.entries(CONTENT_LABELS).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label>
-            <label>同行主页/爆款链接<input value={competitorSource} onChange={(e) => setCompetitorSource(e.target.value)} placeholder="可粘贴采集来源" /></label>
+            <label>来源状态<input readOnly value={sourceResult ? '已下发/已返回采集任务' : sourceMode === 'custom' ? '不采集，直接生成' : '等待下发真实采集'} /></label>
           </div>
           <label className="aiw-wideField">手动凸显关键词<textarea value={manualKeywords} onChange={(e) => setManualKeywords(e.target.value)} placeholder="例如：150万、华语、华人多、大平层、出租、流动性" /></label>
           <div className="aiw-chipRow">
             {cityAnchors(city).map((item) => <span className="aiw-keywordPill" key={item}>{item}</span>)}
           </div>
           <div className="aiw-actions">
-            <button className="aiw-primary" onClick={rebuildScript}>按当前设置生成文案</button>
+            <button className="aiw-primary" onClick={runSourceAction} disabled={!!sourceBusy}>{sourceBusy ? '处理中...' : sourceMode === 'custom' ? '按当前设置生成文案' : '下发真实采集并生成文案'}</button>
             <button className="aiw-muted" onClick={() => goTab('collect')}>去同行采集</button>
-            <button className="aiw-muted" onClick={() => goTab('leads')}>去获客线索</button>
+            <button className="aiw-muted" onClick={() => goTab('leads')}>去真实获客线索</button>
           </div>
+          {sourceError && <div className="aiw-error">{sourceError}</div>}
+          {sourceResult && <details className="aiw-json"><summary>真实采集/入库返回</summary><pre>{JSON.stringify(sourceResult, null, 2)}</pre></details>}
         </section>
         <aside className="aiw-stepCard aiw-resultPanel">
           <h3>关键词洞察</h3>
