@@ -350,3 +350,62 @@ except Exception as _fal_patch_exc:
     print("MALAYSIA_FAL_HARD_PROMPT_PATCH_LOAD_FAILED", _fal_patch_exc)
 # ===== /HARD OVERRIDE MALAYSIA REAL ESTATE FAL PROMPTS =====
 
+
+
+
+# ===== FAL SUBSCRIBE MALAYSIA HARD PATCH =====
+try:
+    import fal_client as _fal_subscribe_patch_client
+
+    if not getattr(_fal_subscribe_patch_client, "_malaysia_subscribe_patched", False):
+        def _mscene(i: int = 1) -> str:
+            scenes = [
+                "KLCC Twin Towers skyline with luxury high-rise condominium in the foreground, Kuala Lumpur premium real estate commercial, vertical 9:16 cinematic video",
+                "Kuala Lumpur city-view luxury condo balcony overlooking the Petronas Twin Towers, premium Malaysia property lifestyle, vertical 9:16",
+                "modern luxury condo living room with floor-to-ceiling windows and KLCC skyline outside, high-end real estate commercial, vertical 9:16",
+                "premium condominium lobby in Kuala Lumpur, elegant residential atmosphere, luxury property marketing video, vertical 9:16",
+                "infinity pool on a high-rise condo rooftop with Kuala Lumpur skyline and residential towers, premium Malaysia condo lifestyle, vertical 9:16",
+            ]
+            return scenes[(int(i) - 1) % len(scenes)] + ". No readable text, no logo, no watermark, no fake price, no black borders."
+
+        def _rewrite_args(arguments):
+            try:
+                if isinstance(arguments, dict):
+                    if isinstance(arguments.get("prompt"), str):
+                        arguments["prompt"] = _mscene(1)
+                    if isinstance(arguments.get("shots"), list):
+                        for i, shot in enumerate(arguments["shots"], start=1):
+                            if isinstance(shot, dict):
+                                shot["prompt"] = _mscene(i)
+                    if "aspect_ratio" in arguments:
+                        arguments["aspect_ratio"] = "9:16"
+                    if "width" in arguments:
+                        arguments["width"] = 1080
+                    if "height" in arguments:
+                        arguments["height"] = 1920
+                    import json
+                    print("MALAYSIA_FAL_FINAL_ARGUMENTS=" + json.dumps(arguments, ensure_ascii=False)[:3000])
+            except Exception as exc:
+                print("MALAYSIA_FAL_SUBSCRIBE_REWRITE_FAILED", exc)
+            return arguments
+
+        if hasattr(_fal_subscribe_patch_client, "subscribe"):
+            _orig_subscribe = _fal_subscribe_patch_client.subscribe
+
+            def _patched_subscribe(*args, **kwargs):
+                if "arguments" in kwargs:
+                    kwargs["arguments"] = _rewrite_args(kwargs.get("arguments"))
+                elif len(args) >= 2 and isinstance(args[1], dict):
+                    args = list(args)
+                    args[1] = _rewrite_args(args[1])
+                    args = tuple(args)
+                return _orig_subscribe(*args, **kwargs)
+
+            _fal_subscribe_patch_client.subscribe = _patched_subscribe
+
+        _fal_subscribe_patch_client._malaysia_subscribe_patched = True
+        print("MALAYSIA_FAL_SUBSCRIBE_PATCH_INSTALLED")
+except Exception as _fal_subscribe_patch_exc:
+    print("MALAYSIA_FAL_SUBSCRIBE_PATCH_LOAD_FAILED", _fal_subscribe_patch_exc)
+# ===== /FAL SUBSCRIBE MALAYSIA HARD PATCH =====
+

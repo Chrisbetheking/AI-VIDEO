@@ -5642,3 +5642,13 @@ try:
 except Exception as _malaysia_visual_exc:
     print("MALAYSIA_VISUAL_PLANNER_LOAD_FAILED", _malaysia_visual_exc)
 # ===== /MALAYSIA REAL ESTATE VISUAL PLANNER =====
+
+
+# ===== FULL AI FINAL GUARD PATCH =====
+try:
+    from app.services.full_ai_final_guard_provider import install_full_ai_final_guard
+    install_full_ai_final_guard(app)
+except Exception as _full_ai_final_guard_exc:
+    print("FULL_AI_FINAL_GUARD_LOAD_FAILED", _full_ai_final_guard_exc)
+# ===== /FULL AI FINAL GUARD PATCH =====
+
