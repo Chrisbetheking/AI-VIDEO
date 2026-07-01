@@ -560,7 +560,7 @@ export async function pollFullAiJob(
 
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     await new Promise((resolve) => window.setTimeout(resolve, intervalMs))
-    const data = await apiGet(`/api/video/full-ai/job/${encodeURIComponent(jobId)}`, 60000)
+    const data = await apiGet(`/api/video/full-ai/tts-first/job/${encodeURIComponent(jobId)}`, 60000)
     const progress = progressFromJob(data, jobId)
     onProgress(progress)
 

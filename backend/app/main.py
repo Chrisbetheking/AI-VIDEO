@@ -5652,3 +5652,13 @@ except Exception as _full_ai_final_guard_exc:
     print("FULL_AI_FINAL_GUARD_LOAD_FAILED", _full_ai_final_guard_exc)
 # ===== /FULL AI FINAL GUARD PATCH =====
 
+
+
+# ===== FULL AI TTS FIRST PIPELINE =====
+try:
+    from app.services.full_ai_tts_first_provider import install_full_ai_tts_first
+    install_full_ai_tts_first(app)
+except Exception as _full_ai_tts_first_exc:
+    print("FULL_AI_TTS_FIRST_LOAD_FAILED", _full_ai_tts_first_exc)
+# ===== /FULL AI TTS FIRST PIPELINE =====
+

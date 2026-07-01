@@ -138,8 +138,8 @@ export default function PureAIVideoPath({ project, setProject, goTab }: Props) {
 
     const confirmText =
       plan.aiShotsRaw > 0
-        ? `将调用视频生成接口。目标 ${plan.duration}s，素材缺 ${plan.missingSeconds}s，本次提交 ${shotCount} 个 AI 镜头。继续？`
-        : '将调用视频生成接口。素材已够用，继续？'
+        ? `将先生成配音，再按配音真实时长拆镜头并生成视频。城市默认锁定吉隆坡，画面优先 KLCC / TRX / Mont Kiara / 公寓阳台 / 大堂 / 泳池。继续？`
+        : '将先生成配音，再按配音真实时长规划镜头和合成视频。素材已够用，继续？'
 
     if (!window.confirm(confirmText)) return
 
@@ -148,7 +148,7 @@ export default function PureAIVideoPath({ project, setProject, goTab }: Props) {
     setProgress({ status: 'submitting', percent: 8, message: '正在提交生成任务...' })
 
     try {
-      const data = await apiPost('/api/video/full-ai/start', payload, 360000)
+      const data = await apiPost('/api/video/full-ai/tts-first/start', payload, 360000)
       const jobId = extractJobId(data)
       const firstProgress = progressFromJob(data, jobId)
       setResult(data)
