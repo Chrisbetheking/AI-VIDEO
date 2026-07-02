@@ -97,7 +97,8 @@ type ContentBrainCard = {
 }
 
 const CONTENT_BRAIN_KEY = 'ai_video_content_brain_cards_v9'
-const WIZARD_DRAFT_KEY = 'ai_video_wizard_draft_v10_9'
+const WIZARD_DRAFT_KEY = 'ai_video_wizard_draft_v10_10'
+const CLEAN_ONCE_KEY = 'ai_video_wizard_v10_10_cleaned_once'
 
 
 function loadWizardDraft(): Record<string, any> {
@@ -133,20 +134,35 @@ function loadApprovedContentBrainCards(): ContentBrainCard[] {
 }
 
 
+function forceCleanEntryOnce() {
+  try {
+    const params = new URLSearchParams(window.location.search || '')
+    const force = params.get('force') || ''
+    const reset = params.get('reset') === '1' || params.get('clean') === '1'
+    if (!reset && !force.includes('v10-10')) return false
+    if (!reset && window.localStorage.getItem(CLEAN_ONCE_KEY) === '1') return false
+    ;[
+      'ai_video_wizard_draft_v10_5', 'ai_video_wizard_draft_v10_6', 'ai_video_wizard_draft_v10_7',
+      'ai_video_wizard_draft_v10_8', 'ai_video_wizard_draft_v10_9', WIZARD_DRAFT_KEY,
+      'ai_video_engineering_project_draft_v16', 'ai_video_engineering_project_draft_v15',
+    ].forEach((key) => window.localStorage.removeItem(key))
+    window.localStorage.setItem(CLEAN_ONCE_KEY, '1')
+    return true
+  } catch { return false }
+}
+
 function clearOldWizardDrafts() {
   try {
-    [
-      'ai_video_wizard_draft_v10_5',
-      'ai_video_wizard_draft_v10_6',
-      'ai_video_wizard_draft_v10_7',
-      'ai_video_wizard_draft_v10_8',
-    ].forEach((key) => window.localStorage.removeItem(key))
+    forceCleanEntryOnce()
+    Object.keys(window.localStorage).forEach((key) => {
+      if (key.startsWith('ai_video_wizard_draft_') && key !== WIZARD_DRAFT_KEY) window.localStorage.removeItem(key)
+    })
   } catch {}
 }
 
 function draftLooksPolluted(draft: Record<string, any>) {
   const text = `${draft.manualKeywords || ''} ${draft.script || ''} ${JSON.stringify(draft.aiKeywordInsights || [])}`
-  return /(62\.?|评论区答疑模板|数字人模板|生活分享讲解模板|禁用素材规则|R2素材自动标签|OpenClaw|内容大脑|这条视频要特别强调|高质量成片沉淀|低质量成片标记)/.test(text)
+  return /(62\.?|61\.?|评论区答疑模板|数字人模板|生活分享讲解模板|禁用素材规则|R2素材自动标签|OpenClaw|openclaw|内容大脑|这条视频要特别强调|高质量成片沉淀|低质量成片标记|类型：|模式：|用途：|风格：|来源状态|评论反向生成视频)/.test(text)
 }
 
 function contentBrainMatch(card: ContentBrainCard, topic: string, city: string, market: string) {
@@ -166,7 +182,7 @@ const BAD_KEYWORDS = new Set([
   '类型', '模式', '风格', 'OpenClaw', 'openclaw', '素材', '规则', '模板', 'AI关键词',
   '先复述问题', '最后引导补充预算', '生活分享讲解模板', '禁用素材规则', 'R2素材自动标签',
   '评论区答疑模板', '数字人模板', '成片沉淀', '低质量成片标记', '高质量成片沉淀', '高质量成片',
-  '低质量成片', '吉隆坡素材优先级', '素材库', '字幕库', '字幕样式', '自动标签', '再拆判断标准',
+  '低质量成片', '吉隆坡素材优先级', '素材库', '字幕库', '字幕样式', '自动标签', '再拆判断标准', '用途', '适合', '评论反向生成视频', '类型：数字人模板', '专业型', '生活分享讲解模板',
 ])
 const VIDEO_BRAIN_TYPES = new Set(['topic', 'hook', 'script', 'market_note', 'lead_question'])
 const NON_VIDEO_BRAIN_TYPES = new Set(['reply_template', 'visual_rule'])
@@ -174,6 +190,7 @@ const NON_VIDEO_BRAIN_TYPES = new Set(['reply_template', 'visual_rule'])
 function normalizeKeywordValue(value: string) {
   return String(value || '')
     .replace(/\bOpenClaw\b/gi, ' ')
+    .replace(/(?:类型|模式|用途|风格|结构|开头|评论引导|适合人群|目的|注意|来源状态|用户指定|评论反向生成视频)[：:][^，,。；;\n]*/g, ' ')
     .replace(/[：:，,。！？!?；;#*`\[\]()（）【】{}]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim()
@@ -203,6 +220,8 @@ function splitKeywordCandidates(value: string) {
 }
 
 function cleanManualKeywordText(value: string) {
+  const rawText = String(value || '')
+  if (rawText.length > 50 && /(62\.?|61\.?|OpenClaw|openclaw|模板|规则|类型|模式|用途|来源状态|评论反向生成视频|内容大脑)/.test(rawText)) return ''
   const out: string[] = []
   const seen = new Set<string>()
   splitKeywordCandidates(value).forEach((kw) => {
@@ -219,7 +238,8 @@ function isVideoBrainCard(card: ContentBrainCard) {
   if (NON_VIDEO_BRAIN_TYPES.has(t)) return false
   if (VIDEO_BRAIN_TYPES.has(t)) return true
   const title = `${card.title || ''} ${card.content || ''}`
-  if (/(回复话术|评论区答疑|私信|镜头规则|素材规则|字幕|数字人|成片沉淀|模板|规则)/.test(title)) return false
+  if (/^\s*\d+[\.、]/.test(title)) return false
+  if (/(回复话术|评论区答疑|私信|镜头规则|素材规则|字幕|数字人|成片沉淀|模板|规则|OpenClaw|openclaw|R2素材|禁用素材|质量标记)/.test(title)) return false
   return true
 }
 
@@ -678,9 +698,9 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
   const [scriptMode, setScriptMode] = useState<ScriptMode>(String(project.scriptMode || project.script_mode || initialDraft.scriptMode || 'professional') as ScriptMode)
   const [targetDuration, setTargetDuration] = useState(Number(project.targetDuration || initialDraft.targetDuration || 30))
   const [competitorSource, setCompetitorSource] = useState(String(project.competitorSource || initialDraft.competitorSource || ''))
-  const [manualKeywords, setManualKeywords] = useState(() => cleanManualKeywordText(String(project.manualKeywords || initialDraft.manualKeywords || '')))
+  const [manualKeywords, setManualKeywords] = useState('')
   const [manualKeywordDraft, setManualKeywordDraft] = useState('')
-  const [script, setScript] = useState(() => { const raw = String(project.script || initialDraft.script || ''); return scriptLooksPolluted(raw) ? '' : raw })
+  const [script, setScript] = useState(() => { const raw = String(initialDraft.script || ''); return scriptLooksPolluted(raw) ? '' : raw })
   const [selectedSegmentId, setSelectedSegmentId] = useState(String(initialDraft.selectedSegmentId || 'seg_1'))
   const [voiceSettings, setVoiceSettings] = useState<Record<string, SegmentVoiceSetting>>((initialDraft.voiceSettings || project.segment_voice_settings || {}) as Record<string, SegmentVoiceSetting>)
   const [shotPlan, setShotPlan] = useState<ShotPlan[]>(Array.isArray(initialDraft.shotPlan) ? initialDraft.shotPlan : [])
@@ -694,7 +714,7 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
   const [sourceResult, setSourceResult] = useState<any>(initialDraft.sourceResult || null)
   const [remoteBrainCards, setRemoteBrainCards] = useState<ContentBrainCard[]>([])
   const [disabledKeywordValues, setDisabledKeywordValues] = useState<string[]>(Array.isArray(initialDraft.disabledKeywordValues) ? initialDraft.disabledKeywordValues : [])
-  const [aiKeywordInsights, setAiKeywordInsights] = useState<KeywordInsight[]>(Array.isArray(initialDraft.aiKeywordInsights) ? initialDraft.aiKeywordInsights : [])
+  const [aiKeywordInsights, setAiKeywordInsights] = useState<KeywordInsight[]>([])
   const [aiBusy, setAiBusy] = useState('')
   const [aiStatus, setAiStatus] = useState(String(initialDraft.aiStatus || ''))
   const [buttonStatus, setButtonStatus] = useState(String(initialDraft.buttonStatus || ''))
@@ -779,6 +799,18 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
 
   useEffect(() => {
     clearOldWizardDrafts()
+    const dirtyProjectText = `${project.manualKeywords || ''} ${project.manual_keywords || ''} ${project.script || ''} ${JSON.stringify(project.ai_keyword_insights || [])}`
+    if (draftLooksPolluted({ manualKeywords: dirtyProjectText, script: String(project.script || ''), aiKeywordInsights: project.ai_keyword_insights || [] })) {
+      setProject({ ...project, script: '', manualKeywords: '', manual_keywords: '', ai_keyword_insights: [], keyword_insights: [], segments: [], script_segments: [], segment_voice_settings: {}, manual_shot_plan: [], shot_overrides: [] })
+      setManualKeywords('')
+      setScript('')
+      setAiKeywordInsights([])
+      setShotPlan([])
+      setVoiceSettings({})
+      setAiStatus('已清空项目草稿里的脏数据：62、模板名、OpenClaw、内容大脑不会再进入文案。')
+      saveWizardDraft({ step: 1 })
+      return
+    }
     const cleaned = cleanManualKeywordText(manualKeywords)
     let touched = false
     if (manualKeywords && cleaned !== manualKeywords) {
@@ -1056,6 +1088,42 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
     }
     if (!silent) setError('暂时没有找到已完成成片，可能还在 fal/合成/字幕烧录。')
     return null
+  }
+
+  function hardResetWizard() {
+    try {
+      Object.keys(window.localStorage).forEach((key) => {
+        if (key.startsWith('ai_video_wizard_draft_') || key === 'ai_video_engineering_project_draft_v16' || key === 'ai_video_engineering_project_draft_v15') {
+          window.localStorage.removeItem(key)
+        }
+      })
+      window.localStorage.setItem(CLEAN_ONCE_KEY, '1')
+    } catch {}
+    setStep(1)
+    setSourceMode('custom')
+    setTopic(DEFAULT_TOPIC)
+    setMarket(DEFAULT_MARKET)
+    setCity('kuala_lumpur')
+    setContentType('investment')
+    setScriptMode('professional')
+    setTargetDuration(15)
+    setCompetitorSource('')
+    setManualKeywords('')
+    setManualKeywordDraft('')
+    setScript('')
+    setVoiceSettings({})
+    setShotPlan([])
+    setJobId('')
+    setJob(null)
+    setSourceResult(null)
+    setDisabledKeywordValues([])
+    setAiKeywordInsights([])
+    setError('')
+    setSourceError('')
+    setAiStatus('已清空旧草稿和脏关键词。请点「AI 生成主题/关键词」，再生成文案。')
+    setButtonStatus('已重置入口；不会再恢复 62、模板名、OpenClaw 等旧数据。')
+    setProject({ ...project, topic: DEFAULT_TOPIC, market: DEFAULT_MARKET, city: 'kuala_lumpur', contentType: 'investment', scriptMode: 'professional', targetDuration: 15, script: '', manualKeywords: '', manual_keywords: '', ai_keyword_insights: [], keyword_insights: [], segments: [], script_segments: [], segment_voice_settings: {}, manual_shot_plan: [], shot_overrides: [], job_id: '', lastOutput: null })
+    saveWizardDraft({ step: 1 })
   }
 
   function openWorkspaceTab(tab: WorkspaceTab) {
@@ -1516,7 +1584,7 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
               <div className="aiw-modeRealBox">
                 <h4>不采集，直接按主题生成</h4>
                 <p>适合你已经确定选题，只需要文案、逐句配音、镜头计划和成片。不会调用 OpenClaw 采集。</p>
-                <div className="aiw-sourceChecklist"><span>① 写主题</span><span>② 生成文案</span><span>③ 逐句配音</span><span>④ 生成视频</span></div>
+                <div className="aiw-info">入口已改为 AI 驱动：先 AI 生成主题/关键词，再 DeepSeek 生成文案、配音和镜头。</div>
               </div>
             )}
           </div>
@@ -1540,13 +1608,15 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
             <label>来源状态<input readOnly value={sourceResult ? '已下发/已返回采集任务' : sourceMode === 'custom' ? '不采集，直接生成' : '等待下发真实采集'} /></label>
           </div>
           <div className="aiw-wideField aiw-manualKeywordBox">
-            <label>手动凸显关键词<textarea value={manualKeywords} onChange={(e) => { setManualKeywords(cleanManualKeywordText(e.target.value)); setAiKeywordInsights([]) }} onPaste={(e) => { e.preventDefault(); const text = e.clipboardData.getData('text'); setManualKeywords(cleanManualKeywordText([manualKeywords, text].filter(Boolean).join('，'))); setAiKeywordInsights([]); setAiStatus('已拦截粘贴内容里的模板名、序号和脏词。') }} onBlur={() => setManualKeywords(cleanManualKeywordText(manualKeywords))} placeholder="只填业务短词，例如：150万、华语、华人多、出租、流动性。不要粘贴知识库整段。" /></label>
+            <label>可选：补充业务关键词</label>
             <div className="aiw-inlineAdd">
-              <input value={manualKeywordDraft} onChange={(e) => setManualKeywordDraft(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addManualKeyword() } }} placeholder="单独加关键词，回车或点加入" />
+              <input value={manualKeywordDraft} onChange={(e) => setManualKeywordDraft(e.target.value)} onPaste={(e) => { const text = e.clipboardData.getData('text'); if (text.length > 40 || /(62\.?|OpenClaw|模板|规则|类型|模式|用途|内容大脑)/.test(text)) { e.preventDefault(); setAiStatus('已拦截整段粘贴。这里不能粘贴知识库，只能单独加业务短词。') } }} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addManualKeyword() } }} placeholder="例如：150万、华语、出租、流动性；不要粘贴整段知识库" />
               <button className="aiw-muted" type="button" onClick={addManualKeyword}>加入关键词</button>
-              <button className="aiw-muted" type="button" onClick={() => { setManualKeywords(cleanManualKeywordText(manualKeywords)); setAiKeywordInsights([]); setAiStatus('已清理手动关键词里的脏词。') }}>清理脏词</button>
+              <button className="aiw-muted" type="button" onClick={() => { setManualKeywords(''); setManualKeywordDraft(''); setAiKeywordInsights([]); setAiStatus('已清空手动关键词。') }}>清空关键词</button>
+              <button className="aiw-danger" type="button" onClick={hardResetWizard}>清空旧草稿/重来</button>
             </div>
-            <p>这里只能放业务短词。模板名、序号、OpenClaw、内容大脑、评论区答疑模板等会自动拦截。</p>
+            {manualKeywords && <div className="aiw-chipRow">{splitKeywordCandidates(manualKeywords).map((kw) => <span className="aiw-keywordPill" key={kw}>{kw}</span>)}</div>}
+            <p>默认不用手填。主题、关键词和文案都交给 DeepSeek；这里只能补充短业务词，不能再塞模板名和知识库长句。</p>
           </div>
           <div className="aiw-chipRow">
             {cityAnchors(city).map((item) => <span className="aiw-keywordPill" key={item}>{item}</span>)}

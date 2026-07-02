@@ -16,6 +16,44 @@ const LEGACY_DRAFT_KEY = 'ai_video_engineering_project_draft_v15'
 const SELECTED_ASSET_KEY = 'ai_video_selected_asset_ids_v16'
 const SELECTED_AVATAR_KEY = 'ai_video_selected_avatar_asset_v16'
 
+const ENTRY_CLEAN_KEY = 'ai_video_bridge_v10_10_cleaned_once'
+
+function entryShouldClean() {
+  try {
+    const params = new URLSearchParams(window.location.search || '')
+    const force = params.get('force') || ''
+    const reset = params.get('reset') === '1' || params.get('clean') === '1'
+    if (!reset && !force.includes('v10-10')) return false
+    if (!reset && localStorage.getItem(ENTRY_CLEAN_KEY) === '1') return false
+    localStorage.setItem(ENTRY_CLEAN_KEY, '1')
+    return true
+  } catch {
+    return false
+  }
+}
+
+function draftIsPolluted(draft: any) {
+  const text = `${draft?.manualKeywords || ''} ${draft?.manual_keywords || ''} ${draft?.script || ''} ${JSON.stringify(draft?.ai_keyword_insights || [])}`
+  return /(62\.?|61\.?|OpenClaw|openclaw|评论区答疑模板|数字人模板|生活分享讲解模板|禁用素材规则|R2素材自动标签|内容大脑|类型：|模式：|用途：|评论反向生成视频|高质量成片沉淀|低质量成片标记)/.test(text)
+}
+
+function cleanProjectDraft(draft: ProjectDraft): ProjectDraft {
+  return {
+    ...emptyProjectDraft(),
+    ...draft,
+    manualKeywords: '',
+    manual_keywords: '',
+    ai_keyword_insights: [],
+    keyword_insights: [],
+    script: draftIsPolluted(draft) ? '' : String(draft.script || ''),
+    segments: draftIsPolluted(draft) ? [] : (Array.isArray(draft.segments) ? draft.segments : []),
+    script_segments: [],
+    segment_voice_settings: {},
+    manual_shot_plan: [],
+    shot_overrides: [],
+  }
+}
+
 type AssetFolderKey = 'all' | 'self' | 'provided' | 'image' | 'collected' | 'ai'
 
 type NavItem = {
@@ -36,15 +74,30 @@ const NAV_ITEMS: NavItem[] = [
 
 function loadDraft(): ProjectDraft {
   try {
+    Object.keys(localStorage).forEach((key) => {
+      if (key.startsWith('ai_video_wizard_draft_')) localStorage.removeItem(key)
+    })
+    if (entryShouldClean()) {
+      localStorage.removeItem(DRAFT_KEY)
+      localStorage.removeItem(LEGACY_DRAFT_KEY)
+      return emptyProjectDraft()
+    }
     const raw = localStorage.getItem(DRAFT_KEY) || localStorage.getItem(LEGACY_DRAFT_KEY)
-    return raw ? { ...emptyProjectDraft(), ...JSON.parse(raw) } : emptyProjectDraft()
+    if (!raw) return emptyProjectDraft()
+    const parsed = { ...emptyProjectDraft(), ...JSON.parse(raw) }
+    if (draftIsPolluted(parsed)) {
+      localStorage.removeItem(DRAFT_KEY)
+      localStorage.removeItem(LEGACY_DRAFT_KEY)
+      return emptyProjectDraft()
+    }
+    return cleanProjectDraft(parsed)
   } catch {
     return emptyProjectDraft()
   }
 }
 
 function saveDraft(draft: ProjectDraft) {
-  localStorage.setItem(DRAFT_KEY, JSON.stringify(draft))
+  localStorage.setItem(DRAFT_KEY, JSON.stringify(cleanProjectDraft(draft)))
 }
 
 function tabFromHash(hash: string): WorkspaceTab | null {
