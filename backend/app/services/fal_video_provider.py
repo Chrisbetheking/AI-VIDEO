@@ -253,26 +253,74 @@ def make_job_id(prefix: str = "fal_video") -> str:
 
 
 # ===== HARD OVERRIDE MALAYSIA REAL ESTATE FAL PROMPTS =====
-def _hard_malaysia_real_estate_prompt(index: int = 1) -> str:
-    scenes = [
-        "KLCC Twin Towers skyline with luxury high-rise condominium in the foreground, Kuala Lumpur premium real estate commercial, vertical 9:16 cinematic video",
-        "Kuala Lumpur city-view luxury condo balcony overlooking the Petronas Twin Towers, premium Malaysia property lifestyle, vertical 9:16",
-        "modern luxury condo living room with floor-to-ceiling windows and KLCC skyline outside, high-end real estate commercial, vertical 9:16",
-        "premium condominium lobby in Kuala Lumpur, elegant residential atmosphere, luxury property marketing video, vertical 9:16",
-        "infinity pool on a high-rise condo rooftop with Kuala Lumpur skyline and residential towers, premium Malaysia condo lifestyle, vertical 9:16",
-        "TRX financial district and luxury residential towers in Kuala Lumpur, cinematic city lifestyle, vertical 9:16",
-        "Mont Kiara upscale condominium neighborhood, family-friendly premium residential lifestyle, vertical 9:16",
-        "Penang ocean-view condominium balcony with elegant seaside second-home lifestyle, Malaysia real estate commercial, vertical 9:16",
-        "Langkawi tropical villa and resort-style residential pool, premium Malaysia second-home lifestyle, vertical 9:16",
-        "Sabah sunset ocean view with premium seaside apartment atmosphere, Malaysia property lifestyle, vertical 9:16",
+
+def _hard_malaysia_real_estate_prompt(index: int = 1, narration: str = "") -> str:
+    """
+    KL 房产短视频不要每个镜头都拍双子塔。
+    镜头序列按真实卖房逻辑走：
+    城市建立信任 -> 房内 -> 阳台 -> 配套 -> 看房/咨询 -> 社区 -> 夜景收尾。
+    """
+    text = (narration or "").lower()
+
+    # 如果文案明确说海边/槟城/兰卡威/沙巴，才允许海边；否则马来西亚房产默认吉隆坡城市房产
+    seaside_words = ["海边", "海景", "槟城", "penang", "兰卡威", "langkawi", "沙巴", "sabah", "ocean", "seaside", "beach"]
+    is_seaside = any(w in text for w in seaside_words)
+
+    kl_sales_scenes = [
+        # 1 城市信任，只出现一次，不要全片都是它
+        "Kuala Lumpur premium real estate establishing shot, modern high-rise residential towers near KLCC skyline, city atmosphere, not a fake project, vertical 9:16",
+
+        # 2 房内
+        "modern Kuala Lumpur condominium living room interior, floor-to-ceiling windows, warm daylight, premium but realistic apartment design, vertical 9:16",
+
+        # 3 阳台
+        "city-view condo balcony in Kuala Lumpur, buyer standing near balcony railing, skyline in the distance, premium residential lifestyle, vertical 9:16",
+
+        # 4 卧室 / 家庭
+        "comfortable master bedroom inside a Kuala Lumpur condominium, clean interior, natural light, family own-stay atmosphere, vertical 9:16",
+
+        # 5 厨房 / 餐厅
+        "modern condo kitchen and dining area, clean fittings, practical home living detail, Malaysia urban apartment interior, vertical 9:16",
+
+        # 6 大堂
+        "premium condominium lobby in Kuala Lumpur, reception area, elegant residential entrance, no readable signage, vertical 9:16",
+
+        # 7 泳池
+        "high-rise condominium swimming pool and lounge deck in Kuala Lumpur, residential amenity lifestyle, vertical 9:16",
+
+        # 8 健身房 / 配套
+        "condominium gym and lifestyle facilities, modern residential amenities, clean premium property atmosphere, vertical 9:16",
+
+        # 9 看房
+        "real estate agent showing a Kuala Lumpur apartment interior to a buyer, natural viewing scene, no readable documents, vertical 9:16",
+
+        # 10 社区 / 周边
+        "upscale Kuala Lumpur residential neighborhood, condo exterior, greenery, driveway, security entrance, urban living environment, vertical 9:16",
+
+        # 11 TRX / Mont Kiara 作为区域锚点
+        "TRX and Mont Kiara inspired Kuala Lumpur premium residential district atmosphere, high-rise condos and city lifestyle, vertical 9:16",
+
+        # 12 收尾
+        "Kuala Lumpur night skyline with modern residential towers, premium real estate closing shot, vertical 9:16",
     ]
+
+    seaside_scenes = [
+        "Penang ocean-view condominium balcony, realistic seaside second-home lifestyle, vertical 9:16",
+        "modern Penang apartment interior facing the sea, warm daylight, premium residential lifestyle, vertical 9:16",
+        "Langkawi resort-style residential pool and tropical greenery, second-home lifestyle, vertical 9:16",
+        "Sabah coastal residential tower with sunset marina atmosphere, vertical 9:16",
+    ]
+
+    scenes = seaside_scenes if is_seaside else kl_sales_scenes
     scene = scenes[(int(index) - 1) % len(scenes)]
+
     return (
         scene
         + ". Ultra realistic, premium real estate commercial style, natural lighting, clean composition, high detail, smooth camera movement. "
-        + "No readable text, no logo, no watermark, no fake project name, no exact price, no exact ROI, no exact school name, no black borders."
+        + "The main subject must be real estate selling visuals, not only landmark scenery. "
+        + "Use interiors, balcony, lobby, pool, amenities, viewing scenes, neighborhood and city context. "
+        + "No readable text, no logo, no watermark, no fake project name, no exact price, no exact ROI, no exact school name, no fake floorplan, no black borders."
     )
-
 
 def _hard_rewrite_fal_arguments_for_malaysia(arguments):
     try:
@@ -281,14 +329,14 @@ def _hard_rewrite_fal_arguments_for_malaysia(arguments):
 
         # 单镜头
         if isinstance(arguments.get("prompt"), str):
-            arguments["prompt"] = _hard_malaysia_real_estate_prompt(1)
+            arguments["prompt"] = _hard_malaysia_real_estate_prompt(1, str(arguments.get("prompt") or arguments.get("script_text") or ""))
 
         # 多镜头 storyboard
         shots = arguments.get("shots")
         if isinstance(shots, list):
             for i, shot in enumerate(shots, start=1):
                 if isinstance(shot, dict):
-                    shot["prompt"] = _hard_malaysia_real_estate_prompt(i)
+                    shot["prompt"] = _hard_malaysia_real_estate_prompt(i, str(shot.get("narration_segment") or shot.get("script") or shot.get("text") or shot.get("prompt") or ""))
 
         # 常见比例字段
         for k in ("aspect_ratio", "ratio"):

@@ -5662,3 +5662,13 @@ except Exception as _full_ai_tts_first_exc:
     print("FULL_AI_TTS_FIRST_LOAD_FAILED", _full_ai_tts_first_exc)
 # ===== /FULL AI TTS FIRST PIPELINE =====
 
+
+
+# ===== FULL AI POSTPROCESS SUBTITLE TAIL GUARD =====
+try:
+    from app.services.full_ai_postprocess_guard_provider import install_full_ai_postprocess_guard
+    install_full_ai_postprocess_guard(app)
+except Exception as _full_ai_postprocess_guard_exc:
+    print("FULL_AI_POSTPROCESS_GUARD_LOAD_FAILED", _full_ai_postprocess_guard_exc)
+# ===== /FULL AI POSTPROCESS SUBTITLE TAIL GUARD =====
+
