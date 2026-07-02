@@ -20,25 +20,27 @@ def _rank(job: dict[str, Any]) -> int:
     jt = str(job.get("job_type") or "").lower()
     url = str(job.get("video_url") or "").lower()
     stage = str(job.get("stage") or "").lower()
+    # V10.12: one_scene is the intended final pipeline: one visual + exact-script subtitles.
+    if jt == "one_scene":
+        return 0 if (job.get("subtitled_video_url") or "subtitled" in url or "subtitle" in stage) else 1
     if jt == "tts_first_v3":
         if "tts_first_v3" in url or job.get("subtitled_video_url") or "subtitle" in stage:
-            return 0
-        return 1
+            return 3
+        return 4
     if jt == "tts_first_v2":
         if "tts_first_v2" in url or job.get("subtitled_video_url") or "subtitle" in stage:
-            return 2
-        return 3
+            return 5
+        return 6
     if jt == "full_ai" and "subtitle" in url:
-        return 4
-    # Raw full_ai/compose is intentionally lower priority because it may be the non-subtitled collage output.
-    if jt == "full_ai": return 7
-    if jt == "compose": return 8
-    return 9
+        return 7
+    if jt == "full_ai": return 10
+    if jt == "compose": return 11
+    return 12
 
 
 @router.get("/health")
 def health() -> dict[str, Any]:
-    return {"ok": True, "provider": "wizard_video_recovery_v3", "prefer_tts_first_v3": True, "prefer_subtitled": True, "avoid_raw_compose": True}
+    return {"ok": True, "provider": "wizard_video_recovery_v10_12", "prefer_one_scene": True, "prefer_subtitled": True, "avoid_raw_compose": True}
 
 
 @router.get("/latest-done")

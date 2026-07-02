@@ -97,8 +97,8 @@ type ContentBrainCard = {
 }
 
 const CONTENT_BRAIN_KEY = 'ai_video_content_brain_cards_v9'
-const WIZARD_DRAFT_KEY = 'ai_video_wizard_draft_v10_11'
-const CLEAN_ONCE_KEY = 'ai_video_wizard_v10_11_cleaned_once'
+const WIZARD_DRAFT_KEY = 'ai_video_wizard_draft_v10_10'
+const CLEAN_ONCE_KEY = 'ai_video_wizard_v10_10_cleaned_once'
 
 
 function loadWizardDraft(): Record<string, any> {
@@ -139,11 +139,11 @@ function forceCleanEntryOnce() {
     const params = new URLSearchParams(window.location.search || '')
     const force = params.get('force') || ''
     const reset = params.get('reset') === '1' || params.get('clean') === '1'
-    if (!reset && !force.includes('v10-11')) return false
+    if (!reset && !force.includes('v10-10')) return false
     if (!reset && window.localStorage.getItem(CLEAN_ONCE_KEY) === '1') return false
     ;[
       'ai_video_wizard_draft_v10_5', 'ai_video_wizard_draft_v10_6', 'ai_video_wizard_draft_v10_7',
-      'ai_video_wizard_draft_v10_8', 'ai_video_wizard_draft_v10_9', 'ai_video_wizard_draft_v10_10', WIZARD_DRAFT_KEY,
+      'ai_video_wizard_draft_v10_8', 'ai_video_wizard_draft_v10_9', WIZARD_DRAFT_KEY,
       'ai_video_engineering_project_draft_v16', 'ai_video_engineering_project_draft_v15',
     ].forEach((key) => window.localStorage.removeItem(key))
     window.localStorage.setItem(CLEAN_ONCE_KEY, '1')
@@ -316,8 +316,8 @@ const STEP_TITLES: Record<WizardStep, string> = {
 const STEP_DESC: Record<WizardStep, string> = {
   1: '主题、同行来源、目标时长、城市和关键词先确定。',
   2: '保留逐句调语速、语调、语气、音量和停顿；不点句子不展开。',
-  3: '每个镜头都能手改，绑定 R2 素材和数字人配置。',
-  4: '调用 TTS-first-v3 直接分镜后端，成片后继续接 OpenClaw 人工待处理。',
+  3: '默认只生成一个正常画面，不再多分镜；需要换画面再手动选择素材。',
+  4: '调用原有 TTS-first 后端，成片后继续接 OpenClaw 人工待处理。',
 }
 
 const SOURCE_LABELS: Record<SourceMode, string> = {
@@ -860,7 +860,7 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
     let alive = true
     const timer = window.setInterval(async () => {
       try {
-        const data = await apiGet(`/api/video/full-ai/tts-first-v3/job/${jobId}`, 180000)
+        const data = await apiGet(`/api/video/full-ai/one-scene/job/${jobId}`, 180000)
         if (!alive) return
         setJob(data)
         const hasVideo = Boolean(extractVideoUrl(data))
@@ -1231,7 +1231,7 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
         setStep(3)
         return
       }
-      noteButton('开始调用 TTS-first-v3：生成后会自动烧录字幕，并用任务恢复接口捞成片。')
+      noteButton('开始调用 单画面 TTS-first：生成后会自动烧录字幕，并用任务恢复接口捞成片。')
       await startGenerate()
       return
     }
@@ -1460,8 +1460,10 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
         source: shot.source,
         asset_ids: shot.assetIds,
       })),
-      max_shots: finalShots.length,
-      fal_fill_shots: finalShots.length,
+      max_shots: 1,
+      fal_fill_shots: 1,
+      one_scene_mode: true,
+      visual_mode: 'single_background_loop',
       script_segments: segments,
       segment_voice_settings: voiceSettings,
       keyword_insights: keywords,
@@ -1481,7 +1483,7 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
       avatar_config: finalProject.avatar_config || avatarConfig,
       openclaw_lead_context: finalProject.leads || [],
       extra: {
-        source: 'original_backend_step_wizard_v10_11_tts_first_v3',
+        source: 'original_backend_step_wizard_v6',
         source_mode: sourceMode,
         competitor_source: competitorSource,
         content_type: contentType,
@@ -1494,11 +1496,11 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
     }
 
     try {
-      const data = await apiPost('/api/video/full-ai/tts-first-v3/start', payload, 240000)
+      const data = await apiPost('/api/video/full-ai/one-scene/start', payload, 240000)
       if (!data?.job_id) throw new Error('后端没有返回 job_id')
       setJob(data)
       setJobId(data.job_id)
-      setBusy('生成中')
+      setBusy('单画面生成中')
     } catch (err: any) {
       setBusy('')
       setError(err?.message || String(err))
@@ -1802,7 +1804,7 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
         </section>
         <section className="aiw-stepCard">
           <h3>生成状态</h3>
-          <div className="aiw-statusRows"><div><span>任务</span><b>{jobId || '-'}</b></div><div><span>阶段</span><b>{job?.stage || job?.status || 'ready'}</b></div><div><span>配音实际</span><b>{job?.audio_duration_seconds ? `${Number(job.audio_duration_seconds).toFixed(1)}s` : '生成后读取'}</b></div><div><span>镜头数</span><b>{job?.shot_count || shotPlan.length}</b></div><div><span>R2 素材</span><b>{selectedAssets.length}</b></div><div><span>OpenClaw 线索</span><b>{leadCount}</b></div><div><span>字幕</span><b>{subtitleEnabled ? (job?.subtitled_video_url ? '已烧录' : job?.stage === 'subtitle_burn' ? '烧录中' : selectedSubtitleStyle?.name) : '未启用'}</b></div></div>
+          <div className="aiw-statusRows"><div><span>任务</span><b>{jobId || '-'}</b></div><div><span>阶段</span><b>{job?.stage || job?.status || 'ready'}</b></div><div><span>配音实际</span><b>{job?.audio_duration_seconds ? `${Number(job.audio_duration_seconds).toFixed(1)}s` : '生成后读取'}</b></div><div><span>画面数</span><b>{job?.shot_count || shotPlan.length}</b></div><div><span>R2 素材</span><b>{selectedAssets.length}</b></div><div><span>OpenClaw 线索</span><b>{leadCount}</b></div><div><span>字幕</span><b>{subtitleEnabled ? (job?.subtitled_video_url ? '已烧录' : job?.stage === 'subtitle_burn' ? '烧录中' : selectedSubtitleStyle?.name) : '未启用'}</b></div></div>
           <div className="aiw-miniProgress"><span style={{ width: `${Math.min(100, Number(job?.progress || (busy ? 65 : 0)))}%` }} /></div>
         </section>
         <aside className="aiw-stepCard">
@@ -1820,7 +1822,7 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
         <div>
           <p className="aiw-eyebrow">STEP BY STEP / ORIGINAL BACKEND LINKED</p>
           <h2>四步视频创作向导</h2>
-          <p>不是旧的一页铺满，也不是假页面；这条链路接 TTS-first-v3、字幕烧录、R2 素材、数字人素材和 OpenClaw。</p>
+          <p>不是旧的一页铺满，也不是假页面；这条链路接 单画面 TTS-first、字幕烧录、R2 素材、数字人素材和 OpenClaw。</p>
         </div>
         <span className="aiw-badge ok">第 {step} 步 / 共 4 步</span>
       </div>
