@@ -1042,9 +1042,6 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
       segment_voice_settings: voiceSettings,
       manual_shot_plan: shotPlan,
       shot_overrides: shotPlan,
-      burn_subtitles: subtitleEnabled,
-      subtitle_style_id: subtitleStyleId,
-      subtitle_style: selectedSubtitleStyle,
       transition_plan: shotPlan.map((shot) => ({ index: shot.index, transition: shot.transition, camera: shot.camera })),
       ...extra,
     }
