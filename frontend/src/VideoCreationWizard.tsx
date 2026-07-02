@@ -675,14 +675,35 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
             ))}
           </div>
 
-          <div className="aiw-sourceModePanel">
+          <div className={`aiw-sourceModePanel aiw-sourceModePanel-${sourceMode}`}>
             <b>{SOURCE_LABELS[sourceMode]}模式</b>
             <p>{sourceHelpText()}</p>
-            {sourceMode !== 'custom' && (
-              <label>
-                {sourceMode === 'account' ? '真实抖音主页 / 账号名 / 种子账号' : '真实爆款视频链接 / 评论来源'}
-                <textarea value={competitorSource} onChange={(e) => setCompetitorSource(e.target.value)} placeholder={sourceMode === 'account' ? '一行一个账号主页、账号名或备注' : '一行一个真实视频链接'} />
-              </label>
+            {sourceMode === 'account' && (
+              <div className="aiw-modeRealBox">
+                <h4>录入真实账号，OpenClaw 才能找到人</h4>
+                <p>一行一个抖音主页、账号名、达人备注。系统会把这些账号写进采集任务，后面线索卡片会显示账号名/主页/来源。</p>
+                <label>真实抖音主页 / 账号名 / 种子账号
+                  <textarea value={competitorSource} onChange={(e) => setCompetitorSource(e.target.value)} placeholder={'例如：@吉隆坡房产顾问\nhttps://www.douyin.com/user/...\n马来西亚买房同行主页'} />
+                </label>
+                <div className="aiw-sourceChecklist"><span>① 下发账号采集</span><span>② 拉视频和评论</span><span>③ OpenClaw 评分</span><span>④ 带回文案/线索</span></div>
+              </div>
+            )}
+            {sourceMode === 'viral' && (
+              <div className="aiw-modeRealBox">
+                <h4>录入真实爆款视频链接，优先拉评论截流</h4>
+                <p>适合看到同行某条视频评论区很热，直接抓这条视频下的评论来找预算、区域、华语、出租等意向客户。</p>
+                <label>真实爆款视频链接 / 评论来源
+                  <textarea value={competitorSource} onChange={(e) => setCompetitorSource(e.target.value)} placeholder={'例如：https://www.douyin.com/video/...\nhttps://www.tiktok.com/@.../video/...'} />
+                </label>
+                <div className="aiw-sourceChecklist"><span>① 下发评论采集</span><span>② 提取高意向问题</span><span>③ 生成首条回复</span><span>④ 反推视频选题</span></div>
+              </div>
+            )}
+            {sourceMode === 'custom' && (
+              <div className="aiw-modeRealBox">
+                <h4>不采集，直接按主题生成</h4>
+                <p>适合你已经确定选题，只需要文案、逐句配音、镜头计划和成片。不会调用 OpenClaw 采集。</p>
+                <div className="aiw-sourceChecklist"><span>① 写主题</span><span>② 生成文案</span><span>③ 逐句配音</span><span>④ 生成视频</span></div>
+              </div>
             )}
           </div>
 

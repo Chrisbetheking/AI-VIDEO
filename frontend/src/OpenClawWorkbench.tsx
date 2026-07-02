@@ -7,6 +7,8 @@ type Props = {
   goTab: (tab: WorkspaceTab) => void
 }
 
+type LeadStatus = '待人工处理' | '已标记可回复' | '已带入文案' | '暂不跟进'
+
 type Lead = {
   text: string
   score: number
@@ -14,9 +16,18 @@ type Lead = {
   reply: string
   report: boolean
   source?: string
+  platform?: string
   author?: string
+  accountName?: string
+  accountId?: string
+  accountUrl?: string
+  profileUrl?: string
   videoTitle?: string
-  url?: string
+  videoUrl?: string
+  commentId?: string
+  contactHint?: string
+  nextAction?: string
+  status?: LeadStatus
   raw?: any
 }
 
@@ -27,16 +38,35 @@ type RealSource = {
   message: string
 }
 
+type SalesStage = {
+  key: string
+  label: string
+  hint: string
+  done: boolean
+  active: boolean
+}
+
 function normalizeText(value: unknown): string {
   if (value === null || value === undefined) return ''
   return String(value).trim()
 }
 
-function uniqueByText(items: Lead[]): Lead[] {
+function splitLines(value: string): string[] {
+  return normalizeText(value)
+    .split(/[\n，,]+/)
+    .map((x) => x.trim())
+    .filter(Boolean)
+}
+
+function compactKey(value: string): string {
+  return normalizeText(value).replace(/\s+/g, '').toLowerCase()
+}
+
+function uniqueByIdentity(items: Lead[]): Lead[] {
   const seen = new Set<string>()
   const out: Lead[] = []
   items.forEach((item) => {
-    const key = item.text.replace(/\s+/g, '')
+    const key = compactKey(`${item.accountName || item.author || ''}|${item.text}`)
     if (!key || seen.has(key)) return
     seen.add(key)
     out.push(item)
@@ -44,13 +74,21 @@ function uniqueByText(items: Lead[]): Lead[] {
   return out
 }
 
+function firstValue(row: Record<string, any>, keys: string[]): string {
+  for (const key of keys) {
+    const value = normalizeText(row?.[key])
+    if (value) return value
+  }
+  return ''
+}
+
 function scoreLead(text: string): Lead {
   const score =
     20 +
-    (/首付|预算|贷款|价格|买房|多少|哪里|哪个|能买吗/.test(text) ? 35 : 0) +
-    (/投资|出租|租金|回报|转手|流动性|区域|地段/.test(text) ? 25 : 0) +
-    (/私信|微信|联系|了解|咨询|可以讲|华语/.test(text) ? 25 : 0) +
-    (/避坑|怕坑|靠谱不|清单|核验/.test(text) ? 15 : 0)
+    (/首付|预算|贷款|价格|买房|多少|哪里|哪个|能买吗|总价|万|马币|RM/i.test(text) ? 35 : 0) +
+    (/投资|出租|租金|回报|转手|流动性|区域|地段|升值|空置/i.test(text) ? 25 : 0) +
+    (/私信|微信|联系|了解|咨询|可以讲|华语|华人|中文/i.test(text) ? 25 : 0) +
+    (/避坑|怕坑|靠谱不|清单|核验|真的假的|安全吗/i.test(text) ? 15 : 0)
   const finalScore = Math.min(100, score)
   const priority = finalScore >= 75 ? 'A' : finalScore >= 55 ? 'B' : 'C'
   return {
@@ -58,52 +96,66 @@ function scoreLead(text: string): Lead {
     score: finalScore,
     priority,
     report: priority === 'A',
+    status: priority === 'A' ? '待人工处理' : '已标记可回复',
+    nextAction: priority === 'A' ? '人工确认预算、用途、城市和联系方式' : '可先公开回复，再观察是否继续追问',
     reply: priority === 'A'
-      ? '先确认你的预算、用途和目标区域，再看具体项目。价格、户型和周边以官方资料为准，我可以先帮你做一版筛选清单。'
-      : '可以先从预算、用途和城市区域开始判断，别只看价格。真实项目信息要回到官方资料核验。',
+      ? '先别急着看项目，我建议先确认你的预算、用途和目标区域。你是偏自住、出租，还是资产配置？我可以先按你的情况帮你做一版筛选。'
+      : '可以先从预算、用途和城市区域开始判断，别只看价格。真实价格、户型和周边以官方资料为准。',
   }
 }
 
 function rowToLead(row: Record<string, any>, source: string): Lead | null {
-  const text = normalizeText(
-    row.comment_text || row.comment || row.text || row.content || row.message || row.title || row.desc || row.body,
-  )
+  const text = firstValue(row, ['comment_text', 'comment', 'text', 'content', 'message', 'body', 'desc', 'title'])
   if (!text) return null
+
   const base = scoreLead(text)
-  const like = Number(row.like_count || row.likes || row.digg_count || 0)
-  const reply = Number(row.reply_count || row.replies || 0)
-  const score = Math.min(100, base.score + (like >= 10 ? 5 : 0) + (reply >= 2 ? 5 : 0))
+  const like = Number(row.like_count || row.likes || row.digg_count || row.like || 0)
+  const replyCount = Number(row.reply_count || row.replies || row.reply || 0)
+  const score = Math.min(100, base.score + (like >= 10 ? 5 : 0) + (replyCount >= 2 ? 5 : 0))
+  const priority = score >= 75 ? 'A' : score >= 55 ? 'B' : 'C'
+  const author = firstValue(row, ['comment_author', 'author', 'nickname', 'user', 'username', 'user_name', 'display_name'])
+  const accountName = firstValue(row, ['account_name', 'account', 'video_author', 'video_account', 'aweme_author', 'douyin_account', 'sec_uid', 'uid']) || author
+  const accountUrl = firstValue(row, ['account_url', 'homepage', 'profile_url', 'author_url', 'user_url'])
+  const videoUrl = firstValue(row, ['url', 'source_url', 'share_url', 'video_url', 'aweme_url'])
+
   return {
     ...base,
     score,
-    priority: score >= 75 ? 'A' : score >= 55 ? 'B' : 'C',
+    priority,
     report: score >= 75,
+    status: score >= 75 ? '待人工处理' : '已标记可回复',
     source,
-    author: normalizeText(row.comment_author || row.author || row.nickname || row.user || row.username),
-    videoTitle: normalizeText(row.video_title || row.title || row.aweme_title),
-    url: normalizeText(row.url || row.source_url || row.share_url || row.video_url),
+    platform: firstValue(row, ['platform']) || 'douyin',
+    author,
+    accountName,
+    accountId: firstValue(row, ['account_id', 'uid', 'sec_uid', 'user_id', 'author_id']),
+    accountUrl,
+    profileUrl: accountUrl,
+    videoTitle: firstValue(row, ['video_title', 'title', 'aweme_title']),
+    videoUrl,
+    commentId: firstValue(row, ['comment_id', 'cid', 'id']),
+    contactHint: accountUrl || accountName || author || '缺少账号信息，请回采集源补齐',
+    nextAction: score >= 75 ? '人工从账号主页/评论源进入处理，不自动私信' : '可作为公开回复或下一条视频选题',
     raw: row,
   }
 }
 
 function recursiveExtractRows(value: any, source: string, depth = 0): Lead[] {
-  if (depth > 5 || value === null || value === undefined) return []
+  if (depth > 6 || value === null || value === undefined) return []
 
   if (typeof value === 'string') {
     if (value.includes('\n') && value.includes(',')) {
       return csvRows(value).map((row) => rowToLead(row, source)).filter(Boolean) as Lead[]
     }
-    return value.length >= 4 ? [scoreLead(value)] : []
+    return value.length >= 4 ? [{ ...scoreLead(value), source }] : []
   }
 
-  if (Array.isArray(value)) {
-    return value.flatMap((item) => recursiveExtractRows(item, source, depth + 1))
-  }
+  if (Array.isArray(value)) return value.flatMap((item) => recursiveExtractRows(item, source, depth + 1))
 
   if (typeof value === 'object') {
     const direct = rowToLead(value, source)
     const children: Lead[] = []
-    ;['comments', 'items', 'data', 'rows', 'results', 'leads', 'records', 'videos', 'messages', 'events'].forEach((key) => {
+    ;['comments', 'items', 'data', 'rows', 'results', 'leads', 'records', 'videos', 'messages', 'events', 'latest', 'comment_leads'].forEach((key) => {
       if (value[key] !== undefined) children.push(...recursiveExtractRows(value[key], `${source}.${key}`, depth + 1))
     })
     return direct ? [direct, ...children] : children
@@ -115,29 +167,23 @@ function recursiveExtractRows(value: any, source: string, depth = 0): Lead[] {
 function parseManualInput(raw: string): Lead[] {
   const trimmed = raw.trim()
   if (!trimmed) return []
-
   if ((trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
     try {
       return recursiveExtractRows(JSON.parse(trimmed), 'manual_json')
     } catch {
-      // fall through to CSV/text
+      // fall through
     }
   }
-
   const rows = csvRows(trimmed)
   if (rows.length) return rows.map((row) => rowToLead(row, 'manual_csv')).filter(Boolean) as Lead[]
-
-  return trimmed
-    .split(/\n+/)
-    .map((x) => x.trim())
-    .filter(Boolean)
-    .map((text) => ({ ...scoreLead(text), source: 'manual_text' }))
+  return trimmed.split(/\n+/).map((x) => x.trim()).filter(Boolean).map((text) => ({ ...scoreLead(text), source: 'manual_text' }))
 }
 
 function backendLeadToLocal(item: any, source: string): Lead | null {
   const text = normalizeText(item?.text || item?.comment_text || item?.original_text || item?.content || item?.message)
   if (!text) return null
-  const base = scoreLead(text)
+  const rowLead = rowToLead(item, source)
+  const base = rowLead || scoreLead(text)
   const score = Number(item?.score || item?.lead_score || item?.priority_score || base.score)
   const priority = normalizeText(item?.priority || item?.level || (score >= 75 ? 'A' : score >= 55 ? 'B' : 'C'))
   return {
@@ -146,11 +192,9 @@ function backendLeadToLocal(item: any, source: string): Lead | null {
     score,
     priority,
     report: Boolean(item?.report ?? item?.needs_human ?? item?.manual_review ?? priority === 'A'),
+    status: item?.status || (priority === 'A' ? '待人工处理' : '已标记可回复'),
     reply: normalizeText(item?.reply || item?.suggested_reply || item?.first_message || base.reply),
     source,
-    author: normalizeText(item?.author || item?.nickname || item?.username),
-    videoTitle: normalizeText(item?.video_title || item?.title),
-    url: normalizeText(item?.source_url || item?.url || item?.video_url),
     raw: item,
   }
 }
@@ -164,12 +208,47 @@ export default function OpenClawWorkbench({ project, setProject, goTab }: Props)
   const [sources, setSources] = useState<RealSource[]>([])
   const [lastLoadedAt, setLastLoadedAt] = useState('')
   const [collectKeyword, setCollectKeyword] = useState(project.topic || '马来西亚吉隆坡买房')
+  const [targetAccounts, setTargetAccounts] = useState(normalizeText((project as any).openclaw_target_accounts || ''))
 
   const stats = useMemo(() => {
     const a = leads.filter((x) => x.priority === 'A').length
-    const report = leads.filter((x) => x.report).length
-    return { count: leads.length, a, report }
+    const report = leads.filter((x) => x.report || x.status === '待人工处理').length
+    const withIdentity = leads.filter((x) => x.author || x.accountName || x.accountUrl || x.videoUrl).length
+    return { count: leads.length, a, report, withIdentity }
   }, [leads])
+
+  const stages: SalesStage[] = useMemo(() => {
+    const hasSource = sources.length > 0
+    const hasCollected = leads.length > 0
+    const hasIdentity = stats.withIdentity > 0
+    const hasAnalyzed = Boolean(result) || leads.some((x) => x.reply)
+    const hasQueue = stats.report > 0
+    const hasHandoff = Boolean((project as any).openclaw_sales_queue?.length || hasQueue)
+    return [
+      { key: 'source', label: '1 读取采集源', hint: 'OpenClaw / Collector / comment-leads', done: hasSource, active: busy === 'loading-real-openclaw' },
+      { key: 'collect', label: '2 采集评论', hint: '账号/视频评论进入系统', done: hasCollected, active: busy === 'collect' },
+      { key: 'identity', label: '3 补齐账号', hint: '账号名、主页、视频链接', done: hasIdentity, active: false },
+      { key: 'analyze', label: '4 AI 评分', hint: 'A/B/C 线索和意向', done: hasAnalyzed, active: busy === 'analyze' },
+      { key: 'queue', label: '5 人工队列', hint: '高意向客户待处理', done: hasQueue, active: false },
+      { key: 'handoff', label: '6 转文案/跟进', hint: 'sales 继续承接', done: hasHandoff, active: false },
+    ]
+  }, [busy, leads, project, result, sources.length, stats.report, stats.withIdentity])
+
+  const progress = Math.round((stages.filter((x) => x.done).length / stages.length) * 100)
+  const hasRealSource = sources.some((item) => item.ok && item.count > 0)
+  const accountLines = splitLines(targetAccounts)
+
+  function updateLeads(nextLeads: Lead[], extra: Record<string, any> = {}) {
+    const unique = uniqueByIdentity(nextLeads).slice(0, 300)
+    setLeads(unique)
+    setProject({
+      ...project,
+      leads: unique,
+      openclaw_sales_queue: unique.filter((lead) => lead.report || lead.priority === 'A'),
+      openclaw_target_accounts: targetAccounts,
+      ...extra,
+    })
+  }
 
   async function loadRealOpenClawData() {
     setBusy('loading-real-openclaw')
@@ -177,14 +256,12 @@ export default function OpenClawWorkbench({ project, setProject, goTab }: Props)
     setResult(null)
     const nextSources: RealSource[] = []
     const found: Lead[] = []
-
     const endpoints = [
       '/api/video/comment-leads/recent',
       '/api/collector/runs/latest',
       '/api/openclaw/export.csv',
       '/api/openclaw/videos',
       '/api/openclaw/accounts',
-      '/api/video/openclaw/comments/self-test',
     ]
 
     for (const endpoint of endpoints) {
@@ -200,16 +277,12 @@ export default function OpenClawWorkbench({ project, setProject, goTab }: Props)
       }
     }
 
-    const unique = uniqueByText(found).slice(0, 200)
     setSources(nextSources)
-    setLeads(unique)
     setLastLoadedAt(new Date().toLocaleString())
-    setProject({ ...project, leads: unique, openclaw_sources: nextSources, openclaw_loaded_at: new Date().toISOString() })
+    updateLeads(found, { openclaw_sources: nextSources, openclaw_loaded_at: new Date().toISOString() })
     setBusy('')
 
-    if (!unique.length) {
-      setError('暂无真实 OpenClaw/采集结果。请先去“同行采集”下发采集任务，或在左侧粘贴真实 CSV/JSON 后分析。')
-    }
+    if (!found.length) setError('暂无真实 OpenClaw/采集结果。请先录入账号或爆款链接并下发采集任务；人工导入真实 CSV/JSON 也可以。')
   }
 
   useEffect(() => {
@@ -217,48 +290,59 @@ export default function OpenClawWorkbench({ project, setProject, goTab }: Props)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  async function createCollectTask() {
+  async function createCollectTask(mode: 'accounts' | 'comments' = 'comments') {
     setBusy('collect')
     setError('')
+    const accounts = accountLines
     const payload = {
-      source: 'frontend_openclaw_capture_board',
+      source: 'frontend_openclaw_sales_board',
       platform: 'douyin',
-      mission_type: 'comments',
+      mission_type: mode === 'accounts' ? 'accounts' : 'comments',
       keyword: collectKeyword,
-      keywords: collectKeyword.split(/[，,\n]/).map((x) => x.trim()).filter(Boolean),
-      target: 'comments',
-      max_videos: 5,
-      max_comments: 80,
+      keywords: splitLines(collectKeyword),
+      accounts,
+      target_accounts: accounts,
+      target: mode === 'accounts' ? 'accounts_videos_comments' : 'comments',
+      max_videos: mode === 'accounts' ? 12 : 5,
+      max_comments: mode === 'accounts' ? 120 : 80,
       run_openclaw_analysis: true,
       payload: {
         keyword: collectKeyword,
-        target: 'comments',
-        max_videos: 5,
-        max_comments: 80,
+        accounts,
+        target: mode === 'accounts' ? 'accounts_videos_comments' : 'comments',
+        max_videos: mode === 'accounts' ? 12 : 5,
+        max_comments: mode === 'accounts' ? 120 : 80,
         run_openclaw_analysis: true,
       },
+    }
+
+    if (mode === 'accounts' && !accounts.length) {
+      setBusy('')
+      setError('请先录入至少一个真实账号名、主页链接或账号备注。否则采集回来也找不到人。')
+      return
     }
 
     try {
       let data: any
       try {
-        data = await apiPost('/api/collector/commands', { type: 'openclaw_collect_comments', ...payload }, 120000)
+        data = await apiPost('/api/collector/commands', { type: mode === 'accounts' ? 'openclaw_collect_accounts' : 'openclaw_collect_comments', ...payload }, 120000)
       } catch {
         try {
           data = await apiPost('/api/collector/commands/create', payload, 120000)
         } catch {
           data = await apiPost('/api/collector/douyin/accounts/bulk-upsert', {
-            accounts: payload.keywords.map((name: string) => ({
-              category: 'openclaw_comment_target',
+            accounts: (accounts.length ? accounts : splitLines(collectKeyword)).map((name: string) => ({
+              category: mode === 'accounts' ? 'openclaw_target_account' : 'openclaw_comment_target',
               account_name: name,
               niche: collectKeyword,
-              source: 'frontend_openclaw_capture',
+              source: 'frontend_openclaw_sales_board',
             })),
           }, 120000)
         }
       }
       setResult(data)
-      setProject({ ...project, last_openclaw_collect_command: data, topic: collectKeyword || project.topic })
+      setProject({ ...project, last_openclaw_collect_command: data, topic: collectKeyword || project.topic, openclaw_target_accounts: targetAccounts })
+      setError('采集任务已下发。稍等几十秒后点“刷新真实采集结果”，看到账号名/评论后再分析。')
     } catch (err) {
       setError(detailToText(err))
     } finally {
@@ -269,93 +353,124 @@ export default function OpenClawWorkbench({ project, setProject, goTab }: Props)
   async function analyze() {
     setBusy('analyze')
     setError('')
-
     const manualLeads = parseManualInput(manualRaw)
     const baseLeads = manualLeads.length ? manualLeads : leads
-
     if (!baseLeads.length) {
       setBusy('')
-      setError('没有可分析的真实评论。请先点击“刷新真实采集结果”，或去同行采集下发任务，或粘贴真实 CSV/JSON。')
+      setError('没有可分析的真实评论。请先采集、刷新，或粘贴 OpenClaw 导出的真实 CSV/JSON。')
       return
     }
 
-    setLeads(baseLeads)
+    updateLeads(baseLeads)
 
     try {
       const comments = baseLeads.map((lead) => ({
         text: lead.text,
         like_count: lead.raw?.like_count || lead.raw?.likes || 0,
         reply_count: lead.raw?.reply_count || lead.raw?.replies || 0,
-        platform: lead.raw?.platform || 'douyin',
+        platform: lead.platform || lead.raw?.platform || 'douyin',
+        author: lead.author,
+        account_name: lead.accountName,
+        account_url: lead.accountUrl || lead.profileUrl,
         video_title: lead.videoTitle || lead.raw?.video_title || lead.raw?.title || '',
-        source_url: lead.url || lead.raw?.source_url || lead.raw?.url || '',
+        source_url: lead.videoUrl || lead.raw?.source_url || lead.raw?.url || '',
       }))
       const data = await apiPost('/api/video/openclaw/llm-enhance/comments', {
         dry_run: false,
-        max_llm_items: Math.min(20, comments.length),
+        max_llm_items: Math.min(30, comments.length),
         min_score: 40,
         campaign_context: {
           market: project.market,
           platform: 'douyin',
           source: manualLeads.length ? 'manual_import' : 'real_openclaw_collector',
           topic: project.topic,
+          target_accounts: accountLines,
+          sales_mode: 'human_review_first',
         },
         comments,
       }, 180000)
       setResult(data)
       const backendCandidates = recursiveExtractRows(data, 'llm_enhance_result')
-      const merged = uniqueByText([
+      const merged = uniqueByIdentity([
         ...backendCandidates.map((item) => backendLeadToLocal(item.raw || item, 'llm_enhance_result') || item),
         ...baseLeads,
-      ]).slice(0, 200)
-      setLeads(merged)
-      setProject({ ...project, leads: merged, openclaw_analysis_result: data })
+      ]).slice(0, 300)
+      updateLeads(merged, { openclaw_analysis_result: data })
     } catch (err) {
       const fallback = baseLeads.map((lead) => ({ ...lead, ...scoreLead(lead.text), source: lead.source || 'local_fallback' }))
-      setLeads(fallback)
       setResult({ ok: false, fallback: 'local_analyze_after_backend_failed', message: detailToText(err) })
-      setProject({ ...project, leads: fallback })
+      updateLeads(fallback)
     } finally {
       setBusy('')
     }
   }
 
-  function toScript() {
-    const top = leads.find((lead) => lead.priority === 'A')?.text || leads[0]?.text || project.topic
+  function updateLeadStatus(index: number, status: LeadStatus) {
+    const next = leads.map((lead, i) => i === index ? { ...lead, status, report: status === '待人工处理' || status === '已标记可回复' } : lead)
+    updateLeads(next)
+  }
+
+  function toScript(lead?: Lead) {
+    const top = lead?.text || leads.find((item) => item.priority === 'A')?.text || leads[0]?.text || project.topic
     const script = generateLocalScript(top, project.market, project.targetDuration)
-    setProject(projectWithScript({ ...project, topic: top, leads }, script, { title: top }))
+    updateLeadStatus(Math.max(0, leads.findIndex((x) => x.text === top)), '已带入文案')
+    setProject(projectWithScript({ ...project, topic: top, leads, openclaw_target_accounts: targetAccounts }, script, { title: top }))
     goTab('pureai')
   }
 
-  const hasRealSource = sources.some((item) => item.ok && item.count > 0)
+  const topQueue = leads.filter((lead) => lead.report || lead.priority === 'A')
 
   return (
-    <section className="aiw-card aiw-real-openclaw">
+    <section className="aiw-card aiw-real-openclaw aiw-salesBoard">
       <div className="aiw-hero">
         <div>
-          <p className="aiw-eyebrow">OPENCLAW REAL CAPTURE</p>
-          <h2>真实获客截流看板</h2>
-          <p>默认读取 OpenClaw / Collector / comment-leads 的真实结果；没有结果就提示先采集，不再预置假评论。</p>
+          <p className="aiw-eyebrow">OPENCLAW SALES CAPTURE</p>
+          <h2>OpenClaw 销售截流台</h2>
+          <p>像销售一样先找人：账号/主页 → 评论采集 → AI 评分 → 首条回复建议 → 人工处理。没有真实采集结果时不展示假线索。</p>
         </div>
         <span className={hasRealSource ? 'aiw-badge ok' : 'aiw-badge warn'}>{hasRealSource ? '已读取真实采集' : '等待真实采集'}</span>
       </div>
 
+      <div className="aiw-salesProgress">
+        <div className="aiw-salesProgressTop">
+          <b>OpenClaw 执行进度</b>
+          <span>{progress}%</span>
+        </div>
+        <div className="aiw-progressTrack"><i style={{ width: `${progress}%` }} /></div>
+        <div className="aiw-salesSteps">
+          {stages.map((stage) => (
+            <div key={stage.key} className={`${stage.done ? 'done' : ''} ${stage.active ? 'active' : ''}`}>
+              <b>{stage.label}</b>
+              <span>{stage.hint}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
       <div className="aiw-form two">
         <label>
-          采集关键词 / 主页备注
-          <input value={collectKeyword} onChange={(e) => setCollectKeyword(e.target.value)} placeholder="例如：马来西亚吉隆坡买房 / 某个同行主页" />
+          采集关键词 / 主攻方向
+          <input value={collectKeyword} onChange={(e) => setCollectKeyword(e.target.value)} placeholder="例如：吉隆坡买房 / 马来西亚房产预算" />
+        </label>
+        <label>
+          目标账号 / 主页 / 达人名称，一行一个
+          <textarea value={targetAccounts} onChange={(e) => setTargetAccounts(e.target.value)} placeholder="例如：@某地产顾问\nhttps://www.douyin.com/user/...\n吉隆坡房产同行主页" />
         </label>
         <label>
           手动导入真实 CSV / JSON / 评论，一行一个；可留空
-          <textarea value={manualRaw} onChange={(e) => setManualRaw(e.target.value)} placeholder="这里不再放假数据。没有真实采集结果时，可以粘贴 OpenClaw 导出的 CSV/JSON。" />
+          <textarea value={manualRaw} onChange={(e) => setManualRaw(e.target.value)} placeholder="没有采集结果时，可以粘贴 OpenClaw 导出的真实 CSV/JSON；不要填假数据。" />
+        </label>
+        <label>
+          承接规则
+          <textarea readOnly value={'A 级线索：进入人工待处理\nB 级线索：生成公开回复建议\nC 级线索：沉淀为视频选题\n系统只生成建议，不自动私信、不自动骚扰。'} />
         </label>
       </div>
 
       <div className="aiw-actions">
         <button className="aiw-primary" onClick={loadRealOpenClawData} disabled={!!busy}>{busy === 'loading-real-openclaw' ? '刷新中...' : '刷新真实采集结果'}</button>
-        <button className="aiw-purple" onClick={createCollectTask} disabled={!!busy}>{busy === 'collect' ? '下发中...' : '下发评论采集任务'}</button>
-        <button className="aiw-primary" onClick={analyze} disabled={!!busy}>{busy === 'analyze' ? '分析中...' : '分析真实线索'}</button>
-        <button className="aiw-purple" onClick={toScript} disabled={!leads.length}>把 A/B 线索转成文稿</button>
+        <button className="aiw-purple" onClick={() => createCollectTask('accounts')} disabled={!!busy}>{busy === 'collect' ? '下发中...' : '下发账号采集'}</button>
+        <button className="aiw-purple" onClick={() => createCollectTask('comments')} disabled={!!busy}>{busy === 'collect' ? '下发中...' : '下发评论采集'}</button>
+        <button className="aiw-primary" onClick={analyze} disabled={!!busy}>{busy === 'analyze' ? '分析中...' : 'AI 评分并生成回复'}</button>
         <button className="aiw-muted" onClick={() => goTab('collect')}>去同行采集</button>
       </div>
 
@@ -363,12 +478,43 @@ export default function OpenClawWorkbench({ project, setProject, goTab }: Props)
 
       <div className="aiw-metrics">
         <div><b>{stats.count}</b><span>真实/导入评论</span></div>
+        <div><b>{stats.withIdentity}</b><span>带账号信息</span></div>
         <div><b>{stats.a}</b><span>A 级线索</span></div>
         <div><b>{stats.report}</b><span>人工待处理</span></div>
         <div><b>{lastLoadedAt || '-'}</b><span>最近刷新</span></div>
       </div>
 
       <div className="aiw-twoCol">
+        <div className="aiw-panel">
+          <h3>人工待处理队列</h3>
+          <div className="aiw-leadCards">
+            {topQueue.map((lead, index) => (
+              <article className="aiw-leadCard" key={`${lead.text}-${index}`}>
+                <div className="aiw-leadHead">
+                  <b>{lead.priority} / {lead.score}</b>
+                  <span>{lead.status || '待人工处理'}</span>
+                </div>
+                <p>{lead.text}</p>
+                <div className="aiw-leadMeta">
+                  <span>账号：{lead.accountName || lead.author || '缺少账号名'}</span>
+                  <span>平台：{lead.platform || 'douyin'}</span>
+                  <span>来源：{lead.source || '-'}</span>
+                  {lead.videoTitle && <span>视频：{lead.videoTitle}</span>}
+                  {(lead.accountUrl || lead.videoUrl) && <a href={lead.accountUrl || lead.videoUrl} target="_blank" rel="noreferrer">打开账号/来源</a>}
+                </div>
+                <div className="aiw-replyBox"><b>首条回复建议</b><span>{lead.reply}</span></div>
+                <div className="aiw-actions mini">
+                  <button onClick={() => updateLeadStatus(leads.indexOf(lead), '待人工处理')}>待处理</button>
+                  <button onClick={() => updateLeadStatus(leads.indexOf(lead), '已标记可回复')}>可回复</button>
+                  <button onClick={() => toScript(lead)}>转视频选题</button>
+                  <button onClick={() => updateLeadStatus(leads.indexOf(lead), '暂不跟进')}>暂不跟</button>
+                </div>
+              </article>
+            ))}
+            {!topQueue.length && <div className="aiw-empty">暂无 A 级线索。先录入账号并采集评论，或导入真实 OpenClaw CSV/JSON。</div>}
+          </div>
+        </div>
+
         <div className="aiw-panel">
           <h3>采集来源状态</h3>
           <div className="aiw-segmentList compact">
@@ -381,46 +527,16 @@ export default function OpenClawWorkbench({ project, setProject, goTab }: Props)
             ))}
             {!sources.length && <div className="aiw-empty">正在检查真实 OpenClaw / Collector 数据。</div>}
           </div>
-        </div>
-        <div className="aiw-panel">
-          <h3>人工待处理队列</h3>
-          <div className="aiw-segmentList compact">
-            {leads.filter((lead) => lead.report || lead.priority === 'A').map((lead, index) => (
-              <div className="aiw-segment" key={`${lead.text}-${index}`}>
-                <b>{lead.priority} / {lead.score}</b>
-                <p>{lead.text}</p>
-                <span>{lead.author ? `用户：${lead.author} · ` : ''}{lead.source || 'openclaw'}</span>
-              </div>
-            ))}
-            {!leads.filter((lead) => lead.report || lead.priority === 'A').length && <div className="aiw-empty">暂无 A 级线索。先采集或导入真实评论后再分析。</div>}
-          </div>
-        </div>
-      </div>
-
-      <div className="aiw-twoCol">
-        <div className="aiw-panel">
           <h3>全部线索</h3>
-          <div className="aiw-segmentList">
+          <div className="aiw-segmentList compact">
             {leads.map((lead, index) => (
               <div className="aiw-segment" key={`${lead.text}-${index}`}>
-                <b>{lead.priority} / {lead.score}</b>
+                <b>{lead.priority} / {lead.score} · {lead.accountName || lead.author || '未识别账号'}</b>
                 <p>{lead.text}</p>
-                <span>{lead.report ? '进入人工待处理' : '可作为公开回复/选题'}{lead.videoTitle ? ` · ${lead.videoTitle}` : ''}</span>
+                <span>{lead.status || (lead.report ? '进入人工待处理' : '可公开回复/选题')}{lead.videoTitle ? ` · ${lead.videoTitle}` : ''}</span>
               </div>
             ))}
-            {!leads.length && <div className="aiw-empty">暂无真实评论。点击“下发评论采集任务”或去“同行采集”获取数据。</div>}
-          </div>
-        </div>
-        <div className="aiw-panel">
-          <h3>首条回复建议</h3>
-          <div className="aiw-segmentList">
-            {leads.map((lead, index) => (
-              <div className="aiw-segment" key={`${lead.reply}-${index}`}>
-                <b>{lead.priority} 线索</b>
-                <p>{lead.reply}</p>
-              </div>
-            ))}
-            {!leads.length && <div className="aiw-empty">分析后这里显示首条公开回复/人工跟进建议，不自动私信。</div>}
+            {!leads.length && <div className="aiw-empty">暂无真实评论。点击“下发账号采集/评论采集”或去“同行采集”获取数据。</div>}
           </div>
         </div>
       </div>

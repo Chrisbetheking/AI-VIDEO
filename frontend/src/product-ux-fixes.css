@@ -1301,3 +1301,189 @@
   color: #92400e;
   background: #fef3c7;
 }
+
+/* ===== V8 OpenClaw sales pipeline polish ===== */
+.aiw-salesBoard .aiw-hero h2 {
+  letter-spacing: -0.02em;
+}
+.aiw-salesProgress {
+  margin: 18px 0 22px;
+  padding: 18px;
+  border: 1px solid rgba(124, 58, 237, 0.16);
+  border-radius: 22px;
+  background: linear-gradient(135deg, rgba(124,58,237,0.08), rgba(255,255,255,0.9));
+}
+.aiw-salesProgressTop {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+  font-weight: 900;
+  color: #4c1d95;
+}
+.aiw-progressTrack {
+  height: 10px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #eee8ff;
+}
+.aiw-progressTrack i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #8b5cf6, #2563eb);
+  transition: width 0.2s ease;
+}
+.aiw-salesSteps {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+}
+.aiw-salesSteps > div {
+  min-height: 72px;
+  padding: 12px;
+  border: 1px solid rgba(124, 58, 237, 0.12);
+  border-radius: 16px;
+  background: rgba(255,255,255,0.72);
+}
+.aiw-salesSteps > div.done {
+  border-color: rgba(22, 163, 74, 0.24);
+  background: rgba(240, 253, 244, 0.9);
+}
+.aiw-salesSteps > div.active {
+  border-color: rgba(37, 99, 235, 0.28);
+  background: rgba(239, 246, 255, 0.95);
+  box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.08);
+}
+.aiw-salesSteps b,
+.aiw-salesSteps span {
+  display: block;
+}
+.aiw-salesSteps b {
+  font-size: 13px;
+  color: #111827;
+}
+.aiw-salesSteps span {
+  margin-top: 5px;
+  color: #7c8494;
+  font-size: 12px;
+  line-height: 1.4;
+}
+.aiw-leadCards {
+  display: grid;
+  gap: 14px;
+}
+.aiw-leadCard {
+  padding: 16px;
+  border: 1px solid rgba(124, 58, 237, 0.14);
+  border-radius: 18px;
+  background: #fff;
+  box-shadow: 0 16px 34px rgba(76, 29, 149, 0.06);
+}
+.aiw-leadHead {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+.aiw-leadHead b {
+  color: #6d28d9;
+  font-size: 15px;
+}
+.aiw-leadHead span {
+  padding: 5px 10px;
+  border-radius: 999px;
+  color: #047857;
+  background: #ecfdf5;
+  font-size: 12px;
+  font-weight: 900;
+}
+.aiw-leadCard p {
+  margin: 8px 0 12px;
+  color: #111827;
+  line-height: 1.7;
+}
+.aiw-leadMeta {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+.aiw-leadMeta span,
+.aiw-leadMeta a {
+  padding: 5px 9px;
+  border-radius: 999px;
+  color: #4b5563;
+  background: #f3f4f6;
+  font-size: 12px;
+  font-weight: 800;
+  text-decoration: none;
+}
+.aiw-replyBox {
+  display: grid;
+  gap: 6px;
+  margin: 12px 0;
+  padding: 12px;
+  border-radius: 14px;
+  background: #f8f7ff;
+  color: #374151;
+}
+.aiw-replyBox b {
+  color: #5b21b6;
+}
+.aiw-actions.mini {
+  margin-top: 8px;
+}
+.aiw-actions.mini button {
+  min-height: 34px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 12px;
+  background: #eef2ff;
+  color: #3730a3;
+  font-weight: 900;
+  cursor: pointer;
+}
+.aiw-sourceModePanel-account,
+.aiw-sourceModePanel-viral,
+.aiw-sourceModePanel-custom {
+  border-left: 4px solid #7c3aed;
+}
+.aiw-modeRealBox {
+  display: grid;
+  gap: 12px;
+}
+.aiw-modeRealBox h4 {
+  margin: 0;
+  color: #111827;
+}
+.aiw-modeRealBox p {
+  margin: 0;
+  color: #6b7280;
+  line-height: 1.7;
+}
+.aiw-sourceChecklist {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.aiw-sourceChecklist span {
+  padding: 7px 10px;
+  border-radius: 999px;
+  color: #5b21b6;
+  background: #f3e8ff;
+  font-size: 12px;
+  font-weight: 900;
+}
+@media (max-width: 1180px) {
+  .aiw-salesSteps {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+@media (max-width: 780px) {
+  .aiw-salesSteps {
+    grid-template-columns: 1fr;
+  }
+}
