@@ -134,20 +134,36 @@ function contentBrainMatch(card: ContentBrainCard, topic: string, city: string, 
   return keys.some((key) => key.length >= 2 && text.includes(key))
 }
 
-const BAD_KEYWORDS = new Set(['房产', '选题', '镜头', '客户问题', '市场知识', '回复模板', '马来西亚', '内容大脑', '类型', '模式', '风格', 'OpenClaw', 'openclaw', '先复述问题', '最后引导补充预算', '生活分享讲解模板', '禁用素材规则', 'R2素材自动标签', '评论区答疑模板', '素材', '规则', '模板'])
+const BAD_KEYWORDS = new Set([
+  '房产', '选题', '镜头', '客户问题', '市场知识', '回复模板', '马来西亚', '内容大脑',
+  '类型', '模式', '风格', 'OpenClaw', 'openclaw', '素材', '规则', '模板', 'AI关键词',
+  '先复述问题', '最后引导补充预算', '生活分享讲解模板', '禁用素材规则', 'R2素材自动标签',
+  '评论区答疑模板', '数字人模板', '成片沉淀', '低质量成片标记', '高质量成片沉淀', '高质量成片',
+  '低质量成片', '吉隆坡素材优先级', '素材库', '字幕库', '字幕样式', '自动标签', '再拆判断标准',
+])
+const VIDEO_BRAIN_TYPES = new Set(['topic', 'hook', 'script', 'market_note', 'lead_question'])
+const NON_VIDEO_BRAIN_TYPES = new Set(['reply_template', 'visual_rule'])
 
 function normalizeKeywordValue(value: string) {
-  return String(value || '').replace(/[：:，,。！？!?；;#*`\[\]()（）]/g, ' ').replace(/\s+/g, ' ').trim()
+  return String(value || '')
+    .replace(/\bOpenClaw\b/gi, ' ')
+    .replace(/[：:，,。！？!?；;#*`\[\]()（）【】{}]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
 }
 
 function usefulKeyword(value: string) {
-  const clean = normalizeKeywordValue(value)
+  const raw = String(value || '')
+  const clean = normalizeKeywordValue(raw)
   if (!clean) return ''
   if (BAD_KEYWORDS.has(clean)) return ''
-  if (clean.length < 2 || clean.length > 14) return ''
+  if (clean.length < 2 || clean.length > 12) return ''
   if (/^[\d.]+$/.test(clean)) return ''
-  if (/^(类型|模式|适合|目的|结构|开头|评论|注意|镜头组合|话术|来源状态)/.test(clean)) return ''
-  if (/(模板|规则|自动|禁用|OpenClaw|openclaw|内容大脑)/.test(clean) && !['R2素材', '真实素材'].includes(clean)) return ''
+  if (/^\d+[\.、]\s*/.test(raw)) return ''
+  if (/^(\d+|第\d+|NO\d+)$/i.test(clean)) return ''
+  if (/^(类型|模式|适合|目的|结构|开头|评论|注意|镜头组合|话术|来源状态|用户指定|标签|规则)/.test(clean)) return ''
+  if (/(模板|规则|自动|禁用|内容大脑|数字人|成片|沉淀|标记|答疑|讲解模板|素材优先级|素材自动|OpenClaw|openclaw)/.test(clean)) return ''
+  if (/(房产顾问|客户问题|视频创作|生成视频|逐句配音|文案模式)/.test(clean)) return ''
   if (/https?:\/\//i.test(clean)) return ''
   return clean
 }
@@ -159,11 +175,42 @@ function splitKeywordCandidates(value: string) {
     .filter(Boolean)
 }
 
+function cleanManualKeywordText(value: string) {
+  const out: string[] = []
+  const seen = new Set<string>()
+  splitKeywordCandidates(value).forEach((kw) => {
+    const key = kw.toLowerCase()
+    if (seen.has(key)) return
+    seen.add(key)
+    out.push(kw)
+  })
+  return out.slice(0, 18).join('，')
+}
+
+function isVideoBrainCard(card: ContentBrainCard) {
+  const t = String(card.type || '').trim()
+  if (NON_VIDEO_BRAIN_TYPES.has(t)) return false
+  if (VIDEO_BRAIN_TYPES.has(t)) return true
+  const title = `${card.title || ''} ${card.content || ''}`
+  if (/(回复话术|评论区答疑|私信|镜头规则|素材规则|字幕|数字人|成片沉淀|模板|规则)/.test(title)) return false
+  return true
+}
+
+function compactBrainForWizard(cards: ContentBrainCard[]) {
+  return cards.filter(isVideoBrainCard).slice(0, 10).map((card) => ({
+    id: card.id,
+    title: card.title,
+    type: card.type,
+    content: String(card.content || '').slice(0, 220),
+    score: card.score || 0,
+  }))
+}
+
 function contentBrainKeywords(cards: ContentBrainCard[]) {
   const out: string[] = []
   const seen = new Set<string>()
-  cards.forEach((card) => {
-    const raw = [...(Array.isArray(card.tags) ? card.tags : []), card.title || '']
+  cards.filter(isVideoBrainCard).forEach((card) => {
+    const raw = [card.title || '', card.content || '']
     raw.flatMap(splitKeywordCandidates).forEach((kw) => {
       const key = kw.toLowerCase()
       if (seen.has(key)) return
@@ -171,7 +218,12 @@ function contentBrainKeywords(cards: ContentBrainCard[]) {
       out.push(kw)
     })
   })
-  return out.slice(0, 14)
+  return out.slice(0, 10)
+}
+
+function scriptLooksPolluted(value: string) {
+  const text = String(value || '')
+  return /(62\.?|评论区答疑模板|数字人模板|生活分享讲解模板|禁用素材规则|R2素材自动标签|OpenClaw|内容大脑|这条视频要特别强调)/.test(text)
 }
 
 function normalizeKeywordInsight(item: any, index = 0): KeywordInsight | null {
@@ -634,13 +686,13 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
       return contentBrainMatch(card, topic, city, market)
     }).slice(0, 12)
   }, [topic, city, market, remoteBrainCards])
-  const brainKeywordText = useMemo(() => contentBrainKeywords(approvedBrainCards).join('，'), [approvedBrainCards])
+  const videoBrainCards = useMemo(() => approvedBrainCards.filter(isVideoBrainCard), [approvedBrainCards])
+  const nonVideoBrainCards = useMemo(() => approvedBrainCards.filter((card) => !isVideoBrainCard(card)), [approvedBrainCards])
+  const brainKeywordText = useMemo(() => contentBrainKeywords(videoBrainCards).join('，'), [videoBrainCards])
+  const cleanManualKeywords = useMemo(() => cleanManualKeywordText(manualKeywords), [manualKeywords])
   const localKeywordCandidates = useMemo(
-    () => extractKeywords(
-      `${topic}\n${script}\n${competitorSource}\n${approvedBrainCards.map((card) => `${card.title || ''} ${card.content || ''} ${(card.tags || []).join(' ')}`).join('\n')}`,
-      [manualKeywords, brainKeywordText].filter(Boolean).join('，')
-    ),
-    [topic, script, competitorSource, manualKeywords, brainKeywordText, approvedBrainCards]
+    () => extractKeywords(`${topic}\n${script}\n${competitorSource}`, cleanManualKeywords),
+    [topic, script, competitorSource, cleanManualKeywords]
   )
   const allKeywords = useMemo(
     () => mergeKeywordInsights(aiKeywordInsights, localKeywordCandidates),
@@ -699,7 +751,20 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
   }, [])
 
   useEffect(() => {
-    if (!script) setAiStatus('还没有生成文案。请在第一步点击「调用 DeepSeek 生成文案」，不会再本地秒出假文案。')
+    const cleaned = cleanManualKeywordText(manualKeywords)
+    if (manualKeywords && cleaned !== manualKeywords) {
+      setManualKeywords(cleaned)
+      setAiKeywordInsights([])
+      setAiStatus('已自动清理旧草稿里的脏关键词：模板名、序号、OpenClaw、内容大脑等不会再进文案。')
+    }
+    if (scriptLooksPolluted(script)) {
+      setScript('')
+      setShotPlan([])
+      setVoiceSettings({})
+      setAiStatus('检测到旧草稿文案被知识库标签污染，已清空；请重新调用 DeepSeek 生成。')
+    } else if (!script) {
+      setAiStatus('还没有生成文案。请在第一步点击「调用 DeepSeek 生成文案」，不会再本地秒出假文案。')
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -764,7 +829,7 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
       scriptMode,
       targetDuration,
       competitorSource,
-      manualKeywords,
+      manualKeywords: cleanManualKeywords,
       script,
       selectedSegmentId,
       voiceSettings,
@@ -897,7 +962,7 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
       script_mode: scriptMode,
       targetDuration,
       script,
-      manualKeywords,
+      manualKeywords: cleanManualKeywords,
       competitorSource,
       sourceMode,
       keyword_insights: keywords,
@@ -907,7 +972,7 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
       subtitle_style_id: subtitleStyleId,
       subtitle_style: selectedSubtitleStyle,
       ai_status: aiStatus,
-      content_brain_context: approvedBrainCards,
+      content_brain_context: videoBrainCards,
       script_segments: segments,
       segment_voice_settings: voiceSettings,
       manual_shot_plan: shotPlan,
@@ -1053,9 +1118,10 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
       content_type: contentType,
       script_mode: scriptMode,
       target_duration_seconds: targetDuration,
-      manual_keywords: manualKeywords,
+      manual_keywords: cleanManualKeywords,
       competitor_source: competitorSource,
-      content_brain_context: approvedBrainCards,
+      content_brain_context: compactBrainForWizard(videoBrainCards),
+      ignored_brain_cards: nonVideoBrainCards.map((card) => ({ id: card.id, title: card.title, type: card.type })),
       source_result: sourceData,
       current_script: script,
       require_llm: true,
@@ -1187,14 +1253,16 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
   }
 
   function addManualKeyword() {
-    const words = manualKeywordDraft.split(/[，,、\s]+/).map(usefulKeyword).filter(Boolean)
-    if (!words.length) return
-    const current = manualKeywords.split(/[，,、\s]+/).map(usefulKeyword).filter(Boolean)
-    const merged = Array.from(new Set([...current, ...words]))
-    setManualKeywords(merged.join('，'))
+    const words = splitKeywordCandidates(manualKeywordDraft)
+    if (!words.length) {
+      setAiStatus('没有可加入的有效关键词；序号、模板名、OpenClaw、内容大脑等会被拦截。')
+      return
+    }
+    const merged = cleanManualKeywordText([cleanManualKeywords, words.join('，')].filter(Boolean).join('，'))
+    setManualKeywords(merged)
     setManualKeywordDraft('')
     setAiKeywordInsights([])
-    setAiStatus('已加入手动关键词，请点 DeepSeek 分析关键词重新筛选。')
+    setAiStatus('已加入干净手动关键词，请点 DeepSeek 分析关键词重新筛选。')
   }
 
   function toggleKeyword(value: string) {
@@ -1263,7 +1331,7 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
       subtitle_style_id: subtitleStyleId,
       subtitle_style: selectedSubtitleStyle,
       ai_status: aiStatus,
-      content_brain_context: approvedBrainCards,
+      content_brain_context: compactBrainForWizard(videoBrainCards),
       manual_shot_plan: finalShots,
       shot_overrides: finalShots,
       transition_plan: finalShots.map((shot) => ({ index: shot.index, camera: shot.camera, transition: shot.transition })),
@@ -1281,7 +1349,7 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
         selected_assets: selectedAssets,
         avatar_config: avatarConfig,
         lead_count: leadCount,
-        content_brain_count: approvedBrainCards.length,
+        content_brain_count: videoBrainCards.length,
       },
     }
 
@@ -1397,12 +1465,13 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
             <label>来源状态<input readOnly value={sourceResult ? '已下发/已返回采集任务' : sourceMode === 'custom' ? '不采集，直接生成' : '等待下发真实采集'} /></label>
           </div>
           <div className="aiw-wideField aiw-manualKeywordBox">
-            <label>手动凸显关键词<textarea value={manualKeywords} onChange={(e) => { setManualKeywords(e.target.value); setAiKeywordInsights([]) }} placeholder="例如：150万、华语、华人多、大平层、出租、流动性" /></label>
+            <label>手动凸显关键词<textarea value={manualKeywords} onChange={(e) => { setManualKeywords(e.target.value); setAiKeywordInsights([]) }} onBlur={() => setManualKeywords(cleanManualKeywordText(manualKeywords))} placeholder="只填业务短词，例如：150万、华语、华人多、出租、流动性。不要粘贴知识库整段。" /></label>
             <div className="aiw-inlineAdd">
               <input value={manualKeywordDraft} onChange={(e) => setManualKeywordDraft(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addManualKeyword() } }} placeholder="单独加关键词，回车或点加入" />
               <button className="aiw-muted" type="button" onClick={addManualKeyword}>加入关键词</button>
+              <button className="aiw-muted" type="button" onClick={() => { setManualKeywords(cleanManualKeywordText(manualKeywords)); setAiKeywordInsights([]); setAiStatus('已清理手动关键词里的脏词。') }}>清理脏词</button>
             </div>
-            <p>手动词不会直接硬塞进口播，先进入候选，再由 DeepSeek 结合内容大脑筛选。</p>
+            <p>这里只能放业务短词。模板名、序号、OpenClaw、内容大脑、评论区答疑模板等会自动拦截。</p>
           </div>
           <div className="aiw-chipRow">
             {cityAnchors(city).map((item) => <span className="aiw-keywordPill" key={item}>{item}</span>)}
@@ -1433,12 +1502,12 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
           <div className="aiw-info">已启用 {keywords.length} 个关键词；关闭的词不会再硬塞进口播文案。</div>
           <h4>内容大脑联动</h4>
           <div className="aiw-brainMiniPanel">
-            <b>已匹配 {approvedBrainCards.length} 条知识</b>
-            <p>会一起传给文案、关键词、镜头和 OpenClaw 承接；不是所有生成内容都自动入库，需在内容大脑里审核。</p>
-            <div className="aiw-chipRow">{approvedBrainCards.slice(0, 8).map((card) => <span className="aiw-keywordPill" key={card.id || card.title}>{card.title || card.type}</span>)}</div>
+            <b>视频创作可用 {videoBrainCards.length} 条；已隔离回复/镜头类 {nonVideoBrainCards.length} 条</b>
+            <p>内容大脑不会再把模板名、序号和回复话术硬塞进口播。知识库只作为 DeepSeek 上下文，关键词必须经 DeepSeek 二次筛选。</p>
+            <div className="aiw-chipRow">{videoBrainCards.slice(0, 8).map((card) => <span className="aiw-keywordPill" key={card.id || card.title}>{card.title || card.type}</span>)}</div>
             <div className="aiw-actions">
               <button className="aiw-muted" onClick={() => openWorkspaceTab('brain')}>去内容大脑</button>
-              <button className="aiw-muted" onClick={() => setManualKeywords([manualKeywords, brainKeywordText].filter(Boolean).join('，'))}>把知识库关键词带入</button>
+              <button className="aiw-muted" onClick={() => void aiAnalyzeKeywords()}>让 DeepSeek 从知识库分析关键词</button>
             </div>
           </div>
           <h4>文案预览</h4>

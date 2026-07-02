@@ -15,6 +15,8 @@ BAD_WORDS = {
     "房产", "选题", "镜头", "客户问题", "市场知识", "回复模板", "马来西亚", "内容大脑",
     "类型", "模式", "风格", "OpenClaw", "openclaw", "先复述问题", "最后引导补充预算",
     "生活分享讲解模板", "禁用素材规则", "R2素材自动标签", "评论区答疑模板",
+    "数字人模板", "成片沉淀", "高质量成片沉淀", "低质量成片标记", "字幕库", "字幕样式",
+    "吉隆坡素材优先级", "再拆判断标准", "素材库", "生成视频", "逐句配音",
 }
 
 class KeywordRequest(BaseModel):
@@ -118,23 +120,47 @@ def _call_deepseek_json(system_prompt: str, user_payload: dict[str, Any], requir
 
 
 def _normalize_keyword(value: Any) -> str:
-    clean = re.sub(r"[：:，,。！？!?；;#*`\[\]()（）]", " ", str(value or ""))
+    raw = str(value or "")
+    clean = re.sub(r"[：:，,。！？!?；;#*`\[\]()（）【】{}]", " ", raw)
     clean = re.sub(r"\s+", " ", clean).strip()
-    clean = re.sub(r"^(类型|模式|目的|结构|开头|评论|注意|镜头组合|话术)\s*", "", clean).strip()
+    clean = re.sub(r"^(类型|模式|目的|结构|开头|评论|注意|镜头组合|话术|标签|规则|用户指定)\s*", "", clean).strip()
     if not clean:
         return ""
     if clean in BAD_WORDS:
         return ""
-    if len(clean) < 2 or len(clean) > 14:
+    if len(clean) < 2 or len(clean) > 12:
         return ""
     if re.fullmatch(r"[\d.]+", clean):
         return ""
-    if re.search(r"(模板|规则|标签|素材|自动|禁用|OpenClaw|openclaw)", clean) and clean not in {"R2素材", "真实素材"}:
+    if re.match(r"^\d+[\.、]?", raw):
+        return ""
+    if re.search(r"(模板|规则|标签|素材|自动|禁用|OpenClaw|openclaw|内容大脑|数字人|成片|沉淀|标记|答疑|讲解模板|素材优先级)", clean):
+        return ""
+    if re.search(r"(房产顾问|客户问题|视频创作|生成视频|逐句配音|文案模式)", clean):
         return ""
     if re.search(r"https?://", clean, flags=re.I):
         return ""
     return clean
 
+
+def _compact_brain_context(items: Any) -> list[dict[str, Any]]:
+    if not isinstance(items, list):
+        return []
+    allowed = {"topic", "hook", "script", "market_note", "lead_question"}
+    out: list[dict[str, Any]] = []
+    for item in items[:30]:
+        if not isinstance(item, dict):
+            continue
+        card_type = str(item.get("type") or item.get("card_type") or "")
+        title = _clean(item.get("title"))
+        content = _clean(item.get("content"))
+        if card_type and card_type not in allowed:
+            continue
+        if re.search(r"(回复话术|评论区答疑|私信|镜头规则|素材规则|字幕|数字人|成片沉淀|模板|规则)", f"{title} {content}"):
+            continue
+        if title or content:
+            out.append({"title": title[:60], "type": card_type or "market_note", "content": content[:220], "score": item.get("score") or 0})
+    return out[:10]
 
 def _sanitize_keywords(items: Any) -> list[dict[str, Any]]:
     if not isinstance(items, list):
@@ -202,15 +228,17 @@ def health() -> dict[str, Any]:
 @router.post("/analyze-keywords")
 def analyze_keywords(req: KeywordRequest) -> dict[str, Any]:
     system = """
-你是 AI-VIDEO 的短视频内容策略分析器。你必须真的分析输入，不要把数据库标签原样塞进结果。
+你是 AI-VIDEO 的短视频内容策略分析器。你必须真的分析输入，不要把数据库标签原样塞进结果。输入里的 content_brain_context 可能混有模板、回复、镜头规则，必须只抽业务短词。
 输出严格 JSON：{keywords:[{category,value,reason,priority}], analysis_notes:string[]}
 规则：
-- 关键词必须是业务可用短词，不要出现纯数字、序号、模板名、规则名、OpenClaw、内容大脑、镜头、房产、选题、客户问题等泛词。
+- 关键词必须是业务可用短词，不要出现纯数字、序号、模板名、规则名、OpenClaw、内容大脑、镜头、房产、选题、客户问题、评论区答疑模板、数字人模板、成片沉淀等泛词。
 - 优先筛：预算、城市/区域、人群、用途、痛点、风险、生活场景、评论区截流点。
 - 每个 value 2-14 个字符；priority 只能 high/medium/low。
 - 不要编造项目名、价格、收益、ROI。
 """.strip()
     payload = req.model_dump(exclude={"require_llm"})
+    payload["manual_keywords"] = "、".join([x["value"] for x in _sanitize_keywords([{"value": x} for x in re.split(r"[，,、\s]+", req.manual_keywords or "")])])
+    payload["content_brain_context"] = _compact_brain_context(req.content_brain_context)
     data = _call_deepseek_json(system, payload, require_llm=req.require_llm)
     keywords = _sanitize_keywords(data.get("keywords"))
     return {"ok": True, "keywords": keywords, "analysis_notes": data.get("analysis_notes") or [], "llm_mode": data.get("llm_mode"), "model": data.get("_llm_model"), "usage": data.get("_llm_usage")}
@@ -224,15 +252,18 @@ def generate_script(req: ScriptRequest) -> dict[str, Any]:
 你是海外房产短视频中文口播编导，必须调用真实输入进行创作。
 输出严格 JSON：{{"title":"", "script":"", "segments":[{{"index":1,"text":""}}], "selected_keywords":[], "content_plan":[], "risk_notes":[]}}
 要求：
-- 口播中文自然，像真人顾问，不要像拼标签。
+- 口播中文自然，像真人顾问，不要像拼标签；禁止把关键词列表、模板名、卡片编号直接念出来。
 - 目标长度 {target_chars_min}-{target_chars_max} 个中文字符左右。
 - 结构：开头钩子 → 判断逻辑 → 专业/生活拆解 → 评论区承接。
 - 根据 script_mode 区分：lead 引流，professional 专业，life 生活日常，sales 成交承接。
-- 必须过滤无意义词：纯数字、62、风格、模板、OpenClaw、内容大脑、镜头、房产、选题。
+- 必须过滤无意义词：纯数字、62、风格、模板、OpenClaw、内容大脑、镜头、房产、选题、评论区答疑模板、数字人模板、成片沉淀。
 - 不能编造具体楼盘、户型、价格、收益、学校、ROI、官方信息。
 - 吉隆坡内容不能乱写海边/沙滩/岛屿。
 """.strip()
     payload = req.model_dump(exclude={"require_llm"})
+    payload["manual_keywords"] = "、".join([x["value"] for x in _sanitize_keywords([{"value": x} for x in re.split(r"[，,、\s]+", req.manual_keywords or "")])])
+    payload["content_brain_context"] = _compact_brain_context(req.content_brain_context)
+    payload["keywords"] = _sanitize_keywords(req.keywords)
     data = _call_deepseek_json(system, payload, require_llm=req.require_llm)
     script = _clean(data.get("script"))
     if not script:

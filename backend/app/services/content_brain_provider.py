@@ -104,6 +104,33 @@ def _clean(text: Any) -> str:
     return re.sub(r"\s+", " ", str(text or "").strip())
 
 
+DIRTY_TAG_WORDS = {
+    "房产", "选题", "镜头", "客户问题", "市场知识", "回复模板", "内容大脑", "OpenClaw", "openclaw",
+    "类型", "模式", "风格", "模板", "规则", "自动", "禁用", "素材", "字幕库", "数字人模板",
+    "评论区答疑模板", "生活分享讲解模板", "禁用素材规则", "R2素材自动标签", "高质量成片沉淀", "低质量成片标记",
+}
+
+
+def _clean_tag(item: Any) -> str:
+    item = re.sub(r"[：:，,。！？!?；;#*`\[\]()（）【】{}]", " ", str(item or ""))
+    item = re.sub(r"\s+", " ", item).strip()
+    if not item:
+        return ""
+    if item in DIRTY_TAG_WORDS:
+        return ""
+    if len(item) < 2 or len(item) > 12:
+        return ""
+    if re.fullmatch(r"[\d.]+", item):
+        return ""
+    if re.match(r"^\d+[\.、]?", item):
+        return ""
+    if re.search(r"(模板|规则|自动|禁用|内容大脑|数字人|成片|沉淀|标记|答疑|OpenClaw|openclaw)", item):
+        return ""
+    if re.search(r"https?://", item, flags=re.I):
+        return ""
+    return item
+
+
 def _split_tags(text: Any) -> list[str]:
     if isinstance(text, list):
         raw = " ".join(str(x) for x in text)
@@ -111,11 +138,10 @@ def _split_tags(text: Any) -> list[str]:
         raw = str(text or "")
     out: list[str] = []
     for item in re.split(r"[，,\n#\s/|]+", raw):
-        item = item.strip()
+        item = _clean_tag(item)
         if item and item not in out:
             out.append(item)
-    return out[:18]
-
+    return out[:12]
 
 def _uid(prefix: str = "brain") -> str:
     return f"{prefix}_{uuid.uuid4().hex[:18]}"
@@ -249,7 +275,7 @@ def _classify_markdown_block(block: str) -> tuple[str, int, list[str]]:
         card_type, score = "visual_rule", 76
     if re.search(r"回复|私信|评论区|话术", block):
         card_type, score = "reply_template", 74
-    tags = _split_tags("马来西亚 吉隆坡 房产 客户问题 选题 镜头 " + block[:80])
+    tags = _split_tags(block[:220])
     return card_type, score, tags
 
 
