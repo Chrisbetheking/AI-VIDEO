@@ -251,7 +251,7 @@ const SUBTITLE_STYLE_FALLBACK: SubtitleStyle[] = [
 ]
 
 const CITY_OPTIONS = [
-  { key: 'kuala_lumpur', label: '吉隆坡 / Kuala Lumpur', anchors: ['KLCC', 'TRX', 'Mont Kiara', '公寓阳台', '大堂', '泳池'] },
+  { key: 'kuala_lumpur', label: '吉隆坡 / Kuala Lumpur', anchors: ['TRX', 'Mont Kiara', '公寓客厅', '公寓阳台', '大堂', '泳池'] },
   { key: 'penang', label: '槟城 / Penang', anchors: ['Gurney Drive', '海景公寓', '养老生活', '滨海天际线'] },
   { key: 'johor', label: '新山 / Johor Bahru', anchors: ['新山城市', 'Medini', '家庭自住', '通勤生活'] },
   { key: 'langkawi', label: '兰卡威 / Langkawi', anchors: ['度假住宅', '岛屿生活', '泳池', '第二家园'] },
@@ -344,7 +344,7 @@ function generateScript(topic: string, city: string, duration: number, contentTy
     } else {
       body = '如果是第二家园，要先看生活便利、医疗、社区氛围和长期居住适应度，不要只看度假感。'
     }
-    body += ' KLCC、TRX、Mont Kiara 只是判断区域的锚点，不代表每个项目都适合你。'
+    body += ' TRX、Mont Kiara、生活半径和社区品质只是判断区域的锚点，不代表每个项目都适合你。'
   } else {
     body = `${cityName}适合的人群和吉隆坡不一样，自住、投资、养老和第二家园的判断标准也不一样，要先把用途筛清楚。`
   }
@@ -401,7 +401,7 @@ function extractKeywords(text: string, manual = ''): KeywordInsight[] {
   money.forEach((x) => add('预算/价格', x, '预算信息是评论截流和口播重音重点', 'high'))
 
   const rules: Array<[string, RegExp, string, KeywordInsight['priority']]> = [
-    ['区域', /(吉隆坡|KLCC|TRX|Mont\s*Kiara|Mont Kiara|槟城|Penang|新山|Johor|兰卡威|Langkawi|沙巴|Sabah)/gi, '区域决定画面锚点和客户判断', 'high'],
+    ['区域', /(吉隆坡|TRX|Mont\s*Kiara|Mont Kiara|槟城|Penang|新山|Johor|兰卡威|Langkawi|沙巴|Sabah)/gi, '区域决定画面锚点和客户判断', 'high'],
     ['人群', /(华人|华语|家庭|孩子|留学|陪读|退休|养老|新加坡|外派|租客)/gi, '人群决定语气和初步回复话术', 'high'],
     ['用途', /(自住|投资|出租|第二家园|养老|度假|资产配置|教育|转手)/gi, '用途决定内容结构和镜头重点', 'high'],
     ['卖点', /(大平层|公寓|condo|大堂|泳池|阳台|学区|商圈|地铁|交通|生活半径|配套)/gi, '卖点用于镜头和关键词高亮', 'medium'],
@@ -511,15 +511,15 @@ function cityScenes(city: string) {
   if (city === 'johor') return ['新山城市住宅区位', 'Medini 现代公寓社区', '家庭自住公寓室内', '城市通勤和生活配套']
   if (city === 'langkawi') return ['兰卡威度假型住宅和泳池', '热带绿植第二家园', '岛屿度假住宅生活方式', '度假社区公共空间']
   if (city === 'sabah') return ['亚庇城市滨海住宅', '沙巴日落住宅生活方式', '滨海公寓阳台', '度假社区配套镜头']
-  return ['吉隆坡住宅天际线：现代高层公寓，不以双子塔为主体', '现代公寓客厅：落地窗、城市景、真实居住感', '公寓阳台：普通吉隆坡城市天际线，禁止双子塔特写', 'TRX / Bukit Bintang 商圈和通勤生活半径', 'Mont Kiara 高端公寓社区、街区和家庭生活', '公寓大堂、保安入口和会客区', '泳池 / 健身房 / 公共设施，体现社区品质', '经纪人带看公寓：开门、看客厅、看阳台', '厨房餐厅与卧室细节，体现自住舒适度', '真实买房咨询场景：资料核验、预算沟通，不出现价格数字']
+  return ['现代吉隆坡公寓入口和落客区：经纪人走向大堂，单一全屏镜头', '现代公寓客厅：落地窗、沙发、自然光，单一全屏镜头', '公寓阳台：普通吉隆坡住宅天际线和绿化，禁止双子塔主体', '公寓大堂：保安入口、会客区、品质感，单一全屏镜头', '公寓泳池和景观平台：社区设施和生活方式', '公寓健身房和公共设施：干净、高端、真实居住感', 'Mont Kiara 高端公寓社区：街区、咖啡和家庭生活', 'TRX / Bukit Bintang 街区生活半径：通勤、咖啡、城市街景，不拍地标天际线', '经纪人带看公寓：开门、看客厅、看阳台', '厨房、餐厅与卧室细节：体现自住舒适度']
 }
 
 function buildPrompt(city: string, scene: string, narration: string, index = 1) {
   const klRule = city === 'kuala_lumpur'
-    ? `Kuala Lumpur only. Do NOT center KLCC or Petronas Twin Towers; for shot ${index}, prefer condo interior, balcony generic city view, lobby, pool, gym, agent showing apartment, TRX/Bukit Bintang street context, Mont Kiara community, kitchen, bedroom or real residential details. Do not repeat the same skyline. Do not show beach, island, seaside, Langkawi, Sabah or Penang seaside.`
+    ? `Kuala Lumpur only. Shot ${index} must be ONE continuous full-screen video shot. Do NOT center KLCC or Petronas Twin Towers. Do NOT repeat the same skyline. No collage, no split screen, no multi-panel, no storyboard grid, no contact sheet, no picture-in-picture, no borders. Do not show documents, paper sheets, charts, calculators, reports, maps, screenshots or readable words. Prefer condo interior, balcony generic city view, lobby, pool, gym, agent showing apartment, TRX/Bukit Bintang street-level context, Mont Kiara community, kitchen, bedroom or real residential details. Do not show beach, island, seaside, Langkawi, Sabah or Penang seaside.`
     : 'Use city-matched Malaysia real estate visuals. Avoid fake project names, exact prices, exact ROI and unreadable text.'
 
-  return `Premium 9:16 cinematic vertical video for Malaysia real-estate content.\nShot ${index} main scene: ${scene}.\nNarration meaning: ${narration.slice(0, 80)}.\n${klRule}\nVisual diversity rule: every shot must show a different place or detail; mix exterior, interior, balcony, lobby, facility, neighborhood and agent showing apartment. Ultra realistic, premium real estate commercial style, natural lighting, clean composition, high detail, smooth camera movement. No readable text, no logo, no watermark, no fake project name, no exact price, no black borders, no repeated KLCC Twin Towers.`
+  return `Premium 9:16 cinematic vertical video for Malaysia real-estate content.\nShot ${index} main scene: ${scene}.\nNarration meaning: ${narration.slice(0, 80)}.\n${klRule}\nSingle-scene rule: this is one full-screen continuous camera shot only, not a montage and not a panel layout. Ultra realistic, premium real estate commercial style, natural lighting, clean composition, high detail, smooth camera movement. No readable text, no logo, no watermark, no fake project name, no exact price, no black borders, no papers, no charts, no repeated KLCC Twin Towers.`
 }
 
 function generateShotPlan(segments: ScriptSegment[], duration: number, city: string, project: ProjectDraft): ShotPlan[] {
@@ -543,8 +543,8 @@ function generateShotPlan(segments: ScriptSegment[], duration: number, city: str
       transition: index === 0 ? '开场建立' : '自然衔接',
       prompt: buildPrompt(city, scene, segment?.text || '', index + 1),
       avoid: city === 'kuala_lumpur'
-        ? ['海边', '沙滩', '海岛', '文件桌面', '计算器', '乱码文字', '假价格']
-        : ['文件桌面', '计算器', '乱码文字', '假价格', '假项目名'],
+        ? ['海边', '沙滩', '海岛', '分屏', '拼贴', '多宫格', '文件桌面', '纸张', '图表', '计算器', '乱码文字', '假价格']
+        : ['分屏', '拼贴', '多宫格', '文件桌面', '纸张', '图表', '计算器', '乱码文字', '假价格', '假项目名'],
       assetIds,
     }
   })
@@ -1007,7 +1007,7 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
       const nextShots = generateShotPlan(nextSegments, targetDuration, city, project)
       setShotPlan(nextShots)
       setSelectedShotId(nextShots[0]?.id || 'shot_1')
-      noteButton(`已按真实口播重建 ${nextShots.length} 个镜头：已强制混合室内、阳台、大堂、泳池、Mont Kiara/TRX，不再重复双子塔。`)
+      noteButton(`已按真实口播重建 ${nextShots.length} 个镜头：已强制单一全屏镜头、混合室内/阳台/大堂/泳池/社区/带看，并禁用分屏拼贴和文件桌面。`)
       setStep(3)
       return
     }

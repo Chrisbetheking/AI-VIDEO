@@ -16,21 +16,40 @@ from fastapi import APIRouter, FastAPI
 from pydantic import BaseModel, ConfigDict
 
 from app.services.subtitle_style_library_provider import burn_subtitles_with_style_and_upload
+try:
+    from app.services.job_persistence_provider import save_job_response
+except Exception:  # pragma: no cover
+    save_job_response = None
 
 router = APIRouter(prefix="/api/video/full-ai/tts-first-v2", tags=["full-ai-tts-first-v2"])
 _jobs: Dict[str, Dict[str, Any]] = {}
 
+
+def _persist(job_id: str) -> None:
+    if not save_job_response:
+        return
+    try:
+        job = dict(_jobs.get(job_id) or {})
+        if job:
+            save_job_response(job_id, "tts_first_v2", job, source_path="/api/video/full-ai/tts-first-v2")
+    except Exception as exc:
+        try:
+            print("TTS_FIRST_V2_PERSIST_FAILED", exc, flush=True)
+        except Exception:
+            pass
+
+
 KL_DIVERSE_SCENES = [
-    "Kuala Lumpur premium residential skyline with modern high-rise condominiums, NOT centered on KLCC or Petronas Twin Towers",
-    "modern luxury condo living room in Kuala Lumpur with floor-to-ceiling windows and generic city view, no landmark tower",
-    "condo balcony overlooking Kuala Lumpur residential skyline, warm daylight, no Twin Towers and no repeated skyline",
-    "TRX and Bukit Bintang urban lifestyle context, street-level premium residential neighborhood, commute and cafes",
-    "Mont Kiara upscale condominium community, family-friendly street scene, green residential environment",
-    "premium condominium lobby, security desk, elegant entrance and resident lounge in Kuala Lumpur",
-    "high-rise condo facilities: swimming pool, gym and landscaped deck, premium residential lifestyle",
-    "real estate agent showing apartment interior, opening door, walking through living room and balcony",
-    "modern condo kitchen, dining area and bedroom details, warm natural light, self-stay comfort",
-    "close-up of hands reviewing a safe generic property checklist, no readable text, no price and no numbers",
+    "single full-screen shot of a modern Kuala Lumpur condominium entrance and drop-off lobby, agent walking toward the entrance, no landmark towers",
+    "single full-screen shot inside a modern luxury condo living room with sofa, warm daylight, floor-to-ceiling windows, no landmark tower",
+    "single full-screen shot from a condo balcony with generic Kuala Lumpur residential skyline and greenery, no Petronas Twin Towers",
+    "single full-screen shot of an elegant condominium lobby with security desk and resident lounge, premium residential feel",
+    "single full-screen shot of high-rise condo swimming pool and landscaped facilities deck, residents lifestyle, no text",
+    "single full-screen shot of a modern condo gym and wellness facility, clean premium residential lifestyle",
+    "single full-screen shot of Mont Kiara residential community street with greenery, cafes and condominium surroundings, no famous landmark",
+    "single full-screen shot of TRX or Bukit Bintang street-level urban lifestyle near premium residences, commute and cafes, no landmark skyline",
+    "single full-screen shot of a real estate agent showing a client through an apartment living room and balcony, natural walkthrough",
+    "single full-screen shot of modern condo kitchen, dining area and bedroom details, warm natural light, self-stay comfort",
 ]
 
 PENANG_SCENES = [
@@ -186,9 +205,11 @@ def _shot_prompt(city: str, index: int, narration_segment: str, scene: str = "")
     if city == "kuala_lumpur":
         main_scene = _clean_scene_for_kl(main_scene, index)
         city_rule = (
-            f"Kuala Lumpur only. Shot {index}: show a different real-estate scene. "
+            f"Kuala Lumpur only. Shot {index}: ONE continuous full-screen scene. "
             "Do NOT center KLCC or Petronas Twin Towers. Do NOT repeat Twin Towers skyline. "
-            "Prefer real estate variety: condo interior, balcony generic city view, lobby, pool, gym, agent showing apartment, TRX/Bukit Bintang street context, Mont Kiara community, kitchen, dining room or bedroom details. "
+            "No collage, no split screen, no multi-panel, no storyboard grid, no contact sheet, no picture-in-picture, no black/white borders. "
+            "Do not show documents, paper sheets, charts, calculators, reports, maps, screenshots or readable words. "
+            "Use one clean real-estate scene only: condo interior, balcony generic city view, lobby, pool, gym, agent showing apartment, TRX/Bukit Bintang street-level context, Mont Kiara community, kitchen, dining room or bedroom details. "
             "No beach, no island, no seaside, no Langkawi/Sabah/Penang sea."
         )
     else:
@@ -340,6 +361,7 @@ def _burn_job_subtitles(job_id: str, raw_video_url: str) -> None:
             "subtitle_result": res,
             "updated_at": time.time(),
         })
+        _persist(job_id)
     except Exception as exc:
         job.update({
             "ok": True,
@@ -351,6 +373,7 @@ def _burn_job_subtitles(job_id: str, raw_video_url: str) -> None:
             "subtitle_error": str(exc),
             "updated_at": time.time(),
         })
+        _persist(job_id)
 
 
 def _poll_child_and_finish(job_id: str, child_job_id: str) -> None:
@@ -371,6 +394,7 @@ def _poll_child_and_finish(job_id: str, child_job_id: str) -> None:
             job["child_job"] = child
             if _is_failed(child):
                 job.update({"status": "failed", "stage": "failed", "progress": 100, "error": child.get("error") or child.get("message") or "child full_ai failed", "updated_at": time.time()})
+                _persist(job_id)
                 return
             if _is_done(child):
                 raw_video_url = _video_url_from(child)
@@ -381,6 +405,7 @@ def _poll_child_and_finish(job_id: str, child_job_id: str) -> None:
                         _burn_job_subtitles(job_id, raw_video_url)
                         return
                     job.update({"ok": True, "status": "completed", "stage": "completed", "progress": 100, "video_url": raw_video_url, "updated_at": time.time()})
+                    _persist(job_id)
                     return
                 job.update({"stage": "waiting_video_url", "progress": 90, "updated_at": time.time()})
             else:
@@ -394,6 +419,7 @@ def _poll_child_and_finish(job_id: str, child_job_id: str) -> None:
     job = _jobs.get(job_id)
     if job and job.get("status") not in {"completed", "failed"}:
         job.update({"status": "running", "stage": "child_timeout_waiting_manual_recovery", "child_poll_error": last_error, "updated_at": time.time()})
+        _persist(job_id)
 
 
 def _run_job(job_id: str, raw: Dict[str, Any]) -> None:
@@ -437,15 +463,17 @@ def _run_job(job_id: str, raw: Dict[str, Any]) -> None:
         child = _post_json("http://127.0.0.1:8000/api/video/full-ai/start", child_payload, timeout=120)
         child_job_id = child.get("job_id") or child.get("id") or (child.get("data") or {}).get("job_id")
         _jobs[job_id].update({"ok": True, "stage": "delegated", "status": "running", "progress": 75, "child_job_id": child_job_id, "child_start_result": child, "updated_at": time.time()})
+        _persist(job_id)
         if child_job_id:
             threading.Thread(target=_poll_child_and_finish, args=(job_id, str(child_job_id)), daemon=True).start()
     except Exception as exc:
         _jobs[job_id].update({"ok": False, "status": "failed", "stage": "failed", "error": str(exc), "updated_at": time.time()})
+        _persist(job_id)
 
 
 @router.get("/health")
 def health() -> dict[str, Any]:
-    return {"ok": True, "provider": "full_ai_tts_first_v2", "version": "v10_6", "logic": "script -> tts -> strict non-repeated KL shot plan -> full-ai -> automatic subtitle burn -> R2", "subtitle": True, "visual_diversity": True, "background_autopoll": True, "klcc_strict_guard": True}
+    return {"ok": True, "provider": "full_ai_tts_first_v2", "version": "v10_7", "logic": "script -> tts -> single-scene KL shot plan -> full-ai -> automatic subtitle burn -> persisted R2", "subtitle": True, "visual_diversity": True, "background_autopoll": True, "klcc_strict_guard": True, "single_scene_only": True, "no_collage_split_screen": True, "persistent_v2_jobs": True}
 
 
 @router.post("/start")
@@ -453,6 +481,7 @@ def start(req: TTSFirstV2StartRequest):
     job_id = "tts_first_v2_" + uuid.uuid4().hex[:18]
     raw = req.model_dump()
     _jobs[job_id] = {"ok": True, "job_id": job_id, "status": "running", "stage": "queued", "progress": 1, "created_at": time.time(), "updated_at": time.time(), "request": raw}
+    _persist(job_id)
     threading.Thread(target=_run_job, args=(job_id, raw), daemon=True).start()
     return {"ok": True, "job_id": job_id, "status": "running", "stage": "queued"}
 
@@ -478,6 +507,7 @@ def get_job(job_id: str):
                         threading.Thread(target=_burn_job_subtitles, args=(job_id, raw_video_url), daemon=True).start()
                     elif not burn_required:
                         job.update({"status": "completed", "stage": "completed", "progress": 100, "video_url": raw_video_url, "updated_at": time.time()})
+                        _persist(job_id)
                 else:
                     job.update({"status": "running", "stage": "waiting_video_url", "progress": 90, "updated_at": time.time()})
             else:
