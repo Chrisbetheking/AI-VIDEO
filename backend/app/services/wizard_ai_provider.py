@@ -32,6 +32,19 @@ class KeywordRequest(BaseModel):
     current_script: str = ""
     require_llm: bool = True
 
+
+class TopicRequest(BaseModel):
+    market: str = "马来西亚"
+    city: str = "吉隆坡"
+    current_topic: str = ""
+    content_type: str = "investment"
+    script_mode: str = "professional"
+    manual_keywords: str = ""
+    competitor_source: str = ""
+    content_brain_context: list[dict[str, Any]] = Field(default_factory=list)
+    source_result: Any = None
+    require_llm: bool = True
+
 class ScriptRequest(BaseModel):
     topic: str = ""
     market: str = "马来西亚"
@@ -224,6 +237,45 @@ def health() -> dict[str, Any]:
     cfg = _deepseek_cfg()
     return {"ok": True, "provider": "wizard_ai_deepseek_v1", "deepseek_configured": cfg["configured"], "model": cfg["model"], "base_url": cfg["base_url"]}
 
+
+@router.post("/generate-topic")
+def generate_topic(req: TopicRequest) -> dict[str, Any]:
+    system = """
+你是 AI-VIDEO 的海外房产短视频选题导演。请基于市场、城市、内容方向、已有主题和内容大脑，生成一个可直接拍摄的中文短视频主题，并筛选干净关键词。
+输出严格 JSON：{topic, title, content_type, script_mode, keywords:[{category,value,reason,priority}], angle, notes:[]}
+要求：
+- topic 必须是自然中文选题，不要包含模板名、编号、OpenClaw、内容大脑、镜头、选题、规则、数字人模板等系统词。
+- keywords 只能是业务短词：预算、区域、人群、用途、痛点、风险、生活场景、评论区截流点。
+- 禁止输出纯数字、62、风格、类型、模式、评论区答疑模板、生活分享讲解模板、R2素材自动标签。
+- 不要编造楼盘、价格、收益、ROI、学校、官方信息。
+- 吉隆坡内容不要写海边、沙滩、海岛。
+""".strip()
+    payload = req.model_dump(exclude={"require_llm"})
+    payload["manual_keywords"] = "、".join([x["value"] for x in _sanitize_keywords([{"value": x} for x in re.split(r"[，,、\s]+", req.manual_keywords or "")])])
+    payload["content_brain_context"] = _compact_brain_context(req.content_brain_context)
+    data = _call_deepseek_json(system, payload, require_llm=req.require_llm)
+    topic = _clean(data.get("topic") or data.get("title") or req.current_topic)
+    if not topic or re.search(r"(模板|OpenClaw|内容大脑|数字人|评论区答疑|R2素材|62\.?|规则)", topic):
+        raise HTTPException(status_code=502, detail="DeepSeek 返回的主题为空或仍含系统脏词，已阻止写入。")
+    ct = _clean(data.get("content_type") or req.content_type)
+    sm = _clean(data.get("script_mode") or req.script_mode)
+    if ct not in {"investment", "own_stay", "second_home", "rental", "education"}:
+        ct = req.content_type
+    if sm not in {"lead", "professional", "life", "sales"}:
+        sm = req.script_mode
+    return {
+        "ok": True,
+        "topic": topic[:80],
+        "title": _clean(data.get("title") or topic)[:80],
+        "content_type": ct,
+        "script_mode": sm,
+        "keywords": _sanitize_keywords(data.get("keywords")),
+        "angle": _clean(data.get("angle") or ""),
+        "notes": data.get("notes") or [],
+        "llm_mode": data.get("llm_mode"),
+        "model": data.get("_llm_model"),
+        "usage": data.get("_llm_usage"),
+    }
 
 @router.post("/analyze-keywords")
 def analyze_keywords(req: KeywordRequest) -> dict[str, Any]:
