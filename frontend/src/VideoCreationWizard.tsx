@@ -72,6 +72,17 @@ type JobPayload = {
   [key: string]: any
 }
 
+type SubtitleStyle = {
+  id: string
+  name: string
+  description: string
+  previewText?: string
+  primary?: string
+  background?: string
+  accent?: string
+  placement?: string
+}
+
 
 type ContentBrainCard = {
   id?: string
@@ -86,7 +97,7 @@ type ContentBrainCard = {
 }
 
 const CONTENT_BRAIN_KEY = 'ai_video_content_brain_cards_v9'
-const WIZARD_DRAFT_KEY = 'ai_video_wizard_draft_v10_3'
+const WIZARD_DRAFT_KEY = 'ai_video_wizard_draft_v10_5'
 
 
 function loadWizardDraft(): Record<string, any> {
@@ -230,6 +241,14 @@ const SCRIPT_LABELS: Record<ScriptMode, string> = {
   life: '生活日常：真实生活 + 轻松种草',
   sales: '成交承接：筛选问题 + 人工跟进',
 }
+
+const SUBTITLE_STYLE_FALLBACK: SubtitleStyle[] = [
+  { id: 'real_estate_gold', name: '金色地产讲解', description: '适合专业讲房，黄底关键词感，手机端清晰。', primary: '#fff7cc', background: 'rgba(20, 16, 8, 0.72)', accent: '#f6c44f', placement: '底部双行' },
+  { id: 'white_outline', name: '白字黑描边', description: '最稳妥，适合任何素材，不挡画面。', primary: '#ffffff', background: 'transparent', accent: '#111827', placement: '底部居中' },
+  { id: 'black_bar', name: '黑底信息条', description: '信息密度高，适合专业拆解和避坑内容。', primary: '#ffffff', background: 'rgba(0,0,0,0.68)', accent: '#60a5fa', placement: '底部黑条' },
+  { id: 'clean_blue', name: '蓝白干净款', description: '适合生活日常、城市介绍和轻松种草。', primary: '#eff6ff', background: 'rgba(30, 64, 175, 0.72)', accent: '#93c5fd', placement: '底部卡片' },
+  { id: 'large_yellow', name: '大黄字重点款', description: '适合短句强钩子、评论区引导和预算问题。', primary: '#fde047', background: 'rgba(17, 24, 39, 0.78)', accent: '#f97316', placement: '中下方' },
+]
 
 const CITY_OPTIONS = [
   { key: 'kuala_lumpur', label: '吉隆坡 / Kuala Lumpur', anchors: ['KLCC', 'TRX', 'Mont Kiara', '公寓阳台', '大堂', '泳池'] },
@@ -492,15 +511,15 @@ function cityScenes(city: string) {
   if (city === 'johor') return ['新山城市住宅区位', 'Medini 现代公寓社区', '家庭自住公寓室内', '城市通勤和生活配套']
   if (city === 'langkawi') return ['兰卡威度假型住宅和泳池', '热带绿植第二家园', '岛屿度假住宅生活方式', '度假社区公共空间']
   if (city === 'sabah') return ['亚庇城市滨海住宅', '沙巴日落住宅生活方式', '滨海公寓阳台', '度假社区配套镜头']
-  return ['KLCC 双子塔天际线 + 高层公寓', 'TRX 金融区 + 高端住宅区位', 'Mont Kiara 高端公寓社区', '公寓阳台看吉隆坡城市天际线', '现代公寓客厅 + 落地窗城市景观', '高端公寓大堂 / 泳池 / 健身房']
+  return ['吉隆坡城市建立镜头：KLCC 远景 + 高层住宅，不超过 1 次', '现代公寓客厅：落地窗、城市景、真实居住感', '公寓阳台：吉隆坡城市天际线，不重复双子塔特写', 'TRX / Bukit Bintang 商圈和通勤生活半径', 'Mont Kiara 高端公寓社区、街区和家庭生活', '公寓大堂、保安入口和会客区', '泳池 / 健身房 / 公共设施，体现社区品质', '经纪人带看公寓：开门、看客厅、看阳台', '厨房餐厅与卧室细节，体现自住舒适度']
 }
 
-function buildPrompt(city: string, scene: string, narration: string) {
+function buildPrompt(city: string, scene: string, narration: string, index = 1) {
   const klRule = city === 'kuala_lumpur'
-    ? 'Kuala Lumpur only: KLCC Twin Towers, TRX, Mont Kiara, luxury condo balcony, apartment interior, lobby, pool, city skyline. Do not show beach, island, seaside, Langkawi, Sabah, Penang seaside.'
+    ? `Kuala Lumpur only. KLCC Twin Towers may appear only as the first establishing shot; for shot ${index}, prefer condo interior, balcony city view, lobby, pool, gym, agent showing apartment, TRX/Bukit Bintang street context, Mont Kiara community, kitchen, bedroom or real residential details. Do not repeat the same Twin Towers skyline. Do not show beach, island, seaside, Langkawi, Sabah or Penang seaside.`
     : 'Use city-matched Malaysia real estate visuals. Avoid fake project names, exact prices, exact ROI and unreadable text.'
 
-  return `Premium 9:16 cinematic vertical video for Malaysia real-estate content.\nMain scene: ${scene}.\nNarration meaning: ${narration.slice(0, 80)}.\n${klRule}\nUltra realistic, premium real estate commercial style, natural lighting, clean composition, high detail, smooth camera movement. No readable text, no logo, no watermark, no fake project name, no exact price, no black borders.`
+  return `Premium 9:16 cinematic vertical video for Malaysia real-estate content.\nShot ${index} main scene: ${scene}.\nNarration meaning: ${narration.slice(0, 80)}.\n${klRule}\nVisual diversity rule: every shot must show a different place or detail; mix exterior, interior, balcony, lobby, facility, neighborhood and agent showing apartment. Ultra realistic, premium real estate commercial style, natural lighting, clean composition, high detail, smooth camera movement. No readable text, no logo, no watermark, no fake project name, no exact price, no black borders.`
 }
 
 function generateShotPlan(segments: ScriptSegment[], duration: number, city: string, project: ProjectDraft): ShotPlan[] {
@@ -522,7 +541,7 @@ function generateShotPlan(segments: ScriptSegment[], duration: number, city: str
       source: assetIds.length ? 'mixed' : 'ai',
       camera: index % 2 === 0 ? '慢推进' : '横移展示',
       transition: index === 0 ? '开场建立' : '自然衔接',
-      prompt: buildPrompt(city, scene, segment?.text || ''),
+      prompt: buildPrompt(city, scene, segment?.text || '', index + 1),
       avoid: city === 'kuala_lumpur'
         ? ['海边', '沙滩', '海岛', '文件桌面', '计算器', '乱码文字', '假价格']
         : ['文件桌面', '计算器', '乱码文字', '假价格', '假项目名'],
@@ -600,6 +619,10 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
   const [aiBusy, setAiBusy] = useState('')
   const [aiStatus, setAiStatus] = useState(String(initialDraft.aiStatus || ''))
   const [buttonStatus, setButtonStatus] = useState(String(initialDraft.buttonStatus || ''))
+  const [subtitleEnabled, setSubtitleEnabled] = useState(Boolean(initialDraft.subtitleEnabled ?? project.burn_subtitles ?? true))
+  const [subtitleStyleId, setSubtitleStyleId] = useState(String(initialDraft.subtitleStyleId || project.subtitle_style_id || 'real_estate_gold'))
+  const [subtitleStyles, setSubtitleStyles] = useState<SubtitleStyle[]>(SUBTITLE_STYLE_FALLBACK)
+  const [generationStartedAt, setGenerationStartedAt] = useState(Number(initialDraft.generationStartedAt || 0))
 
   const approvedBrainCards = useMemo(() => {
     const merged = [...remoteBrainCards, ...loadApprovedContentBrainCards()]
@@ -632,6 +655,7 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
   const selectedSetting = selectedSegment ? (voiceSettings[selectedSegment.id] || inferVoiceSetting(selectedSegment, Math.max(0, selectedSegment.index - 1), segments.length, scriptMode)) : null
   const selectedShot = shotPlan.find((shot) => shot.id === selectedShotId) || shotPlan[0]
   const videoUrl = extractVideoUrl(job)
+  const selectedSubtitleStyle = subtitleStyles.find((item) => item.id === subtitleStyleId) || subtitleStyles[0] || SUBTITLE_STYLE_FALLBACK[0]
   const selectedAssets = asArray(project.asset_context || project.selected_assets || project.r2_material_context)
   const avatarConfig = project.avatar_config || null
   const leadCount = asArray(project.leads).length
@@ -659,6 +683,20 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
       })
     return () => { alive = false }
   }, [topic, city, market])
+
+  useEffect(() => {
+    let alive = true
+    apiGet('/api/video/subtitle-library/styles', 60000)
+      .then((res) => {
+        if (!alive) return
+        const list = Array.isArray(res?.styles) ? res.styles : []
+        if (list.length) setSubtitleStyles(list)
+      })
+      .catch(() => {
+        if (alive) setSubtitleStyles(SUBTITLE_STYLE_FALLBACK)
+      })
+    return () => { alive = false }
+  }, [])
 
   useEffect(() => {
     if (!script) setAiStatus('还没有生成文案。请在第一步点击「调用 DeepSeek 生成文案」，不会再本地秒出假文案。')
@@ -692,15 +730,22 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
     let alive = true
     const timer = window.setInterval(async () => {
       try {
-        const data = await apiGet(`/api/video/full-ai/tts-first/job/${jobId}`, 120000)
+        const data = await apiGet(`/api/video/full-ai/tts-first-v2/job/${jobId}`, 180000)
         if (!alive) return
         setJob(data)
-        if (finalStatus(data)) setBusy('')
+        const hasVideo = Boolean(extractVideoUrl(data))
+        if (hasVideo && finalStatus(data)) {
+          setBusy('')
+          setError('')
+        } else if (!hasVideo) {
+          await recoverLatestDoneVideo(true)
+        }
       } catch (err: any) {
         if (!alive) return
-        setError(err?.message || String(err))
+        const recovered = await recoverLatestDoneVideo(true)
+        if (!recovered) setError(`任务还在恢复中：${err?.message || String(err)}`)
       }
-    }, 3000)
+    }, 4000)
     return () => {
       alive = false
       window.clearInterval(timer)
@@ -732,9 +777,12 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
       aiKeywordInsights,
       aiStatus,
       buttonStatus,
+      subtitleEnabled,
+      subtitleStyleId,
+      generationStartedAt,
       savedAt: new Date().toISOString(),
     })
-  }, [step, sourceMode, topic, market, city, contentType, scriptMode, targetDuration, competitorSource, manualKeywords, script, selectedSegmentId, voiceSettings, shotPlan, selectedShotId, jobId, job, sourceResult, disabledKeywordValues, aiKeywordInsights, aiStatus, buttonStatus])
+  }, [step, sourceMode, topic, market, city, contentType, scriptMode, targetDuration, competitorSource, manualKeywords, script, selectedSegmentId, voiceSettings, shotPlan, selectedShotId, jobId, job, sourceResult, disabledKeywordValues, aiKeywordInsights, aiStatus, buttonStatus, subtitleEnabled, subtitleStyleId, generationStartedAt])
 
 
 
@@ -854,12 +902,19 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
       sourceMode,
       keyword_insights: keywords,
       ai_keyword_insights: aiKeywordInsights,
+      burn_subtitles: subtitleEnabled,
+      subtitle_required: subtitleEnabled,
+      subtitle_style_id: subtitleStyleId,
+      subtitle_style: selectedSubtitleStyle,
       ai_status: aiStatus,
       content_brain_context: approvedBrainCards,
       script_segments: segments,
       segment_voice_settings: voiceSettings,
       manual_shot_plan: shotPlan,
       shot_overrides: shotPlan,
+      burn_subtitles: subtitleEnabled,
+      subtitle_style_id: subtitleStyleId,
+      subtitle_style: selectedSubtitleStyle,
       transition_plan: shotPlan.map((shot) => ({ index: shot.index, transition: shot.transition, camera: shot.camera })),
       ...extra,
     }
@@ -869,6 +924,40 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
 
   function noteButton(message: string) {
     setButtonStatus(`${new Date().toLocaleTimeString()} · ${message}`)
+  }
+
+  async function recoverLatestDoneVideo(silent = false) {
+    try {
+      const data = await apiGet('/api/video/wizard-video/latest-done?limit=30', 60000)
+      const found = data?.job || data?.latest || null
+      const foundUrl = found?.video_url || found?.url || ''
+      if (foundUrl) {
+        const recovered = { ok: true, status: 'done', stage: 'recovered_from_recent_jobs', progress: 100, ...found, video_url: foundUrl }
+        setJob(recovered)
+        setJobId(String(found.job_id || jobId || 'recovered_latest'))
+        setBusy('')
+        setError('')
+        if (!silent) noteButton('已从后端最近任务里找回成片。')
+        return recovered
+      }
+    } catch (err) {
+      try {
+        const data = await apiGet('/api/video/jobs/recent?limit=30', 60000)
+        const jobs = Array.isArray(data?.jobs) ? data.jobs : []
+        const found = jobs.find((item: any) => item?.status === 'done' && item?.video_url)
+        if (found?.video_url) {
+          const recovered = { ok: true, status: 'done', stage: 'recovered_from_jobs_recent', progress: 100, ...found }
+          setJob(recovered)
+          setJobId(String(found.job_id || jobId || 'recovered_latest'))
+          setBusy('')
+          setError('')
+          if (!silent) noteButton('已从 jobs/recent 找回成片。')
+          return recovered
+        }
+      } catch {}
+    }
+    if (!silent) setError('暂时没有找到已完成成片，可能还在 fal/合成/字幕烧录。')
+    return null
   }
 
   function openWorkspaceTab(tab: WorkspaceTab) {
@@ -1126,7 +1215,7 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
     const next = shotPlan.map((shot) => {
       if (shot.id !== id) return shot
       const merged = { ...shot, ...patch }
-      if (patch.scene || patch.narration) merged.prompt = buildPrompt(city, merged.scene, merged.narration)
+      if (patch.scene || patch.narration) merged.prompt = buildPrompt(city, merged.scene, merged.narration, merged.index)
       return merged
     })
     setShotPlan(next)
@@ -1136,6 +1225,7 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
   async function startGenerate() {
     setError('')
     setBusy('启动生成')
+    setGenerationStartedAt(Date.now())
     setStep(4)
     const finalProject = syncProject()
     const finalShots = shotPlan.length ? shotPlan : generateShotPlan(segments, targetDuration, city, finalProject)
@@ -1168,6 +1258,10 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
       segment_voice_settings: voiceSettings,
       keyword_insights: keywords,
       ai_keyword_insights: aiKeywordInsights,
+      burn_subtitles: subtitleEnabled,
+      subtitle_required: subtitleEnabled,
+      subtitle_style_id: subtitleStyleId,
+      subtitle_style: selectedSubtitleStyle,
       ai_status: aiStatus,
       content_brain_context: approvedBrainCards,
       manual_shot_plan: finalShots,
@@ -1192,7 +1286,7 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
     }
 
     try {
-      const data = await apiPost('/api/video/full-ai/tts-first/start', payload, 240000)
+      const data = await apiPost('/api/video/full-ai/tts-first-v2/start', payload, 240000)
       if (!data?.job_id) throw new Error('后端没有返回 job_id')
       setJob(data)
       setJobId(data.job_id)
@@ -1410,6 +1504,32 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
     )
   }
 
+  function renderSubtitleLibrary() {
+    return (
+      <div className="aiw-subtitleLibrary">
+        <div className="aiw-inlineTitle"><b>字幕样式库</b><span>后端会烧录字幕并上传 R2；先选样式，再生成。</span></div>
+        <label className="aiw-checkRow"><input type="checkbox" checked={subtitleEnabled} onChange={(e) => setSubtitleEnabled(e.target.checked)} /> 生成后自动烧录字幕</label>
+        <div style={{ display: 'grid', gap: 8 }}>
+          {subtitleStyles.map((style) => (
+            <button
+              key={style.id}
+              type="button"
+              onClick={() => setSubtitleStyleId(style.id)}
+              className={subtitleStyleId === style.id ? 'active' : ''}
+              style={{ textAlign: 'left', borderRadius: 14, padding: 10, border: subtitleStyleId === style.id ? '2px solid #7c3aed' : '1px solid #e5e7eb', background: '#fff' }}
+            >
+              <b>{style.name}</b>
+              <div style={{ margin: '8px 0', height: 54, borderRadius: 12, background: 'linear-gradient(135deg,#dbeafe,#f5d0fe)', display: 'flex', alignItems: 'end', justifyContent: 'center', padding: 8 }}>
+                <span style={{ color: style.primary || '#fff', background: style.background || 'rgba(0,0,0,.65)', borderRadius: 8, padding: '5px 10px', fontWeight: 800, textShadow: '0 1px 2px rgba(0,0,0,.7)', borderBottom: `3px solid ${style.accent || '#f59e0b'}` }}>吉隆坡买房，先看区域和用途</span>
+              </div>
+              <small>{style.description}</small>
+            </button>
+          ))}
+        </div>
+      </div>
+    )
+  }
+
   function renderStepThree() {
     return (
       <div className="aiw-stepGrid three">
@@ -1451,6 +1571,7 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
             <textarea className="aiw-promptBox" value={selectedShot.prompt} onChange={(e) => updateShot(selectedShot.id, { prompt: e.target.value })} />
             <div className="aiw-chipRow">{selectedShot.avoid.map((item) => <span className="aiw-badPill" key={item}>{item}</span>)}</div>
           </>}
+          {renderSubtitleLibrary()}
           <h4>当前素材上下文</h4>
           <div className="aiw-miniList">{selectedAssets.slice(0, 6).map((asset: any, index) => <div key={asset.id || asset.url || index}>{asset.name || asset.original_name || asset.filename || asset.url}</div>)}</div>
         </aside>
@@ -1464,12 +1585,13 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
         <section className="aiw-stepCard">
           <h3>成片预览</h3>
           {videoUrl ? <video className="aiw-previewVideo" src={videoUrl} controls /> : <div className="aiw-videoPlaceholder"><b>🎬</b><span>点击生成后在这里预览</span></div>}
-          <div className="aiw-actions"><button type="button" className="aiw-danger" onClick={() => void runFlowAction('video')} disabled={!!busy}>{busy || '生成完整 AI 视频'}</button>{videoUrl && <a className="aiw-linkButton" href={videoUrl} target="_blank" rel="noreferrer">打开成片</a>}</div>
+          <div className="aiw-actions"><button type="button" className="aiw-danger" onClick={() => void runFlowAction('video')} disabled={!!busy}>{busy || '生成完整 AI 视频'}</button>{videoUrl && <a className="aiw-linkButton" href={videoUrl} target="_blank" rel="noreferrer">打开成片</a>}<button className="aiw-muted" type="button" onClick={() => void recoverLatestDoneVideo(false)}>找回最新成片</button></div>
+          {job?.subtitle_error && <div className="aiw-error">字幕烧录失败：{job.subtitle_error}</div>}
           {error && <div className="aiw-error">{error}</div>}
         </section>
         <section className="aiw-stepCard">
           <h3>生成状态</h3>
-          <div className="aiw-statusRows"><div><span>任务</span><b>{jobId || '-'}</b></div><div><span>阶段</span><b>{job?.stage || job?.status || 'ready'}</b></div><div><span>配音实际</span><b>{job?.audio_duration_seconds ? `${Number(job.audio_duration_seconds).toFixed(1)}s` : '生成后读取'}</b></div><div><span>镜头数</span><b>{job?.shot_count || shotPlan.length}</b></div><div><span>R2 素材</span><b>{selectedAssets.length}</b></div><div><span>OpenClaw 线索</span><b>{leadCount}</b></div></div>
+          <div className="aiw-statusRows"><div><span>任务</span><b>{jobId || '-'}</b></div><div><span>阶段</span><b>{job?.stage || job?.status || 'ready'}</b></div><div><span>配音实际</span><b>{job?.audio_duration_seconds ? `${Number(job.audio_duration_seconds).toFixed(1)}s` : '生成后读取'}</b></div><div><span>镜头数</span><b>{job?.shot_count || shotPlan.length}</b></div><div><span>R2 素材</span><b>{selectedAssets.length}</b></div><div><span>OpenClaw 线索</span><b>{leadCount}</b></div><div><span>字幕</span><b>{subtitleEnabled ? (job?.subtitled_video_url ? '已烧录' : job?.stage === 'subtitle_burn' ? '烧录中' : selectedSubtitleStyle?.name) : '未启用'}</b></div></div>
           <div className="aiw-miniProgress"><span style={{ width: `${Math.min(100, Number(job?.progress || (busy ? 65 : 0)))}%` }} /></div>
         </section>
         <aside className="aiw-stepCard">
@@ -1487,7 +1609,7 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
         <div>
           <p className="aiw-eyebrow">STEP BY STEP / ORIGINAL BACKEND LINKED</p>
           <h2>四步视频创作向导</h2>
-          <p>不是旧的一页铺满，也不是假页面；这条链路接原来的 TTS-first、R2 素材、数字人素材和 OpenClaw。</p>
+          <p>不是旧的一页铺满，也不是假页面；这条链路接 TTS-first-v2、字幕烧录、R2 素材、数字人素材和 OpenClaw。</p>
         </div>
         <span className="aiw-badge ok">第 {step} 步 / 共 4 步</span>
       </div>
