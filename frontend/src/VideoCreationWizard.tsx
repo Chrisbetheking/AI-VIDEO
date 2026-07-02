@@ -599,6 +599,7 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
   const [aiKeywordInsights, setAiKeywordInsights] = useState<KeywordInsight[]>(Array.isArray(initialDraft.aiKeywordInsights) ? initialDraft.aiKeywordInsights : [])
   const [aiBusy, setAiBusy] = useState('')
   const [aiStatus, setAiStatus] = useState(String(initialDraft.aiStatus || ''))
+  const [buttonStatus, setButtonStatus] = useState(String(initialDraft.buttonStatus || ''))
 
   const approvedBrainCards = useMemo(() => {
     const merged = [...remoteBrainCards, ...loadApprovedContentBrainCards()]
@@ -730,9 +731,10 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
       disabledKeywordValues,
       aiKeywordInsights,
       aiStatus,
+      buttonStatus,
       savedAt: new Date().toISOString(),
     })
-  }, [step, sourceMode, topic, market, city, contentType, scriptMode, targetDuration, competitorSource, manualKeywords, script, selectedSegmentId, voiceSettings, shotPlan, selectedShotId, jobId, job, sourceResult, disabledKeywordValues, aiKeywordInsights, aiStatus])
+  }, [step, sourceMode, topic, market, city, contentType, scriptMode, targetDuration, competitorSource, manualKeywords, script, selectedSegmentId, voiceSettings, shotPlan, selectedShotId, jobId, job, sourceResult, disabledKeywordValues, aiKeywordInsights, aiStatus, buttonStatus])
 
 
 
@@ -863,6 +865,82 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
     }
     setProject(next)
     return next
+  }
+
+  function noteButton(message: string) {
+    setButtonStatus(`${new Date().toLocaleTimeString()} · ${message}`)
+  }
+
+  function openWorkspaceTab(tab: WorkspaceTab) {
+    syncProject()
+    noteButton(`已保存当前向导草稿，正在切到${tab}。回来会恢复进度。`)
+    goTab(tab)
+  }
+
+  async function runFlowAction(action: 'topic' | 'script' | 'voice' | 'shots' | 'video' | 'collect') {
+    setError('')
+    setSourceError('')
+    if (action === 'topic') {
+      setStep(1)
+      noteButton('写主题不是空按钮：已停在第一步，请先填主题、城市、文案模式和关键词。')
+      return
+    }
+    if (action === 'collect') {
+      noteButton(sourceMode === 'custom' ? '自定义主题不采集；需要采集请切到抖音主页或爆款链接。' : '正在下发真实采集任务。')
+      await runSourceAction()
+      return
+    }
+    if (action === 'script') {
+      noteButton('开始调用 DeepSeek 生成文案和逐句配音。')
+      await aiGenerateScriptAndVoice()
+      setStep(2)
+      return
+    }
+    if (action === 'voice') {
+      if (!script.trim()) {
+        noteButton('没有文案，先调用 DeepSeek 生成文案，再进入逐句配音。')
+        await aiGenerateScriptAndVoice()
+      } else {
+        noteButton('开始调用 DeepSeek 判断逐句语气、情绪、音量和停顿。')
+        await aiTuneVoiceAll()
+      }
+      setStep(2)
+      return
+    }
+    if (action === 'shots') {
+      if (!script.trim()) {
+        setError('还没有口播文案，不能生成镜头。请先点「生成文案」。')
+        noteButton('镜头按钮已拦截：没有文案不能假生成镜头。')
+        setStep(1)
+        return
+      }
+      const nextSegments = attachSegmentKeywords(splitScript(script), keywords)
+      const nextShots = generateShotPlan(nextSegments, targetDuration, city, project)
+      setShotPlan(nextShots)
+      setSelectedShotId(nextShots[0]?.id || 'shot_1')
+      noteButton(`已按真实口播重建 ${nextShots.length} 个镜头。`)
+      setStep(3)
+      return
+    }
+    if (action === 'video') {
+      if (!script.trim()) {
+        setError('还没有 DeepSeek 文案，不能生成视频。')
+        noteButton('生成视频已拦截：必须先有文案、逐句配音和镜头计划。')
+        setStep(1)
+        return
+      }
+      if (!shotPlan.length) {
+        const nextSegments = attachSegmentKeywords(splitScript(script), keywords)
+        const nextShots = generateShotPlan(nextSegments, targetDuration, city, project)
+        setShotPlan(nextShots)
+        noteButton(`没有镜头计划，已先补齐 ${nextShots.length} 个镜头；请确认后再生成视频。`)
+        setStep(3)
+        return
+      }
+      noteButton('开始调用 TTS-first 后端生成视频。')
+      await startGenerate()
+      return
+    }
   }
 
   function normalizeBackendSegments(rawSegments: any[], nextScript: string, activeKeywords: KeywordInsight[]) {
@@ -1125,19 +1203,37 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
     }
   }
 
-  function nextStep() {
+  async function nextStep() {
     if (step === 1) {
       syncProject()
+      if (!script.trim()) {
+        noteButton('下一步不是空跳转：没有文案，先调用 DeepSeek 生成。')
+        await aiGenerateScriptAndVoice()
+      }
       setStep(2)
     } else if (step === 2) {
       syncProject()
+      if (!segments.length) {
+        setError('没有可配音的句子，请先生成或填写口播文案。')
+        return
+      }
+      if (!Object.keys(voiceSettings || {}).length) {
+        noteButton('没有逐句配音设置，先调用 DeepSeek 判断语气情绪。')
+        await aiTuneVoiceAll()
+      }
       if (!shotPlan.length) setShotPlan(generateShotPlan(segments, targetDuration, city, project))
       setStep(3)
     } else if (step === 3) {
       syncProject()
+      if (!shotPlan.length) {
+        const plan = generateShotPlan(segments, targetDuration, city, project)
+        setShotPlan(plan)
+        setSelectedShotId(plan[0]?.id || 'shot_1')
+        noteButton(`已自动补齐 ${plan.length} 个镜头，请确认后再生成。`)
+      }
       setStep(4)
     } else {
-      startGenerate()
+      await startGenerate()
     }
   }
 
@@ -1188,6 +1284,15 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
             )}
           </div>
 
+          <div className="aiw-sourceChecklist aiw-actionChecklist">
+            <button type="button" onClick={() => void runFlowAction('topic')}>① 写主题</button>
+            <button type="button" onClick={() => void runFlowAction('script')} disabled={!!aiBusy || !!sourceBusy}>② 生成文案</button>
+            <button type="button" onClick={() => void runFlowAction('voice')} disabled={!!aiBusy}>③ 逐句配音</button>
+            <button type="button" onClick={() => void runFlowAction('video')} disabled={!!busy || !!aiBusy}>④ 生成视频</button>
+            {sourceMode !== 'custom' && <button type="button" onClick={() => void runFlowAction('collect')} disabled={!!sourceBusy || !!aiBusy}>真实采集</button>}
+          </div>
+          {buttonStatus && <div className="aiw-info">{buttonStatus}</div>}
+
           <div className="aiw-form two">
             <label>市场<input value={market} onChange={(e) => setMarket(e.target.value)} /></label>
             <label>城市<select value={city} onChange={(e) => setCity(e.target.value)}>{CITY_OPTIONS.map((item) => <option key={item.key} value={item.key}>{item.label}</option>)}</select></label>
@@ -1209,9 +1314,9 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
             {cityAnchors(city).map((item) => <span className="aiw-keywordPill" key={item}>{item}</span>)}
           </div>
           <div className="aiw-actions">
-            <button className="aiw-primary" onClick={runSourceAction} disabled={!!sourceBusy || !!aiBusy}>{sourceBusy || aiBusy || (sourceMode === 'custom' ? '调用 DeepSeek 生成文案' : '下发采集后调用 DeepSeek 生成')}</button>
-            <button className="aiw-muted" onClick={() => goTab('collect')}>去同行采集</button>
-            <button className="aiw-muted" onClick={() => goTab('leads')}>去真实获客线索</button>
+            <button type="button" className="aiw-primary" onClick={() => void runSourceAction()} disabled={!!sourceBusy || !!aiBusy}>{sourceBusy || aiBusy || (sourceMode === 'custom' ? '调用 DeepSeek 生成文案' : '下发采集后调用 DeepSeek 生成')}</button>
+            <button className="aiw-muted" onClick={() => openWorkspaceTab('collect')}>去同行采集</button>
+            <button className="aiw-muted" onClick={() => openWorkspaceTab('leads')}>去真实获客线索</button>
           </div>
           {sourceError && <div className="aiw-error">{sourceError}</div>}
           {sourceResult && <details className="aiw-json"><summary>真实采集/入库返回</summary><pre>{JSON.stringify(sourceResult, null, 2)}</pre></details>}
@@ -1238,7 +1343,7 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
             <p>会一起传给文案、关键词、镜头和 OpenClaw 承接；不是所有生成内容都自动入库，需在内容大脑里审核。</p>
             <div className="aiw-chipRow">{approvedBrainCards.slice(0, 8).map((card) => <span className="aiw-keywordPill" key={card.id || card.title}>{card.title || card.type}</span>)}</div>
             <div className="aiw-actions">
-              <button className="aiw-muted" onClick={() => goTab('brain')}>去内容大脑</button>
+              <button className="aiw-muted" onClick={() => openWorkspaceTab('brain')}>去内容大脑</button>
               <button className="aiw-muted" onClick={() => setManualKeywords([manualKeywords, brainKeywordText].filter(Boolean).join('，'))}>把知识库关键词带入</button>
             </div>
           </div>
@@ -1312,9 +1417,9 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
           <h3>镜头计划</h3>
           <p>每个镜头都能自己上手改。已选 R2 素材：{selectedAssets.length} 个；数字人：{avatarConfig?.enabled ? '已启用' : '未启用'}。</p>
           <div className="aiw-actions">
-            <button className="aiw-muted" onClick={() => goTab('assets')}>去素材库选择 R2/真实素材</button>
-            <button className="aiw-muted" onClick={() => goTab('digital')}>去数字人库选谁出镜</button>
-            <button className="aiw-primary" onClick={() => setShotPlan(generateShotPlan(segments, targetDuration, city, project))}>按文案重建镜头</button>
+            <button className="aiw-muted" onClick={() => openWorkspaceTab('assets')}>去素材库选择 R2/真实素材</button>
+            <button className="aiw-muted" onClick={() => openWorkspaceTab('digital')}>去数字人库选谁出镜</button>
+            <button type="button" className="aiw-primary" onClick={() => void runFlowAction('shots')}>按文案重建镜头</button>
           </div>
           <div className="aiw-shotPicker">
             {shotPlan.map((shot) => (
@@ -1359,7 +1464,7 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
         <section className="aiw-stepCard">
           <h3>成片预览</h3>
           {videoUrl ? <video className="aiw-previewVideo" src={videoUrl} controls /> : <div className="aiw-videoPlaceholder"><b>🎬</b><span>点击生成后在这里预览</span></div>}
-          <div className="aiw-actions"><button className="aiw-danger" onClick={startGenerate} disabled={!!busy}>{busy || '生成完整 AI 视频'}</button>{videoUrl && <a className="aiw-linkButton" href={videoUrl} target="_blank" rel="noreferrer">打开成片</a>}</div>
+          <div className="aiw-actions"><button type="button" className="aiw-danger" onClick={() => void runFlowAction('video')} disabled={!!busy}>{busy || '生成完整 AI 视频'}</button>{videoUrl && <a className="aiw-linkButton" href={videoUrl} target="_blank" rel="noreferrer">打开成片</a>}</div>
           {error && <div className="aiw-error">{error}</div>}
         </section>
         <section className="aiw-stepCard">
@@ -1370,7 +1475,7 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
         <aside className="aiw-stepCard">
           <h3>发布 / 获客承接</h3>
           <p>成片后不要自动私信。OpenClaw 负责评论区找目标客户、AI 评分、生成第一条初步消息，收集到人工待处理。</p>
-          <div className="aiw-actions vertical"><button className="aiw-muted" onClick={() => goTab('leads')}>去 OpenClaw 人工处理</button><button className="aiw-muted" onClick={() => goTab('collect')}>继续采集同行</button><button className="aiw-muted" onClick={() => goTab('assets')}>补充 R2 素材</button></div>
+          <div className="aiw-actions vertical"><button className="aiw-muted" onClick={() => openWorkspaceTab('leads')}>去 OpenClaw 人工处理</button><button className="aiw-muted" onClick={() => openWorkspaceTab('collect')}>继续采集同行</button><button className="aiw-muted" onClick={() => openWorkspaceTab('assets')}>补充 R2 素材</button></div>
         </aside>
       </div>
     )
@@ -1405,8 +1510,8 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
       <footer className="aiw-stepFooter">
         <div><span>创作进度</span><b>{step}/4</b><i><strong style={{ width: `${(step / 4) * 100}%` }} /></i></div>
         <div className="aiw-actions">
-          <button className="aiw-muted" disabled={step === 1 || !!busy} onClick={() => setStep((Math.max(1, step - 1) as WizardStep))}>上一步</button>
-          <button className="aiw-primary" disabled={!!busy && step === 4} onClick={nextStep}>{step === 4 ? (busy || '生成成片') : '下一步'}</button>
+          <button type="button" className="aiw-muted" disabled={step === 1 || !!busy} onClick={() => setStep((Math.max(1, step - 1) as WizardStep))}>上一步</button>
+          <button type="button" className="aiw-primary" disabled={!!busy && step === 4} onClick={() => void nextStep()}>{step === 4 ? (busy || '生成成片') : '下一步'}</button>
         </div>
       </footer>
     </section>

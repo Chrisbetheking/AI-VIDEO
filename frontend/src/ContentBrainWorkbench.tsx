@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react'
-import { ProjectDraft, WorkspaceTab, projectWithScript, generateLocalScript, apiGet, apiPost } from './aiVideoApi'
+import { ProjectDraft, WorkspaceTab, apiGet, apiPost } from './aiVideoApi'
 
 type Props = {
   project: ProjectDraft
@@ -256,6 +256,7 @@ export default function ContentBrainWorkbench({ project, setProject, goTab }: Pr
   const [backendStatus, setBackendStatus] = useState('正在连接后端内容大脑')
   const [backendBusy, setBackendBusy] = useState('')
   const [backendError, setBackendError] = useState('')
+  const [actionNote, setActionNote] = useState('')
 
   useEffect(() => saveCards(cards), [cards])
   useEffect(() => saveInbox(inbox), [inbox])
@@ -349,10 +350,23 @@ export default function ContentBrainWorkbench({ project, setProject, goTab }: Pr
     setMarkdown('')
   }
 
-  function importCurrentProject() {
+  async function importCurrentProject() {
     const next = makeCardsFromProject(project)
-    if (!next.length) return
+    if (!next.length) {
+      setActionNote('当前视频还没有主题、文案或线索，不能生成待审核知识。')
+      return
+    }
     setInbox((current) => dedupe([...next, ...current]))
+    setActionNote(`已从当前项目生成 ${next.length} 条待审核知识，正在同步后端...`)
+    try {
+      for (const card of next) {
+        await apiPost('/api/video/content-brain/cards', { ...card, status: 'pending' }, 60000)
+      }
+      setBackendStatus(`当前项目已同步到后端待审核：${next.length} 条`)
+      await refreshBackendBrain()
+    } catch (err: any) {
+      setBackendError(err?.message || '当前项目同步后端失败，本地已保留')
+    }
   }
 
   async function addManualCard() {
@@ -394,11 +408,20 @@ export default function ContentBrainWorkbench({ project, setProject, goTab }: Pr
   }
 
   async function useCardForVideo(card: BrainCard) {
-    const videoTitle = card.type === 'reply_template' ? `把这个客户问题拍成视频：${card.title}` : card.title
-    const script = generateLocalScript(videoTitle, project.market || '马来西亚', project.targetDuration || 20)
-    const nextProject = projectWithScript({ ...project, topic: videoTitle, content_brain_context: [card], manualKeywords: card.tags.join('，') }, script, { title: videoTitle })
+    const videoTitle = card.type === 'reply_template' || card.type === 'lead_question' ? `把这个客户问题拍成视频：${card.title}` : card.title
+    const nextProject = {
+      ...project,
+      topic: videoTitle,
+      title: videoTitle,
+      script: '',
+      content_brain_context: [card],
+      manualKeywords: card.tags.join('，'),
+      sourceMode: 'content_brain',
+      ai_status: '从内容大脑带入，进入创作向导后必须调用 DeepSeek 生成，不再本地假写稿。',
+    }
     setProject(nextProject)
     setCards((current) => current.map((item) => item.id === card.id ? { ...item, usedCount: Number(item.usedCount || 0) + 1, updatedAt: nowText() } : item))
+    setActionNote(`已带入视频创作：${videoTitle}。下一步请在创作向导调用 DeepSeek 生成文案。`)
     try { if (card.id) await apiPost(`/api/video/content-brain/mark-used/${card.id}`, {}, 30000) } catch {}
     goTab('pureai')
   }
@@ -459,7 +482,7 @@ export default function ContentBrainWorkbench({ project, setProject, goTab }: Pr
         <span className="aiw-badge ok">已批准 {approved.length} 条 · 待审核 {pending.length} 条</span>
       </div>
 
-      <div className="aiw-statusLine"><b>{backendStatus}</b>{backendBusy && <span>处理中：{backendBusy}</span>}{backendError && <em>{backendError}</em>}<button className="aiw-muted small" onClick={refreshBackendBrain}>刷新后端内容大脑</button></div>
+      <div className="aiw-statusLine"><b>{backendStatus}</b>{backendBusy && <span>处理中：{backendBusy}</span>}{backendError && <em>{backendError}</em>}{actionNote && <span>{actionNote}</span>}<button className="aiw-muted small" onClick={refreshBackendBrain}>刷新后端内容大脑</button></div>
 
       <div className="aiw-brainToolbar">
         <h3>{LANE_LABELS[brainLane]}</h3>
