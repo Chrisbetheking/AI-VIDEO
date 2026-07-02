@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react'
-import { ProjectDraft, WorkspaceTab, projectWithScript, generateLocalScript } from './aiVideoApi'
+import { ProjectDraft, WorkspaceTab, projectWithScript, generateLocalScript, apiGet, apiPost } from './aiVideoApi'
 
 type Props = {
   project: ProjectDraft
@@ -226,6 +226,9 @@ export default function ContentBrainWorkbench({ project, setProject, goTab }: Pr
   const [manualTags, setManualTags] = useState('马来西亚,吉隆坡,房产')
   const [filter, setFilter] = useState<'all' | BrainStatus>('approved')
   const [typeFilter, setTypeFilter] = useState<'all' | BrainType>('all')
+  const [backendStatus, setBackendStatus] = useState('正在连接后端内容大脑')
+  const [backendBusy, setBackendBusy] = useState('')
+  const [backendError, setBackendError] = useState('')
 
   useEffect(() => saveCards(cards), [cards])
   useEffect(() => saveInbox(inbox), [inbox])
@@ -238,16 +241,76 @@ export default function ContentBrainWorkbench({ project, setProject, goTab }: Pr
     return true
   })
 
-  function setCardStatus(card: BrainCard, status: BrainStatus, reason?: string) {
+
+  function normalizeServerCards(data: any): BrainCard[] {
+    const list = Array.isArray(data?.cards) ? data.cards : Array.isArray(data) ? data : []
+    return list.map((item: any) => ({
+      id: String(item.id || uid('srv')),
+      title: String(item.title || item.content || '未命名知识'),
+      type: (item.type || item.card_type || 'market_note') as BrainType,
+      source: String(item.source || 'backend_content_brain'),
+      content: String(item.content || item.title || ''),
+      tags: Array.isArray(item.tags) ? item.tags : splitTags(item.tags || ''),
+      score: Number(item.score || 70),
+      status: (item.status || 'pending') as BrainStatus,
+      decisionReason: String(item.decisionReason || item.decision_reason || '后端内容大脑同步。'),
+      createdAt: String(item.createdAt || item.created_at || nowText()),
+      updatedAt: item.updatedAt || item.updated_at,
+      usedCount: Number(item.usedCount || item.used_count || 0),
+      raw: item.raw || item,
+    })).filter((card: BrainCard) => card.content || card.title)
+  }
+
+  async function refreshBackendBrain() {
+    setBackendBusy('refresh')
+    setBackendError('')
+    try {
+      const [approvedRes, pendingRes] = await Promise.all([
+        apiGet('/api/video/content-brain/cards?status=approved&limit=300'),
+        apiGet('/api/video/content-brain/cards?status=pending&limit=300'),
+      ])
+      const approvedCards = normalizeServerCards(approvedRes)
+      const pendingCards = normalizeServerCards(pendingRes)
+      setCards((current) => dedupe([...approvedCards, ...current]))
+      setInbox((current) => dedupe([...pendingCards, ...current]))
+      setBackendStatus(`已连接后端内容大脑：已批准 ${approvedCards.length} 条，待审核 ${pendingCards.length} 条`)
+    } catch (err: any) {
+      setBackendStatus('后端内容大脑未连接，继续使用浏览器本地草稿')
+      setBackendError(err?.message || '无法连接后端内容大脑')
+    } finally {
+      setBackendBusy('')
+    }
+  }
+
+  useEffect(() => {
+    refreshBackendBrain()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  async function setCardStatus(card: BrainCard, status: BrainStatus, reason?: string) {
     const nextCard = { ...card, status, decisionReason: reason || card.decisionReason, updatedAt: nowText() }
     setInbox((current) => current.filter((item) => item.id !== card.id))
     setCards((current) => dedupe([nextCard, ...current.filter((item) => item.id !== card.id)]))
+    try {
+      const path = status === 'approved' ? '/api/video/content-brain/approve' : status === 'rejected' ? '/api/video/content-brain/reject' : ''
+      if (path && card.id) await apiPost(path, { id: card.id, reason: reason || nextCard.decisionReason }, 60000)
+    } catch (err: any) {
+      setBackendError(err?.message || '后端状态同步失败，本地已先更新')
+    }
   }
 
-  function importMarkdown() {
+  async function importMarkdown() {
     const next = normalizeMarkdownToCards(markdown)
     if (!next.length) return
     setInbox((current) => dedupe([...next, ...current]))
+    try {
+      const res = await apiPost('/api/video/content-brain/import-markdown', { markdown, source: 'obsidian_markdown', status: 'pending' }, 120000)
+      const serverCards = normalizeServerCards(res)
+      if (serverCards.length) setInbox((current) => dedupe([...serverCards, ...current]))
+      setBackendStatus(`Markdown 已同步到后端待审核：${serverCards.length || next.length} 条`)
+    } catch (err: any) {
+      setBackendError(err?.message || 'Markdown 后端导入失败，本地已保留')
+    }
     setMarkdown('')
   }
 
@@ -257,7 +320,7 @@ export default function ContentBrainWorkbench({ project, setProject, goTab }: Pr
     setInbox((current) => dedupe([...next, ...current]))
   }
 
-  function addManualCard() {
+  async function addManualCard() {
     if (!manualTitle.trim() && !manualContent.trim()) return
     const card: BrainCard = {
       id: uid('manual'),
@@ -272,16 +335,59 @@ export default function ContentBrainWorkbench({ project, setProject, goTab }: Pr
       createdAt: nowText(),
     }
     setCards((current) => dedupe([card, ...current]))
+    try {
+      const res = await apiPost('/api/video/content-brain/cards', card, 60000)
+      const saved = normalizeServerCards(res?.card ? { cards: [res.card] } : res)
+      if (saved.length) setCards((current) => dedupe([...saved, ...current.filter((item) => item.id !== card.id)]))
+    } catch (err: any) {
+      setBackendError(err?.message || '手动知识后端保存失败，本地已保留')
+    }
     setManualTitle('')
     setManualContent('')
   }
 
-  function useCardForVideo(card: BrainCard) {
+  async function useCardForVideo(card: BrainCard) {
     const script = generateLocalScript(card.title, project.market || '马来西亚', project.targetDuration || 20)
     const nextProject = projectWithScript({ ...project, topic: card.title, content_brain_context: [card], manualKeywords: card.tags.join('，') }, script, { title: card.title })
     setProject(nextProject)
     setCards((current) => current.map((item) => item.id === card.id ? { ...item, usedCount: Number(item.usedCount || 0) + 1, updatedAt: nowText() } : item))
+    try { if (card.id) await apiPost(`/api/video/content-brain/mark-used/${card.id}`, {}, 30000) } catch {}
     goTab('pureai')
+  }
+
+
+  async function linkOpenClawLeads() {
+    setBackendBusy('openclaw')
+    setBackendError('')
+    try {
+      const res = await apiPost('/api/video/content-brain/link-openclaw-leads', { limit: 120, min_score: 55, status: 'pending' }, 120000)
+      const next = normalizeServerCards(res)
+      setInbox((current) => dedupe([...next, ...current]))
+      setBackendStatus(`已从 OpenClaw 线索同步 ${next.length} 条待审核客户问题`)
+    } catch (err: any) {
+      setBackendError(err?.message || 'OpenClaw 线索同步失败')
+    } finally {
+      setBackendBusy('')
+    }
+  }
+
+  async function exportBackendMarkdown() {
+    try {
+      const res = await apiPost('/api/video/content-brain/export-obsidian', { status: 'approved' }, 120000)
+      if (res?.markdown) {
+        const blob = new Blob([res.markdown], { type: 'text/markdown;charset=utf-8' })
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = `ai-video-content-brain-${Date.now()}.md`
+        a.click()
+        URL.revokeObjectURL(url)
+      } else {
+        downloadMarkdown(cards.filter((card) => card.status === 'approved'))
+      }
+    } catch {
+      downloadMarkdown(cards.filter((card) => card.status === 'approved'))
+    }
   }
 
   function clearRejected() {
@@ -305,6 +411,8 @@ export default function ContentBrainWorkbench({ project, setProject, goTab }: Pr
         <span className="aiw-badge ok">已批准 {approved.length} 条 · 待审核 {pending.length} 条</span>
       </div>
 
+      <div className="aiw-statusLine"><b>{backendStatus}</b>{backendBusy && <span>处理中：{backendBusy}</span>}{backendError && <em>{backendError}</em>}<button className="aiw-muted small" onClick={refreshBackendBrain}>刷新后端内容大脑</button></div>
+
       <div className="aiw-brainLoop">
         <div><b>1 OpenClaw</b><span>真实评论 / 线索问题</span></div>
         <div><b>2 判断入库</b><span>A/B线索、可复用问题、好钩子</span></div>
@@ -320,6 +428,7 @@ export default function ContentBrainWorkbench({ project, setProject, goTab }: Pr
           <div className="aiw-actions">
             <button className="aiw-primary" onClick={importMarkdown}>导入 Markdown 到待审核</button>
             <button className="aiw-muted" onClick={importCurrentProject}>从当前视频/线索生成待审核</button>
+            <button className="aiw-muted" onClick={linkOpenClawLeads}>{backendBusy === 'openclaw' ? '同步中...' : '从 OpenClaw 线索同步'}</button>
             <button className="aiw-muted" onClick={() => goTab('leads')}>去 OpenClaw 找客户问题</button>
           </div>
 
@@ -360,7 +469,7 @@ export default function ContentBrainWorkbench({ project, setProject, goTab }: Pr
           <div className="aiw-actions">
             <select value={filter} onChange={(e) => setFilter(e.target.value as any)}><option value="approved">已批准</option><option value="pending">待审核</option><option value="rejected">已拒绝</option><option value="all">全部</option></select>
             <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value as any)}><option value="all">全部类型</option>{Object.entries(TYPE_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select>
-            <button className="aiw-muted" onClick={() => downloadMarkdown(cards.filter((card) => card.status === 'approved'))}>导出 Obsidian Markdown</button>
+            <button className="aiw-muted" onClick={exportBackendMarkdown}>导出 Obsidian Markdown</button>
             <button className="aiw-muted" onClick={clearRejected}>清理已拒绝</button>
             <button className="aiw-danger small" onClick={clearAllBrain}>清空内容大脑</button>
           </div>

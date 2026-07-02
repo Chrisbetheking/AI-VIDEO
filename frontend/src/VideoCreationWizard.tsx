@@ -401,8 +401,18 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
   const [sourceBusy, setSourceBusy] = useState('')
   const [sourceError, setSourceError] = useState('')
   const [sourceResult, setSourceResult] = useState<any>(null)
+  const [remoteBrainCards, setRemoteBrainCards] = useState<ContentBrainCard[]>([])
 
-  const approvedBrainCards = useMemo(() => loadApprovedContentBrainCards().filter((card) => contentBrainMatch(card, topic, city, market)).slice(0, 12), [topic, city, market])
+  const approvedBrainCards = useMemo(() => {
+    const merged = [...remoteBrainCards, ...loadApprovedContentBrainCards()]
+    const seen = new Set<string>()
+    return merged.filter((card) => {
+      const key = String(card.id || `${card.title}|${card.content}`)
+      if (seen.has(key)) return false
+      seen.add(key)
+      return contentBrainMatch(card, topic, city, market)
+    }).slice(0, 12)
+  }, [topic, city, market, remoteBrainCards])
   const brainKeywordText = useMemo(() => contentBrainKeywords(approvedBrainCards).join('，'), [approvedBrainCards])
   const keywords = useMemo(
     () => extractKeywords(
@@ -419,6 +429,30 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
   const selectedAssets = asArray(project.asset_context || project.selected_assets || project.r2_material_context)
   const avatarConfig = project.avatar_config || null
   const leadCount = asArray(project.leads).length
+
+  useEffect(() => {
+    let alive = true
+    apiGet(`/api/video/content-brain/cards?status=approved&query=${encodeURIComponent(`${topic} ${city} ${market}`)}&limit=80`, 60000)
+      .then((res) => {
+        if (!alive) return
+        const list = Array.isArray(res?.cards) ? res.cards : []
+        setRemoteBrainCards(list.map((item: any) => ({
+          id: String(item.id || ''),
+          title: String(item.title || ''),
+          type: String(item.type || item.card_type || ''),
+          source: String(item.source || 'backend_content_brain'),
+          content: String(item.content || ''),
+          tags: Array.isArray(item.tags) ? item.tags : [],
+          score: Number(item.score || 0),
+          status: String(item.status || 'approved'),
+          usedCount: Number(item.usedCount || item.used_count || 0),
+        })))
+      })
+      .catch(() => {
+        if (alive) setRemoteBrainCards([])
+      })
+    return () => { alive = false }
+  }, [topic, city, market])
 
   useEffect(() => {
     if (!script) {
