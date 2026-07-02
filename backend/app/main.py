@@ -5672,3 +5672,13 @@ except Exception as _full_ai_postprocess_guard_exc:
     print("FULL_AI_POSTPROCESS_GUARD_LOAD_FAILED", _full_ai_postprocess_guard_exc)
 # ===== /FULL AI POSTPROCESS SUBTITLE TAIL GUARD =====
 
+
+
+# ===== CONTENT BRAIN BACKEND PROVIDER =====
+try:
+    from app.services.content_brain_provider import install_content_brain
+    install_content_brain(app)
+except Exception as _content_brain_exc:
+    print("CONTENT_BRAIN_PROVIDER_LOAD_FAILED", _content_brain_exc)
+# ===== /CONTENT BRAIN BACKEND PROVIDER =====
+
