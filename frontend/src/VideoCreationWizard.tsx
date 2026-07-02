@@ -402,7 +402,15 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
   const [sourceError, setSourceError] = useState('')
   const [sourceResult, setSourceResult] = useState<any>(null)
 
-  const keywords = useMemo(() => extractKeywords(`${topic}\n${script}\n${competitorSource}\n${approvedBrainCards.map((card) => `${card.title || ''} ${card.content || ''} ${(card.tags || []).join(' ')}`).join('\n')}`, [manualKeywords, brainKeywordText].filter(Boolean).join('，')), [topic, script, competitorSource, manualKeywords, brainKeywordText, approvedBrainCards.length])
+  const approvedBrainCards = useMemo(() => loadApprovedContentBrainCards().filter((card) => contentBrainMatch(card, topic, city, market)).slice(0, 12), [topic, city, market])
+  const brainKeywordText = useMemo(() => contentBrainKeywords(approvedBrainCards).join('，'), [approvedBrainCards])
+  const keywords = useMemo(
+    () => extractKeywords(
+      `${topic}\n${script}\n${competitorSource}\n${approvedBrainCards.map((card) => `${card.title || ''} ${card.content || ''} ${(card.tags || []).join(' ')}`).join('\n')}`,
+      [manualKeywords, brainKeywordText].filter(Boolean).join('，')
+    ),
+    [topic, script, competitorSource, manualKeywords, brainKeywordText, approvedBrainCards]
+  )
   const segments = useMemo(() => attachSegmentKeywords(splitScript(script || generateScript(topic, city, targetDuration, contentType, keywords)), keywords), [script, topic, city, targetDuration, contentType, keywords])
   const selectedSegment = segments.find((segment) => segment.id === selectedSegmentId) || segments[0]
   const selectedSetting = selectedSegment ? (voiceSettings[selectedSegment.id] || defaultVoiceSetting(selectedSegment)) : null
@@ -411,8 +419,6 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
   const selectedAssets = asArray(project.asset_context || project.selected_assets || project.r2_material_context)
   const avatarConfig = project.avatar_config || null
   const leadCount = asArray(project.leads).length
-  const approvedBrainCards = useMemo(() => loadApprovedContentBrainCards().filter((card) => contentBrainMatch(card, topic, city, market)).slice(0, 12), [topic, city, market])
-  const brainKeywordText = contentBrainKeywords(approvedBrainCards).join('，')
 
   useEffect(() => {
     if (!script) {
