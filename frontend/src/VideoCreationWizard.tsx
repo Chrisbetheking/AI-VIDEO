@@ -10,6 +10,7 @@ type WizardStep = 1 | 2 | 3 | 4
 type SourceMode = 'account' | 'viral' | 'custom'
 type MaterialSource = 'r2' | 'real' | 'ai' | 'mixed'
 type ContentType = 'investment' | 'own_stay' | 'second_home' | 'rental' | 'education'
+type ScriptMode = 'lead' | 'professional' | 'life' | 'sales'
 
 type KeywordInsight = {
   id: string
@@ -104,8 +105,42 @@ function contentBrainMatch(card: ContentBrainCard, topic: string, city: string, 
   return keys.some((key) => key.length >= 2 && text.includes(key))
 }
 
+const BAD_KEYWORDS = new Set(['房产', '选题', '镜头', '客户问题', '市场知识', '回复模板', '马来西亚', '内容大脑', '类型', '模式'])
+
+function normalizeKeywordValue(value: string) {
+  return String(value || '').replace(/[：:，,。！？!?；;#*`\[\]()（）]/g, ' ').replace(/\s+/g, ' ').trim()
+}
+
+function usefulKeyword(value: string) {
+  const clean = normalizeKeywordValue(value)
+  if (!clean) return ''
+  if (BAD_KEYWORDS.has(clean)) return ''
+  if (clean.length < 2 || clean.length > 14) return ''
+  if (/^(类型|模式|适合|目的|结构|开头|评论|注意|镜头组合)/.test(clean)) return ''
+  if (/https?:\/\//i.test(clean)) return ''
+  return clean
+}
+
+function splitKeywordCandidates(value: string) {
+  return String(value || '')
+    .split(/[，,、\n\s/|]+/)
+    .map(usefulKeyword)
+    .filter(Boolean)
+}
+
 function contentBrainKeywords(cards: ContentBrainCard[]) {
-  return Array.from(new Set(cards.flatMap((card) => Array.isArray(card.tags) ? card.tags : []).filter(Boolean))).slice(0, 18)
+  const out: string[] = []
+  const seen = new Set<string>()
+  cards.forEach((card) => {
+    const raw = [...(Array.isArray(card.tags) ? card.tags : []), card.title || '']
+    raw.flatMap(splitKeywordCandidates).forEach((kw) => {
+      const key = kw.toLowerCase()
+      if (seen.has(key)) return
+      seen.add(key)
+      out.push(kw)
+    })
+  })
+  return out.slice(0, 14)
 }
 
 type Props = {
@@ -140,6 +175,13 @@ const CONTENT_LABELS: Record<ContentType, string> = {
   second_home: '第二家园',
   rental: '出租收益',
   education: '教育规划',
+}
+
+const SCRIPT_LABELS: Record<ScriptMode, string> = {
+  lead: '引流型：强钩子 + 评论互动',
+  professional: '专业型：判断逻辑 + 信任建立',
+  life: '生活日常：真实生活 + 轻松种草',
+  sales: '成交承接：筛选问题 + 人工跟进',
 }
 
 const CITY_OPTIONS = [
@@ -199,23 +241,62 @@ function normalizeScriptLength(script: string, duration: number, city: string) {
   return next
 }
 
-function generateScript(topic: string, city: string, duration: number, contentType: ContentType, keywords: KeywordInsight[]) {
-  const baseTopic = topic.trim() || DEFAULT_TOPIC
-  const keywordText = keywords.map((item) => item.value).filter(Boolean).slice(0, 8).join('、')
-  let script = ''
+function keywordTextForScript(keywords: KeywordInsight[]) {
+  const picked = keywords
+    .filter((item) => item.priority === 'high' || ['预算/价格', '区域', '人群', '用途', '风险判断'].includes(item.category))
+    .map((item) => usefulKeyword(item.value))
+    .filter(Boolean)
+  return Array.from(new Set(picked)).slice(0, 7).join('、')
+}
 
-  if (city === 'kuala_lumpur') {
-    script = `${baseTopic}。很多人买马来西亚房产，第一眼只看价格，但在吉隆坡，真正要先看区域、用途和流动性。KLCC、TRX、Mont Kiara 这些位置，看的不是热闹，而是生活半径、出租需求和未来转手。`
-    if (contentType === 'investment') script += '如果是投资配置，先看租客是谁、通勤是否方便、周边配套是否成熟，再看价格是否合理。'
-    else if (contentType === 'own_stay') script += '如果是自住，重点不是短期涨跌，而是生活便利、社区品质和长期居住舒适度。'
-    else if (contentType === 'education') script += '如果考虑家庭和教育，要把通勤、社区、安全感和长期居住需求放在前面。'
-    else script += '自住、出租、第二家园，判断标准完全不一样，先把需求筛清楚，再去看房才不会被带节奏。'
+function generateScript(topic: string, city: string, duration: number, contentType: ContentType, keywords: KeywordInsight[], scriptMode: ScriptMode = 'professional') {
+  const baseTopic = topic.trim() || DEFAULT_TOPIC
+  const keywordText = keywordTextForScript(keywords)
+  const isKl = city === 'kuala_lumpur'
+  const cityName = isKl ? '吉隆坡' : cityLabel(city).split('/')[0].trim()
+  const topicLine = baseTopic.replace(/[。！？!?]+$/g, '')
+  const isLife = scriptMode === 'life'
+  const isLead = scriptMode === 'lead'
+  const isSales = scriptMode === 'sales'
+
+  const hook = isLife
+    ? `很多人想象中的${cityName}生活，和真正住下来感受到的并不一样。`
+    : isLead
+      ? `${topicLine}，这个问题很多人第一步就问错了。`
+      : `${topicLine}，别先看表面的价格和宣传图。`
+
+  let body = ''
+  if (isLife) {
+    body = `先看生活半径：吃饭、通勤、商场、华语环境和周末活动，决定你是不是真的住得舒服。再看预算，不同区域的日常成本差别很大。`
+  } else if (isKl) {
+    if (contentType === 'own_stay') {
+      body = '如果是自住，重点不是短期涨跌，而是生活便利、社区品质、通勤距离和长期居住舒适度。'
+    } else if (contentType === 'rental' || contentType === 'investment') {
+      body = '如果是投资，先看租客从哪里来，再看通勤、商圈、公共设施和未来转手流动性。'
+    } else if (contentType === 'education') {
+      body = '如果考虑家庭和教育，要把通勤、社区安全感、中文生活环境和长期持有需求放在前面。'
+    } else {
+      body = '如果是第二家园，要先看生活便利、医疗、社区氛围和长期居住适应度，不要只看度假感。'
+    }
+    body += ' KLCC、TRX、Mont Kiara 只是判断区域的锚点，不代表每个项目都适合你。'
   } else {
-    script = `${baseTopic}。马来西亚买房不要只看价格，要先看城市、用途和生活方式。${cityLabel(city)}适合的人群不同，投资、自住、第二家园和养老的判断标准也不一样。`
+    body = `${cityName}适合的人群和吉隆坡不一样，自住、投资、养老和第二家园的判断标准也不一样，要先把用途筛清楚。`
   }
 
-  if (keywordText) script += ` 这条视频要特别强调：${keywordText}。`
-  return normalizeScriptLength(script, duration, city)
+  const logic = isSales
+    ? '所以看房前先回答三个问题：预算多少、买来做什么、准备持有多久。答案不同，推荐区域和产品会完全不同。'
+    : isLead
+      ? '真正要看的不是哪个项目最火，而是哪一个区域和你的用途匹配。否则看了很多房，最后还是会被价格牵着走。'
+      : '专业一点看，先判断区域成熟度，再判断真实需求，最后才比较价格、户型和配套。顺序错了，很容易买到不适合自己的房子。'
+
+  const keyLine = keywordText ? `这条重点围绕：${keywordText}。` : ''
+  const cta = isLife
+    ? '你最关心这里的吃饭、语言，还是生活成本？评论区说一下。'
+    : isSales
+      ? '你是自住、投资还是出租？把预算和用途打出来，我按区域逻辑帮你拆。'
+      : '你现在更关心预算、区域，还是未来出租和转手？评论区打出来。'
+
+  return normalizeScriptLength([hook, body, logic, keyLine, cta].filter(Boolean).join(' '), duration, city)
 }
 
 function splitScript(script: string): ScriptSegment[] {
@@ -238,7 +319,7 @@ function extractKeywords(text: string, manual = ''): KeywordInsight[] {
   const seen = new Set<string>()
 
   function add(category: string, value: string, reason: string, priority: KeywordInsight['priority'] = 'medium') {
-    const clean = value.trim()
+    const clean = usefulKeyword(value)
     if (!clean || seen.has(`${category}:${clean}`)) return
     seen.add(`${category}:${clean}`)
     items.push({ id: `${category}_${items.length + 1}`, category, value: clean, reason, priority })
@@ -246,7 +327,7 @@ function extractKeywords(text: string, manual = ''): KeywordInsight[] {
 
   ;(manual || '')
     .split(/[，,、\s]+/)
-    .map((x) => x.trim())
+    .map(usefulKeyword)
     .filter(Boolean)
     .forEach((x) => add('手动关键词', x, '用户指定必须凸显', 'high'))
 
@@ -282,19 +363,81 @@ function attachSegmentKeywords(segments: ScriptSegment[], keywords: KeywordInsig
   }))
 }
 
-function defaultVoiceSetting(segment: ScriptSegment): SegmentVoiceSetting {
+function inferVoiceSetting(segment: ScriptSegment, index = 0, total = 1, scriptMode: ScriptMode = 'professional'): SegmentVoiceSetting {
+  const text = String(segment.text || '')
   const hasHigh = segment.keywords.some((kw) => kw.priority === 'high')
-  return {
-    speed: hasHigh ? 0.95 : 1,
-    pitch: 1,
-    volume: hasHigh ? 1.05 : 1,
-    emotion: hasHigh ? '重点强调' : '自然平稳',
-    tone: hasHigh ? '专业可信' : '清晰讲解',
-    pauseBefore: hasHigh ? 120 : 0,
-    pauseAfter: 180,
-    emphasis: segment.keywords.map((kw) => kw.value),
-    note: hasHigh ? '这一句包含核心判断，语速稍慢，关键词加重。' : '',
+  const isHook = index === 0 || /别|不是|很多人|第一步|最怕|错/.test(text)
+  const isRisk = /坑|风险|担心|怕|不能|不要|忽略|转手|空置|亏|被骗/.test(text)
+  const isLogic = /第一|第二|第三|先看|再看|最后|判断|重点/.test(text)
+  const isCta = index >= total - 1 || /评论区|打出来|预算|你是|你更|私信|联系/.test(text)
+  const isLife = scriptMode === 'life'
+
+  let tone = isLife ? '自然平稳' : '专业可信'
+  let emotion = isLife ? '温和引导' : '解释说明'
+  let speed = 1
+  let pitch = 1
+  let volume = 1
+  let pauseBefore = 60
+  let pauseAfter = 160
+  let note = 'AI 已根据句意自动判断语气、情绪、语速和停顿。'
+
+  if (isHook) {
+    tone = isLife ? '轻快种草' : '专业可信'
+    emotion = '重点强调'
+    speed = 0.93
+    volume = 1.08
+    pauseBefore = 80
+    pauseAfter = 240
+    note = '开头钩子：稍慢、稍重，先抓住注意力。'
   }
+  if (isRisk) {
+    tone = '风险提醒'
+    emotion = '提醒避坑'
+    speed = 0.9
+    pitch = 0.98
+    volume = 1.08
+    pauseBefore = 120
+    pauseAfter = 240
+    note = '风险/避坑句：降低语速，关键词加重。'
+  } else if (isLogic) {
+    tone = '专业可信'
+    emotion = '解释说明'
+    speed = 0.95
+    volume = hasHigh ? 1.06 : 1.02
+    pauseBefore = hasHigh ? 100 : 60
+    pauseAfter = 190
+    note = '判断逻辑句：清晰、可信，方便观众听懂。'
+  }
+  if (isCta) {
+    tone = '成交引导'
+    emotion = '温和引导'
+    speed = 0.98
+    pitch = 1.02
+    volume = 1.05
+    pauseBefore = 120
+    pauseAfter = 260
+    note = '结尾承接句：自然追问，不要像硬广。'
+  }
+  if (hasHigh && !isRisk && !isHook && !isCta) {
+    speed = Math.min(speed, 0.95)
+    volume = Math.max(volume, 1.05)
+  }
+
+  return {
+    speed,
+    pitch,
+    volume,
+    emotion,
+    tone,
+    pauseBefore,
+    pauseAfter,
+    emphasis: segment.keywords.map((kw) => kw.value),
+    note,
+  }
+}
+
+function defaultVoiceSetting(segment: ScriptSegment): SegmentVoiceSetting {
+  return inferVoiceSetting(segment, Math.max(0, segment.index - 1), 1, 'professional')
 }
 
 function cityScenes(city: string) {
@@ -386,6 +529,7 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
   const [market, setMarket] = useState(project.market || DEFAULT_MARKET)
   const [city, setCity] = useState(String(project.city || inferCity(`${project.topic} ${project.script}`)))
   const [contentType, setContentType] = useState<ContentType>(String(project.contentType || 'investment') as ContentType)
+  const [scriptMode, setScriptMode] = useState<ScriptMode>(String(project.scriptMode || project.script_mode || 'professional') as ScriptMode)
   const [targetDuration, setTargetDuration] = useState(Number(project.targetDuration || 20))
   const [competitorSource, setCompetitorSource] = useState(String(project.competitorSource || ''))
   const [manualKeywords, setManualKeywords] = useState(String(project.manualKeywords || ''))
@@ -402,6 +546,7 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
   const [sourceError, setSourceError] = useState('')
   const [sourceResult, setSourceResult] = useState<any>(null)
   const [remoteBrainCards, setRemoteBrainCards] = useState<ContentBrainCard[]>([])
+  const [disabledKeywordValues, setDisabledKeywordValues] = useState<string[]>([])
 
   const approvedBrainCards = useMemo(() => {
     const merged = [...remoteBrainCards, ...loadApprovedContentBrainCards()]
@@ -414,16 +559,20 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
     }).slice(0, 12)
   }, [topic, city, market, remoteBrainCards])
   const brainKeywordText = useMemo(() => contentBrainKeywords(approvedBrainCards).join('，'), [approvedBrainCards])
-  const keywords = useMemo(
+  const allKeywords = useMemo(
     () => extractKeywords(
       `${topic}\n${script}\n${competitorSource}\n${approvedBrainCards.map((card) => `${card.title || ''} ${card.content || ''} ${(card.tags || []).join(' ')}`).join('\n')}`,
       [manualKeywords, brainKeywordText].filter(Boolean).join('，')
     ),
     [topic, script, competitorSource, manualKeywords, brainKeywordText, approvedBrainCards]
   )
-  const segments = useMemo(() => attachSegmentKeywords(splitScript(script || generateScript(topic, city, targetDuration, contentType, keywords)), keywords), [script, topic, city, targetDuration, contentType, keywords])
+  const keywords = useMemo(() => {
+    const disabled = new Set(disabledKeywordValues.map((x) => x.toLowerCase()))
+    return allKeywords.filter((kw) => !disabled.has(kw.value.toLowerCase()))
+  }, [allKeywords, disabledKeywordValues])
+  const segments = useMemo(() => attachSegmentKeywords(splitScript(script || generateScript(topic, city, targetDuration, contentType, keywords, scriptMode)), keywords), [script, topic, city, targetDuration, contentType, keywords, scriptMode])
   const selectedSegment = segments.find((segment) => segment.id === selectedSegmentId) || segments[0]
-  const selectedSetting = selectedSegment ? (voiceSettings[selectedSegment.id] || defaultVoiceSetting(selectedSegment)) : null
+  const selectedSetting = selectedSegment ? (voiceSettings[selectedSegment.id] || inferVoiceSetting(selectedSegment, Math.max(0, selectedSegment.index - 1), segments.length, scriptMode)) : null
   const selectedShot = shotPlan.find((shot) => shot.id === selectedShotId) || shotPlan[0]
   const videoUrl = extractVideoUrl(job)
   const selectedAssets = asArray(project.asset_context || project.selected_assets || project.r2_material_context)
@@ -456,7 +605,7 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
 
   useEffect(() => {
     if (!script) {
-      const generated = generateScript(topic, city, targetDuration, contentType, keywords)
+      const generated = generateScript(topic, city, targetDuration, contentType, keywords, scriptMode)
       setScript(generated)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -466,14 +615,14 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
     if (!segments.length) return
     setVoiceSettings((current) => {
       const next = { ...current }
-      segments.forEach((segment) => {
-        if (!next[segment.id]) next[segment.id] = defaultVoiceSetting(segment)
+      segments.forEach((segment, index) => {
+        if (!next[segment.id]) next[segment.id] = inferVoiceSetting(segment, index, segments.length, scriptMode)
       })
       return next
     })
     if (!segments.find((segment) => segment.id === selectedSegmentId)) setSelectedSegmentId(segments[0].id)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [segments.length, script])
+  }, [segments.length, script, scriptMode])
 
   useEffect(() => {
     if (!shotPlan.length && segments.length) {
@@ -612,6 +761,8 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
       title: topic,
       city,
       contentType,
+      scriptMode,
+      script_mode: scriptMode,
       targetDuration,
       script,
       manualKeywords,
@@ -631,9 +782,9 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
   }
 
   function rebuildScript() {
-    const nextScript = generateScript(topic, city, targetDuration, contentType, keywords)
+    const nextScript = generateScript(topic, city, targetDuration, contentType, keywords, scriptMode)
     setScript(nextScript)
-    const nextSegments = attachSegmentKeywords(splitScript(nextScript), extractKeywords(`${topic}\n${nextScript}\n${competitorSource}`, manualKeywords))
+    const nextSegments = attachSegmentKeywords(splitScript(nextScript), keywords)
     const nextShots = generateShotPlan(nextSegments, targetDuration, city, project)
     setShotPlan(nextShots)
     setSelectedSegmentId(nextSegments[0]?.id || 'seg_1')
@@ -643,10 +794,33 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
 
   function updateSetting(patch: Partial<SegmentVoiceSetting>) {
     if (!selectedSegment) return
-    const base = voiceSettings[selectedSegment.id] || defaultVoiceSetting(selectedSegment)
+    const base = voiceSettings[selectedSegment.id] || inferVoiceSetting(selectedSegment, Math.max(0, selectedSegment.index - 1), segments.length, scriptMode)
     const next = { ...voiceSettings, [selectedSegment.id]: { ...base, ...patch } }
     setVoiceSettings(next)
     setProject({ ...project, segment_voice_settings: next })
+  }
+
+  function autoTuneVoiceAll() {
+    const next: Record<string, SegmentVoiceSetting> = {}
+    segments.forEach((segment, index) => {
+      next[segment.id] = inferVoiceSetting(segment, index, segments.length, scriptMode)
+    })
+    setVoiceSettings(next)
+    setProject({ ...project, segment_voice_settings: next, script_segments: segments })
+  }
+
+  function toggleKeyword(value: string) {
+    const clean = usefulKeyword(value)
+    if (!clean) return
+    setDisabledKeywordValues((current) => {
+      const exists = current.some((item) => item.toLowerCase() === clean.toLowerCase())
+      return exists ? current.filter((item) => item.toLowerCase() !== clean.toLowerCase()) : [...current, clean]
+    })
+  }
+
+  function smartPickKeywords() {
+    const keep = new Set(allKeywords.filter((kw) => kw.priority === 'high' || ['预算/价格', '区域', '人群', '用途', '风险判断'].includes(kw.category)).slice(0, 10).map((kw) => kw.value.toLowerCase()))
+    setDisabledKeywordValues(allKeywords.filter((kw) => !keep.has(kw.value.toLowerCase())).map((kw) => kw.value))
   }
 
   function updateShot(id: string, patch: Partial<ShotPlan>) {
@@ -673,6 +847,7 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
       market,
       city,
       content_type: contentType,
+      script_mode: scriptMode,
       script_text: script,
       target_duration_seconds: targetDuration,
       duration_seconds: targetDuration,
@@ -707,6 +882,7 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
         source_mode: sourceMode,
         competitor_source: competitorSource,
         content_type: contentType,
+        script_mode: scriptMode,
         selected_assets: selectedAssets,
         avatar_config: avatarConfig,
         lead_count: leadCount,
@@ -795,6 +971,7 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
             <label>主题/选题<input value={topic} onChange={(e) => setTopic(e.target.value)} placeholder={sourceMode === 'custom' ? '直接输入要生成的视频主题' : '采集结果会结合这个主题生成文案'} /></label>
             <label>目标时长<select value={targetDuration} onChange={(e) => setTargetDuration(Number(e.target.value))}><option value={15}>15 秒</option><option value={20}>20 秒</option><option value={30}>30 秒</option><option value={45}>45 秒</option><option value={60}>60 秒</option></select></label>
             <label>内容方向<select value={contentType} onChange={(e) => setContentType(e.target.value as ContentType)}>{Object.entries(CONTENT_LABELS).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label>
+            <label>文案模式<select value={scriptMode} onChange={(e) => setScriptMode(e.target.value as ScriptMode)}>{Object.entries(SCRIPT_LABELS).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label>
             <label>来源状态<input readOnly value={sourceResult ? '已下发/已返回采集任务' : sourceMode === 'custom' ? '不采集，直接生成' : '等待下发真实采集'} /></label>
           </div>
           <label className="aiw-wideField">手动凸显关键词<textarea value={manualKeywords} onChange={(e) => setManualKeywords(e.target.value)} placeholder="例如：150万、华语、华人多、大平层、出租、流动性" /></label>
@@ -810,11 +987,19 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
           {sourceResult && <details className="aiw-json"><summary>真实采集/入库返回</summary><pre>{JSON.stringify(sourceResult, null, 2)}</pre></details>}
         </section>
         <aside className="aiw-stepCard aiw-resultPanel">
-          <h3>关键词洞察</h3>
-          <p>这些词会传给配音、镜头计划和 OpenClaw 承接。</p>
-          <div className="aiw-keywordGrid">
-            {keywords.map((kw) => <div key={kw.id} className={`aiw-keywordCard ${kw.priority}`}><b>{kw.value}</b><span>{kw.category}</span><em>{kw.reason}</em></div>)}
+          <h3>关键词选择</h3>
+          <p>点击关键词启用/禁用。只有已启用关键词会进入文案、逐句配音、镜头计划和 OpenClaw 承接。</p>
+          <div className="aiw-actions">
+            <button className="aiw-muted" type="button" onClick={smartPickKeywords}>AI 智能精选</button>
+            <button className="aiw-muted" type="button" onClick={() => setDisabledKeywordValues([])}>全选关键词</button>
           </div>
+          <div className="aiw-keywordGrid">
+            {allKeywords.map((kw) => {
+              const off = disabledKeywordValues.some((item) => item.toLowerCase() === kw.value.toLowerCase())
+              return <button type="button" key={kw.id} className={`aiw-keywordCard ${kw.priority} ${off ? 'muted' : 'active'}`} onClick={() => toggleKeyword(kw.value)}><b>{kw.value}</b><span>{off ? '已关闭' : kw.category}</span><em>{kw.reason}</em></button>
+            })}
+          </div>
+          <div className="aiw-info">已启用 {keywords.length} 个关键词；关闭的词不会再硬塞进口播文案。</div>
           <h4>内容大脑联动</h4>
           <div className="aiw-brainMiniPanel">
             <b>已匹配 {approvedBrainCards.length} 条知识</b>
@@ -839,11 +1024,17 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
         <section className="aiw-stepCard">
           <h3>第二步：口播文案</h3>
           <p>建议 {min}-{max} 字，当前 {script.length} 字。可以手动改文案。</p>
+          <div className="aiw-chipRow">{keywords.slice(0, 10).map((kw) => <span className="aiw-keywordPill" key={kw.id}>{kw.value}</span>)}</div>
+          <div className="aiw-actions">
+            <button className="aiw-primary" type="button" onClick={() => { rebuildScript(); window.setTimeout(autoTuneVoiceAll, 0) }}>AI 重写文案并重调配音</button>
+            <button className="aiw-muted" type="button" onClick={() => setStep(1)}>回第一步选关键词</button>
+          </div>
           <textarea className="aiw-scriptTextarea" value={script} onChange={(e) => setScript(e.target.value)} />
         </section>
         <section className="aiw-stepCard">
           <h3>逐句配音</h3>
-          <p>点某一句，右侧才显示该句的速度、语调、语气和停顿。</p>
+          <p>AI 会按句意自动判断语气、情绪、停顿；你也可以点某一句手动微调。</p>
+          <div className="aiw-actions"><button className="aiw-primary" type="button" onClick={autoTuneVoiceAll}>AI 自动调好全部句子</button></div>
           <div className="aiw-segmentPicker">
             {segments.map((segment) => (
               <button key={segment.id} className={selectedSegment?.id === segment.id ? 'active' : ''} onClick={() => setSelectedSegmentId(segment.id)}>
@@ -873,7 +1064,7 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
                   setProject({ ...project, segment_voice_settings: next })
                 }}>应用到全部句子</button>
                 <button className="aiw-muted" type="button" onClick={() => window.localStorage.setItem('ai_video_voice_template_professional_v9', JSON.stringify(selectedSetting))}>保存为专业讲房模板</button>
-                <button className="aiw-muted" type="button" onClick={() => updateSetting(defaultVoiceSetting(selectedSegment))}>重置本句</button>
+                <button className="aiw-muted" type="button" onClick={() => updateSetting(inferVoiceSetting(selectedSegment, Math.max(0, selectedSegment.index - 1), segments.length, scriptMode))}>AI 重置本句</button>
               </div>
             </div>
           )}
