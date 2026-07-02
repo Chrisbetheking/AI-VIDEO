@@ -71,6 +71,43 @@ type JobPayload = {
   [key: string]: any
 }
 
+
+type ContentBrainCard = {
+  id?: string
+  title?: string
+  type?: string
+  source?: string
+  content?: string
+  tags?: string[]
+  score?: number
+  status?: string
+  usedCount?: number
+}
+
+const CONTENT_BRAIN_KEY = 'ai_video_content_brain_cards_v9'
+
+function loadApprovedContentBrainCards(): ContentBrainCard[] {
+  try {
+    const raw = window.localStorage.getItem(CONTENT_BRAIN_KEY)
+    const parsed = raw ? JSON.parse(raw) : []
+    return Array.isArray(parsed) ? parsed.filter((card) => card && card.status === 'approved') : []
+  } catch {
+    return []
+  }
+}
+
+function contentBrainMatch(card: ContentBrainCard, topic: string, city: string, market: string) {
+  const text = `${card.title || ''} ${card.content || ''} ${(card.tags || []).join(' ')}`.toLowerCase()
+  const keys = [topic, city, market, '马来西亚', '吉隆坡', '房产']
+    .map((x) => String(x || '').toLowerCase())
+    .filter(Boolean)
+  return keys.some((key) => key.length >= 2 && text.includes(key))
+}
+
+function contentBrainKeywords(cards: ContentBrainCard[]) {
+  return Array.from(new Set(cards.flatMap((card) => Array.isArray(card.tags) ? card.tags : []).filter(Boolean))).slice(0, 18)
+}
+
 type Props = {
   project: ProjectDraft
   setProject: (project: ProjectDraft) => void
@@ -365,7 +402,7 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
   const [sourceError, setSourceError] = useState('')
   const [sourceResult, setSourceResult] = useState<any>(null)
 
-  const keywords = useMemo(() => extractKeywords(`${topic}\n${script}\n${competitorSource}`, manualKeywords), [topic, script, competitorSource, manualKeywords])
+  const keywords = useMemo(() => extractKeywords(`${topic}\n${script}\n${competitorSource}\n${approvedBrainCards.map((card) => `${card.title || ''} ${card.content || ''} ${(card.tags || []).join(' ')}`).join('\n')}`, [manualKeywords, brainKeywordText].filter(Boolean).join('，')), [topic, script, competitorSource, manualKeywords, brainKeywordText, approvedBrainCards.length])
   const segments = useMemo(() => attachSegmentKeywords(splitScript(script || generateScript(topic, city, targetDuration, contentType, keywords)), keywords), [script, topic, city, targetDuration, contentType, keywords])
   const selectedSegment = segments.find((segment) => segment.id === selectedSegmentId) || segments[0]
   const selectedSetting = selectedSegment ? (voiceSettings[selectedSegment.id] || defaultVoiceSetting(selectedSegment)) : null
@@ -374,6 +411,8 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
   const selectedAssets = asArray(project.asset_context || project.selected_assets || project.r2_material_context)
   const avatarConfig = project.avatar_config || null
   const leadCount = asArray(project.leads).length
+  const approvedBrainCards = useMemo(() => loadApprovedContentBrainCards().filter((card) => contentBrainMatch(card, topic, city, market)).slice(0, 12), [topic, city, market])
+  const brainKeywordText = contentBrainKeywords(approvedBrainCards).join('，')
 
   useEffect(() => {
     if (!script) {
@@ -539,6 +578,7 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
       competitorSource,
       sourceMode,
       keyword_insights: keywords,
+      content_brain_context: approvedBrainCards,
       script_segments: segments,
       segment_voice_settings: voiceSettings,
       manual_shot_plan: shotPlan,
@@ -613,6 +653,7 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
       script_segments: segments,
       segment_voice_settings: voiceSettings,
       keyword_insights: keywords,
+      content_brain_context: approvedBrainCards,
       manual_shot_plan: finalShots,
       shot_overrides: finalShots,
       transition_plan: finalShots.map((shot) => ({ index: shot.index, camera: shot.camera, transition: shot.transition })),
@@ -629,6 +670,7 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
         selected_assets: selectedAssets,
         avatar_config: avatarConfig,
         lead_count: leadCount,
+        content_brain_count: approvedBrainCards.length,
       },
     }
 
@@ -733,6 +775,16 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
           <div className="aiw-keywordGrid">
             {keywords.map((kw) => <div key={kw.id} className={`aiw-keywordCard ${kw.priority}`}><b>{kw.value}</b><span>{kw.category}</span><em>{kw.reason}</em></div>)}
           </div>
+          <h4>内容大脑联动</h4>
+          <div className="aiw-brainMiniPanel">
+            <b>已匹配 {approvedBrainCards.length} 条知识</b>
+            <p>会一起传给文案、关键词、镜头和 OpenClaw 承接；不是所有生成内容都自动入库，需在内容大脑里审核。</p>
+            <div className="aiw-chipRow">{approvedBrainCards.slice(0, 8).map((card) => <span className="aiw-keywordPill" key={card.id || card.title}>{card.title || card.type}</span>)}</div>
+            <div className="aiw-actions">
+              <button className="aiw-muted" onClick={() => goTab('brain')}>去内容大脑</button>
+              <button className="aiw-muted" onClick={() => setManualKeywords([manualKeywords, brainKeywordText].filter(Boolean).join('，'))}>把知识库关键词带入</button>
+            </div>
+          </div>
           <h4>文案预览</h4>
           <div className="aiw-scriptPreview">{highlightText(script, keywords)}</div>
         </aside>
@@ -773,6 +825,16 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
               <label>句前停顿 ms<input type="number" value={selectedSetting.pauseBefore} onChange={(e) => updateSetting({ pauseBefore: Number(e.target.value) })} /></label>
               <label>句后停顿 ms<input type="number" value={selectedSetting.pauseAfter} onChange={(e) => updateSetting({ pauseAfter: Number(e.target.value) })} /></label>
               <label>备注<textarea value={selectedSetting.note} onChange={(e) => updateSetting({ note: e.target.value })} /></label>
+              <div className="aiw-actions vertical">
+                <button className="aiw-muted" type="button" onClick={() => {
+                  const next: Record<string, SegmentVoiceSetting> = {}
+                  segments.forEach((segment) => { next[segment.id] = { ...selectedSetting } })
+                  setVoiceSettings(next)
+                  setProject({ ...project, segment_voice_settings: next })
+                }}>应用到全部句子</button>
+                <button className="aiw-muted" type="button" onClick={() => window.localStorage.setItem('ai_video_voice_template_professional_v9', JSON.stringify(selectedSetting))}>保存为专业讲房模板</button>
+                <button className="aiw-muted" type="button" onClick={() => updateSetting(defaultVoiceSetting(selectedSegment))}>重置本句</button>
+              </div>
             </div>
           )}
         </aside>

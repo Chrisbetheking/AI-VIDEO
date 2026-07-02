@@ -31,6 +31,67 @@ type Lead = {
   raw?: any
 }
 
+
+
+type BrainCandidate = {
+  id: string
+  title: string
+  type: 'lead_question' | 'topic' | 'hook' | 'reply_template'
+  source: string
+  content: string
+  tags: string[]
+  score: number
+  status: 'pending' | 'approved' | 'rejected'
+  decisionReason: string
+  createdAt: string
+  raw?: any
+}
+
+const CONTENT_BRAIN_INBOX_KEY = 'ai_video_content_brain_inbox_v9'
+
+function pushOpenClawToBrainInbox(leads: Lead[], project: ProjectDraft) {
+  try {
+    const qualified = leads
+      .filter((lead) => lead.text && (lead.priority === 'A' || lead.priority === 'B' || Number(lead.score || 0) >= 55))
+      .slice(0, 80)
+      .map((lead) => {
+        const tags = [project.market, project.topic, lead.priority, lead.accountName, lead.author, 'OpenClaw', '客户问题']
+          .filter(Boolean)
+          .map((x) => String(x))
+        return {
+          id: `openclaw_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
+          title: lead.text.slice(0, 36),
+          type: 'lead_question' as const,
+          source: 'openclaw_sales_capture',
+          content: lead.text,
+          tags,
+          score: Number(lead.score || 60),
+          status: 'pending' as const,
+          decisionReason: lead.priority === 'A'
+            ? 'A 级真实客户问题，建议沉淀进内容大脑。'
+            : 'B 级线索，可作为选题/FAQ 候选，等待人工判断。',
+          createdAt: new Date().toLocaleString(),
+          raw: lead,
+        }
+      })
+
+    if (!qualified.length) return
+    const oldRaw = window.localStorage.getItem(CONTENT_BRAIN_INBOX_KEY)
+    const oldItems = oldRaw ? JSON.parse(oldRaw) : []
+    const merged = [...qualified, ...(Array.isArray(oldItems) ? oldItems : [])]
+    const seen = new Set<string>()
+    const deduped = merged.filter((item: BrainCandidate) => {
+      const key = `${item.type}|${item.title}|${String(item.content || '').slice(0, 80)}`.replace(/\s+/g, '').toLowerCase()
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
+    window.localStorage.setItem(CONTENT_BRAIN_INBOX_KEY, JSON.stringify(deduped.slice(0, 300)))
+  } catch {
+    // 内容大脑同步失败不影响 OpenClaw 主流程
+  }
+}
+
 type RealSource = {
   endpoint: string
   ok: boolean
@@ -241,6 +302,7 @@ export default function OpenClawWorkbench({ project, setProject, goTab }: Props)
   function updateLeads(nextLeads: Lead[], extra: Record<string, any> = {}) {
     const unique = uniqueByIdentity(nextLeads).slice(0, 300)
     setLeads(unique)
+    pushOpenClawToBrainInbox(unique, project)
     setProject({
       ...project,
       leads: unique,
@@ -472,6 +534,7 @@ export default function OpenClawWorkbench({ project, setProject, goTab }: Props)
         <button className="aiw-purple" onClick={() => createCollectTask('comments')} disabled={!!busy}>{busy === 'collect' ? '下发中...' : '下发评论采集'}</button>
         <button className="aiw-primary" onClick={analyze} disabled={!!busy}>{busy === 'analyze' ? '分析中...' : 'AI 评分并生成回复'}</button>
         <button className="aiw-muted" onClick={() => goTab('collect')}>去同行采集</button>
+          <button className="aiw-muted" onClick={() => goTab('brain')}>去内容大脑审核</button>
       </div>
 
       {error && <div className="aiw-error">{error}</div>}

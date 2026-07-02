@@ -1487,3 +1487,59 @@
     grid-template-columns: 1fr;
   }
 }
+
+/* ===== V9 Content Brain / Obsidian / linked knowledge base ===== */
+.aiw-contentBrain .aiw-brainLoop {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin: 18px 0 22px;
+}
+.aiw-brainLoop div {
+  border: 1px solid rgba(124, 58, 237, 0.16);
+  background: linear-gradient(180deg, #fff, #fbf7ff);
+  border-radius: 18px;
+  padding: 14px;
+}
+.aiw-brainLoop b { display: block; color: #4c1d95; margin-bottom: 6px; }
+.aiw-brainLoop span { color: #6b7280; font-size: 12px; line-height: 1.5; }
+.aiw-brainMarkdown { min-height: 220px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
+.aiw-brainManual {
+  margin-top: 18px;
+  padding: 16px;
+  border-radius: 18px;
+  background: #faf7ff;
+  border: 1px dashed rgba(124, 58, 237, 0.25);
+}
+.aiw-brainManual h4 { margin-top: 0; }
+.aiw-brainInbox, .aiw-brainGrid { display: grid; gap: 12px; }
+.aiw-brainGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.aiw-brainCard {
+  border: 1px solid rgba(124, 58, 237, 0.14);
+  border-radius: 18px;
+  padding: 15px;
+  background: #fff;
+  box-shadow: 0 12px 30px rgba(76, 29, 149, 0.05);
+}
+.aiw-brainCard.pending { background: #fffaf1; border-color: rgba(245, 158, 11, 0.28); }
+.aiw-brainCard.approved { background: #f0fdf4; border-color: rgba(34, 197, 94, 0.22); }
+.aiw-brainCard.rejected { background: #f8fafc; opacity: 0.72; }
+.aiw-brainCard > div:first-child { display: grid; gap: 4px; }
+.aiw-brainCard b { color: #111827; line-height: 1.35; }
+.aiw-brainCard span, .aiw-brainCard em { color: #6b7280; font-size: 12px; line-height: 1.55; }
+.aiw-brainCard p { color: #374151; line-height: 1.65; margin: 10px 0; }
+.aiw-brainToolbar { display: flex; justify-content: space-between; gap: 14px; align-items: center; flex-wrap: wrap; }
+.aiw-brainToolbar select { border: 1px solid rgba(124,58,237,.18); border-radius: 12px; padding: 10px 12px; background: #fff; }
+.aiw-brainMiniPanel {
+  border: 1px solid rgba(124, 58, 237, .15);
+  background: #fbf7ff;
+  border-radius: 18px;
+  padding: 14px;
+  margin: 10px 0 18px;
+}
+.aiw-brainMiniPanel b { color: #5b21b6; }
+.aiw-brainMiniPanel p { color: #6b7280; line-height: 1.55; }
+.aiw-danger.small { min-height: 38px; padding: 0 14px; }
+@media (max-width: 1100px) {
+  .aiw-contentBrain .aiw-brainLoop, .aiw-brainGrid { grid-template-columns: 1fr; }
+}
