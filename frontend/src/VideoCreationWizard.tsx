@@ -511,15 +511,15 @@ function cityScenes(city: string) {
   if (city === 'johor') return ['新山城市住宅区位', 'Medini 现代公寓社区', '家庭自住公寓室内', '城市通勤和生活配套']
   if (city === 'langkawi') return ['兰卡威度假型住宅和泳池', '热带绿植第二家园', '岛屿度假住宅生活方式', '度假社区公共空间']
   if (city === 'sabah') return ['亚庇城市滨海住宅', '沙巴日落住宅生活方式', '滨海公寓阳台', '度假社区配套镜头']
-  return ['吉隆坡城市建立镜头：KLCC 远景 + 高层住宅，不超过 1 次', '现代公寓客厅：落地窗、城市景、真实居住感', '公寓阳台：吉隆坡城市天际线，不重复双子塔特写', 'TRX / Bukit Bintang 商圈和通勤生活半径', 'Mont Kiara 高端公寓社区、街区和家庭生活', '公寓大堂、保安入口和会客区', '泳池 / 健身房 / 公共设施，体现社区品质', '经纪人带看公寓：开门、看客厅、看阳台', '厨房餐厅与卧室细节，体现自住舒适度']
+  return ['吉隆坡住宅天际线：现代高层公寓，不以双子塔为主体', '现代公寓客厅：落地窗、城市景、真实居住感', '公寓阳台：普通吉隆坡城市天际线，禁止双子塔特写', 'TRX / Bukit Bintang 商圈和通勤生活半径', 'Mont Kiara 高端公寓社区、街区和家庭生活', '公寓大堂、保安入口和会客区', '泳池 / 健身房 / 公共设施，体现社区品质', '经纪人带看公寓：开门、看客厅、看阳台', '厨房餐厅与卧室细节，体现自住舒适度', '真实买房咨询场景：资料核验、预算沟通，不出现价格数字']
 }
 
 function buildPrompt(city: string, scene: string, narration: string, index = 1) {
   const klRule = city === 'kuala_lumpur'
-    ? `Kuala Lumpur only. KLCC Twin Towers may appear only as the first establishing shot; for shot ${index}, prefer condo interior, balcony city view, lobby, pool, gym, agent showing apartment, TRX/Bukit Bintang street context, Mont Kiara community, kitchen, bedroom or real residential details. Do not repeat the same Twin Towers skyline. Do not show beach, island, seaside, Langkawi, Sabah or Penang seaside.`
+    ? `Kuala Lumpur only. Do NOT center KLCC or Petronas Twin Towers; for shot ${index}, prefer condo interior, balcony generic city view, lobby, pool, gym, agent showing apartment, TRX/Bukit Bintang street context, Mont Kiara community, kitchen, bedroom or real residential details. Do not repeat the same skyline. Do not show beach, island, seaside, Langkawi, Sabah or Penang seaside.`
     : 'Use city-matched Malaysia real estate visuals. Avoid fake project names, exact prices, exact ROI and unreadable text.'
 
-  return `Premium 9:16 cinematic vertical video for Malaysia real-estate content.\nShot ${index} main scene: ${scene}.\nNarration meaning: ${narration.slice(0, 80)}.\n${klRule}\nVisual diversity rule: every shot must show a different place or detail; mix exterior, interior, balcony, lobby, facility, neighborhood and agent showing apartment. Ultra realistic, premium real estate commercial style, natural lighting, clean composition, high detail, smooth camera movement. No readable text, no logo, no watermark, no fake project name, no exact price, no black borders.`
+  return `Premium 9:16 cinematic vertical video for Malaysia real-estate content.\nShot ${index} main scene: ${scene}.\nNarration meaning: ${narration.slice(0, 80)}.\n${klRule}\nVisual diversity rule: every shot must show a different place or detail; mix exterior, interior, balcony, lobby, facility, neighborhood and agent showing apartment. Ultra realistic, premium real estate commercial style, natural lighting, clean composition, high detail, smooth camera movement. No readable text, no logo, no watermark, no fake project name, no exact price, no black borders, no repeated KLCC Twin Towers.`
 }
 
 function generateShotPlan(segments: ScriptSegment[], duration: number, city: string, project: ProjectDraft): ShotPlan[] {
@@ -1007,7 +1007,7 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
       const nextShots = generateShotPlan(nextSegments, targetDuration, city, project)
       setShotPlan(nextShots)
       setSelectedShotId(nextShots[0]?.id || 'shot_1')
-      noteButton(`已按真实口播重建 ${nextShots.length} 个镜头。`)
+      noteButton(`已按真实口播重建 ${nextShots.length} 个镜头：已强制混合室内、阳台、大堂、泳池、Mont Kiara/TRX，不再重复双子塔。`)
       setStep(3)
       return
     }
@@ -1026,7 +1026,7 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
         setStep(3)
         return
       }
-      noteButton('开始调用 TTS-first 后端生成视频。')
+      noteButton('开始调用 TTS-first-v2：生成后会自动烧录字幕，并用任务恢复接口捞成片。')
       await startGenerate()
       return
     }

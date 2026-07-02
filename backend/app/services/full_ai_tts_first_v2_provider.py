@@ -21,15 +21,16 @@ router = APIRouter(prefix="/api/video/full-ai/tts-first-v2", tags=["full-ai-tts-
 _jobs: Dict[str, Dict[str, Any]] = {}
 
 KL_DIVERSE_SCENES = [
-    "Kuala Lumpur establishing shot: KLCC Twin Towers far in skyline with luxury high-rise condominium foreground, use only once",
-    "modern luxury condo living room in Kuala Lumpur with floor-to-ceiling windows and city view, no Twin Towers close-up",
-    "condo balcony overlooking Kuala Lumpur city skyline, residential towers and warm daylight, no repeated KLCC landmark shot",
-    "TRX and Bukit Bintang urban context, premium residential neighborhood, commute and lifestyle radius",
-    "Mont Kiara upscale condominium community, street-level residential lifestyle and family-friendly environment",
+    "Kuala Lumpur premium residential skyline with modern high-rise condominiums, NOT centered on KLCC or Petronas Twin Towers",
+    "modern luxury condo living room in Kuala Lumpur with floor-to-ceiling windows and generic city view, no landmark tower",
+    "condo balcony overlooking Kuala Lumpur residential skyline, warm daylight, no Twin Towers and no repeated skyline",
+    "TRX and Bukit Bintang urban lifestyle context, street-level premium residential neighborhood, commute and cafes",
+    "Mont Kiara upscale condominium community, family-friendly street scene, green residential environment",
     "premium condominium lobby, security desk, elegant entrance and resident lounge in Kuala Lumpur",
     "high-rise condo facilities: swimming pool, gym and landscaped deck, premium residential lifestyle",
     "real estate agent showing apartment interior, opening door, walking through living room and balcony",
     "modern condo kitchen, dining area and bedroom details, warm natural light, self-stay comfort",
+    "close-up of hands reviewing a safe generic property checklist, no readable text, no price and no numbers",
 ]
 
 PENANG_SCENES = [
@@ -172,8 +173,8 @@ def _is_klcc_heavy(text: str) -> bool:
 
 
 def _clean_scene_for_kl(scene: str, index: int) -> str:
-    if index <= 1:
-        return scene
+    # V10.6: do not let KLCC/Twin Towers dominate. If any upstream prompt mentions
+    # KLCC/Petronas, replace it with a non-landmark real-estate scene.
     if _is_klcc_heavy(scene):
         return KL_DIVERSE_SCENES[(index - 1) % len(KL_DIVERSE_SCENES)]
     return scene
@@ -186,8 +187,8 @@ def _shot_prompt(city: str, index: int, narration_segment: str, scene: str = "")
         main_scene = _clean_scene_for_kl(main_scene, index)
         city_rule = (
             f"Kuala Lumpur only. Shot {index}: show a different real-estate scene. "
-            "KLCC Twin Towers may appear only once as a far establishing landmark; do not repeat the same Twin Towers skyline. "
-            "Use condo interior, balcony city view, lobby, pool, gym, agent showing apartment, TRX/Bukit Bintang context, Mont Kiara community, kitchen or bedroom details. "
+            "Do NOT center KLCC or Petronas Twin Towers. Do NOT repeat Twin Towers skyline. "
+            "Prefer real estate variety: condo interior, balcony generic city view, lobby, pool, gym, agent showing apartment, TRX/Bukit Bintang street context, Mont Kiara community, kitchen, dining room or bedroom details. "
             "No beach, no island, no seaside, no Langkawi/Sabah/Penang sea."
         )
     else:
@@ -352,6 +353,49 @@ def _burn_job_subtitles(job_id: str, raw_video_url: str) -> None:
         })
 
 
+def _poll_child_and_finish(job_id: str, child_job_id: str) -> None:
+    """V10.6: finish and burn subtitles in background, not only when frontend polls.
+
+    Earlier V10.5 only started subtitle burn inside GET /job. If the browser was
+    on an old bundle or stopped polling, child full_ai could finish while the
+    parent stayed delegated/running. This loop closes that gap.
+    """
+    deadline = time.time() + 3600
+    last_error = ""
+    while time.time() < deadline:
+        try:
+            child = _get_json(f"http://127.0.0.1:8000/api/video/full-ai/job/{child_job_id}", timeout=60)
+            job = _jobs.get(job_id)
+            if not job:
+                return
+            job["child_job"] = child
+            if _is_failed(child):
+                job.update({"status": "failed", "stage": "failed", "progress": 100, "error": child.get("error") or child.get("message") or "child full_ai failed", "updated_at": time.time()})
+                return
+            if _is_done(child):
+                raw_video_url = _video_url_from(child)
+                if raw_video_url:
+                    burn_required = bool((job.get("request") or {}).get("burn_subtitles", True))
+                    if burn_required and not job.get("subtitle_burn_started") and not job.get("subtitled_video_url"):
+                        job["subtitle_burn_started"] = True
+                        _burn_job_subtitles(job_id, raw_video_url)
+                        return
+                    job.update({"ok": True, "status": "completed", "stage": "completed", "progress": 100, "video_url": raw_video_url, "updated_at": time.time()})
+                    return
+                job.update({"stage": "waiting_video_url", "progress": 90, "updated_at": time.time()})
+            else:
+                job.update({"stage": child.get("stage") or job.get("stage"), "status": "running", "progress": max(float(job.get("progress") or 75), 80), "updated_at": time.time()})
+        except Exception as exc:
+            last_error = str(exc)
+            job = _jobs.get(job_id)
+            if job:
+                job["child_poll_error"] = last_error
+        time.sleep(12)
+    job = _jobs.get(job_id)
+    if job and job.get("status") not in {"completed", "failed"}:
+        job.update({"status": "running", "stage": "child_timeout_waiting_manual_recovery", "child_poll_error": last_error, "updated_at": time.time()})
+
+
 def _run_job(job_id: str, raw: Dict[str, Any]) -> None:
     try:
         _jobs[job_id].update({"stage": "script", "progress": 10})
@@ -393,13 +437,15 @@ def _run_job(job_id: str, raw: Dict[str, Any]) -> None:
         child = _post_json("http://127.0.0.1:8000/api/video/full-ai/start", child_payload, timeout=120)
         child_job_id = child.get("job_id") or child.get("id") or (child.get("data") or {}).get("job_id")
         _jobs[job_id].update({"ok": True, "stage": "delegated", "status": "running", "progress": 75, "child_job_id": child_job_id, "child_start_result": child, "updated_at": time.time()})
+        if child_job_id:
+            threading.Thread(target=_poll_child_and_finish, args=(job_id, str(child_job_id)), daemon=True).start()
     except Exception as exc:
         _jobs[job_id].update({"ok": False, "status": "failed", "stage": "failed", "error": str(exc), "updated_at": time.time()})
 
 
 @router.get("/health")
 def health() -> dict[str, Any]:
-    return {"ok": True, "provider": "full_ai_tts_first_v2", "logic": "script -> tts -> diverse shot plan -> full-ai -> subtitle burn -> R2", "subtitle": True, "visual_diversity": True}
+    return {"ok": True, "provider": "full_ai_tts_first_v2", "version": "v10_6", "logic": "script -> tts -> strict non-repeated KL shot plan -> full-ai -> automatic subtitle burn -> R2", "subtitle": True, "visual_diversity": True, "background_autopoll": True, "klcc_strict_guard": True}
 
 
 @router.post("/start")
