@@ -254,6 +254,7 @@ def make_job_id(prefix: str = "fal_video") -> str:
 
 # ===== HARD OVERRIDE MALAYSIA REAL ESTATE FAL PROMPTS =====
 
+
 def _hard_malaysia_real_estate_prompt(index: int = 1, narration: str = "") -> str:
     """
     KL 房产短视频不要每个镜头都拍双子塔。
