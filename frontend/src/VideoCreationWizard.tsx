@@ -86,6 +86,24 @@ type ContentBrainCard = {
 }
 
 const CONTENT_BRAIN_KEY = 'ai_video_content_brain_cards_v9'
+const WIZARD_DRAFT_KEY = 'ai_video_wizard_draft_v10_3'
+
+
+function loadWizardDraft(): Record<string, any> {
+  try {
+    const raw = window.localStorage.getItem(WIZARD_DRAFT_KEY)
+    const parsed = raw ? JSON.parse(raw) : {}
+    return parsed && typeof parsed === 'object' ? parsed : {}
+  } catch {
+    return {}
+  }
+}
+
+function saveWizardDraft(value: Record<string, any>) {
+  try {
+    window.localStorage.setItem(WIZARD_DRAFT_KEY, JSON.stringify(value))
+  } catch {}
+}
 
 function loadApprovedContentBrainCards(): ContentBrainCard[] {
   try {
@@ -105,7 +123,7 @@ function contentBrainMatch(card: ContentBrainCard, topic: string, city: string, 
   return keys.some((key) => key.length >= 2 && text.includes(key))
 }
 
-const BAD_KEYWORDS = new Set(['房产', '选题', '镜头', '客户问题', '市场知识', '回复模板', '马来西亚', '内容大脑', '类型', '模式'])
+const BAD_KEYWORDS = new Set(['房产', '选题', '镜头', '客户问题', '市场知识', '回复模板', '马来西亚', '内容大脑', '类型', '模式', '风格', 'OpenClaw', 'openclaw', '先复述问题', '最后引导补充预算', '生活分享讲解模板', '禁用素材规则', 'R2素材自动标签', '评论区答疑模板', '素材', '规则', '模板'])
 
 function normalizeKeywordValue(value: string) {
   return String(value || '').replace(/[：:，,。！？!?；;#*`\[\]()（）]/g, ' ').replace(/\s+/g, ' ').trim()
@@ -116,7 +134,9 @@ function usefulKeyword(value: string) {
   if (!clean) return ''
   if (BAD_KEYWORDS.has(clean)) return ''
   if (clean.length < 2 || clean.length > 14) return ''
-  if (/^(类型|模式|适合|目的|结构|开头|评论|注意|镜头组合)/.test(clean)) return ''
+  if (/^[\d.]+$/.test(clean)) return ''
+  if (/^(类型|模式|适合|目的|结构|开头|评论|注意|镜头组合|话术|来源状态)/.test(clean)) return ''
+  if (/(模板|规则|自动|禁用|OpenClaw|openclaw|内容大脑)/.test(clean) && !['R2素材', '真实素材'].includes(clean)) return ''
   if (/https?:\/\//i.test(clean)) return ''
   return clean
 }
@@ -141,6 +161,33 @@ function contentBrainKeywords(cards: ContentBrainCard[]) {
     })
   })
   return out.slice(0, 14)
+}
+
+function normalizeKeywordInsight(item: any, index = 0): KeywordInsight | null {
+  const value = usefulKeyword(String(item?.value || item?.keyword || item?.text || ''))
+  if (!value) return null
+  const priority = String(item?.priority || 'medium')
+  return {
+    id: String(item?.id || `ai_kw_${index + 1}_${value}`),
+    category: String(item?.category || 'AI关键词').slice(0, 16),
+    value,
+    reason: String(item?.reason || 'DeepSeek 结合主题、内容大脑和业务目标筛选。').slice(0, 90),
+    priority: priority === 'high' || priority === 'low' ? priority : 'medium',
+  }
+}
+
+function mergeKeywordInsights(primary: KeywordInsight[], fallback: KeywordInsight[]) {
+  const out: KeywordInsight[] = []
+  const seen = new Set<string>()
+  ;[...primary, ...fallback].forEach((item, index) => {
+    const normalized = normalizeKeywordInsight(item, index)
+    if (!normalized) return
+    const key = normalized.value.toLowerCase()
+    if (seen.has(key)) return
+    seen.add(key)
+    out.push(normalized)
+  })
+  return out.slice(0, 22)
 }
 
 type Props = {
@@ -523,30 +570,35 @@ function finalStatus(job: JobPayload | null) {
 }
 
 export default function VideoCreationWizard({ project, setProject, goTab }: Props) {
-  const [step, setStep] = useState<WizardStep>(1)
-  const [sourceMode, setSourceMode] = useState<SourceMode>('custom')
-  const [topic, setTopic] = useState(project.topic || DEFAULT_TOPIC)
-  const [market, setMarket] = useState(project.market || DEFAULT_MARKET)
-  const [city, setCity] = useState(String(project.city || inferCity(`${project.topic} ${project.script}`)))
-  const [contentType, setContentType] = useState<ContentType>(String(project.contentType || 'investment') as ContentType)
-  const [scriptMode, setScriptMode] = useState<ScriptMode>(String(project.scriptMode || project.script_mode || 'professional') as ScriptMode)
-  const [targetDuration, setTargetDuration] = useState(Number(project.targetDuration || 20))
-  const [competitorSource, setCompetitorSource] = useState(String(project.competitorSource || ''))
-  const [manualKeywords, setManualKeywords] = useState(String(project.manualKeywords || ''))
-  const [script, setScript] = useState(String(project.script || ''))
-  const [selectedSegmentId, setSelectedSegmentId] = useState('seg_1')
-  const [voiceSettings, setVoiceSettings] = useState<Record<string, SegmentVoiceSetting>>({})
-  const [shotPlan, setShotPlan] = useState<ShotPlan[]>([])
-  const [selectedShotId, setSelectedShotId] = useState('shot_1')
-  const [jobId, setJobId] = useState('')
-  const [job, setJob] = useState<JobPayload | null>(null)
+  const initialDraft = useMemo(() => loadWizardDraft(), [])
+  const [step, setStep] = useState<WizardStep>((Number(initialDraft.step || 1) as WizardStep) || 1)
+  const [sourceMode, setSourceMode] = useState<SourceMode>((initialDraft.sourceMode || 'custom') as SourceMode)
+  const [topic, setTopic] = useState(String(project.topic || initialDraft.topic || DEFAULT_TOPIC))
+  const [market, setMarket] = useState(String(project.market || initialDraft.market || DEFAULT_MARKET))
+  const [city, setCity] = useState(String(project.city || initialDraft.city || inferCity(`${project.topic || initialDraft.topic} ${project.script || initialDraft.script}`)))
+  const [contentType, setContentType] = useState<ContentType>(String(project.contentType || initialDraft.contentType || 'investment') as ContentType)
+  const [scriptMode, setScriptMode] = useState<ScriptMode>(String(project.scriptMode || project.script_mode || initialDraft.scriptMode || 'professional') as ScriptMode)
+  const [targetDuration, setTargetDuration] = useState(Number(project.targetDuration || initialDraft.targetDuration || 30))
+  const [competitorSource, setCompetitorSource] = useState(String(project.competitorSource || initialDraft.competitorSource || ''))
+  const [manualKeywords, setManualKeywords] = useState(String(project.manualKeywords || initialDraft.manualKeywords || ''))
+  const [manualKeywordDraft, setManualKeywordDraft] = useState('')
+  const [script, setScript] = useState(String(project.script || initialDraft.script || ''))
+  const [selectedSegmentId, setSelectedSegmentId] = useState(String(initialDraft.selectedSegmentId || 'seg_1'))
+  const [voiceSettings, setVoiceSettings] = useState<Record<string, SegmentVoiceSetting>>((initialDraft.voiceSettings || project.segment_voice_settings || {}) as Record<string, SegmentVoiceSetting>)
+  const [shotPlan, setShotPlan] = useState<ShotPlan[]>(Array.isArray(initialDraft.shotPlan) ? initialDraft.shotPlan : [])
+  const [selectedShotId, setSelectedShotId] = useState(String(initialDraft.selectedShotId || 'shot_1'))
+  const [jobId, setJobId] = useState(String(initialDraft.jobId || ''))
+  const [job, setJob] = useState<JobPayload | null>((initialDraft.job || null) as JobPayload | null)
   const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
   const [sourceBusy, setSourceBusy] = useState('')
   const [sourceError, setSourceError] = useState('')
-  const [sourceResult, setSourceResult] = useState<any>(null)
+  const [sourceResult, setSourceResult] = useState<any>(initialDraft.sourceResult || null)
   const [remoteBrainCards, setRemoteBrainCards] = useState<ContentBrainCard[]>([])
-  const [disabledKeywordValues, setDisabledKeywordValues] = useState<string[]>([])
+  const [disabledKeywordValues, setDisabledKeywordValues] = useState<string[]>(Array.isArray(initialDraft.disabledKeywordValues) ? initialDraft.disabledKeywordValues : [])
+  const [aiKeywordInsights, setAiKeywordInsights] = useState<KeywordInsight[]>(Array.isArray(initialDraft.aiKeywordInsights) ? initialDraft.aiKeywordInsights : [])
+  const [aiBusy, setAiBusy] = useState('')
+  const [aiStatus, setAiStatus] = useState(String(initialDraft.aiStatus || ''))
 
   const approvedBrainCards = useMemo(() => {
     const merged = [...remoteBrainCards, ...loadApprovedContentBrainCards()]
@@ -559,18 +611,22 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
     }).slice(0, 12)
   }, [topic, city, market, remoteBrainCards])
   const brainKeywordText = useMemo(() => contentBrainKeywords(approvedBrainCards).join('，'), [approvedBrainCards])
-  const allKeywords = useMemo(
+  const localKeywordCandidates = useMemo(
     () => extractKeywords(
       `${topic}\n${script}\n${competitorSource}\n${approvedBrainCards.map((card) => `${card.title || ''} ${card.content || ''} ${(card.tags || []).join(' ')}`).join('\n')}`,
       [manualKeywords, brainKeywordText].filter(Boolean).join('，')
     ),
     [topic, script, competitorSource, manualKeywords, brainKeywordText, approvedBrainCards]
   )
+  const allKeywords = useMemo(
+    () => mergeKeywordInsights(aiKeywordInsights, localKeywordCandidates),
+    [aiKeywordInsights, localKeywordCandidates]
+  )
   const keywords = useMemo(() => {
     const disabled = new Set(disabledKeywordValues.map((x) => x.toLowerCase()))
     return allKeywords.filter((kw) => !disabled.has(kw.value.toLowerCase()))
   }, [allKeywords, disabledKeywordValues])
-  const segments = useMemo(() => attachSegmentKeywords(splitScript(script || generateScript(topic, city, targetDuration, contentType, keywords, scriptMode)), keywords), [script, topic, city, targetDuration, contentType, keywords, scriptMode])
+  const segments = useMemo(() => attachSegmentKeywords(splitScript(script), keywords), [script, keywords])
   const selectedSegment = segments.find((segment) => segment.id === selectedSegmentId) || segments[0]
   const selectedSetting = selectedSegment ? (voiceSettings[selectedSegment.id] || inferVoiceSetting(selectedSegment, Math.max(0, selectedSegment.index - 1), segments.length, scriptMode)) : null
   const selectedShot = shotPlan.find((shot) => shot.id === selectedShotId) || shotPlan[0]
@@ -604,10 +660,7 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
   }, [topic, city, market])
 
   useEffect(() => {
-    if (!script) {
-      const generated = generateScript(topic, city, targetDuration, contentType, keywords, scriptMode)
-      setScript(generated)
-    }
+    if (!script) setAiStatus('还没有生成文案。请在第一步点击「调用 DeepSeek 生成文案」，不会再本地秒出假文案。')
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -654,6 +707,35 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
   }, [jobId, busy])
 
 
+  useEffect(() => {
+    saveWizardDraft({
+      step,
+      sourceMode,
+      topic,
+      market,
+      city,
+      contentType,
+      scriptMode,
+      targetDuration,
+      competitorSource,
+      manualKeywords,
+      script,
+      selectedSegmentId,
+      voiceSettings,
+      shotPlan,
+      selectedShotId,
+      jobId,
+      job,
+      sourceResult,
+      disabledKeywordValues,
+      aiKeywordInsights,
+      aiStatus,
+      savedAt: new Date().toISOString(),
+    })
+  }, [step, sourceMode, topic, market, city, contentType, scriptMode, targetDuration, competitorSource, manualKeywords, script, selectedSegmentId, voiceSettings, shotPlan, selectedShotId, jobId, job, sourceResult, disabledKeywordValues, aiKeywordInsights, aiStatus])
+
+
+
   function applySourceMode(nextMode: SourceMode) {
     setSourceMode(nextMode)
     setSourceError('')
@@ -677,7 +759,7 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
     setSourceResult(null)
 
     if (sourceMode === 'custom') {
-      rebuildScript()
+      await aiGenerateScriptAndVoice(null)
       return
     }
 
@@ -745,7 +827,7 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
         collector_source_result: data,
         contentInsights: [...asArray(project.contentInsights), { source_mode: sourceMode, source: competitorSource, result: data, note: sourceNote }],
       })
-      rebuildScript()
+      await aiGenerateScriptAndVoice(data)
     } catch (err: any) {
       setSourceError(err?.message || String(err))
     } finally {
@@ -769,6 +851,8 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
       competitorSource,
       sourceMode,
       keyword_insights: keywords,
+      ai_keyword_insights: aiKeywordInsights,
+      ai_status: aiStatus,
       content_brain_context: approvedBrainCards,
       script_segments: segments,
       segment_voice_settings: voiceSettings,
@@ -781,6 +865,136 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
     return next
   }
 
+  function normalizeBackendSegments(rawSegments: any[], nextScript: string, activeKeywords: KeywordInsight[]) {
+    const base = Array.isArray(rawSegments) && rawSegments.length
+      ? rawSegments.map((item: any, index: number) => ({
+        id: String(item?.id || `seg_${index + 1}`),
+        index: Number(item?.index || index + 1),
+        text: String(item?.text || '').trim(),
+        keywords: [],
+      })).filter((item: ScriptSegment) => item.text)
+      : splitScript(nextScript)
+    return attachSegmentKeywords(base, activeKeywords)
+  }
+
+  function wizardAiPayload(sourceData: any = sourceResult) {
+    return {
+      topic,
+      market,
+      city: cityLabel(city),
+      city_key: city,
+      content_type: contentType,
+      script_mode: scriptMode,
+      target_duration_seconds: targetDuration,
+      manual_keywords: manualKeywords,
+      competitor_source: competitorSource,
+      content_brain_context: approvedBrainCards,
+      source_result: sourceData,
+      current_script: script,
+      require_llm: true,
+    }
+  }
+
+  async function aiAnalyzeKeywords() {
+    setError('')
+    setSourceError('')
+    setAiBusy('DeepSeek 正在分析关键词')
+    setAiStatus('正在调用 DeepSeek 结合主题、内容大脑、手动词和采集上下文筛选关键词...')
+    try {
+      const data = await apiPost('/api/video/wizard-ai/analyze-keywords', wizardAiPayload(), 180000)
+      const next = Array.isArray(data?.keywords) ? data.keywords.map(normalizeKeywordInsight).filter(Boolean) as KeywordInsight[] : []
+      if (!next.length) throw new Error('DeepSeek 没有返回有效关键词。')
+      setAiKeywordInsights(next)
+      setDisabledKeywordValues([])
+      setAiStatus(`DeepSeek 已筛出 ${next.length} 个有效关键词，已过滤 62、模板名和泛词。`)
+      setProject({ ...project, ai_keyword_insights: next, ai_status: `DeepSeek 已筛出 ${next.length} 个关键词` })
+      return next
+    } catch (err: any) {
+      const msg = err?.message || String(err)
+      setAiStatus(`DeepSeek 关键词分析失败：${msg}`)
+      setError(msg)
+      throw err
+    } finally {
+      setAiBusy('')
+    }
+  }
+
+  async function aiTuneVoiceAll(nextScript = script, nextSegments = segments, activeKeywords = keywords) {
+    setError('')
+    setAiBusy('DeepSeek 正在判断语气情绪')
+    setAiStatus('正在调用 DeepSeek 逐句判断语气、情绪、语速、音量和停顿...')
+    try {
+      const data = await apiPost('/api/video/wizard-ai/tune-voice', {
+        script: nextScript,
+        script_mode: scriptMode,
+        keywords: activeKeywords,
+        script_segments: nextSegments,
+        require_llm: true,
+      }, 180000)
+      const nextSettings = data?.segment_voice_settings || {}
+      if (!Object.keys(nextSettings).length) throw new Error('DeepSeek 没有返回逐句配音设置。')
+      setVoiceSettings(nextSettings)
+      setAiStatus(`DeepSeek 已完成 ${Object.keys(nextSettings).length} 句语气/情绪/停顿判断。`)
+      setProject({ ...project, segment_voice_settings: nextSettings, script_segments: nextSegments, ai_status: 'DeepSeek 已完成逐句配音判断' })
+      return nextSettings
+    } catch (err: any) {
+      const msg = err?.message || String(err)
+      setAiStatus(`DeepSeek 逐句配音失败：${msg}`)
+      setError(msg)
+      throw err
+    } finally {
+      setAiBusy('')
+    }
+  }
+
+  async function aiGenerateScriptAndVoice(sourceData: any = sourceResult) {
+    setError('')
+    setSourceError('')
+    setAiBusy('DeepSeek 正在生成文案')
+    setAiStatus('正在调用 DeepSeek 结合内容大脑、关键词和业务目标生成文案，不再本地秒出假文案...')
+    try {
+      let activeKeywords = keywords
+      if (!aiKeywordInsights.length) {
+        const keywordData = await apiPost('/api/video/wizard-ai/analyze-keywords', wizardAiPayload(sourceData), 180000)
+        const nextAiKeywords = Array.isArray(keywordData?.keywords) ? keywordData.keywords.map(normalizeKeywordInsight).filter(Boolean) as KeywordInsight[] : []
+        if (nextAiKeywords.length) {
+          setAiKeywordInsights(nextAiKeywords)
+          activeKeywords = mergeKeywordInsights(nextAiKeywords, localKeywordCandidates)
+          setDisabledKeywordValues([])
+        }
+      }
+
+      const data = await apiPost('/api/video/wizard-ai/generate-script', {
+        ...wizardAiPayload(sourceData),
+        keywords: activeKeywords,
+      }, 240000)
+      const nextScript = String(data?.script || '').trim()
+      if (!nextScript) throw new Error('DeepSeek 没有返回有效文案。')
+      const selectedKeywords = Array.isArray(data?.selected_keywords) ? data.selected_keywords.map(normalizeKeywordInsight).filter(Boolean) as KeywordInsight[] : []
+      if (selectedKeywords.length) {
+        activeKeywords = mergeKeywordInsights(selectedKeywords, activeKeywords)
+        setAiKeywordInsights(activeKeywords)
+      }
+      const nextSegments = normalizeBackendSegments(data?.segments || [], nextScript, activeKeywords)
+      const nextShots = generateShotPlan(nextSegments, targetDuration, city, project)
+      setScript(nextScript)
+      setShotPlan(nextShots)
+      setSelectedSegmentId(nextSegments[0]?.id || 'seg_1')
+      setSelectedShotId(nextShots[0]?.id || 'shot_1')
+      setAiStatus(`DeepSeek 文案生成完成：${nextScript.length} 字，${nextSegments.length} 句；继续判断逐句配音。`)
+      const nextVoiceSettings = await aiTuneVoiceAll(nextScript, nextSegments, activeKeywords)
+      syncProject({ script: nextScript, segments: nextSegments, script_segments: nextSegments, segment_voice_settings: nextVoiceSettings, manual_shot_plan: nextShots, shot_overrides: nextShots, ai_keyword_insights: activeKeywords, ai_status: 'DeepSeek 文案与逐句配音已完成' })
+      return nextScript
+    } catch (err: any) {
+      const msg = err?.message || String(err)
+      setAiStatus(`DeepSeek 文案生成失败：${msg}`)
+      setError(msg)
+      throw err
+    } finally {
+      setAiBusy('')
+    }
+  }
+
   function rebuildScript() {
     const nextScript = generateScript(topic, city, targetDuration, contentType, keywords, scriptMode)
     setScript(nextScript)
@@ -789,6 +1003,7 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
     setShotPlan(nextShots)
     setSelectedSegmentId(nextSegments[0]?.id || 'seg_1')
     setSelectedShotId(nextShots[0]?.id || 'shot_1')
+    setAiStatus('本地兜底文案已生成；正式使用请点 DeepSeek 生成。')
     syncProject({ script: nextScript, segments: nextSegments, manual_shot_plan: nextShots })
   }
 
@@ -801,12 +1016,18 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
   }
 
   function autoTuneVoiceAll() {
-    const next: Record<string, SegmentVoiceSetting> = {}
-    segments.forEach((segment, index) => {
-      next[segment.id] = inferVoiceSetting(segment, index, segments.length, scriptMode)
-    })
-    setVoiceSettings(next)
-    setProject({ ...project, segment_voice_settings: next, script_segments: segments })
+    void aiTuneVoiceAll()
+  }
+
+  function addManualKeyword() {
+    const words = manualKeywordDraft.split(/[，,、\s]+/).map(usefulKeyword).filter(Boolean)
+    if (!words.length) return
+    const current = manualKeywords.split(/[，,、\s]+/).map(usefulKeyword).filter(Boolean)
+    const merged = Array.from(new Set([...current, ...words]))
+    setManualKeywords(merged.join('，'))
+    setManualKeywordDraft('')
+    setAiKeywordInsights([])
+    setAiStatus('已加入手动关键词，请点 DeepSeek 分析关键词重新筛选。')
   }
 
   function toggleKeyword(value: string) {
@@ -868,6 +1089,8 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
       script_segments: segments,
       segment_voice_settings: voiceSettings,
       keyword_insights: keywords,
+      ai_keyword_insights: aiKeywordInsights,
+      ai_status: aiStatus,
       content_brain_context: approvedBrainCards,
       manual_shot_plan: finalShots,
       shot_overrides: finalShots,
@@ -974,12 +1197,19 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
             <label>文案模式<select value={scriptMode} onChange={(e) => setScriptMode(e.target.value as ScriptMode)}>{Object.entries(SCRIPT_LABELS).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label>
             <label>来源状态<input readOnly value={sourceResult ? '已下发/已返回采集任务' : sourceMode === 'custom' ? '不采集，直接生成' : '等待下发真实采集'} /></label>
           </div>
-          <label className="aiw-wideField">手动凸显关键词<textarea value={manualKeywords} onChange={(e) => setManualKeywords(e.target.value)} placeholder="例如：150万、华语、华人多、大平层、出租、流动性" /></label>
+          <div className="aiw-wideField aiw-manualKeywordBox">
+            <label>手动凸显关键词<textarea value={manualKeywords} onChange={(e) => { setManualKeywords(e.target.value); setAiKeywordInsights([]) }} placeholder="例如：150万、华语、华人多、大平层、出租、流动性" /></label>
+            <div className="aiw-inlineAdd">
+              <input value={manualKeywordDraft} onChange={(e) => setManualKeywordDraft(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addManualKeyword() } }} placeholder="单独加关键词，回车或点加入" />
+              <button className="aiw-muted" type="button" onClick={addManualKeyword}>加入关键词</button>
+            </div>
+            <p>手动词不会直接硬塞进口播，先进入候选，再由 DeepSeek 结合内容大脑筛选。</p>
+          </div>
           <div className="aiw-chipRow">
             {cityAnchors(city).map((item) => <span className="aiw-keywordPill" key={item}>{item}</span>)}
           </div>
           <div className="aiw-actions">
-            <button className="aiw-primary" onClick={runSourceAction} disabled={!!sourceBusy}>{sourceBusy ? '处理中...' : sourceMode === 'custom' ? '按当前设置生成文案' : '下发真实采集并生成文案'}</button>
+            <button className="aiw-primary" onClick={runSourceAction} disabled={!!sourceBusy || !!aiBusy}>{sourceBusy || aiBusy || (sourceMode === 'custom' ? '调用 DeepSeek 生成文案' : '下发采集后调用 DeepSeek 生成')}</button>
             <button className="aiw-muted" onClick={() => goTab('collect')}>去同行采集</button>
             <button className="aiw-muted" onClick={() => goTab('leads')}>去真实获客线索</button>
           </div>
@@ -990,9 +1220,11 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
           <h3>关键词选择</h3>
           <p>点击关键词启用/禁用。只有已启用关键词会进入文案、逐句配音、镜头计划和 OpenClaw 承接。</p>
           <div className="aiw-actions">
-            <button className="aiw-muted" type="button" onClick={smartPickKeywords}>AI 智能精选</button>
+            <button className="aiw-primary" type="button" onClick={() => void aiAnalyzeKeywords()} disabled={!!aiBusy}>{aiBusy === 'DeepSeek 正在分析关键词' ? 'DeepSeek 分析中...' : 'DeepSeek 分析关键词'}</button>
+            <button className="aiw-muted" type="button" onClick={smartPickKeywords}>按高优先级筛选</button>
             <button className="aiw-muted" type="button" onClick={() => setDisabledKeywordValues([])}>全选关键词</button>
           </div>
+          {aiStatus && <div className="aiw-info">{aiStatus}</div>}
           <div className="aiw-keywordGrid">
             {allKeywords.map((kw) => {
               const off = disabledKeywordValues.some((item) => item.toLowerCase() === kw.value.toLowerCase())
@@ -1026,7 +1258,7 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
           <p>建议 {min}-{max} 字，当前 {script.length} 字。可以手动改文案。</p>
           <div className="aiw-chipRow">{keywords.slice(0, 10).map((kw) => <span className="aiw-keywordPill" key={kw.id}>{kw.value}</span>)}</div>
           <div className="aiw-actions">
-            <button className="aiw-primary" type="button" onClick={() => { rebuildScript(); window.setTimeout(autoTuneVoiceAll, 0) }}>AI 重写文案并重调配音</button>
+            <button className="aiw-primary" type="button" disabled={!!aiBusy} onClick={() => void aiGenerateScriptAndVoice()}>{aiBusy || 'DeepSeek 重写文案并重调配音'}</button>
             <button className="aiw-muted" type="button" onClick={() => setStep(1)}>回第一步选关键词</button>
           </div>
           <textarea className="aiw-scriptTextarea" value={script} onChange={(e) => setScript(e.target.value)} />
@@ -1034,7 +1266,7 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
         <section className="aiw-stepCard">
           <h3>逐句配音</h3>
           <p>AI 会按句意自动判断语气、情绪、停顿；你也可以点某一句手动微调。</p>
-          <div className="aiw-actions"><button className="aiw-primary" type="button" onClick={autoTuneVoiceAll}>AI 自动调好全部句子</button></div>
+          <div className="aiw-actions"><button className="aiw-primary" type="button" disabled={!!aiBusy} onClick={autoTuneVoiceAll}>{aiBusy === 'DeepSeek 正在判断语气情绪' ? 'DeepSeek 判断中...' : 'DeepSeek 自动调好全部句子'}</button></div>
           <div className="aiw-segmentPicker">
             {segments.map((segment) => (
               <button key={segment.id} className={selectedSegment?.id === segment.id ? 'active' : ''} onClick={() => setSelectedSegmentId(segment.id)}>

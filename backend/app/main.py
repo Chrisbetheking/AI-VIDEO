@@ -5682,3 +5682,13 @@ except Exception as _content_brain_exc:
     print("CONTENT_BRAIN_PROVIDER_LOAD_FAILED", _content_brain_exc)
 # ===== /CONTENT BRAIN BACKEND PROVIDER =====
 
+
+
+# ===== WIZARD AI DEEPSEEK PROVIDER =====
+try:
+    from app.services.wizard_ai_provider import install_wizard_ai
+    install_wizard_ai(app)
+except Exception as _wizard_ai_exc:
+    print("WIZARD_AI_PROVIDER_LOAD_FAILED", _wizard_ai_exc)
+# ===== /WIZARD AI DEEPSEEK PROVIDER =====
+

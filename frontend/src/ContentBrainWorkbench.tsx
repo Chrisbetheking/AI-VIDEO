@@ -9,6 +9,7 @@ type Props = {
 
 type BrainStatus = 'pending' | 'approved' | 'rejected'
 type BrainType = 'lead_question' | 'topic' | 'hook' | 'script' | 'visual_rule' | 'market_note' | 'reply_template'
+type BrainLane = 'video' | 'reply' | 'visual' | 'all'
 
 type BrainCard = {
   id: string
@@ -37,6 +38,30 @@ const TYPE_LABELS: Record<BrainType, string> = {
   visual_rule: '画面规则',
   market_note: '市场知识',
   reply_template: '回复模板',
+}
+
+const LANE_LABELS: Record<BrainLane, string> = {
+  video: '视频选题库',
+  reply: '回复话术库',
+  visual: '镜头规则库',
+  all: '全部内容',
+}
+
+function cardLane(card: Pick<BrainCard, 'type' | 'title' | 'content' | 'tags'>): BrainLane {
+  if (card.type === 'reply_template' || card.type === 'lead_question') return 'reply'
+  if (card.type === 'visual_rule') return 'visual'
+  return 'video'
+}
+
+function matchLane(card: BrainCard, lane: BrainLane) {
+  return lane === 'all' || cardLane(card) === lane
+}
+
+function laneHelp(lane: BrainLane) {
+  if (lane === 'video') return '只放选题、钩子、口播、市场知识，给视频创作用；不混回复话术。'
+  if (lane === 'reply') return '只放客户问题、评论区回复、私信跟进话术，给 OpenClaw/人工销售用。'
+  if (lane === 'visual') return '只放镜头组合、素材规则、画面禁忌，给第三步镜头和 R2 素材匹配用。'
+  return '管理员视角，查看所有内容。'
 }
 
 function nowText() {
@@ -226,6 +251,8 @@ export default function ContentBrainWorkbench({ project, setProject, goTab }: Pr
   const [manualTags, setManualTags] = useState('马来西亚,吉隆坡,房产')
   const [filter, setFilter] = useState<'all' | BrainStatus>('approved')
   const [typeFilter, setTypeFilter] = useState<'all' | BrainType>('all')
+  const [brainLane, setBrainLane] = useState<BrainLane>('video')
+  const [manualType, setManualType] = useState<BrainType>('topic')
   const [backendStatus, setBackendStatus] = useState('正在连接后端内容大脑')
   const [backendBusy, setBackendBusy] = useState('')
   const [backendError, setBackendError] = useState('')
@@ -235,7 +262,15 @@ export default function ContentBrainWorkbench({ project, setProject, goTab }: Pr
 
   const approved = cards.filter((card) => card.status === 'approved')
   const pending = [...inbox, ...cards.filter((card) => card.status === 'pending')]
+  const laneCounts = useMemo(() => ({
+    video: cards.filter((card) => card.status === 'approved' && cardLane(card) === 'video').length,
+    reply: cards.filter((card) => card.status === 'approved' && cardLane(card) === 'reply').length,
+    visual: cards.filter((card) => card.status === 'approved' && cardLane(card) === 'visual').length,
+    all: cards.filter((card) => card.status === 'approved').length,
+  }), [cards])
+  const visiblePending = pending.filter((card) => matchLane(card, brainLane)).slice(0, 12)
   const filteredCards = cards.filter((card) => {
+    if (!matchLane(card, brainLane)) return false
     if (filter !== 'all' && card.status !== filter) return false
     if (typeFilter !== 'all' && card.type !== typeFilter) return false
     return true
@@ -325,13 +360,13 @@ export default function ContentBrainWorkbench({ project, setProject, goTab }: Pr
     const card: BrainCard = {
       id: uid('manual'),
       title: manualTitle.trim() || manualContent.slice(0, 24),
-      type: 'market_note',
-      source: 'manual_input',
+      type: manualType,
+      source: `manual_input_${cardLane({ type: manualType, title: manualTitle, content: manualContent, tags: splitTags(manualTags) })}`,
       content: manualContent.trim() || manualTitle.trim(),
       tags: splitTags(manualTags),
       score: 72,
       status: 'approved',
-      decisionReason: '人工手动录入，默认进入内容大脑。',
+      decisionReason: `人工手动录入，默认进入${LANE_LABELS[cardLane({ type: manualType, title: manualTitle, content: manualContent, tags: splitTags(manualTags) })]}。`,
       createdAt: nowText(),
     }
     setCards((current) => dedupe([card, ...current]))
@@ -346,9 +381,22 @@ export default function ContentBrainWorkbench({ project, setProject, goTab }: Pr
     setManualContent('')
   }
 
+  async function copyCardContent(card: BrainCard) {
+    const text = card.type === 'lead_question'
+      ? `客户问题：${card.content}\n参考回复：这个问题要结合预算、用途和目标区域看。你是偏自住还是投资？`
+      : card.content
+    try {
+      await navigator.clipboard.writeText(text)
+      setBackendStatus(`已复制：${card.title}`)
+    } catch {
+      setBackendStatus('复制失败，可以手动选中文字复制')
+    }
+  }
+
   async function useCardForVideo(card: BrainCard) {
-    const script = generateLocalScript(card.title, project.market || '马来西亚', project.targetDuration || 20)
-    const nextProject = projectWithScript({ ...project, topic: card.title, content_brain_context: [card], manualKeywords: card.tags.join('，') }, script, { title: card.title })
+    const videoTitle = card.type === 'reply_template' ? `把这个客户问题拍成视频：${card.title}` : card.title
+    const script = generateLocalScript(videoTitle, project.market || '马来西亚', project.targetDuration || 20)
+    const nextProject = projectWithScript({ ...project, topic: videoTitle, content_brain_context: [card], manualKeywords: card.tags.join('，') }, script, { title: videoTitle })
     setProject(nextProject)
     setCards((current) => current.map((item) => item.id === card.id ? { ...item, usedCount: Number(item.usedCount || 0) + 1, updatedAt: nowText() } : item))
     try { if (card.id) await apiPost(`/api/video/content-brain/mark-used/${card.id}`, {}, 30000) } catch {}
@@ -406,18 +454,30 @@ export default function ContentBrainWorkbench({ project, setProject, goTab }: Pr
         <div>
           <p className="aiw-eyebrow">CONTENT BRAIN / OBSIDIAN READY</p>
           <h2>内容大脑</h2>
-          <p>把 OpenClaw 客户问题、同行采集、已生成文案和 Obsidian/Markdown 笔记沉淀成知识库；先审核，再进入视频创作。</p>
+          <p>把内容大脑分成三条线：视频选题库、回复话术库、镜头规则库。视频用视频的，销售回复用回复的，不再混在一起。</p>
         </div>
         <span className="aiw-badge ok">已批准 {approved.length} 条 · 待审核 {pending.length} 条</span>
       </div>
 
       <div className="aiw-statusLine"><b>{backendStatus}</b>{backendBusy && <span>处理中：{backendBusy}</span>}{backendError && <em>{backendError}</em>}<button className="aiw-muted small" onClick={refreshBackendBrain}>刷新后端内容大脑</button></div>
 
+      <div className="aiw-brainToolbar">
+        <h3>{LANE_LABELS[brainLane]}</h3>
+        <div className="aiw-actions">
+          {(['video', 'reply', 'visual', 'all'] as BrainLane[]).map((lane) => (
+            <button key={lane} className={brainLane === lane ? 'aiw-primary' : 'aiw-muted'} onClick={() => setBrainLane(lane)}>
+              {LANE_LABELS[lane]} · {laneCounts[lane]}
+            </button>
+          ))}
+        </div>
+        <p className="aiw-note">{laneHelp(brainLane)}</p>
+      </div>
+
       <div className="aiw-brainLoop">
         <div><b>1 OpenClaw</b><span>真实评论 / 线索问题</span></div>
         <div><b>2 判断入库</b><span>A/B线索、可复用问题、好钩子</span></div>
-        <div><b>3 内容大脑</b><span>主题、钩子、客户问题、画面规则</span></div>
-        <div><b>4 视频创作</b><span>反哺文案、关键词、镜头和 CTA</span></div>
+        <div><b>3 分库入脑</b><span>视频选题 / 回复话术 / 镜头规则</span></div>
+        <div><b>4 分别调用</b><span>视频创作、OpenClaw 回复、R2 镜头匹配各用各的</span></div>
       </div>
 
       <div className="aiw-stepGrid two">
@@ -434,6 +494,7 @@ export default function ContentBrainWorkbench({ project, setProject, goTab }: Pr
 
           <div className="aiw-brainManual">
             <h4>手动新增一条知识</h4>
+            <label>入库分区<select value={manualType} onChange={(e) => setManualType(e.target.value as BrainType)}><option value="topic">视频选题</option><option value="hook">开头钩子</option><option value="script">口播文案</option><option value="market_note">市场知识</option><option value="lead_question">客户问题/截流问题</option><option value="reply_template">回复话术</option><option value="visual_rule">镜头规则</option></select></label>
             <label>标题<input value={manualTitle} onChange={(e) => setManualTitle(e.target.value)} placeholder="例如：吉隆坡华语客户沟通点" /></label>
             <label>内容<textarea value={manualContent} onChange={(e) => setManualContent(e.target.value)} placeholder="写下客户问题、选题角度、画面规则或回复模板" /></label>
             <label>标签<input value={manualTags} onChange={(e) => setManualTags(e.target.value)} /></label>
@@ -442,10 +503,10 @@ export default function ContentBrainWorkbench({ project, setProject, goTab }: Pr
         </section>
 
         <section className="aiw-stepCard">
-          <h3>待审核：该不该放进去？</h3>
-          <p>不是所有生成内容都值得入库。只保留真实问题、高频问题、好钩子、可复用画面规则和高转化文案。</p>
+          <h3>待审核：{LANE_LABELS[brainLane]}</h3>
+          <p>当前只审核这个分区的内容。回复话术不会混进视频选题，镜头规则也不会混进评论回复。</p>
           <div className="aiw-brainInbox">
-            {pending.slice(0, 12).map((card) => (
+            {visiblePending.map((card) => (
               <article className="aiw-brainCard pending" key={card.id}>
                 <div><b>{card.title}</b><span>{TYPE_LABELS[card.type]} · {card.source} · {card.score}</span></div>
                 <p>{card.content.slice(0, 180)}</p>
@@ -454,18 +515,19 @@ export default function ContentBrainWorkbench({ project, setProject, goTab }: Pr
                 <div className="aiw-actions">
                   <button className="aiw-primary" onClick={() => setCardStatus(card, 'approved', '人工确认：值得进入内容大脑。')}>放进去</button>
                   <button className="aiw-muted" onClick={() => setCardStatus(card, 'rejected', '人工确认：暂不沉淀。')}>不放</button>
-                  <button className="aiw-muted" onClick={() => useCardForVideo(card)}>直接做视频</button>
+                  {cardLane(card) === 'reply' && <button className="aiw-muted" onClick={() => copyCardContent(card)}>复制/作为回复参考</button>}
+                  {cardLane(card) !== 'visual' && <button className="aiw-muted" onClick={() => useCardForVideo(card)}>{cardLane(card) === 'reply' ? '转成视频选题' : '直接做视频'}</button>}
                 </div>
               </article>
             ))}
-            {!pending.length && <div className="aiw-empty">暂无待审核。可以从 OpenClaw、当前视频或 Markdown 导入。</div>}
+            {!visiblePending.length && <div className="aiw-empty">这个分区暂无待审核。可以切换分区，或从 OpenClaw、当前视频、Markdown 导入。</div>}
           </div>
         </section>
       </div>
 
       <section className="aiw-stepCard">
         <div className="aiw-brainToolbar">
-          <h3>知识库</h3>
+          <h3>{LANE_LABELS[brainLane]} · 知识库</h3>
           <div className="aiw-actions">
             <select value={filter} onChange={(e) => setFilter(e.target.value as any)}><option value="approved">已批准</option><option value="pending">待审核</option><option value="rejected">已拒绝</option><option value="all">全部</option></select>
             <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value as any)}><option value="all">全部类型</option>{Object.entries(TYPE_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select>
@@ -482,7 +544,8 @@ export default function ContentBrainWorkbench({ project, setProject, goTab }: Pr
               <p>{card.content.slice(0, 220)}</p>
               <div className="aiw-chipRow">{card.tags.slice(0, 8).map((tag) => <span className="aiw-keywordPill" key={tag}>{tag}</span>)}</div>
               <div className="aiw-actions">
-                <button className="aiw-muted" onClick={() => useCardForVideo(card)}>带入视频创作</button>
+                {cardLane(card) === 'reply' && <button className="aiw-muted" onClick={() => copyCardContent(card)}>复制回复/跟进参考</button>}
+                {cardLane(card) !== 'visual' && <button className="aiw-muted" onClick={() => useCardForVideo(card)}>{cardLane(card) === 'reply' ? '转成视频选题' : '带入视频创作'}</button>}
                 {card.status !== 'approved' && <button className="aiw-primary" onClick={() => setCardStatus(card, 'approved')}>批准</button>}
                 {card.status !== 'rejected' && <button className="aiw-muted" onClick={() => setCardStatus(card, 'rejected')}>拒绝</button>}
               </div>
