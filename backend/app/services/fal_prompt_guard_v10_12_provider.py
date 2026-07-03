@@ -10,19 +10,19 @@ _INSTALLED = False
 NEGATIVE = (
     "collage, split screen, multi panel, multi-panel, panels, grid, storyboard, contact sheet, brochure, poster, magazine layout, "
     "montage board, picture in picture, frame within frame, black border, white border, static slideshow, single still image, "
-    "documents, papers, file folder, chart, graph, calculator, UI, screenshot, readable text, fake text, logo, watermark, "
+    "people, human, hands, fingers, pen, pencil, documents, papers, file folder, floorplan, floor plan, blueprint, office desk, office table, meeting room, chart, graph, calculator, UI, screenshot, readable text, fake text, logo, watermark, "
     "Petronas Twin Towers, KLCC Twin Towers, landmark towers, repeated skyline, beach, ocean, island"
 )
 
 APPEND_GUARD = (
     " Full-screen vertical 9:16 realistic phone video. One normal camera view per clip with natural camera motion. "
     "No collage, no split screen, no grid, no poster, no brochure, no storyboard, no picture-in-picture. "
-    "No readable text, no fake labels, no logo, no watermark, no documents, no charts, no calculator. "
+    "No readable text, no fake labels, no logo, no watermark, no people, no hands, no papers, no floorplans, no office table, no documents, no charts, no calculator. "
     "Do not show KLCC or Petronas Twin Towers."
 )
 
 DEFAULT_PROMPT = (
-    "vertical 9:16 realistic smartphone video of a modern Kuala Lumpur condominium interior, slow natural camera movement, "
+    "vertical 9:16 realistic smartphone video of a bright furnished Kuala Lumpur condominium living room interior property tour, no people no hands no documents, slow natural camera movement, "
     "premium but realistic, full-screen single camera view, no readable text, no people"
 )
 
@@ -55,7 +55,7 @@ def _rewrite_args(arguments: Any) -> Any:
                 args[k] = 5.0
     args["prompt_optimizer"] = False
     try:
-        print("V10_12_COMPAT_FAL_FINAL_ARGUMENTS=" + json.dumps(args, ensure_ascii=False)[:3000], flush=True)
+        print("V10_12_FAL_FINAL_ARGUMENTS=" + json.dumps(args, ensure_ascii=False)[:3000], flush=True)
     except Exception:
         pass
     return args
@@ -103,11 +103,11 @@ def install_fal_prompt_guard_v10_12(app: FastAPI | None = None) -> None:
                 return base_subscribe(*args, **kwargs)
             fal_client.subscribe = guarded_subscribe
 
-        setattr(fal_client, "_ai_video_v10_12_compat_prompt_guard", True)
+        setattr(fal_client, "_ai_video_v10_12_prompt_guard", True)
         _INSTALLED = True
-        print("V10_12_COMPAT_FAL_PROMPT_GUARD_INSTALLED", flush=True)
+        print("V10_12_FAL_PROMPT_GUARD_INSTALLED", flush=True)
     except Exception as exc:
-        print("V10_12_COMPAT_FAL_PROMPT_GUARD_INSTALL_FAILED", exc, flush=True)
+        print("V10_12_FAL_PROMPT_GUARD_INSTALL_FAILED", exc, flush=True)
     if app is not None:
         try:
             app.include_router(router)
@@ -126,4 +126,6 @@ def health() -> dict[str, Any]:
         "no_fixed_static_prompt": True,
         "no_collage_split_screen": True,
         "no_readable_text": True,
+        "no_office_papers_floorplans": True,
+        "force_condo_tour_visuals": True,
     }

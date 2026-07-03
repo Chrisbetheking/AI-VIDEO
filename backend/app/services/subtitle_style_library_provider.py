@@ -45,12 +45,12 @@ SUBTITLE_STYLES: list[dict[str, Any]] = [
         "ass_primary": "&H00FFFFFF",
         "ass_outline": "&H00000000",
         "ass_back": "&H00000000",
-        "font_size": 92,
-        "outline": 9,
+        "font_size": 112,
+        "outline": 12,
         "shadow": 1,
-        "margin_v": 285,
+        "margin_v": 330,
         "border_style": 1,
-        "max_chars": 10,
+        "max_chars": 9,
         "ass_prefix": r"{\fad(60,60)\blur0.35\t(0,120,\fscx108\fscy108)\t(120,220,\fscx100\fscy100)}",
     },
     {
@@ -63,10 +63,10 @@ SUBTITLE_STYLES: list[dict[str, Any]] = [
         "ass_primary": "&H005CE4FF",
         "ass_outline": "&H00000000",
         "ass_back": "&H00000000",
-        "font_size": 94,
-        "outline": 10,
+        "font_size": 116,
+        "outline": 13,
         "shadow": 1,
-        "margin_v": 285,
+        "margin_v": 330,
         "border_style": 1,
         "max_chars": 9,
         "ass_prefix": r"{\fad(60,60)\blur0.35\t(0,120,\fscx108\fscy108)\t(120,220,\fscx100\fscy100)}",
@@ -81,12 +81,12 @@ SUBTITLE_STYLES: list[dict[str, Any]] = [
         "ass_primary": "&H00FFFFFF",
         "ass_outline": "&H00000000",
         "ass_back": "&H99000000",
-        "font_size": 80,
+        "font_size": 98,
         "outline": 1,
         "shadow": 0,
         "margin_v": 275,
         "border_style": 4,
-        "max_chars": 13,
+        "max_chars": 10,
         "ass_prefix": r"{\fad(70,70)}",
     },
     {
@@ -185,9 +185,14 @@ def _ass_time(seconds: float) -> str:
 
 
 
+def _to_cn_digits(text: str) -> str:
+    table = str.maketrans({"0":"零","1":"一","2":"二","3":"三","4":"四","5":"五","6":"六","7":"七","8":"八","9":"九"})
+    return str(text or "").translate(table)
+
+
 def _strip_subtitle_punctuation(text: str) -> str:
-    value = re.sub(r"\s+", "", str(text or "").strip())
-    # 纯文字字幕：去掉中英文标点，只保留汉字、英文、数字和必要空格。
+    value = re.sub(r"\s+", "", _to_cn_digits(str(text or "")).strip())
+    # 纯文字字幕：去掉中英文标点，把 3/5/10 这种数字转成中文，避免口播字幕像 PPT。
     value = re.sub(r"[，。！？、；：,.!?;:\"'“”‘’（）()【】\[\]《》<>/\\|·•…—_-]+", "", value)
     return value.strip()
 
@@ -207,7 +212,7 @@ def _clean_keyword(value: str) -> str:
 def _ass_tag_for_highlight(style: dict[str, Any]) -> str:
     # ASS 使用 BGR 十六进制。这里用醒目的黄橙色，字体放大约 1.25 倍。
     base_size = int(style.get("font_size") or 90)
-    return r"{\1c&H003FE8FF&\fs" + str(int(base_size * 1.25)) + r"\fscx118\fscy118}"
+    return r"{\1c&H003FE8FF&\fs" + str(int(base_size * 1.36)) + r"\fscx130\fscy130}"
 
 
 def _ass_tag_reset(style: dict[str, Any]) -> str:
@@ -238,18 +243,17 @@ def _apply_keyword_highlight(text: str, keywords: Optional[list[str]], style: di
             pass
     return value
 
-def _ass_escape(text: str, max_chars: int = 10, keywords: Optional[list[str]] = None, style: Optional[dict[str, Any]] = None) -> str:
+def _ass_escape(text: str, max_chars: int = 9, keywords: Optional[list[str]] = None, style: Optional[dict[str, Any]] = None) -> str:
     style = style or {}
     value = _strip_subtitle_punctuation(str(text or ""))
     value = value.replace("{", "（").replace("}", "）")
-    max_chars = max(7, min(int(max_chars or 10), 14))
-    # 抖音口播字幕：短块、大字、纯文字，不带标点。一屏最多两行。
+    max_chars = max(6, min(int(max_chars or 9), 12))
+    # V10.16: one screen = one short line. Do not split inside one cue with \N,
+    # because that caused ugly breaks like “生活还不 / 方便”.
     if len(value) > max_chars:
-        chunks = [value[i:i + max_chars] for i in range(0, len(value), max_chars)]
-        value = r"\N".join(chunks[:2])
+        value = value[:max_chars]
     value = _apply_keyword_highlight(value, keywords=keywords, style=style)
     return value
-
 
 def _make_ass(cues: list[dict[str, Any]], style_id: str, prefix: str = "subtitle_style", keywords: Optional[list[str]] = None) -> Path:
     _ensure_dirs()
@@ -355,8 +359,8 @@ def _preview_svg(style: dict[str, Any]) -> str:
 <rect width="720" height="1280" fill="url(#g)"/>
 <rect x="80" y="940" width="560" height="110" rx="24" fill="{html.escape(bg)}" opacity="0.88"/>
 <rect x="140" y="1038" width="440" height="8" rx="4" fill="{html.escape(accent)}"/>
-<text x="360" y="985" text-anchor="middle" font-family="Arial, sans-serif" font-size="36" font-weight="800" fill="{html.escape(primary)}">吉隆坡买房，先看区域和用途</text>
-<text x="360" y="1026" text-anchor="middle" font-family="Arial, sans-serif" font-size="28" font-weight="700" fill="{html.escape(primary)}">预算、出租、转手要分开判断</text>
+<text x="360" y="985" text-anchor="middle" font-family="Arial, sans-serif" font-size="48" font-weight="800" fill="{html.escape(primary)}">吉隆坡买房，先看区域和用途</text>
+<text x="360" y="1026" text-anchor="middle" font-family="Arial, sans-serif" font-size="38" font-weight="700" fill="{html.escape(primary)}">预算、出租、转手要分开判断</text>
 </svg>'''
     return "data:image/svg+xml;base64," + base64.b64encode(svg.encode("utf-8")).decode("ascii")
 
@@ -381,7 +385,7 @@ class BurnRequest(BaseModel):
 @router.get("/health")
 def health() -> dict[str, Any]:
     _ensure_dirs()
-    return {"ok": True, "provider": "subtitle_style_library_v10_15", "style_count": len(SUBTITLE_STYLES), "punctuation_free": True, "keyword_highlight_scale": True, "large_douyin_font": True, "work_dir": str(WORK_DIR)}
+    return {"ok": True, "provider": "subtitle_style_library_v10_16", "style_count": len(SUBTITLE_STYLES), "punctuation_free": True, "keyword_highlight_scale": True, "large_douyin_font": True, "larger_keyword_highlight": True, "one_line_no_punctuation": True, "digits_converted_to_chinese": True, "work_dir": str(WORK_DIR)}
 
 
 @router.get("/styles")

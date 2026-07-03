@@ -285,8 +285,8 @@ def _tts(script: str, voice: str) -> tuple[float, str, Dict[str, Any]]:
 
 
 def _clean_subtitle_text(text: str) -> str:
-    value = re.sub(r"\s+", "", str(text or "").strip())
-    # 字幕只保留纯文字和英文数字，去掉逗号句号问号冒号引号等标点。
+    value = re.sub(r"\s+", "", _to_cn_digits(str(text or "")).strip())
+    # 字幕只保留纯文字，去掉标点并把阿拉伯数字转成中文数字。
     value = re.sub(r"[，。！？、；：,.!?;:\"'“”‘’（）()【】\[\]《》<>\/\\|·•…—_-]+", "", value)
     return value.strip()
 
@@ -332,55 +332,78 @@ def _extract_highlight_keywords(raw: Dict[str, Any], title: str, script: str) ->
 
 
 def _scene_prompts(city: str, topic: str, requested_count: int = 3) -> List[str]:
-    count = max(2, min(int(requested_count or 3), 4))
+    """V10.16: force real condo-tour visuals, not office paperwork.
+
+    The previous prompts still let fal drift into desks, floorplans, calculators and hands.
+    This version describes an EMPTY furnished apartment tour, with hard negative language
+    repeated in both prompt and negative_prompt.
+    """
+    count = max(3, min(int(requested_count or 3), 4))
     base_prefix = (
-        "vertical 9:16 realistic smartphone video, full screen single shot, not a collage, not split screen, "
-        "modern Kuala Lumpur condominium, premium but realistic, no readable text, no watermark, no logo, "
-        "no KLCC, no Petronas Twin Towers, no documents, no charts, no calculator"
+        "vertical 9:16 photorealistic smartphone property tour video, real furnished Kuala Lumpur condominium interior, "
+        "empty apartment, no people, no hands, no desk, no office, no paperwork, no floorplan, no blueprint, no brochure, no calculator, "
+        "no documents, no charts, no readable text, no logo, no watermark, no KLCC, no Petronas Twin Towers, "
+        "full screen single camera view, natural smooth camera movement, premium but realistic lighting"
     )
     scenes = [
-        "same apartment living room interior, wide angle, warm daylight, slow cinematic push in, natural handheld micro movement",
-        "same apartment balcony and floor to ceiling window area, city view without famous landmarks, slow left to right pan, calm premium residential feeling",
-        "same apartment open kitchen and dining area, clean counter, warm lighting, slow dolly move, realistic home viewing atmosphere",
-        "same condominium lobby or resident lounge, quiet luxury interior, slow forward movement, no people, no text signage",
+        "walk through a bright modern living room with sofa, coffee table, TV wall, curtains, warm daylight, slow forward push in like a real viewing tour",
+        "pan from living room to balcony and floor-to-ceiling windows, show city-facing residential view without famous landmarks, slow left-to-right camera movement",
+        "move through open kitchen and dining area inside the same condo, clean countertop, dining table, cabinets, warm residential lighting, slow dolly movement",
+        "gentle camera move inside master bedroom of the same condo, bed, wardrobe, bedside lights, clean realistic home viewing atmosphere",
     ]
     suffix = (
-        "Only one camera view in this clip. No montage, no multi panel, no grid, no brochure, no poster, "
-        "no storyboard, no picture in picture, no fake labels, no subtitles inside the generated video."
+        "This clip must look like real apartment viewing footage, not a business meeting. "
+        "Do not show any paper, hand, pen, construction plan, floor plan, office table, calculator, brochure, presentation board, poster, text overlay, split screen, grid, collage or slideshow. "
+        "No subtitles inside the generated video. No text anywhere in the image."
     )
     return [f"{base_prefix}. {scenes[i]}. {suffix}" for i in range(count)]
 
+def _to_cn_digits(text: str) -> str:
+    table = str.maketrans({"0":"零","1":"一","2":"二","3":"三","4":"四","5":"五","6":"六","7":"七","8":"八","9":"九"})
+    return str(text or "").translate(table)
 
-def _split_subtitle_chunks(script: str, max_chars: int = 10) -> List[str]:
-    text = re.sub(r"\s+", " ", str(script or "").strip())
+
+def _split_subtitle_chunks(script: str, max_chars: int = 9) -> List[str]:
+    """Make Douyin-style subtitle chunks: pure text, one short phrase per cue.
+
+    Avoid the old ugly two-line split like “生活还不 / 方便”.
+    """
+    text = _to_cn_digits(str(script or ""))
+    text = re.sub(r"\s+", " ", text.strip())
     if not text:
         return []
-    # 先按标点切语义，再删除标点；最终字幕绝不带标点。
+    # punctuation marks are boundaries first, then removed by _clean_subtitle_text
     rough = [x.strip() for x in re.split(r"[。！？!?；;，,、：:\n]+", text) if x.strip()] or [text]
+    preferred_breakers = ["因为", "但是", "如果", "不是", "而是", "先看", "再看", "第一", "第二", "第三", "自住", "投资", "出租", "区域", "配套", "通勤", "生活"]
     out: List[str] = []
     for piece in rough:
         piece = _clean_subtitle_text(piece)
         if not piece:
             continue
-        while len(piece) > max_chars:
-            out.append(piece[:max_chars])
-            piece = piece[max_chars:]
-        if piece:
-            out.append(piece)
-    # 合并太短的小块，但控制在抖音大字长度。
+        # Insert soft boundaries before important connector words when the phrase is too long.
+        if len(piece) > max_chars + 3:
+            for b in preferred_breakers:
+                piece = piece.replace(b, "|" + b)
+        for part in [x for x in piece.split("|") if x]:
+            part = _clean_subtitle_text(part)
+            while len(part) > max_chars:
+                # Keep the last chunk from being one lonely character.
+                cut = max_chars
+                rest = len(part) - cut
+                if rest == 1:
+                    cut -= 1
+                out.append(part[:cut])
+                part = part[cut:]
+            if part:
+                out.append(part)
+    # merge very short chunks only when it does not exceed max length
     merged: List[str] = []
-    buf = ""
     for part in out:
-        if buf and len(buf) + len(part) <= max_chars:
-            buf += part
+        if merged and len(merged[-1]) <= 3 and len(merged[-1]) + len(part) <= max_chars:
+            merged[-1] += part
         else:
-            if buf:
-                merged.append(buf)
-            buf = part
-    if buf:
-        merged.append(buf)
+            merged.append(part)
     return [x for x in merged if x]
-
 
 def _tts_segment_cues(tts_res: Dict[str, Any], duration: float) -> List[Dict[str, Any]]:
     # Try to use backend TTS per-segment timing if it exists. Different TTS providers use different keys.
@@ -419,7 +442,7 @@ def _subtitle_cues(script: str, duration: float, tts_res: Optional[Dict[str, Any
     if raw:
         refined: List[Dict[str, Any]] = []
         for cue in raw:
-            parts = _split_subtitle_chunks(str(cue.get("text") or ""), max_chars=12) or [str(cue.get("text") or "")]
+            parts = _split_subtitle_chunks(str(cue.get("text") or ""), max_chars=9) or [str(cue.get("text") or "")]
             st = float(cue.get("start") or 0)
             en = float(cue.get("end") or st + 1.0)
             span = max(0.5, en - st)
@@ -432,7 +455,7 @@ def _subtitle_cues(script: str, duration: float, tts_res: Optional[Dict[str, Any
                 cur = nxt
         return refined
 
-    parts = _split_subtitle_chunks(script, max_chars=12)
+    parts = _split_subtitle_chunks(script, max_chars=9)
     if not parts:
         return [{"text": script.strip(), "start": 0.05, "end": round(duration, 2)}]
     weights = [max(2, len(p)) for p in parts]
@@ -634,11 +657,13 @@ def _run(job_id: str, raw: Dict[str, Any]) -> None:
 def health() -> Dict[str, Any]:
     return {
         "ok": True,
-        "provider": "full_ai_one_scene_v10_15",
+        "provider": "full_ai_one_scene_v10_16",
         "single_scene": True,
         "shot_count": 3,
         "dynamic_single_scene": True,
         "dynamic_shot_count": 3,
+        "real_condo_tour_visuals": True,
+        "no_office_papers_floorplans": True,
         "same_theme_multi_angle": True,
         "exact_script_subtitles": True,
         "douyin_subtitle_styles": True,
@@ -648,6 +673,8 @@ def health() -> Dict[str, Any]:
         "raw_video_fallback": True,
         "no_static_single_frame_loop": True,
         "punctuation_free_subtitles": True,
+        "digits_converted_to_chinese": True,
+        "one_line_short_subtitles": True,
         "keyword_highlight_scale": True,
         "no_multi_shots": True,
     }
@@ -660,7 +687,7 @@ def start(req: StartReq) -> Dict[str, Any]:
     _jobs[job_id] = {"ok": True, "job_id": job_id, "job_type": "one_scene", "status": "running", "stage": "queued", "progress": 1, "created_at": time.time(), "updated_at": time.time(), "request": raw}
     _persist(job_id)
     threading.Thread(target=_run, args=(job_id, raw), daemon=True).start()
-    return {"ok": True, "job_id": job_id, "status": "running", "stage": "queued", "single_scene": True, "message": "已启动 V10.15 单场景动态视频：3 个同主题动态角度 + 抖音大字关键词高亮字幕。"}
+    return {"ok": True, "job_id": job_id, "status": "running", "stage": "queued", "single_scene": True, "message": "已启动 V10.16 动态看房视频：真实公寓室内多角度 + 大号抖音关键词字幕。"}
 
 
 @router.get("/job/{job_id}")

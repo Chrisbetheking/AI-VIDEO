@@ -1464,6 +1464,7 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
       max_shots: 3,
       fal_fill_shots: 3,
       dynamic_shot_count: 3,
+        visual_policy: 'real_condo_tour_no_office_no_papers',
       one_scene_mode: true,
       dynamic_single_scene: true,
       visual_mode: 'single_scene_dynamic',
@@ -1486,7 +1487,7 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
       avatar_config: finalProject.avatar_config || avatarConfig,
       openclaw_lead_context: finalProject.leads || [],
       extra: {
-        source: 'one_scene_dynamic_douyin_subtitle_v10_15',
+        source: 'one_scene_condo_tour_douyin_subtitle_v10_16',
         source_mode: sourceMode,
         competitor_source: competitorSource,
         content_type: contentType,
