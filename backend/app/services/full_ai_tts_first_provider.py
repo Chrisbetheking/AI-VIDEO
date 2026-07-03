@@ -1037,7 +1037,7 @@ def _v10_22_render_semantic_direct(job_id: str, raw: Dict[str, Any], script: str
         raise RuntimeError("local subtitle burn failed; refusing raw fallback: " + str(subtitle_res)[:1200])
     return {
         "ok": True,
-        "provider": "full_ai_tts_first_semantic_direct_render_v10_25",
+        "provider": "full_ai_tts_first_semantic_direct_render_v10_25d",
         "video_url": final_url,
         "subtitled_video_url": final_url,
         "raw_video_url": raw_video_url,
@@ -1120,30 +1120,22 @@ def _v10_23_burn_local_subtitles_and_upload(raw_video_path: Path, audio_url: str
 
 # ================= AI VIDEO V10.25 COMPREHENSIVE QUALITY UPGRADE =================
 def _v10_25_clean_text(text: str) -> str:
-    text = str(text or '')
-    text = re.sub(r''' + "'" + r'''[，。！？；：、,.!?;:"“”‘’（）()【】\[\]《》<>…]+''' + "'" + r''', ' ', text)
-    return re.sub(r'\s+', ' ', text).strip()
+    """V10.25d: remove Chinese/English punctuation safely before ASS subtitle rendering."""
+    import re
+    if text is None:
+        return ""
+    s = str(text)
+    s = re.sub(r"[，。！？；：、,.!?;:\"'“”‘’（）()【】\[\]《》<>…—_\-]+", " ", s)
+    s = re.sub(r"\s+", " ", s).strip()
+    return s
 
-_V10_25_KEYWORDS = ['吉隆坡华人区','生活配套','配套不足','长期持有','自主购买力','护城河','房价','华人区','配套','餐厅','餐饮','吃饭','咖啡','美食','商场','购物','超市','便利店','地铁','MRT','LRT','主干道','交通','通勤','医疗','诊所','药房','医院','教育','学校','户型','采光','阳台','客厅','卧室','厨房','社区','大堂','园林','泳池','健身房','投资','出租','风险','后悔','评论区']
-
-def _v10_25_manual_keywords_from_raw(raw):
-    out = []
-    def add(v):
-        if isinstance(v, str):
-            for x in re.split(r'[,，、\n\s]+', v):
-                x=x.strip()
-                if x and x not in out: out.append(x)
-        elif isinstance(v, list):
-            for x in v: add(x)
-        elif isinstance(v, dict):
-            for k in ['keywords','manual_keywords','highlight_keywords','subtitle_keywords','final_keywords']:
-                add(v.get(k))
-    if isinstance(raw, dict):
-        for k in ['manual_keywords','highlight_keywords','subtitle_keywords','final_keywords']:
-            add(raw.get(k))
-        add(raw.get('keyword_highlight') or {})
-        for seg in raw.get('segment_voice_settings') or []: add(seg)
-    return out[:30]
+_V10_25_KEYWORDS = [
+    "吉隆坡华人区", "生活配套", "配套不足", "长期持有", "自主购买力", "护城河", "房价", "华人区", "配套",
+    "餐厅", "餐饮", "吃饭", "咖啡", "美食", "商场", "购物", "超市", "便利店",
+    "地铁", "MRT", "LRT", "主干道", "交通", "通勤", "医疗", "诊所", "药房", "医院",
+    "教育", "学校", "户型", "采光", "阳台", "客厅", "卧室", "厨房", "社区", "大堂", "园林", "泳池", "健身房",
+    "投资", "出租", "风险", "后悔", "评论区"
+]
 
 def _v10_25_auto_keywords(text, manual=None):
     clean = _v10_25_clean_text(text)
@@ -1228,7 +1220,7 @@ def _v10_25_run(cmd, timeout=900):
     print('V10_25_FFMPEG_CMD='+' '.join(shlex.quote(str(x)) for x in cmd))
     p=subprocess.run(cmd,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,timeout=timeout)
     if p.returncode!=0:
-        print('V10_25_FFMPEG_STDERR='+(p.stderr or '')[-4000:]); raise RuntimeError('V10.25 ffmpeg failed')
+        print('V10_25_FFMPEG_STDERR='+(p.stderr or '')[-4000:]); raise RuntimeError('V10.25d ffmpeg failed')
     return p
 
 def _v10_25_burn_subtitles_local(video_path=None, audio_url=None, cues=None, job_id=None, work_dir=None, raw_video_url=None, raw=None, **kwargs):
@@ -1293,7 +1285,7 @@ def _v10_25_apply_visual_logic(shots, raw=None, script_text=''):
 _v10_23_burn_subtitles_local = _v10_25_burn_subtitles_local
 # ================= END AI VIDEO V10.25 COMPREHENSIVE QUALITY UPGRADE =================
 
-# V10_25_FORCE_ALIAS_AFTER_LEGACY
+# V10_25D_FORCE_ALIAS_AFTER_LEGACY
 _v10_23_burn_subtitles_local = _v10_25_burn_subtitles_local
 
 def _run_job(job_id: str, raw: Dict[str, Any]) -> None:
@@ -1353,7 +1345,7 @@ def _run_job(job_id: str, raw: Dict[str, Any]) -> None:
                 "status": "completed",
                 "stage": "completed",
                 "progress": 100,
-                "provider": "full_ai_tts_first_semantic_direct_render_v10_25",
+                "provider": "full_ai_tts_first_semantic_direct_render_v10_25d",
                 "direct_render": True,
                 "no_child_full_ai_start": True,
                 "video_url": render_result.get("video_url"),
@@ -1380,7 +1372,7 @@ def _run_job(job_id: str, raw: Dict[str, Any]) -> None:
 def health() -> Dict[str, Any]:
     return {
         "ok": True,
-        "provider": "full_ai_tts_first_semantic_direct_render_v10_25",
+        "provider": "full_ai_tts_first_semantic_direct_render_v10_25d",
         "logic": "script -> real TTS duration -> semantic storyboard -> direct per-shot fal render -> concat -> local ffmpeg subtitle burn -> DouyinCleanEmphasisV2 keyword highlight -> semantic transitions",
         "guarantees": [
             "画面片段数按真实配音时长计算",
@@ -1402,7 +1394,7 @@ def plan_preview(req: TTSFirstStartRequest) -> Dict[str, Any]:
     shots = _plan_shots(script, float(duration), city, req.model_dump())
     return {
         "ok": True,
-        "provider": "full_ai_tts_first_semantic_direct_render_v10_25",
+        "provider": "full_ai_tts_first_semantic_direct_render_v10_25d",
         "city": city,
         "duration_seconds": round(float(duration), 2),
         "shot_count": len(shots),
