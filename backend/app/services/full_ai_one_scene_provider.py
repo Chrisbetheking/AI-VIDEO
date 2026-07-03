@@ -42,7 +42,7 @@ class StartReq(BaseModel):
     city: str = ""
     voice: str = "default"
     burn_subtitles: bool = True
-    subtitle_style_id: str = "real_estate_gold"
+    subtitle_style_id: str = "douyin_pop"
     background_scene: str = ""
     visual_mode: str = "single_background_loop"
 
@@ -194,59 +194,135 @@ def _tts(script: str, voice: str) -> tuple[float, str, Dict[str, Any]]:
 
 
 def _prompt(city: str, topic: str, scene: str = "") -> str:
-    # ONE scene only. This is intentional: user asked for normal single picture/video, not many shots.
-    if scene:
-        base = scene
-    else:
-        raw = f"{city} {topic}".lower()
-        if "penang" in raw or "槟城" in raw:
-            base = "one modern Penang condo living room with balcony daylight, realistic long-stay lifestyle"
-        elif "johor" in raw or "新山" in raw:
-            base = "one modern Johor Bahru apartment living room and dining area, practical family self-stay atmosphere"
-        else:
-            base = "one modern Kuala Lumpur condominium living room connected to balcony, warm daylight, subtle residential skyline outside, no famous towers"
+    # V10.13: fixed single background. Do not let fal infer “real-estate brochure / storyboard”.
+    base = str(scene or "").strip()
+    if not base:
+        base = (
+            "single uncut vertical 9:16 realistic phone video of one clean modern Kuala Lumpur condominium living room interior, "
+            "one full-screen image only, one locked camera angle, slow subtle natural movement, warm daylight, premium but realistic, "
+            "no people, no readable text, no skyline landmark, no project name"
+        )
     return (
-        f"{base}. A single continuous vertical 9:16 realistic phone video, one full-screen scene only, one camera angle with very slow natural movement. "
-        "No montage, no collage, no split screen, no multi-panel, no grid, no brochure, no poster, no storyboard, no picture-in-picture. "
+        f"{base}. Only one normal interior background shot filling the whole screen. "
+        "Single continuous shot, one camera angle, no cuts, no multiple rooms, no agent, no brochure layout. "
+        "Absolutely no montage, no collage, no split screen, no multi-panel, no grid, no storyboard, no picture-in-picture. "
         "No documents, no charts, no calculator, no UI, no screenshots, no readable text, no fake labels. "
-        "Natural Malaysian condominium environment, clean realistic interior, calm premium real estate walkthrough feeling. "
-        "Do not show KLCC or Petronas Twin Towers, no beach, no island, no ocean, no fake project name, no exact price, no ROI text."
+        "Do not show KLCC or Petronas Twin Towers, no famous landmark towers, no beach, no island, no ocean."
     )
 
 
-def _sentence_cues(script: str, duration: float) -> List[Dict[str, Any]]:
-    # Use the exact post-TTS script. Do NOT use stale frontend script_segments.
-    parts = [p.strip() for p in re.split(r"(?<=[。！？!?；;])", script) if p.strip()]
-    if not parts:
-        parts = [script.strip()]
-    # Merge very short pieces so subtitles do not run ahead of voice.
+def _split_subtitle_chunks(script: str, max_chars: int = 12) -> List[str]:
+    text = re.sub(r"\s+", " ", str(script or "").strip())
+    if not text:
+        return []
+    # First split by Chinese punctuation, then by commas, then by fixed short chunks.
+    rough = [x.strip() for x in re.split(r"(?<=[。！？!?；;])", text) if x.strip()]
+    if not rough:
+        rough = [text]
+    out: List[str] = []
+    for part in rough:
+        pieces = [x.strip() for x in re.split(r"(?<=[，,、：:])", part) if x.strip()]
+        for piece in pieces or [part]:
+            piece = piece.strip()
+            while len(piece) > max_chars:
+                cut = max_chars
+                for mark in "，,、 ":
+                    pos = piece.rfind(mark, 0, max_chars + 1)
+                    if pos >= 6:
+                        cut = pos + 1
+                        break
+                out.append(piece[:cut].strip())
+                piece = piece[cut:].strip()
+            if piece:
+                out.append(piece)
+    # Merge tiny fragments but keep TikTok/Douyin short rhythm.
     merged: List[str] = []
     buf = ""
-    for p in parts:
-        if len(buf) + len(p) < 16:
-            buf += p
+    for part in out:
+        if buf and len(buf) + len(part) <= max_chars:
+            buf += part
         else:
             if buf:
                 merged.append(buf)
-            buf = p
+            buf = part
     if buf:
         merged.append(buf)
-    parts = merged or parts
-    weights = [max(6, len(p)) for p in parts]
-    total = sum(weights) or 1
-    cues = []
-    t = 0.15
-    usable = max(1.0, float(duration) - 0.35)
-    for i, (p, w) in enumerate(zip(parts, weights)):
-        seg_d = max(1.2, usable * w / total)
-        if i == len(parts) - 1:
-            end = max(t + 1.0, usable)
-        else:
-            end = min(usable, t + seg_d)
-        cues.append({"text": p, "start": round(t, 2), "end": round(end, 2)})
-        t = end
+    return [x for x in merged if x]
+
+
+def _tts_segment_cues(tts_res: Dict[str, Any], duration: float) -> List[Dict[str, Any]]:
+    # Try to use backend TTS per-segment timing if it exists. Different TTS providers use different keys.
+    candidates: List[Any] = []
+    for key in ("segments", "audio_segments", "items", "results"):
+        value = tts_res.get(key) if isinstance(tts_res, dict) else None
+        if isinstance(value, list):
+            candidates = value
+            break
+    cues: List[Dict[str, Any]] = []
+    t = 0.05
+    for item in candidates:
+        if not isinstance(item, dict):
+            continue
+        text = str(item.get("text") or item.get("sentence") or item.get("content") or "").strip()
+        if not text:
+            continue
+        start = item.get("start") or item.get("start_time") or item.get("start_seconds")
+        end = item.get("end") or item.get("end_time") or item.get("end_seconds")
+        dur = item.get("duration") or item.get("duration_seconds")
+        try:
+            st = float(start) if start is not None else t
+            en = float(end) if end is not None else st + float(dur)
+        except Exception:
+            continue
+        en = min(float(duration), max(st + 0.45, en))
+        cues.append({"text": text, "start": round(max(0.0, st), 2), "end": round(en, 2)})
+        t = en
     return cues
 
+
+def _subtitle_cues(script: str, duration: float, tts_res: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+    duration = max(1.0, float(duration or 1.0))
+    # Prefer exact TTS segment timing, then split long TTS lines into Douyin-sized chunks.
+    raw = _tts_segment_cues(tts_res or {}, duration)
+    if raw:
+        refined: List[Dict[str, Any]] = []
+        for cue in raw:
+            parts = _split_subtitle_chunks(str(cue.get("text") or ""), max_chars=12) or [str(cue.get("text") or "")]
+            st = float(cue.get("start") or 0)
+            en = float(cue.get("end") or st + 1.0)
+            span = max(0.5, en - st)
+            weights = [max(2, len(x)) for x in parts]
+            total = sum(weights) or 1
+            cur = st
+            for i, (part, w) in enumerate(zip(parts, weights)):
+                nxt = en if i == len(parts) - 1 else min(en, cur + span * w / total)
+                refined.append({"text": part, "start": round(cur, 2), "end": round(max(cur + 0.45, nxt), 2)})
+                cur = nxt
+        return refined
+
+    parts = _split_subtitle_chunks(script, max_chars=12)
+    if not parts:
+        return [{"text": script.strip(), "start": 0.05, "end": round(duration, 2)}]
+    weights = [max(2, len(p)) for p in parts]
+    total = sum(weights) or 1
+    usable = max(0.8, duration - 0.1)
+    cues: List[Dict[str, Any]] = []
+    t = 0.05
+    for i, (p, w) in enumerate(zip(parts, weights)):
+        # Short chunks. Avoid old long-sentence subtitles staying on screen too long.
+        seg_d = usable * w / total
+        seg_d = max(0.55, min(seg_d, 2.15))
+        if i == len(parts) - 1:
+            end = duration
+        else:
+            end = min(duration, t + seg_d)
+        cues.append({"text": p, "start": round(t, 2), "end": round(max(t + 0.45, end), 2)})
+        t = end
+        if t >= duration - 0.15:
+            break
+    if cues:
+        cues[-1]["end"] = round(duration, 2)
+    return cues
 
 def _poll_fal(job_id: str, timeout_s: int = 900) -> Dict[str, Any]:
     deadline = time.time() + timeout_s
@@ -274,7 +350,7 @@ def _loop_with_audio(video_url: str, audio_url: str, duration: float, prefix: st
         "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
         "-stream_loop", "-1", "-i", str(bg),
         "-i", str(audio),
-        "-t", str(round(float(duration) + 0.35, 2)),
+        "-t", str(round(float(duration) + 0.12, 2)),
         "-map", "0:v:0", "-map", "1:a:0",
         "-vf", vf,
         "-c:v", "libx264", "-preset", "veryfast", "-crf", "22",
@@ -337,13 +413,13 @@ def _run(job_id: str, raw: Dict[str, Any]) -> None:
         subtitle_res: Dict[str, Any] = {}
         if bool(raw.get("burn_subtitles", True)):
             job.update({"stage": "subtitle_burn_exact_script", "progress": 88, "raw_video_url": raw_url, "updated_at": time.time()}); _persist(job_id)
-            cues = _sentence_cues(script, float(audio_dur))
+            cues = _subtitle_cues(script, float(audio_dur), tts_res)
             subtitle_res = burn_subtitles_with_style_and_upload(
                 video_path=str(composed_path),
                 text=script,
                 segments=cues,
                 duration=float(audio_dur),
-                style_id=str(raw.get("subtitle_style_id") or "real_estate_gold"),
+                style_id=str(raw.get("subtitle_style_id") or "douyin_pop"),
                 prefix=f"one_scene_{job_id}",
                 object_key=f"videos/one-scene/subtitled/{time.strftime('%Y/%m/%d')}/{uuid.uuid4().hex}_{job_id}.mp4",
             )
@@ -373,11 +449,13 @@ def _run(job_id: str, raw: Dict[str, Any]) -> None:
 def health() -> Dict[str, Any]:
     return {
         "ok": True,
-        "provider": "full_ai_one_scene_v10_12",
+        "provider": "full_ai_one_scene_v10_13",
         "single_scene": True,
         "shot_count": 1,
         "loop_visual_to_audio": True,
         "exact_script_subtitles": True,
+        "douyin_subtitle_styles": True,
+        "short_chunk_subtitle_timing": True,
         "no_multi_shots": True,
     }
 
@@ -389,7 +467,7 @@ def start(req: StartReq) -> Dict[str, Any]:
     _jobs[job_id] = {"ok": True, "job_id": job_id, "job_type": "one_scene", "status": "running", "stage": "queued", "progress": 1, "created_at": time.time(), "updated_at": time.time(), "request": raw}
     _persist(job_id)
     threading.Thread(target=_run, args=(job_id, raw), daemon=True).start()
-    return {"ok": True, "job_id": job_id, "status": "running", "stage": "queued", "single_scene": True, "message": "已启动单画面视频：只生成一个背景画面，配整段口播和字幕。"}
+    return {"ok": True, "job_id": job_id, "status": "running", "stage": "queued", "single_scene": True, "message": "已启动 V10.13 单画面视频：一个背景画面 + 抖音大字字幕 + 按 TTS 实际时长切字幕。"}
 
 
 @router.get("/job/{job_id}")

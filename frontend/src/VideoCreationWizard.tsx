@@ -97,7 +97,7 @@ type ContentBrainCard = {
 }
 
 const CONTENT_BRAIN_KEY = 'ai_video_content_brain_cards_v9'
-const WIZARD_DRAFT_KEY = 'ai_video_wizard_draft_v10_10'
+const WIZARD_DRAFT_KEY = 'ai_video_wizard_draft_v10_13'
 const CLEAN_ONCE_KEY = 'ai_video_wizard_v10_10_cleaned_once'
 
 
@@ -143,7 +143,7 @@ function forceCleanEntryOnce() {
     if (!reset && window.localStorage.getItem(CLEAN_ONCE_KEY) === '1') return false
     ;[
       'ai_video_wizard_draft_v10_5', 'ai_video_wizard_draft_v10_6', 'ai_video_wizard_draft_v10_7',
-      'ai_video_wizard_draft_v10_8', 'ai_video_wizard_draft_v10_9', WIZARD_DRAFT_KEY,
+      'ai_video_wizard_draft_v10_8', 'ai_video_wizard_draft_v10_9', 'ai_video_wizard_draft_v10_10', 'ai_video_wizard_draft_v10_12', WIZARD_DRAFT_KEY,
       'ai_video_engineering_project_draft_v16', 'ai_video_engineering_project_draft_v15',
     ].forEach((key) => window.localStorage.removeItem(key))
     window.localStorage.setItem(CLEAN_ONCE_KEY, '1')
@@ -342,11 +342,12 @@ const SCRIPT_LABELS: Record<ScriptMode, string> = {
 }
 
 const SUBTITLE_STYLE_FALLBACK: SubtitleStyle[] = [
+  { id: 'douyin_pop', name: '抖音大字弹幕款', description: '大白字、粗黑描边、轻微弹入，短视频口播默认。', primary: '#ffffff', background: 'transparent', accent: '#fde047', placement: '中下方大字' },
+  { id: 'douyin_yellow_pop', name: '抖音黄字重点款', description: '亮黄大字、黑描边，适合强钩子和避坑。', primary: '#ffe45c', background: 'transparent', accent: '#ffffff', placement: '中下方大字' },
+  { id: 'douyin_black_bubble', name: '抖音黑底口播款', description: '黑底白字，画面复杂时最清楚。', primary: '#ffffff', background: 'rgba(0,0,0,0.62)', accent: '#fde047', placement: '底部黑条' },
   { id: 'real_estate_gold', name: '金色地产讲解', description: '适合专业讲房，黄底关键词感，手机端清晰。', primary: '#fff7cc', background: 'rgba(20, 16, 8, 0.72)', accent: '#f6c44f', placement: '底部双行' },
   { id: 'white_outline', name: '白字黑描边', description: '最稳妥，适合任何素材，不挡画面。', primary: '#ffffff', background: 'transparent', accent: '#111827', placement: '底部居中' },
   { id: 'black_bar', name: '黑底信息条', description: '信息密度高，适合专业拆解和避坑内容。', primary: '#ffffff', background: 'rgba(0,0,0,0.68)', accent: '#60a5fa', placement: '底部黑条' },
-  { id: 'clean_blue', name: '蓝白干净款', description: '适合生活日常、城市介绍和轻松种草。', primary: '#eff6ff', background: 'rgba(30, 64, 175, 0.72)', accent: '#93c5fd', placement: '底部卡片' },
-  { id: 'large_yellow', name: '大黄字重点款', description: '适合短句强钩子、评论区引导和预算问题。', primary: '#fde047', background: 'rgba(17, 24, 39, 0.78)', accent: '#f97316', placement: '中下方' },
 ]
 
 const CITY_OPTIONS = [
@@ -719,7 +720,7 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
   const [aiStatus, setAiStatus] = useState(String(initialDraft.aiStatus || ''))
   const [buttonStatus, setButtonStatus] = useState(String(initialDraft.buttonStatus || ''))
   const [subtitleEnabled, setSubtitleEnabled] = useState(Boolean(initialDraft.subtitleEnabled ?? project.burn_subtitles ?? true))
-  const [subtitleStyleId, setSubtitleStyleId] = useState(String(initialDraft.subtitleStyleId || project.subtitle_style_id || 'real_estate_gold'))
+  const [subtitleStyleId, setSubtitleStyleId] = useState(String(initialDraft.subtitleStyleId || project.subtitle_style_id || 'douyin_pop'))
   const [subtitleStyles, setSubtitleStyles] = useState<SubtitleStyle[]>(SUBTITLE_STYLE_FALLBACK)
   const [generationStartedAt, setGenerationStartedAt] = useState(Number(initialDraft.generationStartedAt || 0))
 
@@ -1034,7 +1035,7 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
       ai_keyword_insights: aiKeywordInsights,
       burn_subtitles: subtitleEnabled,
       subtitle_required: subtitleEnabled,
-      subtitle_style_id: subtitleStyleId,
+      subtitle_style_id: subtitleStyleId || 'douyin_pop',
       subtitle_style: selectedSubtitleStyle,
       ai_status: aiStatus,
       content_brain_context: videoBrainCards,
@@ -1055,7 +1056,7 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
 
   async function recoverLatestDoneVideo(silent = false) {
     try {
-      const data = await apiGet('/api/video/wizard-video/latest-done?limit=30', 60000)
+      const data = await apiGet('/api/video/wizard-video/latest-done?limit=30&strict_one_scene=1', 60000)
       const found = data?.job || data?.latest || null
       const foundUrl = found?.video_url || found?.url || ''
       if (foundUrl) {
@@ -1071,7 +1072,7 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
       try {
         const data = await apiGet('/api/video/jobs/recent?limit=30', 60000)
         const jobs = Array.isArray(data?.jobs) ? data.jobs : []
-        const found = jobs.find((item: any) => item?.status === 'done' && item?.video_url)
+        const found = jobs.find((item: any) => item?.status === 'done' && item?.video_url && (String(item?.job_type || '').toLowerCase() === 'one_scene' || String(item?.job_id || '').startsWith('one_scene_') || item?.single_scene))
         if (found?.video_url) {
           const recovered = { ok: true, status: 'done', stage: 'recovered_from_jobs_recent', progress: 100, ...found }
           setJob(recovered)
@@ -1470,7 +1471,7 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
       ai_keyword_insights: aiKeywordInsights,
       burn_subtitles: subtitleEnabled,
       subtitle_required: subtitleEnabled,
-      subtitle_style_id: subtitleStyleId,
+      subtitle_style_id: subtitleStyleId || 'douyin_pop',
       subtitle_style: selectedSubtitleStyle,
       ai_status: aiStatus,
       content_brain_context: compactBrainForWizard(videoBrainCards),
@@ -1483,7 +1484,7 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
       avatar_config: finalProject.avatar_config || avatarConfig,
       openclaw_lead_context: finalProject.leads || [],
       extra: {
-        source: 'original_backend_step_wizard_v6',
+        source: 'one_scene_douyin_subtitle_v10_13',
         source_mode: sourceMode,
         competitor_source: competitorSource,
         content_type: contentType,
@@ -1804,7 +1805,7 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
         </section>
         <section className="aiw-stepCard">
           <h3>生成状态</h3>
-          <div className="aiw-statusRows"><div><span>任务</span><b>{jobId || '-'}</b></div><div><span>阶段</span><b>{job?.stage || job?.status || 'ready'}</b></div><div><span>配音实际</span><b>{job?.audio_duration_seconds ? `${Number(job.audio_duration_seconds).toFixed(1)}s` : '生成后读取'}</b></div><div><span>画面数</span><b>{job?.shot_count || shotPlan.length}</b></div><div><span>R2 素材</span><b>{selectedAssets.length}</b></div><div><span>OpenClaw 线索</span><b>{leadCount}</b></div><div><span>字幕</span><b>{subtitleEnabled ? (job?.subtitled_video_url ? '已烧录' : job?.stage === 'subtitle_burn' ? '烧录中' : selectedSubtitleStyle?.name) : '未启用'}</b></div></div>
+          <div className="aiw-statusRows"><div><span>任务</span><b>{jobId || '-'}</b></div><div><span>阶段</span><b>{job?.stage || job?.status || 'ready'}</b></div><div><span>配音实际</span><b>{job?.audio_duration_seconds ? `${Number(job.audio_duration_seconds).toFixed(1)}s` : '生成后读取'}</b></div><div><span>画面数</span><b>{job?.shot_count || 1}</b></div><div><span>R2 素材</span><b>{selectedAssets.length}</b></div><div><span>OpenClaw 线索</span><b>{leadCount}</b></div><div><span>字幕</span><b>{subtitleEnabled ? (job?.subtitled_video_url ? '已烧录' : job?.stage === 'subtitle_burn' ? '烧录中' : selectedSubtitleStyle?.name) : '未启用'}</b></div></div>
           <div className="aiw-miniProgress"><span style={{ width: `${Math.min(100, Number(job?.progress || (busy ? 65 : 0)))}%` }} /></div>
         </section>
         <aside className="aiw-stepCard">
@@ -1822,7 +1823,7 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
         <div>
           <p className="aiw-eyebrow">STEP BY STEP / ORIGINAL BACKEND LINKED</p>
           <h2>四步视频创作向导</h2>
-          <p>不是旧的一页铺满，也不是假页面；这条链路接 单画面 TTS-first、字幕烧录、R2 素材、数字人素材和 OpenClaw。</p>
+          <p>不是旧的一页铺满，也不是假页面；这条链路接 V10.13 单画面 TTS-first、抖音大字字幕烧录、R2 素材、数字人素材和 OpenClaw。</p>
         </div>
         <span className="aiw-badge ok">第 {step} 步 / 共 4 步</span>
       </div>

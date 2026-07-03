@@ -36,6 +36,60 @@ def _ensure_dirs() -> None:
 
 SUBTITLE_STYLES: list[dict[str, Any]] = [
     {
+        "id": "douyin_pop",
+        "name": "抖音大字弹幕款",
+        "description": "短视频口播默认款：大白字、粗黑描边、轻微弹入，接近抖音/剪映口播字幕。",
+        "primary": "#FFFFFF",
+        "background": "transparent",
+        "accent": "#FDE047",
+        "ass_primary": "&H00FFFFFF",
+        "ass_outline": "&H00000000",
+        "ass_back": "&H00000000",
+        "font_size": 70,
+        "outline": 7,
+        "shadow": 1,
+        "margin_v": 235,
+        "border_style": 1,
+        "max_chars": 12,
+        "ass_prefix": r"{\fad(60,60)\blur0.35\t(0,120,\fscx108\fscy108)\t(120,220,\fscx100\fscy100)}",
+    },
+    {
+        "id": "douyin_yellow_pop",
+        "name": "抖音黄字重点款",
+        "description": "强钩子/避坑款：亮黄大字、黑描边、移动端很醒目。",
+        "primary": "#FFE45C",
+        "background": "transparent",
+        "accent": "#FFFFFF",
+        "ass_primary": "&H005CE4FF",
+        "ass_outline": "&H00000000",
+        "ass_back": "&H00000000",
+        "font_size": 72,
+        "outline": 8,
+        "shadow": 1,
+        "margin_v": 235,
+        "border_style": 1,
+        "max_chars": 11,
+        "ass_prefix": r"{\fad(60,60)\blur0.35\t(0,120,\fscx108\fscy108)\t(120,220,\fscx100\fscy100)}",
+    },
+    {
+        "id": "douyin_black_bubble",
+        "name": "抖音黑底口播款",
+        "description": "黑色半透明圆角条，大白字，适合画面复杂时保清晰。",
+        "primary": "#FFFFFF",
+        "background": "rgba(0,0,0,0.62)",
+        "accent": "#FDE047",
+        "ass_primary": "&H00FFFFFF",
+        "ass_outline": "&H00000000",
+        "ass_back": "&H99000000",
+        "font_size": 62,
+        "outline": 1,
+        "shadow": 0,
+        "margin_v": 230,
+        "border_style": 4,
+        "max_chars": 13,
+        "ass_prefix": r"{\fad(70,70)}",
+    },
+    {
         "id": "real_estate_gold",
         "name": "金色地产讲解",
         "description": "专业讲房默认款：金色重点、黑色半透明底，手机端最清楚。",
@@ -50,6 +104,8 @@ SUBTITLE_STYLES: list[dict[str, Any]] = [
         "shadow": 1,
         "margin_v": 150,
         "border_style": 4,
+        "max_chars": 16,
+        "ass_prefix": r"{\fad(80,80)}",
     },
     {
         "id": "white_outline",
@@ -61,11 +117,13 @@ SUBTITLE_STYLES: list[dict[str, Any]] = [
         "ass_primary": "&H00FFFFFF",
         "ass_outline": "&H00000000",
         "ass_back": "&H00000000",
-        "font_size": 56,
-        "outline": 4,
+        "font_size": 58,
+        "outline": 5,
         "shadow": 1,
-        "margin_v": 145,
+        "margin_v": 170,
         "border_style": 1,
+        "max_chars": 15,
+        "ass_prefix": r"{\fad(70,70)}",
     },
     {
         "id": "black_bar",
@@ -82,41 +140,10 @@ SUBTITLE_STYLES: list[dict[str, Any]] = [
         "shadow": 0,
         "margin_v": 130,
         "border_style": 4,
-    },
-    {
-        "id": "clean_blue",
-        "name": "蓝白干净款",
-        "description": "适合生活日常、城市生活方式、华人区介绍。",
-        "primary": "#EFF6FF",
-        "background": "rgba(30,64,175,0.72)",
-        "accent": "#93C5FD",
-        "ass_primary": "&H00FFF6EF",
-        "ass_outline": "&H00AF401E",
-        "ass_back": "&HAAAF401E",
-        "font_size": 54,
-        "outline": 2,
-        "shadow": 1,
-        "margin_v": 145,
-        "border_style": 4,
-    },
-    {
-        "id": "large_yellow",
-        "name": "大黄字重点款",
-        "description": "适合强钩子、预算、评论区承接，视觉冲击强。",
-        "primary": "#FDE047",
-        "background": "rgba(17,24,39,0.78)",
-        "accent": "#F97316",
-        "ass_primary": "&H0047E0FD",
-        "ass_outline": "&H00271811",
-        "ass_back": "&HAA271811",
-        "font_size": 62,
-        "outline": 4,
-        "shadow": 1,
-        "margin_v": 155,
-        "border_style": 4,
+        "max_chars": 17,
+        "ass_prefix": r"{\fad(80,80)}",
     },
 ]
-
 
 def _style(style_id: str) -> dict[str, Any]:
     for item in SUBTITLE_STYLES:
@@ -157,12 +184,14 @@ def _ass_time(seconds: float) -> str:
     return f"{h}:{m:02d}:{s:02d}.{cs:02d}"
 
 
-def _ass_escape(text: str) -> str:
+def _ass_escape(text: str, max_chars: int = 12) -> str:
     value = re.sub(r"\s+", " ", str(text or "").strip())
     value = value.replace("{", "（").replace("}", "）")
-    # ASS supports \N for line break; keep lines short for 9:16.
-    if len(value) > 18:
-        chunks = [value[i:i+18] for i in range(0, len(value), 18)]
+    value = value.replace("\n", " ").replace("\r", " ")
+    max_chars = max(8, min(int(max_chars or 12), 18))
+    # Douyin-style口播字幕：短块、大字，不要一整句糊在底部。
+    if len(value) > max_chars:
+        chunks = [value[i:i + max_chars] for i in range(0, len(value), max_chars)]
         value = r"\N".join(chunks[:2])
     return value
 
@@ -187,10 +216,12 @@ Style: Default,{font},{style['font_size']},{style['ass_primary']},&H00FFFFFF,{st
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
     lines = [header]
+    max_chars = int(style.get("max_chars") or 12)
+    ass_prefix = str(style.get("ass_prefix") or "")
     for cue in cues:
         start = _ass_time(float(cue.get("start") or 0))
         end = _ass_time(float(cue.get("end") or 0))
-        text = _ass_escape(str(cue.get("text") or ""))
+        text = ass_prefix + _ass_escape(str(cue.get("text") or ""), max_chars=max_chars)
         lines.append(f"Dialogue: 0,{start},{end},Default,,0,0,0,,{text}\n")
     ass_path.write_text("".join(lines), encoding="utf-8")
     return ass_path
@@ -293,7 +324,7 @@ class BurnRequest(BaseModel):
 @router.get("/health")
 def health() -> dict[str, Any]:
     _ensure_dirs()
-    return {"ok": True, "provider": "subtitle_style_library_v1", "style_count": len(SUBTITLE_STYLES), "work_dir": str(WORK_DIR)}
+    return {"ok": True, "provider": "subtitle_style_library_v10_13", "style_count": len(SUBTITLE_STYLES), "work_dir": str(WORK_DIR)}
 
 
 @router.get("/styles")
