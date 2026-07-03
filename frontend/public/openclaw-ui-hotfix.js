@@ -1,196 +1,259 @@
+/* AI VIDEO V10.24 - wizard resume hotfix
+ * Purpose:
+ * 1) capture tts-first / one-scene job id when a generation starts
+ * 2) keep polling/resume state in localStorage across route changes/refreshes
+ * 3) provide a visible "继续上一次生成" panel even if React wizard resets to step 1
+ */
 (function () {
-  const API_BASE = "https://ai-video.47-76-143-158.sslip.io";
+  'use strict';
+  if (window.__AI_VIDEO_V10_24_RESUME_HOTFIX__) return;
+  window.__AI_VIDEO_V10_24_RESUME_HOTFIX__ = true;
 
-  const replacements = [
-    ["流量监控与投流决策", "发布后数据复盘与投放建议"],
-    ["生成投流决策", "生成投放建议"],
-    ["系统会用规则 + AI 判断是否加热、换封面、重剪或停投。", "未接入抖音开放平台 API：这里只基于人工录入/公开可见数据做复盘建议，不读取投流后台。"],
-    ["投流分", "建议分"],
-    ["投流消耗", "已花费预算"],
-    ["预算建议：0（暂不投入、待完善素材）", "建议：暂不投放，先补标题、封面、口播钩子和基础数据。"],
+  var STORE_KEY = 'ai_video_wizard_resume_v10_24';
+  var POLL_MS = 4000;
+  var MAX_AGE_MS = 1000 * 60 * 60 * 24 * 3;
+  var lastRenderAt = 0;
+  var pollTimer = null;
 
-    ["这里不是手工记录本，而是自动采集的账号池。系统会按账号库顺序抓近期视频、归类同行内容、学习钩子结构。", "这里联动 OpenClaw 自动发现和初筛竞品账号。系统每天自动扩展新账号、去重、打分；人工只负责复核和跟进。"],
-    ["刷新账号库", "同步 OpenClaw 账号池"],
-    ["采集全部账号", "OpenClaw 自动找新账号"],
-    ["加入账号库", "手动补充种子账号"],
-    ["worker 状态", "OpenClaw 状态"],
-    ["本轮采集失败", "等待 OpenClaw 自动发现 / 初筛"],
-
-    ["获客自动化", "OpenClaw 获客自动化"],
-    ["抖音截留获客", "OpenClaw 截流线索发现"],
-    ["博主联动流量", "同行账号扩展"],
-    ["采集目标客户", "自动发现线索"],
-    ["自动监听", "自动监听线索"],
-    ["自动回复", "生成回复草稿"],
-    ["目标用户导流私域", "飞书/微信通知人工承接"],
-    ["私信咨询 / 需求筛选 / 加微信进入私域 / 预约顾问沟通", "OpenClaw 初筛线索 → 飞书/微信提醒 → 人工确认 → 私域承接"],
-    ["自动回复模板 → 私信筛选 → 微信私域标签", "回复草稿 → 人工确认 → 微信/飞书标签"],
-  ];
-
-  function walkText(node) {
-    if (!node) return;
-    if (node.nodeType === Node.TEXT_NODE) {
-      let text = node.nodeValue;
-      let changed = false;
-      for (const [a, b] of replacements) {
-        if (text.includes(a)) {
-          text = text.split(a).join(b);
-          changed = true;
-        }
-      }
-      if (changed) node.nodeValue = text;
-      return;
+  function now() { return Date.now(); }
+  function isObj(x) { return x && typeof x === 'object'; }
+  function safeJsonParse(s, fallback) { try { return JSON.parse(s); } catch (e) { return fallback; } }
+  function readState() {
+    var s = safeJsonParse(localStorage.getItem(STORE_KEY) || 'null', null);
+    if (!isObj(s)) return null;
+    if (s.updated_at && now() - Number(s.updated_at) > MAX_AGE_MS) return null;
+    return s;
+  }
+  function writeState(patch) {
+    var prev = readState() || {};
+    var next = Object.assign({}, prev, patch || {}, { updated_at: now(), version: 'v10_24' });
+    try { localStorage.setItem(STORE_KEY, JSON.stringify(next)); } catch (e) {}
+    renderPanel();
+    return next;
+  }
+  function clearState() {
+    try { localStorage.removeItem(STORE_KEY); } catch (e) {}
+    var el = document.getElementById('ai-video-v10-24-resume-panel');
+    if (el) el.remove();
+    if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+  }
+  function text(x, fallback) {
+    if (x === null || x === undefined) return fallback || '';
+    var s = String(x).trim();
+    return s || (fallback || '');
+  }
+  function findJobId(data) {
+    if (!isObj(data)) return '';
+    var keys = ['job_id', 'task_id', 'id', 'child_job_id'];
+    for (var i = 0; i < keys.length; i++) {
+      var v = text(data[keys[i]]);
+      if (/^(tts_first|one_scene|full_ai|fal)_/.test(v)) return v;
     }
-    if (node.nodeType !== Node.ELEMENT_NODE) return;
-    if (["SCRIPT", "STYLE", "TEXTAREA", "INPUT"].includes(node.tagName)) return;
-    for (const child of Array.from(node.childNodes)) walkText(child);
+    if (isObj(data.job)) {
+      var nested = findJobId(data.job);
+      if (nested) return nested;
+    }
+    if (isObj(data.data)) {
+      var nested2 = findJobId(data.data);
+      if (nested2) return nested2;
+    }
+    return '';
   }
-
-  function hideOpsShooting() {
-    const all = Array.from(document.querySelectorAll("body *"));
-    for (const el of all) {
-      const t = (el.innerText || "").trim();
-      if (t === "运营拍摄" || t.includes("运营拍摄")) {
-        const item = el.closest("button,a,li,[role='button'],.card,div");
-        if (item && item !== document.body) {
-          item.style.display = "none";
-        }
-      }
+  function findVideoUrl(data) {
+    if (!isObj(data)) return '';
+    var keys = ['subtitled_video_url', 'final_video_url', 'video_url', 'url', 'raw_video_url'];
+    for (var i = 0; i < keys.length; i++) {
+      var v = text(data[keys[i]]);
+      if (/^https?:\/\//.test(v) || v.indexOf('/api/') === 0) return v;
+    }
+    if (isObj(data.job)) {
+      var nested = findVideoUrl(data.job);
+      if (nested) return nested;
+    }
+    if (isObj(data.result)) {
+      var nested2 = findVideoUrl(data.result);
+      if (nested2) return nested2;
+    }
+    return '';
+  }
+  function normalizeStatus(data) {
+    if (!isObj(data)) return '';
+    return text(data.status || data.state || (data.job && data.job.status) || (data.result && data.result.status), 'running');
+  }
+  function jobEndpoint(jobId) {
+    if (!jobId) return '';
+    if (jobId.indexOf('tts_first_') === 0) return '/api/video/full-ai/tts-first/job/' + encodeURIComponent(jobId);
+    if (jobId.indexOf('one_scene_') === 0) return '/api/video/full-ai/one-scene/job/' + encodeURIComponent(jobId);
+    if (jobId.indexOf('full_ai_') === 0) return '/api/video/full-ai/job/' + encodeURIComponent(jobId);
+    return '/api/video/full-ai/tts-first/job/' + encodeURIComponent(jobId);
+  }
+  function statusLabel(s) {
+    s = text(s).toLowerCase();
+    if (!s || s === 'running' || s === 'processing' || s === 'queued' || s === 'pending') return '生成中，正在继续轮询';
+    if (s === 'completed' || s === 'done' || s === 'success' || s === 'succeeded') return '已完成';
+    if (s === 'failed' || s === 'error') return '失败';
+    return s;
+  }
+  function ensureCss() {
+    if (document.getElementById('ai-video-v10-24-resume-css')) return;
+    var style = document.createElement('style');
+    style.id = 'ai-video-v10-24-resume-css';
+    style.textContent = [
+      '#ai-video-v10-24-resume-panel{position:fixed;right:18px;bottom:18px;z-index:2147483647;width:min(380px,calc(100vw - 36px));background:rgba(17,24,39,.96);color:#fff;border:1px solid rgba(255,255,255,.18);box-shadow:0 20px 60px rgba(0,0,0,.35);border-radius:18px;padding:14px;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Arial,sans-serif}',
+      '#ai-video-v10-24-resume-panel .ai-title{font-weight:800;font-size:15px;margin-bottom:6px}',
+      '#ai-video-v10-24-resume-panel .ai-line{font-size:12px;line-height:1.45;color:rgba(255,255,255,.78);word-break:break-all;margin-top:4px}',
+      '#ai-video-v10-24-resume-panel .ai-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}',
+      '#ai-video-v10-24-resume-panel button,#ai-video-v10-24-resume-panel a{border:0;border-radius:10px;padding:8px 10px;font-size:12px;font-weight:700;cursor:pointer;text-decoration:none}',
+      '#ai-video-v10-24-resume-panel .ai-primary{background:#fff;color:#111827}',
+      '#ai-video-v10-24-resume-panel .ai-ghost{background:rgba(255,255,255,.12);color:#fff}',
+      '#ai-video-v10-24-resume-panel video{width:100%;max-height:360px;margin-top:10px;border-radius:12px;background:#000}',
+      '#ai-video-v10-24-resume-panel .ai-badge{display:inline-block;padding:3px 8px;border-radius:999px;background:rgba(16,185,129,.18);color:#bbf7d0;font-size:11px;font-weight:800;margin-left:6px}'
+    ].join('\n');
+    document.head.appendChild(style);
+  }
+  function renderPanel() {
+    var st = readState();
+    if (!st || !st.job_id) return;
+    if (now() - lastRenderAt < 250) return;
+    lastRenderAt = now();
+    ensureCss();
+    var el = document.getElementById('ai-video-v10-24-resume-panel');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'ai-video-v10-24-resume-panel';
+      document.body.appendChild(el);
+    }
+    var video = text(st.video_url || st.subtitled_video_url || st.final_video_url || st.raw_video_url);
+    var err = text(st.error || st.message || st.detail);
+    var status = text(st.status, 'running');
+    var created = st.created_at ? new Date(st.created_at).toLocaleString() : '';
+    el.innerHTML = '';
+    var title = document.createElement('div');
+    title.className = 'ai-title';
+    title.innerHTML = 'AI 视频任务恢复 <span class="ai-badge">V10.24</span>';
+    el.appendChild(title);
+    var line1 = document.createElement('div');
+    line1.className = 'ai-line';
+    line1.textContent = '状态：' + statusLabel(status) + (created ? ' ｜ ' + created : '');
+    el.appendChild(line1);
+    var line2 = document.createElement('div');
+    line2.className = 'ai-line';
+    line2.textContent = '任务：' + st.job_id;
+    el.appendChild(line2);
+    if (err && !video) {
+      var line3 = document.createElement('div');
+      line3.className = 'ai-line';
+      line3.textContent = '错误：' + err;
+      el.appendChild(line3);
+    }
+    if (video) {
+      var v = document.createElement('video');
+      v.controls = true;
+      v.playsInline = true;
+      v.src = video;
+      el.appendChild(v);
+    }
+    var actions = document.createElement('div');
+    actions.className = 'ai-actions';
+    var btnPoll = document.createElement('button');
+    btnPoll.className = 'ai-primary';
+    btnPoll.textContent = video ? '刷新状态' : '继续轮询';
+    btnPoll.onclick = function () { pollOnce(true); };
+    actions.appendChild(btnPoll);
+    if (video) {
+      var a = document.createElement('a');
+      a.className = 'ai-primary';
+      a.href = video;
+      a.target = '_blank';
+      a.rel = 'noreferrer';
+      a.textContent = '打开视频';
+      actions.appendChild(a);
+    }
+    var btnCopy = document.createElement('button');
+    btnCopy.className = 'ai-ghost';
+    btnCopy.textContent = '复制任务ID';
+    btnCopy.onclick = function () { navigator.clipboard && navigator.clipboard.writeText(st.job_id); };
+    actions.appendChild(btnCopy);
+    var btnClear = document.createElement('button');
+    btnClear.className = 'ai-ghost';
+    btnClear.textContent = '新建/清空';
+    btnClear.onclick = clearState;
+    actions.appendChild(btnClear);
+    el.appendChild(actions);
+  }
+  async function pollOnce(force) {
+    var st = readState();
+    if (!st || !st.job_id) return;
+    var status = text(st.status).toLowerCase();
+    if (!force && (status === 'completed' || status === 'done' || status === 'success') && findVideoUrl(st)) return;
+    var ep = jobEndpoint(st.job_id);
+    if (!ep) return;
+    try {
+      var res = await fetch(ep, { credentials: 'include', cache: 'no-store' });
+      var data = await res.clone().json().catch(function () { return {}; });
+      var video = findVideoUrl(data);
+      var next = {
+        status: normalizeStatus(data),
+        last_response: data,
+        video_url: video || st.video_url || '',
+        subtitled_video_url: text(data.subtitled_video_url || (data.job && data.job.subtitled_video_url), st.subtitled_video_url || ''),
+        final_video_url: text(data.final_video_url || (data.job && data.job.final_video_url), st.final_video_url || ''),
+        raw_video_url: text(data.raw_video_url || (data.job && data.job.raw_video_url), st.raw_video_url || ''),
+        error: text(data.error || data.message || data.detail || (data.job && data.job.error), st.error || '')
+      };
+      if (video) next.status = next.status || 'completed';
+      writeState(next);
+    } catch (e) {
+      writeState({ error: '轮询失败：' + (e && e.message ? e.message : String(e)) });
     }
   }
-
-  async function triggerOpenClaw() {
-    const payload = {
-      dry_run: true,
-      force_openclaw: true,
-      title: "前端触发 OpenClaw 自动找号",
-      keywords: [
-        "马来西亚房产",
-        "马来西亚买房",
-        "吉隆坡房产",
-        "槟城房产",
-        "柔佛房产",
-        "MM2H",
-        "马来西亚第二家园",
-        "海外置业 马来西亚",
-        "大马房产",
-        "大马买房"
-      ]
-    };
-
-    const r = await fetch(API_BASE + "/api/openclaw/fallback/run", {
-      method: "POST",
-      headers: {"Content-Type": "application/json"},
-      body: JSON.stringify(payload)
-    });
-
-    return await r.json();
+  function startPoller() {
+    if (pollTimer) return;
+    pollTimer = setInterval(function () { pollOnce(false); }, POLL_MS);
+    setTimeout(function () { pollOnce(false); }, 500);
   }
 
-  function addOpenClawPanel() {
-    const bodyText = document.body.innerText || "";
-    const shouldShow =
-      bodyText.includes("竞品账号库") ||
-      bodyText.includes("同行采集") ||
-      bodyText.includes("OpenClaw 获客自动化") ||
-      bodyText.includes("获客自动化");
-
-    if (!shouldShow) return;
-    if (document.getElementById("openclaw-ui-bridge")) return;
-
-    const main = document.querySelector("main") || document.body;
-
-    const box = document.createElement("div");
-    box.id = "openclaw-ui-bridge";
-    box.style.cssText = `
-      margin: 16px 0;
-      padding: 18px 20px;
-      border: 1px solid #bcd3ff;
-      border-radius: 18px;
-      background: linear-gradient(135deg, #f7fbff, #eef4ff);
-      box-shadow: 0 10px 28px rgba(37, 99, 235, .08);
-      font-family: -apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif;
-    `;
-
-    box.innerHTML = `
-      <div style="font-size:20px;font-weight:800;color:#0f172a;margin-bottom:8px;">
-        OpenClaw 自动采集与获客联动
-      </div>
-      <div style="font-size:14px;color:#475569;line-height:1.7;margin-bottom:14px;">
-        当前模式：OpenClaw 自动找新账号、初筛竞品内容、沉淀账号池/视频池；不自动出片、不自动骚扰用户。
-        下一步可接入飞书或微信，把高分线索推给人工处理。
-      </div>
-      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px;">
-        <button id="openclaw-trigger-btn" style="border:0;background:#3157ff;color:white;border-radius:12px;padding:11px 16px;font-weight:700;cursor:pointer;">
-          OpenClaw 自动找号
-        </button>
-        <a href="${API_BASE}/openclaw-dashboard" target="_blank" style="background:white;color:#3157ff;border:1px solid #bcd3ff;border-radius:12px;padding:10px 16px;font-weight:700;text-decoration:none;">
-          打开采集面板
-        </a>
-        <a href="${API_BASE}/api/openclaw/export.csv" target="_blank" style="background:white;color:#3157ff;border:1px solid #bcd3ff;border-radius:12px;padding:10px 16px;font-weight:700;text-decoration:none;">
-          导出候选 CSV
-        </a>
-      </div>
-      <div id="openclaw-bridge-status" style="font-size:13px;color:#64748b;">
-        状态：等待操作。流程为 OpenClaw 初筛 → 飞书/微信通知待接入 → 人工确认 → 私域承接。
-      </div>
-    `;
-
-    main.prepend(box);
-
-    const btn = document.getElementById("openclaw-trigger-btn");
-    const status = document.getElementById("openclaw-bridge-status");
-
-    btn.onclick = async function () {
-      btn.disabled = true;
-      btn.innerText = "正在提交...";
-      status.innerText = "状态：正在触发 OpenClaw 自动找号，不会自动出片。";
-
-      try {
-        const res = await triggerOpenClaw();
-        status.innerText = "状态：已提交 OpenClaw 任务：" + JSON.stringify(res);
-        btn.innerText = "已提交，稍后刷新";
-      } catch (e) {
-        status.innerText = "状态：提交失败：" + e.message;
-        btn.innerText = "重新触发";
-        btn.disabled = false;
+  var originalFetch = window.fetch;
+  window.fetch = async function(input, init) {
+    var url = '';
+    try { url = typeof input === 'string' ? input : (input && input.url) || ''; } catch (e) {}
+    var method = text((init && init.method) || (input && input.method) || 'GET').toUpperCase();
+    var isStart = method === 'POST' && (/\/api\/video\/full-ai\/(one-scene|tts-first)\/start/.test(url));
+    var isJob = method === 'GET' && (/\/api\/video\/full-ai\/(one-scene|tts-first)\/job\//.test(url));
+    var response = await originalFetch.apply(this, arguments);
+    try {
+      if (isStart || isJob) {
+        response.clone().json().then(function(data) {
+          var jobId = findJobId(data) || (url.match(/\/job\/([^/?#]+)/) || [])[1] || '';
+          if (!jobId) return;
+          var video = findVideoUrl(data);
+          writeState({
+            job_id: jobId,
+            created_at: (readState() && readState().created_at) || new Date().toISOString(),
+            current_step: 4,
+            endpoint: url,
+            status: normalizeStatus(data),
+            video_url: video || '',
+            subtitled_video_url: text(data.subtitled_video_url || (data.job && data.job.subtitled_video_url), ''),
+            final_video_url: text(data.final_video_url || (data.job && data.job.final_video_url), ''),
+            raw_video_url: text(data.raw_video_url || (data.job && data.job.raw_video_url), ''),
+            error: text(data.error || data.message || data.detail || (data.job && data.job.error), ''),
+            last_response: data
+          });
+          startPoller();
+        }).catch(function(){});
       }
-    };
-  }
+    } catch (e) {}
+    return response;
+  };
 
-  function patchButtons() {
-    const buttons = Array.from(document.querySelectorAll("button"));
-    for (const btn of buttons) {
-      const t = (btn.innerText || "").trim();
-
-      if (["采集全部账号", "一键采集全部账号", "开始采集"].some(x => t.includes(x))) {
-        btn.onclick = async function (e) {
-          e.preventDefault();
-          e.stopPropagation();
-          btn.disabled = true;
-          const old = btn.innerText;
-          btn.innerText = "OpenClaw 提交中...";
-          try {
-            const res = await triggerOpenClaw();
-            alert("OpenClaw 已开始自动找号/采集：\n" + JSON.stringify(res, null, 2));
-            btn.innerText = "已提交 OpenClaw";
-          } catch (err) {
-            alert("OpenClaw 提交失败：" + err.message);
-            btn.disabled = false;
-            btn.innerText = old;
-          }
-        };
-      }
+  function boot() {
+    var st = readState();
+    if (st && st.job_id) {
+      renderPanel();
+      startPoller();
     }
   }
-
-  function run() {
-    walkText(document.body);
-    hideOpsShooting();
-    addOpenClawPanel();
-    patchButtons();
-  }
-
-  setInterval(run, 900);
-  window.addEventListener("load", run);
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot); else boot();
+  window.addEventListener('storage', function (e) { if (e.key === STORE_KEY) renderPanel(); });
 })();
