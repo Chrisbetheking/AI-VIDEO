@@ -782,6 +782,263 @@ def _semantic_summary(shots: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     ]
 
 
+
+
+# ================= V10.22 semantic direct renderer =================
+# This block fixes the real failure point: TTS-first used to plan semantic shots,
+# then delegated to /api/video/full-ai/start. That downstream path can collapse the
+# plan back into one generic fal_storyboard / condo-interior clip and can return a
+# raw video without burned subtitles. V10.22 renders each semantic shot directly,
+# concatenates them, then burns the exact script subtitles. No raw fallback.
+
+def _v10_22_extract_url(obj: Any) -> str:
+    """Best-effort recursive extraction of a usable http/media URL from nested API results."""
+    if obj is None:
+        return ""
+    if isinstance(obj, str):
+        v = obj.strip()
+        if v.startswith("http://") or v.startswith("https://") or v.startswith("file://") or v.startswith("/"):
+            if any(ext in v.lower().split("?")[0] for ext in [".mp4", ".mov", ".webm", ".m4a", ".mp3", ".wav", ".aac"]):
+                return v
+        return ""
+    if isinstance(obj, dict):
+        preferred = [
+            "subtitled_video_url", "video_url", "url", "output_url", "result_url",
+            "audio_url", "audio", "public_url", "signed_url", "download_url",
+        ]
+        for k in preferred:
+            if k in obj:
+                found = _v10_22_extract_url(obj.get(k))
+                if found:
+                    return found
+        for v in obj.values():
+            found = _v10_22_extract_url(v)
+            if found:
+                return found
+    if isinstance(obj, list):
+        for item in obj:
+            found = _v10_22_extract_url(item)
+            if found:
+                return found
+    return ""
+
+
+def _v10_22_run(cmd: List[str], timeout: int = 900) -> None:
+    import subprocess
+    print("V10_22_FFMPEG_CMD=" + " ".join(cmd[:12]), flush=True)
+    proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=timeout)
+    if proc.returncode != 0:
+        raise RuntimeError("ffmpeg failed: " + (proc.stderr or proc.stdout or "")[-2400:])
+
+
+def _v10_22_download(url: str, out_path: Path) -> Path:
+    import shutil, urllib.request
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    if not url:
+        raise RuntimeError("missing media url")
+    if url.startswith("file://"):
+        src = Path(url.replace("file://", "", 1))
+        if not src.exists():
+            raise RuntimeError(f"file url not found: {src}")
+        shutil.copyfile(src, out_path)
+        return out_path
+    if url.startswith("/"):
+        src = Path(url)
+        if not src.exists():
+            raise RuntimeError(f"local media not found: {src}")
+        shutil.copyfile(src, out_path)
+        return out_path
+    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+    with urllib.request.urlopen(req, timeout=180) as r, open(out_path, "wb") as f:
+        shutil.copyfileobj(r, f)
+    if out_path.stat().st_size < 1024:
+        raise RuntimeError(f"downloaded media too small: {url}")
+    return out_path
+
+
+def _v10_22_fix_clip(src: Path, dst: Path, duration: float, fps: int = 30) -> Path:
+    duration = max(0.6, float(duration or 2.5))
+    vf = "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1"
+    _v10_22_run([
+        "ffmpeg", "-y", "-stream_loop", "2", "-i", str(src),
+        "-t", f"{duration:.2f}", "-vf", vf, "-r", str(fps),
+        "-an", "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+        "-pix_fmt", "yuv420p", "-movflags", "+faststart", str(dst)
+    ], timeout=900)
+    return dst
+
+
+def _v10_22_concat(clips: List[Path], out_path: Path) -> Path:
+    if not clips:
+        raise RuntimeError("no semantic clips generated")
+    list_path = out_path.with_suffix(".txt")
+    list_path.write_text("".join([f"file '{c.as_posix()}'\n" for c in clips]), encoding="utf-8")
+    _v10_22_run([
+        "ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", str(list_path),
+        "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+        "-pix_fmt", "yuv420p", "-movflags", "+faststart", str(out_path)
+    ], timeout=900)
+    return out_path
+
+
+def _v10_22_clean_subtitle_text(text: str) -> str:
+    import re
+    v = str(text or "").strip()
+    v = re.sub(r"[，。！？、；：,.!?;:\\n\\r]+", " ", v)
+    v = re.sub(r"\\s+", " ", v).strip()
+    return v
+
+
+def _v10_22_split_chunks(script: str, max_chars: int = 9) -> List[str]:
+    import re
+    raw_parts = re.split(r"[，。！？、；：,.!?;:\\n\\r]+", str(script or ""))
+    chunks: List[str] = []
+    for part in raw_parts:
+        part = _v10_22_clean_subtitle_text(part)
+        if not part:
+            continue
+        buf = ""
+        for ch in part:
+            buf += ch
+            if len(buf) >= max_chars:
+                chunks.append(buf.strip())
+                buf = ""
+        if buf.strip():
+            chunks.append(buf.strip())
+    return chunks or [_v10_22_clean_subtitle_text(script)[:max_chars] or " "]
+
+
+def _v10_22_subtitle_cues(script: str, duration: float, tts_result: Any = None) -> List[Dict[str, Any]]:
+    # Prefer TTS provider segments when present; fallback to short Douyin chunks.
+    segs = []
+    if isinstance(tts_result, dict):
+        for key in ["segments", "subtitle_segments", "sentences", "cues"]:
+            if isinstance(tts_result.get(key), list) and tts_result.get(key):
+                segs = tts_result.get(key) or []
+                break
+    cues: List[Dict[str, Any]] = []
+    if segs:
+        for item in segs:
+            if not isinstance(item, dict):
+                continue
+            text = _v10_22_clean_subtitle_text(item.get("text") or item.get("subtitle_text") or item.get("sentence") or "")
+            if not text:
+                continue
+            start = float(item.get("start") or item.get("start_seconds") or 0)
+            end = float(item.get("end") or item.get("end_seconds") or min(float(duration), start + 2.0))
+            for chunk in _v10_22_split_chunks(text, max_chars=9):
+                cues.append({"text": chunk, "start": start, "end": end})
+        if cues:
+            return cues
+    chunks = _v10_22_split_chunks(script, max_chars=9)
+    per = max(0.8, float(duration) / max(1, len(chunks)))
+    t = 0.0
+    for chunk in chunks:
+        start = t
+        end = min(float(duration), t + per)
+        cues.append({"text": chunk, "start": round(start, 2), "end": round(end, 2)})
+        t = end
+    if cues:
+        cues[-1]["end"] = round(float(duration), 2)
+    return cues
+
+
+def _v10_22_render_semantic_direct(job_id: str, raw: Dict[str, Any], script: str, audio_duration: float, tts_result: Any, shots: List[Dict[str, Any]], title: str) -> Dict[str, Any]:
+    from pathlib import Path
+    import time, uuid
+    from app.services.subtitle_provider import upload_file_to_r2
+    from app.services.subtitle_style_library_provider import burn_subtitles_with_style_and_upload
+
+    work = Path("/tmp") / f"tts_first_semantic_v10_22_{job_id}"
+    work.mkdir(parents=True, exist_ok=True)
+    fixed_clips: List[Path] = []
+    _jobs[job_id].update({"stage": "semantic_direct_render", "progress": 66, "updated_at": time.time(), "direct_render_version": "v10_22"})
+
+    for idx, shot in enumerate(shots, start=1):
+        duration = float(shot.get("duration_seconds") or 3.0)
+        prompt = str(shot.get("visual_prompt") or shot.get("prompt") or shot.get("visual_subject") or "").strip()
+        if not prompt:
+            raise RuntimeError(f"shot {idx} missing semantic prompt")
+        payload = {
+            "prompt": prompt,
+            "input_prompt": prompt,
+            "text_prompt": prompt,
+            "visual_prompt": prompt,
+            "negative_prompt": str(shot.get("negative_prompt") or raw.get("negative_prompt") or ""),
+            "duration_seconds": max(2.0, min(5.0, duration)),
+            "target_duration_seconds": max(2.0, min(5.0, duration)),
+            "aspect_ratio": "9:16",
+            "width": int(raw.get("width") or 1080),
+            "height": int(raw.get("height") or 1920),
+            "fps": int(raw.get("fps") or 30),
+            "frames_per_second": int(raw.get("fps") or 30),
+            "resolution": "720p",
+            "video_quality": "high",
+            "prompt_optimizer": False,
+            "semantic_direct_render": True,
+            "semantic_type": shot.get("semantic_type"),
+            "semantic_label": shot.get("semantic_label"),
+            "must_show": shot.get("must_show"),
+            "forbidden_visuals": shot.get("forbidden_visuals"),
+        }
+        print("V10_22_SEMANTIC_SHOT_START=" + json.dumps({"idx": idx, "duration": duration, "label": shot.get("semantic_label"), "subject": shot.get("visual_subject")}, ensure_ascii=False), flush=True)
+        start = _post_json("http://127.0.0.1:8000/api/video/fal/shot/start", payload, timeout=80)
+        fal_job_id = start.get("job_id") or start.get("id") or start.get("data", {}).get("job_id")
+        if not fal_job_id:
+            raise RuntimeError("fal shot start failed: " + str(start)[:800])
+        last: Dict[str, Any] = {}
+        video_url = ""
+        for _ in range(90):
+            time.sleep(5)
+            last = _get_json(f"http://127.0.0.1:8000/api/video/fal/job/{fal_job_id}", timeout=80)
+            status = str(last.get("status") or last.get("stage") or "").lower()
+            if status in {"completed", "succeeded", "success", "done"} or last.get("ok") is True and _v10_22_extract_url(last):
+                video_url = _v10_22_extract_url(last)
+                break
+            if status in {"failed", "error"} or last.get("ok") is False and last.get("error"):
+                raise RuntimeError(f"fal shot {idx} failed: " + str(last)[:1200])
+        if not video_url:
+            raise RuntimeError(f"fal shot {idx} timeout/no video url: " + str(last)[:1200])
+        raw_clip = _v10_22_download(video_url, work / f"shot_{idx:02d}_raw.mp4")
+        fixed_clip = _v10_22_fix_clip(raw_clip, work / f"shot_{idx:02d}_fixed.mp4", duration, int(raw.get("fps") or 30))
+        fixed_clips.append(fixed_clip)
+        _jobs[job_id].update({"stage": f"semantic_direct_render_{idx}_of_{len(shots)}", "progress": 66 + int(18 * idx / max(1, len(shots))), "updated_at": time.time()})
+
+    raw_video_path = _v10_22_concat(fixed_clips, work / f"{job_id}_semantic_raw.mp4")
+    raw_upload = upload_file_to_r2(raw_video_path, object_key=f"videos/tts-first-semantic/raw/{time.strftime('%Y/%m/%d')}/{uuid.uuid4().hex}_{job_id}.mp4")
+    raw_video_url = str(raw_upload.get("video_url") or raw_upload.get("url") or raw_upload.get("public_url") or "")
+    if not raw_video_url:
+        raise RuntimeError("semantic raw upload failed: " + str(raw_upload)[:1000])
+
+    audio_url = _v10_22_extract_url(tts_result) or str(raw.get("audio_url") or raw.get("voice_url") or "")
+    if not audio_url:
+        raise RuntimeError("TTS-first direct render missing audio_url; refusing to return unsubtitled raw video")
+    cues = _v10_22_subtitle_cues(script, float(audio_duration), tts_result)
+    print("V10_22_SUBTITLE_BURN_START=" + json.dumps({"job_id": job_id, "cue_count": len(cues), "raw_video_url": raw_video_url[:120]}, ensure_ascii=False), flush=True)
+    subtitle_res = burn_subtitles_with_style_and_upload(
+        video_url=raw_video_url,
+        audio_url=audio_url,
+        cues=cues,
+        prefix=f"tts_first_semantic_{job_id}",
+        style_id=str(raw.get("subtitle_style_id") or "douyin_pop"),
+        object_key=f"videos/tts-first-semantic/subtitled/{time.strftime('%Y/%m/%d')}/{uuid.uuid4().hex}_{job_id}.mp4",
+    )
+    final_url = str(subtitle_res.get("video_url") or subtitle_res.get("subtitled_video_url") or subtitle_res.get("url") or "") if isinstance(subtitle_res, dict) else ""
+    if not final_url:
+        raise RuntimeError("subtitle burn failed; refusing raw fallback: " + str(subtitle_res)[:1200])
+    return {
+        "ok": True,
+        "provider": "full_ai_tts_first_semantic_direct_render_v10_22",
+        "video_url": final_url,
+        "subtitled_video_url": final_url,
+        "raw_video_url": raw_video_url,
+        "subtitle_result": subtitle_res,
+        "semantic_clip_count": len(fixed_clips),
+        "audio_url": audio_url,
+        "cues": cues[:12],
+    }
+# ================= end V10.22 semantic direct renderer =================
+
 def _run_job(job_id: str, raw: Dict[str, Any]) -> None:
     try:
         _jobs[job_id].update({"stage": "script", "progress": 10, "updated_at": time.time()})
@@ -824,68 +1081,32 @@ def _run_job(job_id: str, raw: Dict[str, Any]) -> None:
         if shots:
             print(f"TTS_FIRST_FINAL_PROMPT_1={shots[0]['prompt'][:360]}")
 
-        child_payload = dict(raw)
-        child_payload.update(
-            {
-                "title": title,
-                "topic": title,
-                "script_text": script,
-                # 核心：视频长度以真实 TTS 音频为准，不以用户选择的 15s/20s 死卡。
-                "duration_seconds": round(audio_duration, 2),
-                "target_duration_seconds": round(audio_duration, 2),
-                "target_seconds": round(audio_duration, 2),
-                "targetSeconds": round(audio_duration, 2),
-                "targetDuration": round(audio_duration, 2),
-                # 核心：把语义分镜直接交给后续 full-ai/fal/compose 链路。
-                "shots": shots,
-                "manual_shot_plan": shots,
-                "shot_overrides": {str(s["index"]): s for s in shots},
-                "semantic_shot_plan": semantic_plan,
-                "max_shots": len(shots),
-                "fal_fill_shots": len(shots),
-                "width": int(raw.get("width") or 1080),
-                "height": int(raw.get("height") or 1920),
-                "fps": int(raw.get("fps") or 30),
-                "city": city,
-                "visual_prompt_version": "tts_first_semantic_storyboard_v2",
-                "no_repeat_visuals": True,
-                "sync_visual_to_narration": True,
-                "avoid_indoor_when_narration_is_transport_or_amenities": True,
-                "avoid_klcc_repetition": True,
-            }
+        render_result = _v10_22_render_semantic_direct(
+            job_id=job_id,
+            raw=raw,
+            script=script,
+            audio_duration=audio_duration,
+            tts_result=tts_result,
+            shots=shots,
+            title=title,
         )
-
-        _jobs[job_id].update(
-            {
-                "shots": shots,
-                "semantic_shot_plan": semantic_plan,
-                "shot_count": len(shots),
-                "progress": 65,
-                "stage": "full_ai_start",
-                "child_payload_preview": {
-                    "duration_seconds": child_payload["duration_seconds"],
-                    "shot_count": len(shots),
-                    "city": city,
-                    "first_prompt": shots[0]["prompt"][:260] if shots else "",
-                    "semantic_plan": semantic_plan,
-                },
-                "updated_at": time.time(),
-            }
-        )
-
-        child = _post_json("http://127.0.0.1:8000/api/video/full-ai/start", child_payload, timeout=120)
-        child_job_id = child.get("job_id") or child.get("id") or child.get("data", {}).get("job_id")
         _jobs[job_id].update(
             {
                 "ok": True,
-                "stage": "delegated",
-                "status": "running",
-                "progress": 75,
-                "child_job_id": child_job_id,
-                "child_start_result": child,
+                "status": "completed",
+                "stage": "completed",
+                "progress": 100,
+                "provider": "full_ai_tts_first_semantic_direct_render_v10_22",
+                "direct_render": True,
+                "no_child_full_ai_start": True,
+                "video_url": render_result.get("video_url"),
+                "subtitled_video_url": render_result.get("subtitled_video_url"),
+                "raw_video_url": render_result.get("raw_video_url"),
+                "render_result": render_result,
                 "updated_at": time.time(),
             }
         )
+        return
     except Exception as exc:
         _jobs[job_id].update(
             {
@@ -902,8 +1123,8 @@ def _run_job(job_id: str, raw: Dict[str, Any]) -> None:
 def health() -> Dict[str, Any]:
     return {
         "ok": True,
-        "provider": "full_ai_tts_first_semantic_storyboard_v2",
-        "logic": "script -> real TTS duration -> semantic storyboard -> narration-synced shots -> full-ai compose",
+        "provider": "full_ai_tts_first_semantic_direct_render_v10_22",
+        "logic": "script -> real TTS duration -> semantic storyboard -> direct per-shot fal render -> concat -> subtitle burn",
         "guarantees": [
             "画面片段数按真实配音时长计算",
             "交通口播优先生成地铁/主干道/通勤画面",
@@ -924,7 +1145,7 @@ def plan_preview(req: TTSFirstStartRequest) -> Dict[str, Any]:
     shots = _plan_shots(script, float(duration), city, req.model_dump())
     return {
         "ok": True,
-        "provider": "full_ai_tts_first_semantic_storyboard_v2",
+        "provider": "full_ai_tts_first_semantic_direct_render_v10_22",
         "city": city,
         "duration_seconds": round(float(duration), 2),
         "shot_count": len(shots),
@@ -954,6 +1175,8 @@ def start(req: TTSFirstStartRequest) -> Dict[str, Any]:
 @router.get("/job/{job_id}")
 def get_job(job_id: str) -> Dict[str, Any]:
     job = _jobs.get(job_id)
+    if job and job.get("direct_render"):
+        return job
     if not job:
         return {"ok": False, "status": "not_found", "job_id": job_id}
 
