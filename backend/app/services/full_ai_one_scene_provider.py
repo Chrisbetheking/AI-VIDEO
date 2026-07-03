@@ -44,7 +44,8 @@ class StartReq(BaseModel):
     burn_subtitles: bool = True
     subtitle_style_id: str = "douyin_pop"
     background_scene: str = ""
-    visual_mode: str = "single_background_loop"
+    visual_mode: str = "single_scene_dynamic"
+    dynamic_shot_count: int = 3
 
 
 def _ensure() -> None:
@@ -283,49 +284,90 @@ def _tts(script: str, voice: str) -> tuple[float, str, Dict[str, Any]]:
     return fallback, "", last
 
 
-def _prompt(city: str, topic: str, scene: str = "") -> str:
-    # V10.14: fixed single background. Do not let fal infer “real-estate brochure / storyboard”.
-    base = str(scene or "").strip()
-    if not base:
-        base = (
-            "single uncut vertical 9:16 realistic phone video of one clean modern Kuala Lumpur condominium living room interior, "
-            "one full-screen image only, one locked camera angle, slow subtle natural movement, warm daylight, premium but realistic, "
-            "no people, no readable text, no skyline landmark, no project name"
-        )
-    return (
-        f"{base}. Only one normal interior background shot filling the whole screen. "
-        "Single continuous shot, one camera angle, no cuts, no multiple rooms, no agent, no brochure layout. "
-        "Absolutely no montage, no collage, no split screen, no multi-panel, no grid, no storyboard, no picture-in-picture. "
-        "No documents, no charts, no calculator, no UI, no screenshots, no readable text, no fake labels. "
-        "Do not show KLCC or Petronas Twin Towers, no famous landmark towers, no beach, no island, no ocean."
+def _clean_subtitle_text(text: str) -> str:
+    value = re.sub(r"\s+", "", str(text or "").strip())
+    # 字幕只保留纯文字和英文数字，去掉逗号句号问号冒号引号等标点。
+    value = re.sub(r"[，。！？、；：,.!?;:\"'“”‘’（）()【】\[\]《》<>\/\\|·•…—_-]+", "", value)
+    return value.strip()
+
+
+def _clean_keyword(value: str) -> str:
+    v = _clean_subtitle_text(value)
+    bad = ["评论区答疑模板", "数字人模板", "OpenClaw", "内容大脑", "R2素材", "类型", "模式", "用途", "模板", "规则", "字幕库", "素材库"]
+    if any(b.lower() in v.lower() for b in bad):
+        return ""
+    if re.fullmatch(r"\d{1,3}", v):
+        return ""
+    if len(v) < 2 or len(v) > 10:
+        return ""
+    return v
+
+
+def _extract_highlight_keywords(raw: Dict[str, Any], title: str, script: str) -> List[str]:
+    values: List[str] = []
+    def add(x: Any):
+        if isinstance(x, str):
+            values.extend(re.split(r"[,，、\s]+", x))
+        elif isinstance(x, dict):
+            for k in ("value", "keyword", "text", "label", "name", "term"):
+                if x.get(k):
+                    add(str(x.get(k)))
+        elif isinstance(x, list):
+            for item in x:
+                add(item)
+    for key in ("keyword_insights", "ai_keyword_insights", "keywords", "manualKeywords", "manual_keywords"):
+        add(raw.get(key))
+    add(title)
+    # 房产口播常用高亮词，确保字幕里重点词能变色变大。
+    values.extend(["吉隆坡", "马来西亚", "买房", "价格", "预算", "区域", "自住", "投资", "出租", "租金", "通勤", "转手", "流动性", "生活半径", "社区品质", "MontKiara", "TRX"])
+    seen = set()
+    out: List[str] = []
+    for v in values:
+        clean = _clean_keyword(str(v))
+        if clean and clean.lower() not in seen:
+            seen.add(clean.lower())
+            out.append(clean)
+    # 长词优先，避免“吉隆坡”被“吉”之类误切。
+    return sorted(out[:24], key=len, reverse=True)
+
+
+def _scene_prompts(city: str, topic: str, requested_count: int = 3) -> List[str]:
+    count = max(2, min(int(requested_count or 3), 4))
+    base_prefix = (
+        "vertical 9:16 realistic smartphone video, full screen single shot, not a collage, not split screen, "
+        "modern Kuala Lumpur condominium, premium but realistic, no readable text, no watermark, no logo, "
+        "no KLCC, no Petronas Twin Towers, no documents, no charts, no calculator"
     )
+    scenes = [
+        "same apartment living room interior, wide angle, warm daylight, slow cinematic push in, natural handheld micro movement",
+        "same apartment balcony and floor to ceiling window area, city view without famous landmarks, slow left to right pan, calm premium residential feeling",
+        "same apartment open kitchen and dining area, clean counter, warm lighting, slow dolly move, realistic home viewing atmosphere",
+        "same condominium lobby or resident lounge, quiet luxury interior, slow forward movement, no people, no text signage",
+    ]
+    suffix = (
+        "Only one camera view in this clip. No montage, no multi panel, no grid, no brochure, no poster, "
+        "no storyboard, no picture in picture, no fake labels, no subtitles inside the generated video."
+    )
+    return [f"{base_prefix}. {scenes[i]}. {suffix}" for i in range(count)]
 
 
-def _split_subtitle_chunks(script: str, max_chars: int = 12) -> List[str]:
+def _split_subtitle_chunks(script: str, max_chars: int = 10) -> List[str]:
     text = re.sub(r"\s+", " ", str(script or "").strip())
     if not text:
         return []
-    # First split by Chinese punctuation, then by commas, then by fixed short chunks.
-    rough = [x.strip() for x in re.split(r"(?<=[。！？!?；;])", text) if x.strip()]
-    if not rough:
-        rough = [text]
+    # 先按标点切语义，再删除标点；最终字幕绝不带标点。
+    rough = [x.strip() for x in re.split(r"[。！？!?；;，,、：:\n]+", text) if x.strip()] or [text]
     out: List[str] = []
-    for part in rough:
-        pieces = [x.strip() for x in re.split(r"(?<=[，,、：:])", part) if x.strip()]
-        for piece in pieces or [part]:
-            piece = piece.strip()
-            while len(piece) > max_chars:
-                cut = max_chars
-                for mark in "，,、 ":
-                    pos = piece.rfind(mark, 0, max_chars + 1)
-                    if pos >= 6:
-                        cut = pos + 1
-                        break
-                out.append(piece[:cut].strip())
-                piece = piece[cut:].strip()
-            if piece:
-                out.append(piece)
-    # Merge tiny fragments but keep TikTok/Douyin short rhythm.
+    for piece in rough:
+        piece = _clean_subtitle_text(piece)
+        if not piece:
+            continue
+        while len(piece) > max_chars:
+            out.append(piece[:max_chars])
+            piece = piece[max_chars:]
+        if piece:
+            out.append(piece)
+    # 合并太短的小块，但控制在抖音大字长度。
     merged: List[str] = []
     buf = ""
     for part in out:
@@ -425,31 +467,57 @@ def _poll_fal(job_id: str, timeout_s: int = 900) -> Dict[str, Any]:
     return {"ok": False, "status": "failed", "error": "fal one-scene shot timeout", "last": last}
 
 
-def _loop_with_audio(video_url: str, audio_url: str, duration: float, prefix: str) -> Path:
-    if not shutil.which("ffmpeg"):
-        raise RuntimeError("ffmpeg 不可用，无法合成单画面视频")
-    _ensure()
-    bg = _download(video_url, ".mp4")
+def _resolve_audio(audio_url: str) -> Path:
     audio_ref = str(audio_url or "").strip()
     if audio_ref.startswith("http://") or audio_ref.startswith("https://"):
-        audio = _download(audio_ref, Path(urlparse(audio_ref).path).suffix or ".mp3")
-    else:
-        candidates = [Path(audio_ref)]
-        if audio_ref and not Path(audio_ref).is_absolute():
-            candidates.extend([BASE_DIR / audio_ref, BASE_DIR / "data" / audio_ref, Path("/tmp") / audio_ref])
-        audio = next((x for x in candidates if x.exists()), candidates[0] if candidates else Path(""))
+        return _download(audio_ref, Path(urlparse(audio_ref).path).suffix or ".mp3")
+    candidates = [Path(audio_ref)]
+    if audio_ref and not Path(audio_ref).is_absolute():
+        candidates.extend([BASE_DIR / audio_ref, BASE_DIR / "data" / audio_ref, Path("/tmp") / audio_ref])
+    audio = next((x for x in candidates if x.exists()), candidates[0] if candidates else Path(""))
     if not audio.exists():
-        raise RuntimeError(f"TTS 音频不存在或不可下载: {audio_url}; checked={ [str(x) for x in (candidates if 'candidates' in locals() else [audio])] }")
+        raise RuntimeError(f"TTS 音频不存在或不可下载: {audio_url}; checked={ [str(x) for x in candidates] }")
+    return audio
+
+
+def _compose_dynamic_scene_with_audio(video_urls: List[str], audio_url: str, duration: float, prefix: str) -> Path:
+    if not shutil.which("ffmpeg"):
+        raise RuntimeError("ffmpeg 不可用，无法合成单场景动态视频")
+    _ensure()
+    if not video_urls:
+        raise RuntimeError("没有可用的单场景动态画面 URL")
+    clips = [_download(u, ".mp4") for u in video_urls]
+    audio = _resolve_audio(audio_url)
+    # 先把 2~4 个全屏动态角度拼成一个无声背景视频，再循环铺满整段配音。
+    bg_mix = WORK_DIR / f"{prefix}_dynamic_bg_{uuid.uuid4().hex[:8]}.mp4"
+    inputs: List[str] = []
+    filters: List[str] = []
+    labels: List[str] = []
+    for i, clip in enumerate(clips):
+        inputs.extend(["-i", str(clip)])
+        labels.append(f"[v{i}]")
+        filters.append(f"[{i}:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,fps=30,setsar=1,trim=duration=5,setpts=PTS-STARTPTS[v{i}]")
+    filter_complex = ";".join(filters) + ";" + "".join(labels) + f"concat=n={len(clips)}:v=1:a=0,format=yuv420p[v]"
+    cmd_bg = [
+        "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+        *inputs,
+        "-filter_complex", filter_complex,
+        "-map", "[v]", "-an",
+        "-c:v", "libx264", "-preset", "veryfast", "-crf", "22",
+        "-movflags", "+faststart",
+        str(bg_mix),
+    ]
+    proc = subprocess.run(cmd_bg, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=900)
+    if proc.returncode != 0:
+        raise RuntimeError(proc.stderr or "dynamic scene concat failed")
+
     out = WORK_DIR / f"{prefix}_{time.strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}.mp4"
-    # Loop one generated visual behind the whole audio. This avoids multiple-shot/collage failure entirely.
-    vf = "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,fps=30"
     cmd = [
         "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
-        "-stream_loop", "-1", "-i", str(bg),
+        "-stream_loop", "-1", "-i", str(bg_mix),
         "-i", str(audio),
         "-t", str(round(float(duration) + 0.12, 2)),
         "-map", "0:v:0", "-map", "1:a:0",
-        "-vf", vf,
         "-c:v", "libx264", "-preset", "veryfast", "-crf", "22",
         "-c:a", "aac", "-b:a", "192k",
         "-shortest", "-movflags", "+faststart",
@@ -457,7 +525,7 @@ def _loop_with_audio(video_url: str, audio_url: str, duration: float, prefix: st
     ]
     proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=900)
     if proc.returncode != 0:
-        raise RuntimeError(proc.stderr or "one-scene ffmpeg compose failed")
+        raise RuntimeError(proc.stderr or "dynamic scene ffmpeg compose failed")
     return out
 
 
@@ -482,27 +550,34 @@ def _run(job_id: str, raw: Dict[str, Any]) -> None:
         audio_dur, audio_url, tts_res = _tts(script, str(raw.get("voice") or "default"))
         job.update({"stage": "one_scene_fal", "progress": 25, "audio_duration_seconds": round(audio_dur, 2), "audio_url": audio_url, "tts_result": tts_res, "updated_at": time.time()}); _persist(job_id)
 
-        prompt = _prompt(str(raw.get("city") or ""), title, str(raw.get("background_scene") or ""))
-        print("ONE_SCENE_PROMPT=" + prompt[:600], flush=True)
-        start = _post_json("http://127.0.0.1:8000/api/video/fal/shot/start", {
-            "prompt": prompt,
-            "duration_seconds": 5.0,
-            "duration": 5.0,
-            "width": 1080,
-            "height": 1920,
-            "fps": int(raw.get("fps") or 30),
-            "negative_prompt": "collage, split screen, multi panel, grid, brochure, poster, storyboard, picture in picture, documents, charts, calculator, readable text, KLCC, Petronas Twin Towers",
-        }, timeout=120)
-        fid = start.get("job_id") or start.get("id") or (start.get("data") or {}).get("job_id")
-        if not fid:
-            raise RuntimeError(f"fal one-scene did not return job_id: {start}")
-        fal_done = _poll_fal(str(fid), timeout_s=1200)
-        bg_url = _video_url(fal_done)
-        if not bg_url:
-            raise RuntimeError(f"fal one-scene failed/no video_url: {fal_done}")
-        job.update({"stage": "compose_one_scene", "progress": 70, "background_video_url": bg_url, "fal_result": fal_done, "updated_at": time.time()}); _persist(job_id)
+        scene_count = max(2, min(int(raw.get("dynamic_shot_count") or raw.get("fal_fill_shots") or 3), 4))
+        prompts = _scene_prompts(str(raw.get("city") or ""), title, requested_count=scene_count)
+        fal_results: List[Dict[str, Any]] = []
+        bg_urls: List[str] = []
+        for idx, prompt in enumerate(prompts, start=1):
+            job.update({"stage": f"one_scene_fal_{idx}_of_{len(prompts)}", "progress": 25 + int(35 * (idx - 1) / max(1, len(prompts))), "updated_at": time.time()}); _persist(job_id)
+            print(f"ONE_SCENE_DYNAMIC_PROMPT_{idx}=" + prompt[:800], flush=True)
+            start = _post_json("http://127.0.0.1:8000/api/video/fal/shot/start", {
+                "prompt": prompt,
+                "duration_seconds": 5.0,
+                "duration": 5.0,
+                "width": 1080,
+                "height": 1920,
+                "fps": int(raw.get("fps") or 30),
+                "negative_prompt": "collage, split screen, multi panel, grid, brochure, poster, storyboard, picture in picture, documents, charts, calculator, readable text, fake text, KLCC, Petronas Twin Towers, static single image, slideshow",
+            }, timeout=120)
+            fid = start.get("job_id") or start.get("id") or (start.get("data") or {}).get("job_id")
+            if not fid:
+                raise RuntimeError(f"fal dynamic scene {idx} did not return job_id: {start}")
+            fal_done = _poll_fal(str(fid), timeout_s=1200)
+            bg_url = _video_url(fal_done)
+            if not bg_url:
+                raise RuntimeError(f"fal dynamic scene {idx} failed/no video_url: {fal_done}")
+            fal_results.append(fal_done)
+            bg_urls.append(bg_url)
+        job.update({"stage": "compose_dynamic_scene", "progress": 70, "background_video_urls": bg_urls, "background_video_url": bg_urls[0] if bg_urls else "", "fal_results": fal_results, "updated_at": time.time()}); _persist(job_id)
 
-        composed_path = _loop_with_audio(bg_url, audio_url, audio_dur, prefix=job_id)
+        composed_path = _compose_dynamic_scene_with_audio(bg_urls, audio_url, audio_dur, prefix=job_id)
         raw_upload = upload_file_to_r2(composed_path, object_key=f"videos/one-scene/raw/{time.strftime('%Y/%m/%d')}/{composed_path.name}")
         raw_url = raw_upload.get("url") or ""
 
@@ -512,6 +587,7 @@ def _run(job_id: str, raw: Dict[str, Any]) -> None:
         if bool(raw.get("burn_subtitles", True)):
             job.update({"stage": "subtitle_burn_exact_script", "progress": 88, "raw_video_url": raw_url, "updated_at": time.time()}); _persist(job_id)
             cues = _subtitle_cues(script, float(audio_dur), tts_res)
+            highlight_keywords = _extract_highlight_keywords(raw, title, script)
             try:
                 subtitle_res = burn_subtitles_with_style_and_upload(
                     video_path=str(composed_path),
@@ -519,6 +595,7 @@ def _run(job_id: str, raw: Dict[str, Any]) -> None:
                     segments=cues,
                     duration=float(audio_dur),
                     style_id=str(raw.get("subtitle_style_id") or "douyin_pop"),
+                    keywords=highlight_keywords,
                     prefix=f"one_scene_{job_id}",
                     object_key=f"videos/one-scene/subtitled/{time.strftime('%Y/%m/%d')}/{uuid.uuid4().hex}_{job_id}.mp4",
                 )
@@ -543,7 +620,8 @@ def _run(job_id: str, raw: Dict[str, Any]) -> None:
             "subtitle_error": subtitle_error,
             "thumbnail_result": thumb,
             "single_scene": True,
-            "shot_count": 1,
+            "dynamic_single_scene": True,
+            "shot_count": len(bg_urls),
             "updated_at": time.time(),
         }); _persist(job_id)
     except Exception as exc:
@@ -556,16 +634,21 @@ def _run(job_id: str, raw: Dict[str, Any]) -> None:
 def health() -> Dict[str, Any]:
     return {
         "ok": True,
-        "provider": "full_ai_one_scene_v10_14",
+        "provider": "full_ai_one_scene_v10_15",
         "single_scene": True,
-        "shot_count": 1,
-        "loop_visual_to_audio": True,
+        "shot_count": 3,
+        "dynamic_single_scene": True,
+        "dynamic_shot_count": 3,
+        "same_theme_multi_angle": True,
         "exact_script_subtitles": True,
         "douyin_subtitle_styles": True,
         "short_chunk_subtitle_timing": True,
         "safe_audio_url_extraction": True,
         "failure_error_exposed": True,
         "raw_video_fallback": True,
+        "no_static_single_frame_loop": True,
+        "punctuation_free_subtitles": True,
+        "keyword_highlight_scale": True,
         "no_multi_shots": True,
     }
 
@@ -577,7 +660,7 @@ def start(req: StartReq) -> Dict[str, Any]:
     _jobs[job_id] = {"ok": True, "job_id": job_id, "job_type": "one_scene", "status": "running", "stage": "queued", "progress": 1, "created_at": time.time(), "updated_at": time.time(), "request": raw}
     _persist(job_id)
     threading.Thread(target=_run, args=(job_id, raw), daemon=True).start()
-    return {"ok": True, "job_id": job_id, "status": "running", "stage": "queued", "single_scene": True, "message": "已启动 V10.14 单画面视频：一个背景画面 + 抖音大字字幕 + 按 TTS 实际时长切字幕。"}
+    return {"ok": True, "job_id": job_id, "status": "running", "stage": "queued", "single_scene": True, "message": "已启动 V10.15 单场景动态视频：3 个同主题动态角度 + 抖音大字关键词高亮字幕。"}
 
 
 @router.get("/job/{job_id}")

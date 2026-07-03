@@ -4,7 +4,7 @@ import json
 from typing import Any, Dict
 from fastapi import APIRouter, FastAPI
 
-router = APIRouter(prefix="/api/video/fal-prompt-guard-v10-13", tags=["fal-prompt-guard-v10-13"])
+router = APIRouter(prefix="/api/video/fal-prompt-guard-v10-15", tags=["fal-prompt-guard-v10-15"])
 _INSTALLED = False
 
 NEGATIVE = (
@@ -55,13 +55,13 @@ def _rewrite_args(arguments: Any) -> Any:
                 args[k] = 5.0
     args["prompt_optimizer"] = False
     try:
-        print("V10_13_COMPAT_FAL_FINAL_ARGUMENTS=" + json.dumps(args, ensure_ascii=False)[:3000], flush=True)
+        print("V10_15_FAL_FINAL_ARGUMENTS=" + json.dumps(args, ensure_ascii=False)[:3000], flush=True)
     except Exception:
         pass
     return args
 
 
-def install_fal_prompt_guard_v10_13(app: FastAPI | None = None) -> None:
+def install_fal_prompt_guard_v10_15(app: FastAPI | None = None) -> None:
     global _INSTALLED
     if _INSTALLED:
         return
@@ -103,11 +103,11 @@ def install_fal_prompt_guard_v10_13(app: FastAPI | None = None) -> None:
                 return base_subscribe(*args, **kwargs)
             fal_client.subscribe = guarded_subscribe
 
-        setattr(fal_client, "_ai_video_v10_13_compat_prompt_guard", True)
+        setattr(fal_client, "_ai_video_v10_15_prompt_guard", True)
         _INSTALLED = True
-        print("V10_13_COMPAT_FAL_PROMPT_GUARD_INSTALLED", flush=True)
+        print("V10_15_FAL_PROMPT_GUARD_INSTALLED", flush=True)
     except Exception as exc:
-        print("V10_13_COMPAT_FAL_PROMPT_GUARD_INSTALL_FAILED", exc, flush=True)
+        print("V10_15_FAL_PROMPT_GUARD_INSTALL_FAILED", exc, flush=True)
     if app is not None:
         try:
             app.include_router(router)
@@ -119,7 +119,7 @@ def install_fal_prompt_guard_v10_13(app: FastAPI | None = None) -> None:
 def health() -> dict[str, Any]:
     return {
         "ok": True,
-        "provider": "fal_prompt_guard_v10_13",
+        "provider": "fal_prompt_guard_v10_15",
         "installed": _INSTALLED,
         "preserve_scene_prompt": True,
         "dynamic_single_scene": True,

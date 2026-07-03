@@ -9,18 +9,21 @@ _INSTALLED = False
 
 NEGATIVE = (
     "collage, split screen, multi panel, multi-panel, panels, grid, storyboard, contact sheet, brochure, poster, magazine layout, "
-    "picture in picture, frame within frame, multiple photos, mosaic, montage board, comparison chart, UI, screenshot, "
-    "document, paperwork, paper sheets, report, graph, chart, calculator, table, file folder, readable text, fake text, gibberish text, "
-    "logo, watermark, caption overlay, black border, white border, Petronas Twin Towers, KLCC Twin Towers, repeated skyline, beach, ocean, island"
+    "montage board, picture in picture, frame within frame, black border, white border, static slideshow, single still image, "
+    "documents, papers, file folder, chart, graph, calculator, UI, screenshot, readable text, fake text, logo, watermark, "
+    "Petronas Twin Towers, KLCC Twin Towers, landmark towers, repeated skyline, beach, ocean, island"
 )
 
-PROMPT = (
-    "one modern Kuala Lumpur condominium living room connected to a balcony, warm daylight, subtle ordinary residential skyline outside, no landmark towers. "
-    "A single continuous vertical 9:16 realistic phone video, one full-screen scene only, one camera angle with very slow natural handheld movement. "
-    "No montage, no collage, no split screen, no multi-panel, no grid, no brochure, no poster, no storyboard, no picture-in-picture. "
-    "No documents, no charts, no calculator, no UI, no screenshots, no readable text, no fake labels. "
-    "Natural Malaysian condominium environment, clean realistic interior, calm premium real estate walkthrough feeling. "
-    "Do not show KLCC or Petronas Twin Towers, no beach, no island, no ocean, no fake project name, no exact price, no ROI text."
+APPEND_GUARD = (
+    " Full-screen vertical 9:16 realistic phone video. One normal camera view per clip with natural camera motion. "
+    "No collage, no split screen, no grid, no poster, no brochure, no storyboard, no picture-in-picture. "
+    "No readable text, no fake labels, no logo, no watermark, no documents, no charts, no calculator. "
+    "Do not show KLCC or Petronas Twin Towers."
+)
+
+DEFAULT_PROMPT = (
+    "vertical 9:16 realistic smartphone video of a modern Kuala Lumpur condominium interior, slow natural camera movement, "
+    "premium but realistic, full-screen single camera view, no readable text, no people"
 )
 
 
@@ -28,10 +31,17 @@ def _rewrite_args(arguments: Any) -> Any:
     if not isinstance(arguments, dict):
         return arguments
     args: Dict[str, Any] = dict(arguments)
-    # V10.12: one visual only. Even if upstream sends shots, collapse to one prompt.
+    # Do not force a fixed living-room prompt anymore. Preserve the caller's scene prompt and only append safety constraints.
     args.pop("shots", None)
+    args.pop("storyboard", None)
+    args.pop("scenes", None)
     for k in ("prompt", "input_prompt", "text_prompt", "visual_prompt"):
-        args[k] = PROMPT
+        current = str(args.get(k) or "").strip()
+        if not current:
+            current = DEFAULT_PROMPT
+        if "no collage" not in current.lower():
+            current = current.rstrip(" .") + "." + APPEND_GUARD
+        args[k] = current
     old_neg = str(args.get("negative_prompt") or "")
     args["negative_prompt"] = (old_neg + ", " + NEGATIVE).strip(", ") if old_neg else NEGATIVE
     args["aspect_ratio"] = "9:16"
@@ -40,15 +50,12 @@ def _rewrite_args(arguments: Any) -> Any:
     for k in ("duration", "duration_seconds", "video_duration"):
         if k in args:
             try:
-                args[k] = min(float(args[k]), 5.0)
+                args[k] = min(float(args[k]), 6.0)
             except Exception:
                 args[k] = 5.0
+    args["prompt_optimizer"] = False
     try:
-        args["prompt_optimizer"] = False
-    except Exception:
-        pass
-    try:
-        print("V10_12_FAL_FINAL_ARGUMENTS=" + json.dumps(args, ensure_ascii=False)[:3000], flush=True)
+        print("V10_12_COMPAT_FAL_FINAL_ARGUMENTS=" + json.dumps(args, ensure_ascii=False)[:3000], flush=True)
     except Exception:
         pass
     return args
@@ -96,11 +103,11 @@ def install_fal_prompt_guard_v10_12(app: FastAPI | None = None) -> None:
                 return base_subscribe(*args, **kwargs)
             fal_client.subscribe = guarded_subscribe
 
-        setattr(fal_client, "_ai_video_v10_12_prompt_guard", True)
+        setattr(fal_client, "_ai_video_v10_12_compat_prompt_guard", True)
         _INSTALLED = True
-        print("V10_12_FAL_PROMPT_GUARD_INSTALLED", flush=True)
+        print("V10_12_COMPAT_FAL_PROMPT_GUARD_INSTALLED", flush=True)
     except Exception as exc:
-        print("V10_12_FAL_PROMPT_GUARD_INSTALL_FAILED", exc, flush=True)
+        print("V10_12_COMPAT_FAL_PROMPT_GUARD_INSTALL_FAILED", exc, flush=True)
     if app is not None:
         try:
             app.include_router(router)
@@ -114,8 +121,9 @@ def health() -> dict[str, Any]:
         "ok": True,
         "provider": "fal_prompt_guard_v10_12",
         "installed": _INSTALLED,
-        "one_visual_only": True,
+        "preserve_scene_prompt": True,
+        "dynamic_single_scene": True,
+        "no_fixed_static_prompt": True,
         "no_collage_split_screen": True,
-        "no_multi_shots": True,
-        "fixed_single_condo_interior": True,
+        "no_readable_text": True,
     }

@@ -45,12 +45,12 @@ SUBTITLE_STYLES: list[dict[str, Any]] = [
         "ass_primary": "&H00FFFFFF",
         "ass_outline": "&H00000000",
         "ass_back": "&H00000000",
-        "font_size": 70,
-        "outline": 7,
+        "font_size": 92,
+        "outline": 9,
         "shadow": 1,
-        "margin_v": 235,
+        "margin_v": 285,
         "border_style": 1,
-        "max_chars": 12,
+        "max_chars": 10,
         "ass_prefix": r"{\fad(60,60)\blur0.35\t(0,120,\fscx108\fscy108)\t(120,220,\fscx100\fscy100)}",
     },
     {
@@ -63,12 +63,12 @@ SUBTITLE_STYLES: list[dict[str, Any]] = [
         "ass_primary": "&H005CE4FF",
         "ass_outline": "&H00000000",
         "ass_back": "&H00000000",
-        "font_size": 72,
-        "outline": 8,
+        "font_size": 94,
+        "outline": 10,
         "shadow": 1,
-        "margin_v": 235,
+        "margin_v": 285,
         "border_style": 1,
-        "max_chars": 11,
+        "max_chars": 9,
         "ass_prefix": r"{\fad(60,60)\blur0.35\t(0,120,\fscx108\fscy108)\t(120,220,\fscx100\fscy100)}",
     },
     {
@@ -81,10 +81,10 @@ SUBTITLE_STYLES: list[dict[str, Any]] = [
         "ass_primary": "&H00FFFFFF",
         "ass_outline": "&H00000000",
         "ass_back": "&H99000000",
-        "font_size": 62,
+        "font_size": 80,
         "outline": 1,
         "shadow": 0,
-        "margin_v": 230,
+        "margin_v": 275,
         "border_style": 4,
         "max_chars": 13,
         "ass_prefix": r"{\fad(70,70)}",
@@ -184,19 +184,74 @@ def _ass_time(seconds: float) -> str:
     return f"{h}:{m:02d}:{s:02d}.{cs:02d}"
 
 
-def _ass_escape(text: str, max_chars: int = 12) -> str:
-    value = re.sub(r"\s+", " ", str(text or "").strip())
+
+def _strip_subtitle_punctuation(text: str) -> str:
+    value = re.sub(r"\s+", "", str(text or "").strip())
+    # 纯文字字幕：去掉中英文标点，只保留汉字、英文、数字和必要空格。
+    value = re.sub(r"[，。！？、；：,.!?;:\"'“”‘’（）()【】\[\]《》<>/\\|·•…—_-]+", "", value)
+    return value.strip()
+
+
+def _clean_keyword(value: str) -> str:
+    v = _strip_subtitle_punctuation(value)
+    bad = ["评论区答疑模板", "数字人模板", "OpenClaw", "内容大脑", "R2素材", "类型", "模式", "用途", "模板", "规则", "字幕库", "素材库"]
+    if any(b.lower() in v.lower() for b in bad):
+        return ""
+    if re.fullmatch(r"\d{1,3}", v):
+        return ""
+    if len(v) < 2 or len(v) > 10:
+        return ""
+    return v
+
+
+def _ass_tag_for_highlight(style: dict[str, Any]) -> str:
+    # ASS 使用 BGR 十六进制。这里用醒目的黄橙色，字体放大约 1.25 倍。
+    base_size = int(style.get("font_size") or 90)
+    return r"{\1c&H003FE8FF&\fs" + str(int(base_size * 1.25)) + r"\fscx118\fscy118}"
+
+
+def _ass_tag_reset(style: dict[str, Any]) -> str:
+    base_size = int(style.get("font_size") or 90)
+    primary = str(style.get("ass_primary") or "&H00FFFFFF")
+    if not primary.endswith("&"):
+        primary = primary + "&"
+    return r"{\1c" + primary + r"\fs" + str(base_size) + r"\fscx100\fscy100}"
+
+
+def _apply_keyword_highlight(text: str, keywords: Optional[list[str]], style: dict[str, Any]) -> str:
+    value = text
+    kws = []
+    seen = set()
+    for k in keywords or []:
+        ck = _clean_keyword(str(k))
+        if ck and ck.lower() not in seen:
+            seen.add(ck.lower())
+            kws.append(ck)
+    kws.sort(key=len, reverse=True)
+    hi = _ass_tag_for_highlight(style)
+    reset = _ass_tag_reset(style)
+    # 逐词替换，避免重复套标签。
+    for kw in kws[:20]:
+        try:
+            value = re.sub(re.escape(kw), lambda m: hi + m.group(0) + reset, value)
+        except Exception:
+            pass
+    return value
+
+def _ass_escape(text: str, max_chars: int = 10, keywords: Optional[list[str]] = None, style: Optional[dict[str, Any]] = None) -> str:
+    style = style or {}
+    value = _strip_subtitle_punctuation(str(text or ""))
     value = value.replace("{", "（").replace("}", "）")
-    value = value.replace("\n", " ").replace("\r", " ")
-    max_chars = max(8, min(int(max_chars or 12), 18))
-    # Douyin-style口播字幕：短块、大字，不要一整句糊在底部。
+    max_chars = max(7, min(int(max_chars or 10), 14))
+    # 抖音口播字幕：短块、大字、纯文字，不带标点。一屏最多两行。
     if len(value) > max_chars:
         chunks = [value[i:i + max_chars] for i in range(0, len(value), max_chars)]
         value = r"\N".join(chunks[:2])
+    value = _apply_keyword_highlight(value, keywords=keywords, style=style)
     return value
 
 
-def _make_ass(cues: list[dict[str, Any]], style_id: str, prefix: str = "subtitle_style") -> Path:
+def _make_ass(cues: list[dict[str, Any]], style_id: str, prefix: str = "subtitle_style", keywords: Optional[list[str]] = None) -> Path:
     _ensure_dirs()
     style = _style(style_id)
     ass_path = WORK_DIR / f"{prefix}_{time.strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}.ass"
@@ -221,7 +276,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     for cue in cues:
         start = _ass_time(float(cue.get("start") or 0))
         end = _ass_time(float(cue.get("end") or 0))
-        text = ass_prefix + _ass_escape(str(cue.get("text") or ""), max_chars=max_chars)
+        text = ass_prefix + _ass_escape(str(cue.get("text") or ""), max_chars=max_chars, keywords=keywords, style=style)
         lines.append(f"Dialogue: 0,{start},{end},Default,,0,0,0,,{text}\n")
     ass_path.write_text("".join(lines), encoding="utf-8")
     return ass_path
@@ -246,6 +301,7 @@ def burn_subtitles_with_style_and_upload(
     segments: Optional[list[dict[str, Any]]] = None,
     duration: Optional[float] = None,
     style_id: str = "real_estate_gold",
+    keywords: Optional[list[str]] = None,
     prefix: str = "wizard_subtitle",
     object_key: str = "",
 ) -> dict[str, Any]:
@@ -258,7 +314,7 @@ def burn_subtitles_with_style_and_upload(
         raise FileNotFoundError(f"视频文件不存在: {input_path}")
     media_duration = float(duration or get_media_duration_seconds(input_path, default=12.0))
     cues = _make_cues(text=text, segments=segments, duration=media_duration)
-    ass_path = _make_ass(cues, style_id=style_id, prefix=prefix)
+    ass_path = _make_ass(cues, style_id=style_id, prefix=prefix, keywords=keywords)
     output_path = WORK_DIR / f"{prefix}_{time.strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}.mp4"
 
     cmd = [
@@ -318,13 +374,14 @@ class BurnRequest(BaseModel):
     segments: list[dict[str, Any]] = []
     duration: Optional[float] = None
     style_id: str = "real_estate_gold"
+    keywords: list[str] = []
     prefix: str = "wizard_subtitle_manual"
 
 
 @router.get("/health")
 def health() -> dict[str, Any]:
     _ensure_dirs()
-    return {"ok": True, "provider": "subtitle_style_library_v10_13", "style_count": len(SUBTITLE_STYLES), "work_dir": str(WORK_DIR)}
+    return {"ok": True, "provider": "subtitle_style_library_v10_15", "style_count": len(SUBTITLE_STYLES), "punctuation_free": True, "keyword_highlight_scale": True, "large_douyin_font": True, "work_dir": str(WORK_DIR)}
 
 
 @router.get("/styles")
@@ -347,6 +404,7 @@ def burn_upload(req: BurnRequest) -> dict[str, Any]:
         segments=req.segments,
         duration=req.duration,
         style_id=req.style_id,
+        keywords=req.keywords,
         prefix=req.prefix,
     )
 
