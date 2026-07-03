@@ -1014,21 +1014,23 @@ def _v10_22_render_semantic_direct(job_id: str, raw: Dict[str, Any], script: str
     if not audio_url:
         raise RuntimeError("TTS-first direct render missing audio_url; refusing to return unsubtitled raw video")
     cues = _v10_22_subtitle_cues(script, float(audio_duration), tts_result)
-    print("V10_22_SUBTITLE_BURN_START=" + json.dumps({"job_id": job_id, "cue_count": len(cues), "raw_video_url": raw_video_url[:120]}, ensure_ascii=False), flush=True)
-    subtitle_res = burn_subtitles_with_style_and_upload(
-        video_url=raw_video_url,
+    # Expose raw video before subtitle burn so paid fal clips are never lost if burn fails.
+    _jobs[job_id].update({"stage": "subtitle_burn_local_v10_23", "progress": 94, "raw_video_url": raw_video_url, "local_raw_video_path": str(raw_video_path), "updated_at": time.time()})
+    print("V10_22_SUBTITLE_BURN_START=" + json.dumps({"job_id": job_id, "cue_count": len(cues), "raw_video_url": raw_video_url[:150]}, ensure_ascii=False), flush=True)
+    subtitle_res = _v10_23_burn_local_subtitles_and_upload(
+        raw_video_path=raw_video_path,
         audio_url=audio_url,
         cues=cues,
-        prefix=f"tts_first_semantic_{job_id}",
-        style_id=str(raw.get("subtitle_style_id") or "douyin_pop"),
-        object_key=f"videos/tts-first-semantic/subtitled/{time.strftime('%Y/%m/%d')}/{uuid.uuid4().hex}_{job_id}.mp4",
+        job_id=job_id,
+        work=work,
+        duration=float(audio_duration),
     )
     final_url = str(subtitle_res.get("video_url") or subtitle_res.get("subtitled_video_url") or subtitle_res.get("url") or "") if isinstance(subtitle_res, dict) else ""
     if not final_url:
-        raise RuntimeError("subtitle burn failed; refusing raw fallback: " + str(subtitle_res)[:1200])
+        raise RuntimeError("local subtitle burn failed; refusing raw fallback: " + str(subtitle_res)[:1200])
     return {
         "ok": True,
-        "provider": "full_ai_tts_first_semantic_direct_render_v10_22",
+        "provider": "full_ai_tts_first_semantic_direct_render_v10_23",
         "video_url": final_url,
         "subtitled_video_url": final_url,
         "raw_video_url": raw_video_url,
@@ -1037,6 +1039,75 @@ def _v10_22_render_semantic_direct(job_id: str, raw: Dict[str, Any], script: str
         "audio_url": audio_url,
         "cues": cues[:12],
     }
+
+
+def _v10_23_ass_time(seconds: float) -> str:
+    seconds = max(0.0, float(seconds or 0.0))
+    h = int(seconds // 3600)
+    m = int((seconds % 3600) // 60)
+    sec = seconds % 60
+    return f"{h:d}:{m:02d}:{sec:05.2f}"
+
+
+def _v10_23_ass_escape(text: str) -> str:
+    return str(text or "").replace("{", "").replace("}", "").replace("\n", " ").strip()
+
+
+def _v10_23_write_ass(cues: List[Dict[str, Any]], ass_path: Path) -> Path:
+    lines = [
+        "[Script Info]",
+        "ScriptType: v4.00+",
+        "PlayResX: 1080",
+        "PlayResY: 1920",
+        "ScaledBorderAndShadow: yes",
+        "",
+        "[V4+ Styles]",
+        "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
+        "Style: Main,Arial,78,&H00FFFFFF,&H00FFFFFF,&H00000000,&H66000000,-1,0,0,0,100,100,0,0,1,6,1,2,70,70,220,1",
+        "",
+        "[Events]",
+        "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
+    ]
+    for cue in cues or []:
+        text = _v10_23_ass_escape(cue.get("text") or cue.get("subtitle_text") or "")
+        if not text:
+            continue
+        start = float(cue.get("start") or cue.get("start_seconds") or 0.0)
+        end = float(cue.get("end") or cue.get("end_seconds") or start + 1.2)
+        if end <= start:
+            end = start + 1.2
+        lines.append(f"Dialogue: 0,{_v10_23_ass_time(start)},{_v10_23_ass_time(end)},Main,,0,0,0,,{text}")
+    ass_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return ass_path
+
+
+def _v10_23_burn_local_subtitles_and_upload(raw_video_path: Path, audio_url: str, cues: List[Dict[str, Any]], job_id: str, work: Path, duration: float) -> Dict[str, Any]:
+    import time, uuid
+    from app.services.subtitle_provider import upload_file_to_r2
+    if not raw_video_path.exists() or raw_video_path.stat().st_size < 1024:
+        raise RuntimeError(f"raw semantic video missing before subtitle burn: {raw_video_path}")
+    audio_path = _v10_22_download(audio_url, work / f"{job_id}_tts_audio.m4a")
+    ass_path = _v10_23_write_ass(cues, work / f"{job_id}_douyin_subtitles.ass")
+    final_path = work / f"{job_id}_final_subtitled.mp4"
+    print("V10_23_SUBTITLE_BURN_LOCAL_START=" + json.dumps({"job_id": job_id, "cue_count": len(cues or []), "raw": raw_video_path.as_posix(), "audio_size": audio_path.stat().st_size}, ensure_ascii=False), flush=True)
+    vf = f"subtitles='{ass_path.as_posix()}'"
+    _v10_22_run([
+        "ffmpeg", "-y", "-i", str(raw_video_path), "-i", str(audio_path),
+        "-vf", vf, "-map", "0:v:0", "-map", "1:a:0",
+        "-t", f"{max(0.8, float(duration or 0)):.2f}",
+        "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+        "-c:a", "aac", "-b:a", "192k", "-shortest",
+        "-movflags", "+faststart", str(final_path)
+    ], timeout=900)
+    if not final_path.exists() or final_path.stat().st_size < 4096:
+        raise RuntimeError("local subtitle burn produced empty final video")
+    upload = upload_file_to_r2(final_path, object_key=f"videos/tts-first-semantic/subtitled/{time.strftime('%Y/%m/%d')}/{uuid.uuid4().hex}_{job_id}.mp4")
+    final_url = str(upload.get("video_url") or upload.get("url") or upload.get("public_url") or upload.get("signed_url") or "")
+    if not final_url:
+        raise RuntimeError("final subtitled upload failed: " + str(upload)[:1000])
+    print("V10_23_SUBTITLE_BURN_LOCAL_DONE=" + json.dumps({"job_id": job_id, "final_url": final_url[:150]}, ensure_ascii=False), flush=True)
+    return {"ok": True, "provider": "v10_23_local_ass_burn", "video_url": final_url, "subtitled_video_url": final_url, "ass_path": ass_path.as_posix(), "local_final_path": final_path.as_posix(), "upload": upload}
+
 # ================= end V10.22 semantic direct renderer =================
 
 def _run_job(job_id: str, raw: Dict[str, Any]) -> None:
@@ -1096,7 +1167,7 @@ def _run_job(job_id: str, raw: Dict[str, Any]) -> None:
                 "status": "completed",
                 "stage": "completed",
                 "progress": 100,
-                "provider": "full_ai_tts_first_semantic_direct_render_v10_22",
+                "provider": "full_ai_tts_first_semantic_direct_render_v10_23",
                 "direct_render": True,
                 "no_child_full_ai_start": True,
                 "video_url": render_result.get("video_url"),
@@ -1123,8 +1194,8 @@ def _run_job(job_id: str, raw: Dict[str, Any]) -> None:
 def health() -> Dict[str, Any]:
     return {
         "ok": True,
-        "provider": "full_ai_tts_first_semantic_direct_render_v10_22",
-        "logic": "script -> real TTS duration -> semantic storyboard -> direct per-shot fal render -> concat -> subtitle burn",
+        "provider": "full_ai_tts_first_semantic_direct_render_v10_23",
+        "logic": "script -> real TTS duration -> semantic storyboard -> direct per-shot fal render -> concat -> local ffmpeg subtitle burn",
         "guarantees": [
             "画面片段数按真实配音时长计算",
             "交通口播优先生成地铁/主干道/通勤画面",
@@ -1145,7 +1216,7 @@ def plan_preview(req: TTSFirstStartRequest) -> Dict[str, Any]:
     shots = _plan_shots(script, float(duration), city, req.model_dump())
     return {
         "ok": True,
-        "provider": "full_ai_tts_first_semantic_direct_render_v10_22",
+        "provider": "full_ai_tts_first_semantic_direct_render_v10_23",
         "city": city,
         "duration_seconds": round(float(duration), 2),
         "shot_count": len(shots),
