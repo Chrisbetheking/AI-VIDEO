@@ -5,7 +5,7 @@ import re
 from typing import Any, Dict
 from fastapi import APIRouter, FastAPI
 
-router = APIRouter(prefix="/api/video/fal-prompt-guard-v10-17", tags=["fal-prompt-guard-v10-17"])
+router = APIRouter(prefix="/api/video/fal-prompt-guard-v10-18", tags=["fal-prompt-guard-v10-18"])
 _INSTALLED = False
 
 BANNED_VISUAL_NEGATIVE = (
@@ -78,7 +78,7 @@ def _rewrite_args(arguments: Any) -> Any:
     return args
 
 
-def install_fal_prompt_guard_v10_17(app: FastAPI | None = None) -> None:
+def install_fal_prompt_guard_v10_18(app: FastAPI | None = None) -> None:
     global _INSTALLED
     if _INSTALLED:
         return
@@ -122,9 +122,9 @@ def install_fal_prompt_guard_v10_17(app: FastAPI | None = None) -> None:
 
         setattr(fal_client, "_ai_video_v10_18_deepseek_visual_guard", True)
         _INSTALLED = True
-        print("V10_18_DEEPSEEK_VISUAL_FAL_PROMPT_GUARD_INSTALLED for v10_17", flush=True)
+        print("V10_18_DEEPSEEK_VISUAL_FAL_PROMPT_GUARD_INSTALLED for v10_18", flush=True)
     except Exception as exc:
-        print("V10_18_DEEPSEEK_VISUAL_FAL_PROMPT_GUARD_INSTALL_FAILED for v10_17", exc, flush=True)
+        print("V10_18_DEEPSEEK_VISUAL_FAL_PROMPT_GUARD_INSTALL_FAILED for v10_18", exc, flush=True)
     if app is not None:
         try:
             app.include_router(router)
@@ -136,7 +136,7 @@ def install_fal_prompt_guard_v10_17(app: FastAPI | None = None) -> None:
 def health() -> dict[str, Any]:
     return {
         "ok": True,
-        "provider": "fal_prompt_guard_v10_17_v10_18_deepseek_visual",
+        "provider": "fal_prompt_guard_v10_18_v10_18_deepseek_visual",
         "installed": _INSTALLED,
         "deepseek_visual_prompt_planner": True,
         "positive_prompt_without_banned_words": True,

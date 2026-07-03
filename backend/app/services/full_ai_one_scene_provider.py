@@ -332,37 +332,212 @@ def _extract_highlight_keywords(raw: Dict[str, Any], title: str, script: str) ->
 
 
 BANNED_VISUAL_NEGATIVE = (
-    "office desk, desk, table paperwork, papers, document, documents, floorplan, floor plan, blueprint, brochure, booklet, contract, "
+    "office desk, desk, paperwork, papers, document, documents, floorplan, floor plan, blueprint, brochure, booklet, contract, "
     "calculator, pen, pencil, hand, hands, fingers, person, people, human, meeting, consultant, agent at desk, business meeting, "
     "chart, graph, tablet UI, computer screen, laptop, phone screen, readable text, fake text, labels, logo, watermark, "
     "collage, split screen, grid, multi panel, storyboard, poster, magazine layout, slideshow, picture in picture, black border, white border, "
     "Petronas Twin Towers, KLCC, landmark towers, beach, ocean, island"
 )
 
-def _scene_prompts(city: str, topic: str, requested_count: int = 4) -> List[str]:
-    """V10.17: positive prompt contains ONLY the desired apartment interior.
+# Words that must NEVER appear in the positive prompt. They may exist only in negative_prompt.
+BANNED_POSITIVE_TOKENS = [
+    "office", "desk", "paper", "papers", "document", "documents", "floorplan", "floor plan", "blueprint", "brochure", "contract",
+    "calculator", "pen", "pencil", "hand", "hands", "finger", "fingers", "person", "people", "human", "meeting", "consultant",
+    "chart", "graph", "tablet", "computer", "laptop", "phone screen", "readable text", "fake text", "text overlay", "logo", "watermark",
+    "collage", "split screen", "grid", "multi panel", "storyboard", "poster", "slideshow", "picture in picture", "petronas", "klcc", "beach", "ocean",
+    "no ", "without ", "avoid ", "禁止", "不要", "不能", "无纸", "没有人", "无手",
+]
 
-    V10.16 still put banned words such as papers/floorplan/calculator inside the positive prompt using "no xxx" language.
-    Some video models still latch onto those objects. This version keeps banned objects only in negative_prompt.
-    """
-    count = max(3, min(int(requested_count or 4), 4))
-    base = (
-        "vertical 9:16 cinematic smartphone video, clean modern furnished Kuala Lumpur high-rise condominium apartment interior, "
-        "empty residential home, architectural walkthrough, natural daylight, premium realistic condo interior, "
-        "full-screen single camera shot, smooth handheld gimbal motion, realistic rental viewing footage"
+REQUIRED_VISUAL_TERMS = [
+    "condominium apartment interior", "furnished", "living room", "sofa", "tv feature wall", "floor-to-ceiling windows", "kitchen", "bedroom",
+]
+
+VISUAL_CONTRACT = (
+    "AI_VIDEO_V10_18_VISUAL_CONTRACT: generate ONLY wide room-level furnished Kuala Lumpur condominium apartment interior walkthrough footage. "
+    "The frame is dominated by apartment architecture and furniture: sofa, TV feature wall, curtains, wooden floor, balcony glass, kitchen cabinets, bed and wardrobe. "
+    "Standing eye-level wide-angle gimbal camera movement. Full-screen vertical 9:16 realistic property viewing video."
+)
+
+FALLBACK_PROMPTS = [
+    (
+        "vertical 9:16 realistic smartphone property viewing video, AI_VIDEO_V10_18_VISUAL_CONTRACT, "
+        "wide room-level shot inside a clean modern furnished Kuala Lumpur high-rise condominium apartment interior, "
+        "living room with sofa, rug, TV feature wall, curtains, wooden floor, ceiling lights and floor-to-ceiling windows, "
+        "standing eye-level gimbal camera, slow forward walkthrough from doorway into the living room, premium natural daylight, full-screen architectural footage"
+    ),
+    (
+        "vertical 9:16 realistic smartphone property viewing video, AI_VIDEO_V10_18_VISUAL_CONTRACT, "
+        "wide room-level shot from living room toward balcony glass inside a clean furnished Kuala Lumpur condominium apartment interior, "
+        "sofa, curtains, balcony sliding door, residential city view through floor-to-ceiling windows, wooden floor and warm daylight, "
+        "standing eye-level gimbal camera, slow left-to-right pan across the apartment space, full-screen architectural footage"
+    ),
+    (
+        "vertical 9:16 realistic smartphone property viewing video, AI_VIDEO_V10_18_VISUAL_CONTRACT, "
+        "wide room-level shot of open kitchen and dining corner connected to living room inside a clean modern furnished Kuala Lumpur condominium apartment interior, "
+        "kitchen cabinets, countertop, dining chairs, sofa edge, TV wall and window light visible in one continuous home layout, "
+        "standing eye-level gimbal camera, slow smooth dolly movement, full-screen architectural footage"
+    ),
+    (
+        "vertical 9:16 realistic smartphone property viewing video, AI_VIDEO_V10_18_VISUAL_CONTRACT, "
+        "wide room-level shot inside a clean staged master bedroom of a Kuala Lumpur condominium apartment interior, "
+        "bed, wardrobe, curtains, bedside lights, wooden floor and soft natural window light, "
+        "standing eye-level gimbal camera, slow gentle move from doorway into the bedroom, full-screen architectural footage"
+    ),
+]
+
+
+def _has_banned_positive(prompt: str) -> bool:
+    low = str(prompt or "").lower()
+    return any(tok in low for tok in BANNED_POSITIVE_TOKENS)
+
+
+def _normalize_visual_prompt(prompt: str) -> str:
+    p = re.sub(r"\s+", " ", str(prompt or "").strip())
+    # Remove accidental negative language from positive prompt. A video model can latch onto the object even after "no".
+    p = re.sub(r"(?i)\b(no|without|avoid)\s+[^,.，。;；]{1,80}[,.，。;；]?", " ", p)
+    p = re.sub(r"\s+", " ", p).strip(" ,，.;；")
+    return p
+
+
+def _validate_visual_prompt(prompt: str) -> tuple[bool, str]:
+    p = _normalize_visual_prompt(prompt)
+    if len(p) < 90:
+        return False, "too_short"
+    if _has_banned_positive(p):
+        return False, "banned_token_in_positive_prompt"
+    low = p.lower()
+    must = ["vertical 9:16", "condominium apartment interior", "wide", "room", "living", "sofa", "window"]
+    missing = [x for x in must if x not in low]
+    if len(missing) >= 3:
+        return False, "missing_core_interior_terms:" + ",".join(missing)
+    return True, "ok"
+
+
+def _extract_json_object(text: str) -> Dict[str, Any]:
+    raw = str(text or "").strip()
+    raw = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw, flags=re.I | re.S).strip()
+    try:
+        return json.loads(raw)
+    except Exception:
+        pass
+    m = re.search(r"\{.*\}", raw, flags=re.S)
+    if m:
+        return json.loads(m.group(0))
+    raise ValueError("DeepSeek did not return JSON")
+
+
+def _deepseek_chat(messages: List[Dict[str, str]], timeout: int = 45) -> Dict[str, Any]:
+    api_key = os.getenv("DEEPSEEK_API_KEY") or os.getenv("AI_VIDEO_DEEPSEEK_API_KEY")
+    base_url = (os.getenv("DEEPSEEK_BASE_URL") or os.getenv("AI_VIDEO_DEEPSEEK_BASE_URL") or "https://api.deepseek.com").rstrip("/")
+    model = os.getenv("DEEPSEEK_MODEL") or os.getenv("AI_VIDEO_DEEPSEEK_MODEL") or "deepseek-chat"
+    if not api_key:
+        return {"ok": False, "error": "DEEPSEEK_API_KEY not configured"}
+    try:
+        resp = requests.post(
+            f"{base_url}/v1/chat/completions",
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            json={"model": model, "messages": messages, "temperature": 0.2, "response_format": {"type": "json_object"}},
+            timeout=timeout,
+        )
+        if resp.status_code >= 400:
+            return {"ok": False, "error": f"DeepSeek HTTP {resp.status_code}: {resp.text[:500]}"}
+        data = resp.json()
+        content = (((data.get("choices") or [{}])[0]).get("message") or {}).get("content") or ""
+        parsed = _extract_json_object(content)
+        parsed["ok"] = True
+        parsed["model"] = model
+        return parsed
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+
+
+def _build_visual_planner_prompt(city: str, topic: str, count: int) -> List[Dict[str, str]]:
+    forbidden = ", ".join(BANNED_POSITIVE_TOKENS[:36])
+    system = (
+        "You are a strict visual prompt planner for AI real estate short videos. "
+        "Return ONLY valid JSON. You do not generate marketing copy. You only generate visual prompts."
     )
-    scenes = [
-        "bright living room with sofa, coffee table, TV feature wall, curtains and warm daylight, slow forward camera push from entrance into the room",
-        "living room turning toward balcony and floor-to-ceiling windows, residential city view through glass, slow left-to-right pan",
-        "open kitchen and dining area with clean countertop, cabinets and dining table, slow dolly move across the space",
-        "master bedroom with bed, wardrobe, bedside lights and clean hotel-like staging, slow gentle camera move from doorway inward",
-    ]
-    suffix = (
-        "Looks like actual apartment viewing footage captured on a phone. Interior architecture only. "
-        "Furniture, windows, balcony, kitchen, bedroom and residential details are visible. "
-        "No text overlay generated in the image."
-    )
-    return [f"{base}. {scenes[i]}. {suffix}" for i in range(count)]
+    user = f"""
+Generate {count} positive English prompts for fal.ai text-to-video.
+Business goal: Malaysia / Kuala Lumpur real estate short video.
+Topic: {topic or 'Kuala Lumpur condo viewing'}
+City: {city or 'Kuala Lumpur'}
+
+ABSOLUTE VISUAL RULES:
+1. Positive prompts must describe ONLY wide room-level furnished condominium apartment interior walkthrough footage.
+2. Required visual content: living room, sofa, TV feature wall, floor-to-ceiling windows, balcony glass, kitchen cabinets, bedroom, wardrobe, natural daylight.
+3. Camera: vertical 9:16 smartphone video, standing eye-level, wide-angle, smooth gimbal, slow push or pan.
+4. Same apartment / same style / coherent property tour across all prompts.
+5. Do NOT include any text overlay, labels, signs, logo, watermark, floorplan, calculator, papers, hands, people, office desk, documents, brochure, chart, laptop, phone, meeting, consultant, KLCC, Petronas, beach.
+6. CRITICAL: Do not put negative phrases such as "no papers" or "without people" inside the positive prompt. Just describe the desired apartment interior.
+7. Do not use the words: {forbidden}
+
+Return JSON exactly in this schema:
+{{
+  "visual_contract": "one sentence summary",
+  "shots": [
+    {{"name":"living room push", "prompt":"..."}},
+    {{"name":"balcony window pan", "prompt":"..."}},
+    {{"name":"kitchen dining move", "prompt":"..."}}
+  ],
+  "negative_prompt": "comma separated forbidden objects"
+}}
+""".strip()
+    return [{"role": "system", "content": system}, {"role": "user", "content": user}]
+
+
+def _repair_prompt_with_contract(prompt: str, fallback: str) -> str:
+    p = _normalize_visual_prompt(prompt)
+    ok, _ = _validate_visual_prompt(p)
+    if ok:
+        return p
+    return fallback
+
+
+def _deepseek_scene_prompts(city: str, topic: str, requested_count: int = 3) -> Dict[str, Any]:
+    count = max(3, min(int(requested_count or 3), 4))
+    planner = _deepseek_chat(_build_visual_planner_prompt(city, topic, count), timeout=55)
+    fallback = FALLBACK_PROMPTS[:count]
+    prompts: List[str] = []
+    reasons: List[str] = []
+    if planner.get("ok"):
+        shots = planner.get("shots") if isinstance(planner.get("shots"), list) else []
+        for i, item in enumerate(shots[:count]):
+            raw_prompt = item.get("prompt") if isinstance(item, dict) else str(item)
+            raw_prompt = _normalize_visual_prompt(raw_prompt)
+            ok, reason = _validate_visual_prompt(raw_prompt)
+            if ok:
+                prompts.append(raw_prompt)
+            else:
+                prompts.append(fallback[min(i, len(fallback)-1)])
+                reasons.append(f"shot_{i+1}:{reason}")
+    else:
+        reasons.append(str(planner.get("error") or "deepseek_unavailable"))
+        prompts = fallback
+    while len(prompts) < count:
+        prompts.append(fallback[len(prompts) % len(fallback)])
+    # Final hard validation: never allow banned positive words to pass downstream.
+    final: List[str] = []
+    for i, p in enumerate(prompts[:count]):
+        ok, reason = _validate_visual_prompt(p)
+        if ok:
+            final.append(p)
+        else:
+            final.append(fallback[min(i, len(fallback)-1)])
+            reasons.append(f"final_{i+1}:{reason}")
+    return {
+        "ok": bool(planner.get("ok")),
+        "source": "deepseek" if planner.get("ok") else "curated_fallback",
+        "planner": planner,
+        "prompts": final,
+        "validation_notes": reasons,
+        "negative_prompt": BANNED_VISUAL_NEGATIVE,
+    }
+
+
+def _scene_prompts(city: str, topic: str, requested_count: int = 3) -> List[str]:
+    plan = _deepseek_scene_prompts(city, topic, requested_count=requested_count)
+    return list(plan.get("prompts") or FALLBACK_PROMPTS[:max(3, min(int(requested_count or 3), 4))])
 
 def _to_cn_digits(text: str) -> str:
     table = str.maketrans({"0":"零","1":"一","2":"二","3":"三","4":"四","5":"五","6":"六","7":"七","8":"八","9":"九"})
@@ -579,13 +754,15 @@ def _run(job_id: str, raw: Dict[str, Any]) -> None:
         audio_dur, audio_url, tts_res = _tts(script, str(raw.get("voice") or "default"))
         job.update({"stage": "one_scene_fal", "progress": 25, "audio_duration_seconds": round(audio_dur, 2), "audio_url": audio_url, "tts_result": tts_res, "updated_at": time.time()}); _persist(job_id)
 
-        scene_count = max(3, min(int(raw.get("dynamic_shot_count") or raw.get("fal_fill_shots") or 4), 4))
-        prompts = _scene_prompts(str(raw.get("city") or ""), title, requested_count=scene_count)
+        scene_count = max(3, min(int(raw.get("dynamic_shot_count") or raw.get("fal_fill_shots") or 3), 4))
+        visual_plan = _deepseek_scene_prompts(str(raw.get("city") or ""), title, requested_count=scene_count)
+        prompts = list(visual_plan.get("prompts") or [])
+        job.update({"visual_prompt_planner": visual_plan, "visual_prompt_source": visual_plan.get("source"), "visual_prompt_validation_notes": visual_plan.get("validation_notes") or [], "updated_at": time.time()}); _persist(job_id)
         fal_results: List[Dict[str, Any]] = []
         bg_urls: List[str] = []
         for idx, prompt in enumerate(prompts, start=1):
             job.update({"stage": f"one_scene_fal_{idx}_of_{len(prompts)}", "progress": 25 + int(35 * (idx - 1) / max(1, len(prompts))), "updated_at": time.time()}); _persist(job_id)
-            print(f"ONE_SCENE_DYNAMIC_PROMPT_{idx}=" + prompt[:800], flush=True)
+            print(f"ONE_SCENE_DEEPSEEK_VALIDATED_PROMPT_{idx}=" + prompt[:1200], flush=True)
             start = _post_json("http://127.0.0.1:8000/api/video/fal/shot/start", {
                 "prompt": prompt,
                 "duration_seconds": 5.0,
@@ -663,11 +840,11 @@ def _run(job_id: str, raw: Dict[str, Any]) -> None:
 def health() -> Dict[str, Any]:
     return {
         "ok": True,
-        "provider": "full_ai_one_scene_v10_17",
+        "provider": "full_ai_one_scene_v10_18",
         "single_scene": True,
-        "shot_count": 4,
+        "shot_count": 3,
         "dynamic_single_scene": True,
-        "dynamic_shot_count": 4,
+        "dynamic_shot_count": 3,
         "real_condo_tour_visuals": True,
         "positive_prompt_without_banned_words": True,
         "negative_prompt_only_for_forbidden_objects": True,
@@ -685,6 +862,10 @@ def health() -> Dict[str, Any]:
         "digits_converted_to_chinese": True,
         "one_line_short_subtitles": True,
         "keyword_highlight_scale": True,
+        "deepseek_visual_prompt_planner": True,
+        "hard_prompt_validation": True,
+        "positive_prompt_banned_word_filter": True,
+        "curated_fallback_when_deepseek_invalid": True,
         "no_multi_shots": True,
     }
 
@@ -696,7 +877,7 @@ def start(req: StartReq) -> Dict[str, Any]:
     _jobs[job_id] = {"ok": True, "job_id": job_id, "job_type": "one_scene", "status": "running", "stage": "queued", "progress": 1, "created_at": time.time(), "updated_at": time.time(), "request": raw}
     _persist(job_id)
     threading.Thread(target=_run, args=(job_id, raw), daemon=True).start()
-    return {"ok": True, "job_id": job_id, "status": "running", "stage": "queued", "single_scene": True, "message": "已启动 V10.17 纯公寓内景动态看房视频：禁用桌面纸张计算器，使用干净室内镜头。"}
+    return {"ok": True, "job_id": job_id, "status": "running", "stage": "queued", "single_scene": True, "message": "已启动 V10.18 纯公寓内景动态看房视频：禁用桌面纸张计算器，使用干净室内镜头。"}
 
 
 @router.get("/job/{job_id}")

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any, Dict
 from fastapi import APIRouter, FastAPI
 
@@ -8,29 +9,40 @@ router = APIRouter(prefix="/api/video/fal-prompt-guard-v10-12", tags=["fal-promp
 _INSTALLED = False
 
 BANNED_VISUAL_NEGATIVE = (
-    "office desk, desk, table paperwork, papers, document, documents, floorplan, floor plan, blueprint, brochure, booklet, contract, "
+    "office desk, desk, paperwork, papers, document, documents, floorplan, floor plan, blueprint, brochure, booklet, contract, "
     "calculator, pen, pencil, hand, hands, fingers, person, people, human, meeting, consultant, agent at desk, business meeting, "
     "chart, graph, tablet UI, computer screen, laptop, phone screen, readable text, fake text, labels, logo, watermark, "
     "collage, split screen, grid, multi panel, storyboard, poster, magazine layout, slideshow, picture in picture, black border, white border, "
     "Petronas Twin Towers, KLCC, landmark towers, beach, ocean, island"
 )
 
-DEFAULT_INTERIOR_PROMPT = (
-    "vertical 9:16 cinematic smartphone video, clean modern furnished Kuala Lumpur high-rise condominium apartment interior, "
-    "empty residential home, architectural walkthrough, natural daylight, premium realistic condo interior, "
-    "full-screen single camera shot, smooth handheld gimbal motion, realistic apartment viewing footage"
-)
-
 BANNED_IN_POSITIVE = [
     "no people", "no hands", "no desk", "no office", "no paperwork", "no floorplan", "no blueprint", "no brochure", "no calculator",
-    "documents", "papers", "floorplan", "floor plan", "blueprint", "calculator", "office desk", "office table", "meeting room",
-    "hand", "hands", "pen", "pencil", "chart", "graph", "brochure", "business meeting", "consultant"
+    "without people", "without hands", "avoid papers", "avoid floorplan", "不要", "禁止", "不能", "没有人",
+    "documents", "document", "papers", "paper", "floorplan", "floor plan", "blueprint", "calculator", "office desk", "office table", "meeting room",
+    "hand", "hands", "fingers", "pen", "pencil", "chart", "graph", "brochure", "contract", "business meeting", "consultant", "person", "people",
+    "laptop", "phone screen", "tablet", "computer", "klcc", "petronas", "beach", "ocean", "collage", "split screen", "grid"
 ]
 
+DEFAULT_INTERIOR_PROMPT = (
+    "vertical 9:16 realistic smartphone property viewing video, AI_VIDEO_V10_18_VISUAL_CONTRACT, "
+    "wide room-level shot inside a clean modern furnished Kuala Lumpur high-rise condominium apartment interior, "
+    "living room with sofa, rug, TV feature wall, curtains, wooden floor, ceiling lights and floor-to-ceiling windows, "
+    "standing eye-level gimbal camera, slow forward walkthrough from doorway into the living room, premium natural daylight, full-screen architectural footage"
+)
 
-def _needs_replacement(prompt: str) -> bool:
+
+def _clean_positive(prompt: str) -> str:
+    p = re.sub(r"\s+", " ", str(prompt or "").strip())
+    p = re.sub(r"(?i)\b(no|without|avoid)\s+[^,.，。;；]{1,80}[,.，。;；]?", " ", p)
+    return re.sub(r"\s+", " ", p).strip(" ,，.;；")
+
+
+def _contaminated(prompt: str) -> bool:
     low = str(prompt or "").lower()
-    return any(x in low for x in BANNED_IN_POSITIVE) or len(low.strip()) < 20
+    if len(low.strip()) < 40:
+        return True
+    return any(x in low for x in BANNED_IN_POSITIVE)
 
 
 def _rewrite_args(arguments: Any) -> Any:
@@ -41,10 +53,10 @@ def _rewrite_args(arguments: Any) -> Any:
     args.pop("storyboard", None)
     args.pop("scenes", None)
     for k in ("prompt", "input_prompt", "text_prompt", "visual_prompt"):
-        current = str(args.get(k) or "").strip()
-        # Critical: do NOT append negative words to the positive prompt.
-        # If an earlier patch injected "no paper/no hands/no calculator" into the prompt, replace it completely.
-        if _needs_replacement(current):
+        current = _clean_positive(str(args.get(k) or ""))
+        # If the prompt has any forbidden object words, replace it completely.
+        # Forbidden objects live only in negative_prompt, never in positive prompt.
+        if _contaminated(current):
             current = DEFAULT_INTERIOR_PROMPT
         args[k] = current
     old_neg = str(args.get("negative_prompt") or "")
@@ -60,7 +72,7 @@ def _rewrite_args(arguments: Any) -> Any:
                 args[k] = 5.0
     args["prompt_optimizer"] = False
     try:
-        print("V10_17_FAL_FINAL_ARGUMENTS=" + json.dumps(args, ensure_ascii=False)[:3000], flush=True)
+        print("V10_18_FAL_FINAL_ARGUMENTS=" + json.dumps(args, ensure_ascii=False)[:4000], flush=True)
     except Exception:
         pass
     return args
@@ -108,11 +120,11 @@ def install_fal_prompt_guard_v10_12(app: FastAPI | None = None) -> None:
                 return base_subscribe(*args, **kwargs)
             fal_client.subscribe = guarded_subscribe
 
-        setattr(fal_client, "_ai_video_v10_17_clean_prompt_guard", True)
+        setattr(fal_client, "_ai_video_v10_18_deepseek_visual_guard", True)
         _INSTALLED = True
-        print("V10_17_CLEAN_FAL_PROMPT_GUARD_INSTALLED for v10_12", flush=True)
+        print("V10_18_DEEPSEEK_VISUAL_FAL_PROMPT_GUARD_INSTALLED for v10_12", flush=True)
     except Exception as exc:
-        print("V10_17_CLEAN_FAL_PROMPT_GUARD_INSTALL_FAILED for v10_12", exc, flush=True)
+        print("V10_18_DEEPSEEK_VISUAL_FAL_PROMPT_GUARD_INSTALL_FAILED for v10_12", exc, flush=True)
     if app is not None:
         try:
             app.include_router(router)
@@ -124,11 +136,11 @@ def install_fal_prompt_guard_v10_12(app: FastAPI | None = None) -> None:
 def health() -> dict[str, Any]:
     return {
         "ok": True,
-        "provider": "fal_prompt_guard_v10-12_clean_v10_17",
+        "provider": "fal_prompt_guard_v10_12_v10_18_deepseek_visual",
         "installed": _INSTALLED,
-        "clean_positive_prompt": True,
-        "no_negative_words_inside_positive_prompt": True,
-        "interior_apartment_only": True,
-        "replace_contaminated_prompts": True,
+        "deepseek_visual_prompt_planner": True,
+        "positive_prompt_without_banned_words": True,
         "negative_prompt_only_for_forbidden_objects": True,
+        "replace_contaminated_prompts": True,
+        "wide_condo_interior_only": True,
     }
