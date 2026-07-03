@@ -2085,7 +2085,7 @@ async def api_compose_video(req: ComposeRequest, request: Request, settings: Set
         result = await compose_video(
             settings=settings,
             script=req.script,
-            asset_paths=media_clips,
+            asset_paths=[getattr(c, "path", c) for c in media_clips],
             duration_seconds=req.duration_seconds,
             audio_path=audio_path,
             voice=req.voice,
@@ -2840,3 +2840,2989 @@ else:
             'health': '/api/health',
             'docs': '/docs',
         }
+
+
+# ===== ONE CLICK FINAL DELIVERY HOTFIX =====
+_one_click_final_jobs = {}
+
+@app.post('/api/one-click/final-delivery/start')
+async def api_one_click_final_delivery_start(payload: dict | None = None, background_tasks: BackgroundTasks = None) -> dict:
+    import uuid
+    import subprocess
+    import sys
+    import json
+    from pathlib import Path
+    from datetime import datetime, timezone
+
+    payload = payload or {}
+    job_id = uuid.uuid4().hex
+    _one_click_final_jobs[job_id] = {
+        'job_id': job_id,
+        'status': 'queued',
+        'created_at': datetime.now(timezone.utc).isoformat(),
+        'message': '任务已进入队列',
+        'result': None,
+        'error': '',
+        'log_tail': '',
+    }
+
+    def _run():
+        script = Path('/opt/ai-video/backend/one_click_final_delivery.py')
+        text = str(payload.get('text') or '').strip()
+        title = str(payload.get('title') or 'AI-VIDEO 正式交付视频').strip()
+        avatar = str(payload.get('avatar_file_name') or 'avatar_template.mp4').strip()
+
+        _one_click_final_jobs[job_id].update({
+            'status': 'running',
+            'message': '正在生成 TTS、数字人、9:16 视频和封面',
+        })
+
+        cmd = [sys.executable, str(script), '--title', title, '--avatar', avatar]
+        if text:
+            cmd += ['--text', text]
+
+        try:
+            proc = subprocess.run(
+                cmd,
+                cwd='/opt/ai-video/backend',
+                text=True,
+                capture_output=True,
+                timeout=1200,
+            )
+            raw = (proc.stdout or '') + '\n' + (proc.stderr or '')
+            result = None
+            for line in reversed(raw.splitlines()):
+                if line.startswith('FINAL_RESULT::'):
+                    result = json.loads(line.replace('FINAL_RESULT::', '', 1))
+                    break
+
+            if proc.returncode == 0 and result and result.get('ok'):
+                _one_click_final_jobs[job_id].update({
+                    'status': 'done',
+                    'message': '正式交付视频已生成',
+                    'result': result,
+                    'error': '',
+                    'log_tail': raw[-6000:],
+                })
+            else:
+                _one_click_final_jobs[job_id].update({
+                    'status': 'failed',
+                    'message': '生成失败',
+                    'result': result,
+                    'error': (result or {}).get('error') or raw[-1000:],
+                    'log_tail': raw[-6000:],
+                })
+        except Exception as exc:
+            _one_click_final_jobs[job_id].update({
+                'status': 'failed',
+                'message': '生成异常',
+                'error': str(exc),
+            })
+
+    background_tasks.add_task(_run)
+    return _one_click_final_jobs[job_id]
+
+@app.get('/api/one-click/final-delivery/job/{job_id}')
+def api_one_click_final_delivery_job(job_id: str) -> dict:
+    item = _one_click_final_jobs.get(job_id)
+    if not item:
+        raise HTTPException(status_code=404, detail='任务不存在')
+    return item
+
+@app.get('/one-click-final')
+def api_one_click_final_delivery_page():
+    from fastapi.responses import HTMLResponse
+    return HTMLResponse("""
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>AI-VIDEO 一键正式出片</title>
+<style>
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif;background:#0f172a;color:#e5e7eb;margin:0;padding:32px}
+.wrap{max-width:980px;margin:0 auto}
+.card{background:#111827;border:1px solid #334155;border-radius:18px;padding:24px;box-shadow:0 12px 32px rgba(0,0,0,.28)}
+h1{margin-top:0;font-size:28px}
+label{display:block;margin:14px 0 8px;color:#cbd5e1}
+input,textarea{width:100%;box-sizing:border-box;border-radius:12px;border:1px solid #475569;background:#020617;color:#e5e7eb;padding:14px;font-size:15px}
+textarea{min-height:160px}
+button{margin-top:18px;background:#22c55e;color:#052e16;border:0;border-radius:12px;padding:14px 22px;font-weight:800;font-size:16px;cursor:pointer}
+button:disabled{opacity:.6;cursor:not-allowed}
+pre{white-space:pre-wrap;background:#020617;border-radius:12px;padding:16px;border:1px solid #334155;max-height:360px;overflow:auto}
+a{color:#93c5fd;word-break:break-all}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:16px}
+video,img{width:100%;border-radius:12px;border:1px solid #334155;background:#020617}
+.badge{display:inline-block;background:#1e293b;border:1px solid #475569;border-radius:999px;padding:6px 10px;color:#cbd5e1}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="card">
+    <h1>AI-VIDEO 一键正式出片</h1>
+    <p><span class="badge">脚本 → TTS → 数字人 → 9:16包装 → 封面 → R2链接</span></p>
+
+    <label>标题</label>
+    <input id="title" value="马来西亚房产避坑正式样片" />
+
+    <label>口播文案</label>
+    <textarea id="text">来马来西亚买房，最怕的不是价格高，而是区域选错。同样是吉隆坡，有的地方租客稳定、转手容易；有的地方看起来便宜，后期却很难出租。如果你是为了孩子教育、第二家园、资产配置，第一步不是看样板间，而是先看区域、交通、学校和真实租售数据。真正稳的房子，不是销售说出来的，是市场长期验证出来的。</textarea>
+
+    <button id="btn" onclick="start()">一键生成正式交付版</button>
+
+    <h3>状态</h3>
+    <pre id="status">等待开始</pre>
+
+    <div id="result"></div>
+  </div>
+</div>
+
+<script>
+let timer=null;
+async function start(){
+  const btn=document.getElementById('btn');
+  btn.disabled=true;
+  document.getElementById('result').innerHTML='';
+  document.getElementById('status').textContent='正在提交任务...';
+
+  const res=await fetch('/api/one-click/final-delivery/start',{
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({
+      title:document.getElementById('title').value,
+      text:document.getElementById('text').value,
+      avatar_file_name:'avatar_template.mp4'
+    })
+  });
+  const job=await res.json();
+  document.getElementById('status').textContent=JSON.stringify(job,null,2);
+  poll(job.job_id);
+}
+async function poll(jobId){
+  clearInterval(timer);
+  timer=setInterval(async()=>{
+    const res=await fetch('/api/one-click/final-delivery/job/'+jobId);
+    const job=await res.json();
+    document.getElementById('status').textContent=JSON.stringify(job,null,2);
+    if(job.status==='done'){
+      clearInterval(timer);
+      document.getElementById('btn').disabled=false;
+      const r=job.result || {};
+      document.getElementById('result').innerHTML =
+        '<h3>生成完成</h3>' +
+        '<p>视频：<a target="_blank" href="'+r.video_url+'">'+r.video_url+'</a></p>' +
+        '<p>封面：<a target="_blank" href="'+r.cover_url+'">'+r.cover_url+'</a></p>' +
+        '<div class="grid"><div><video controls src="'+r.video_url+'"></video></div><div><img src="'+r.cover_url+'"/></div></div>';
+    }
+    if(job.status==='failed'){
+      clearInterval(timer);
+      document.getElementById('btn').disabled=false;
+    }
+  },3000);
+}
+</script>
+</body>
+</html>
+    """)
+
+
+# ===== ONE CLICK FINAL DELIVERY PAGE API ALIAS =====
+@app.get('/api/one-click/final-delivery/page')
+def api_one_click_final_delivery_page_api_alias():
+    return api_one_click_final_delivery_page()
+
+# ===== OPENCLAW PUBLIC API PROXY HOTFIX =====
+# Public /api/openclaw/* -> local OpenClaw fallback worker on 127.0.0.1:8093
+import urllib.request as _openclaw_urlreq
+import urllib.error as _openclaw_urlerr
+from fastapi import Request as _OpenClawRequest
+from fastapi.responses import Response as _OpenClawResponse
+
+def _openclaw_proxy_response(method: str, path: str, body: bytes | None = None, query: str = ""):
+    path = (path or "health").lstrip("/")
+    url = f"http://127.0.0.1:8093/api/openclaw/{path}"
+    if query:
+        url += "?" + query
+
+    headers = {"Content-Type": "application/json"}
+    req = _openclaw_urlreq.Request(
+        url,
+        data=body if body else None,
+        headers=headers,
+        method=method.upper(),
+    )
+
+    try:
+        with _openclaw_urlreq.urlopen(req, timeout=120) as r:
+            raw = r.read()
+            content_type = r.headers.get("Content-Type") or "application/json; charset=utf-8"
+            return _OpenClawResponse(
+                content=raw,
+                status_code=r.status,
+                media_type=content_type.split(";")[0],
+            )
+    except _openclaw_urlerr.HTTPError as e:
+        raw = e.read()
+        content_type = e.headers.get("Content-Type") or "application/json; charset=utf-8"
+        return _OpenClawResponse(
+            content=raw,
+            status_code=e.code,
+            media_type=content_type.split(";")[0],
+        )
+    except Exception as e:
+        raw = ('{"ok": false, "error": "openclaw proxy failed", "detail": ' + repr(str(e)) + '}').encode("utf-8")
+        return _OpenClawResponse(
+            content=raw,
+            status_code=502,
+            media_type="application/json",
+        )
+
+@app.get("/api/openclaw")
+def api_openclaw_root_proxy():
+    return _openclaw_proxy_response("GET", "health")
+
+@app.get("/api/openclaw/")
+def api_openclaw_root_slash_proxy():
+    return _openclaw_proxy_response("GET", "health")
+
+@app.get("/api/openclaw/health")
+def api_openclaw_health_proxy():
+    return _openclaw_proxy_response("GET", "health")
+
+@app.api_route("/api/openclaw/{path:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE"])
+async def api_openclaw_proxy(path: str, request: _OpenClawRequest):
+    body = await request.body()
+    return _openclaw_proxy_response(
+        request.method,
+        path,
+        body if body else None,
+        request.url.query,
+    )
+# ===== /OPENCLAW PUBLIC API PROXY HOTFIX =====
+
+
+# ===== OPENCLAW DASHBOARD HOTFIX =====
+import json as _oc_dash_json
+import csv as _oc_dash_csv
+import io as _oc_dash_io
+import urllib.request as _oc_dash_urlreq
+from fastapi.responses import HTMLResponse as _OpenClawHTMLResponse
+from fastapi.responses import Response as _OpenClawCSVResponse
+
+def _oc_dash_get_json(path: str):
+    url = "http://127.0.0.1:8093" + path
+    try:
+        with _oc_dash_urlreq.urlopen(url, timeout=20) as r:
+            return _oc_dash_json.loads(r.read().decode("utf-8"))
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+@app.get("/openclaw-dashboard", response_class=_OpenClawHTMLResponse)
+def openclaw_dashboard_page():
+    html = """
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>AI-VIDEO OpenClaw 采集面板</title>
+  <style>
+    body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,"Microsoft YaHei",sans-serif;background:#f6f7fb;margin:0;color:#111827;}
+    header{background:#111827;color:white;padding:22px 28px;}
+    h1{margin:0;font-size:24px;}
+    .sub{opacity:.78;margin-top:6px;font-size:14px;}
+    main{padding:22px;max-width:1180px;margin:0 auto;}
+    .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:18px;}
+    .card{background:white;border-radius:14px;padding:16px;box-shadow:0 8px 22px rgba(15,23,42,.06);}
+    .num{font-size:30px;font-weight:750;margin-top:8px;}
+    .muted{color:#6b7280;font-size:13px;}
+    button,a.btn{border:0;background:#111827;color:white;border-radius:10px;padding:10px 14px;cursor:pointer;text-decoration:none;display:inline-block;margin-right:8px;}
+    button.secondary{background:#374151;}
+    table{width:100%;border-collapse:collapse;background:white;border-radius:14px;overflow:hidden;box-shadow:0 8px 22px rgba(15,23,42,.06);}
+    th,td{padding:11px 12px;border-bottom:1px solid #e5e7eb;text-align:left;font-size:13px;vertical-align:top;}
+    th{background:#f3f4f6;color:#374151;}
+    tr:hover{background:#fafafa;}
+    .section{margin-top:22px;}
+    .pill{display:inline-block;padding:3px 8px;border-radius:999px;background:#eef2ff;color:#3730a3;font-size:12px;}
+    .score{font-weight:700;color:#047857;}
+    code{background:#f3f4f6;padding:2px 5px;border-radius:5px;}
+    @media(max-width:800px){.grid{grid-template-columns:1fr;} main{padding:14px;} table{font-size:12px;}}
+  </style>
+</head>
+<body>
+<header>
+  <h1>AI-VIDEO OpenClaw 采集面板</h1>
+  <div class="sub">只做采集与候选池沉淀，不自动出片，不消耗数字人额度。</div>
+</header>
+<main>
+  <div class="grid">
+    <div class="card"><div class="muted">OpenClaw 状态</div><div class="num" id="status">...</div></div>
+    <div class="card"><div class="muted">账号候选</div><div class="num" id="accountCount">0</div></div>
+    <div class="card"><div class="muted">视频候选</div><div class="num" id="videoCount">0</div></div>
+  </div>
+
+  <div class="card">
+    <button onclick="loadAll()">刷新</button>
+    <button class="secondary" onclick="triggerDryRun()">手动采集一次 dry-run</button>
+    <a class="btn" href="/api/openclaw/export.csv" target="_blank">导出 CSV</a>
+    <span class="muted">建议每天看这里：账号池、视频池、分数、来源。</span>
+  </div>
+
+  <div class="section">
+    <h2>账号候选</h2>
+    <table>
+      <thead><tr><th>账号</th><th>分数</th><th>来源</th><th>链接</th><th>采集时间</th></tr></thead>
+      <tbody id="accountsBody"></tbody>
+    </table>
+  </div>
+
+  <div class="section">
+    <h2>视频候选</h2>
+    <table>
+      <thead><tr><th>视频</th><th>账号</th><th>分数</th><th>来源</th><th>链接</th><th>采集时间</th></tr></thead>
+      <tbody id="videosBody"></tbody>
+    </table>
+  </div>
+</main>
+
+<script>
+async function j(url, opts){ const r = await fetch(url, opts || {}); return await r.json(); }
+
+function esc(s){ return String(s || "").replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
+
+async function loadAll(){
+  const h = await j('/api/openclaw/health');
+  const a = await j('/api/openclaw/accounts');
+  const v = await j('/api/openclaw/videos');
+
+  document.getElementById('status').textContent = h.ok ? 'running' : 'error';
+  document.getElementById('accountCount').textContent = (a.accounts || []).length;
+  document.getElementById('videoCount').textContent = (v.videos || []).length;
+
+  document.getElementById('accountsBody').innerHTML = (a.accounts || []).map(x => `
+    <tr>
+      <td>${esc(x.account_name || '未命名账号')}</td>
+      <td class="score">${esc(x.score || '')}</td>
+      <td><span class="pill">${esc(x.source || x.keyword || '')}</span></td>
+      <td><a href="${esc(x.account_url)}" target="_blank">打开</a><br><code>${esc(x.account_url)}</code></td>
+      <td>${esc(x.collected_at || '')}</td>
+    </tr>
+  `).join('');
+
+  document.getElementById('videosBody').innerHTML = (v.videos || []).map(x => `
+    <tr>
+      <td>${esc(x.video_title || '未命名视频')}</td>
+      <td>${esc(x.account_name || '')}</td>
+      <td class="score">${esc(x.score || '')}</td>
+      <td><span class="pill">${esc(x.source || x.keyword || '')}</span></td>
+      <td><a href="${esc(x.video_url)}" target="_blank">打开</a><br><code>${esc(x.video_url)}</code></td>
+      <td>${esc(x.collected_at || '')}</td>
+    </tr>
+  `).join('');
+}
+
+async function triggerDryRun(){
+  const body = {
+    dry_run: true,
+    force_openclaw: true,
+    title: 'OpenClaw 面板手动采集',
+    keywords: ['马来西亚房产','吉隆坡房产','MM2H','马来西亚买房','马来西亚第二家园','海外置业 马来西亚']
+  };
+  const r = await j('/api/openclaw/fallback/run', {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify(body)
+  });
+  alert('已提交：' + JSON.stringify(r, null, 2));
+  setTimeout(loadAll, 90000);
+}
+
+loadAll();
+</script>
+</body>
+</html>
+"""
+    return html
+
+@app.get("/api/openclaw/export.csv")
+def openclaw_export_csv():
+    accounts = (_oc_dash_get_json("/api/openclaw/accounts").get("accounts") or [])
+    videos = (_oc_dash_get_json("/api/openclaw/videos").get("videos") or [])
+
+    out = _oc_dash_io.StringIO()
+    w = _oc_dash_csv.writer(out)
+    w.writerow(["type", "name_or_title", "account_name", "score", "source", "url", "account_url", "collected_at"])
+
+    for a in accounts:
+        w.writerow([
+            "account",
+            a.get("account_name", ""),
+            a.get("account_name", ""),
+            a.get("score", ""),
+            a.get("source", "") or a.get("keyword", ""),
+            a.get("account_url", ""),
+            a.get("account_url", ""),
+            a.get("collected_at", ""),
+        ])
+
+    for v in videos:
+        w.writerow([
+            "video",
+            v.get("video_title", ""),
+            v.get("account_name", ""),
+            v.get("score", ""),
+            v.get("source", "") or v.get("keyword", ""),
+            v.get("video_url", ""),
+            v.get("account_url", ""),
+            v.get("collected_at", ""),
+        ])
+
+    return _OpenClawCSVResponse(
+        content=out.getvalue().encode("utf-8-sig"),
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=openclaw_candidates.csv"}
+    )
+# ===== /OPENCLAW DASHBOARD HOTFIX =====
+
+
+# ===== OPENCLAW DISCOVERY API HOTFIX =====
+import subprocess as _oc_disc_subprocess
+import threading as _oc_disc_threading
+import uuid as _oc_disc_uuid
+import time as _oc_disc_time
+import json as _oc_disc_json
+
+_openclaw_discovery_jobs = {}
+
+def _run_openclaw_discovery_job(job_id: str):
+    job = _openclaw_discovery_jobs[job_id]
+    job["status"] = "running"
+    job["stage"] = "discovering"
+    job["updated_at"] = _oc_disc_time.time()
+
+    script = "/opt/openclaw-worker/openclaw_account_discovery.py"
+    py = "/opt/openclaw-worker/.venv/bin/python"
+
+    try:
+        cp = _oc_disc_subprocess.run(
+            [py, script],
+            text=True,
+            capture_output=True,
+            timeout=1200,
+        )
+
+        stdout = cp.stdout or ""
+        stderr = cp.stderr or ""
+
+        result = None
+        for line in stdout.splitlines():
+            if line.startswith("DISCOVERY_RESULT::"):
+                try:
+                    result = _oc_disc_json.loads(line.split("DISCOVERY_RESULT::", 1)[1])
+                except Exception:
+                    result = None
+
+        job["status"] = "done" if cp.returncode == 0 else "failed"
+        job["stage"] = "finished" if cp.returncode == 0 else "failed"
+        job["returncode"] = cp.returncode
+        job["result"] = result or {}
+        job["stdout_tail"] = stdout[-5000:]
+        job["stderr_tail"] = stderr[-5000:]
+        job["updated_at"] = _oc_disc_time.time()
+
+    except Exception as e:
+        job["status"] = "failed"
+        job["stage"] = "exception"
+        job["error"] = str(e)
+        job["updated_at"] = _oc_disc_time.time()
+
+@app.post("/api/openclaw/discovery/start")
+def api_openclaw_discovery_start():
+    job_id = "openclaw_discovery_" + _oc_disc_uuid.uuid4().hex[:16]
+    now_ts = _oc_disc_time.time()
+
+    _openclaw_discovery_jobs[job_id] = {
+        "ok": True,
+        "job_id": job_id,
+        "status": "queued",
+        "stage": "queued",
+        "message": "OpenClaw 自动账号发现任务已入队",
+        "created_at": now_ts,
+        "updated_at": now_ts,
+        "result": None,
+        "error": "",
+    }
+
+    t = _oc_disc_threading.Thread(
+        target=_run_openclaw_discovery_job,
+        args=(job_id,),
+        daemon=True,
+    )
+    t.start()
+
+    return _openclaw_discovery_jobs[job_id]
+
+@app.get("/api/openclaw/discovery/job/{job_id}")
+def api_openclaw_discovery_job(job_id: str):
+    job = _openclaw_discovery_jobs.get(job_id)
+    if not job:
+        return {
+            "ok": False,
+            "job_id": job_id,
+            "status": "not_found",
+            "message": "任务不存在，可能后端重启后内存记录已清空",
+        }
+    return job
+# ===== /OPENCLAW DISCOVERY API HOTFIX =====
+
+
+# ===== FAL VIDEO API HOTFIX =====
+import threading as _fal_threading
+import time as _fal_time
+from typing import Optional as _FalOptional, List as _FalList
+from pydantic import BaseModel as _FalBaseModel, Field as _FalField
+
+from app.services.fal_video_provider import (
+    fal_ready as _fal_ready,
+    generate_fal_video as _generate_fal_video,
+    safe_error as _fal_safe_error,
+    make_job_id as _fal_make_job_id,
+)
+
+_fal_video_jobs = {}
+
+
+class _FalShotRequest(_FalBaseModel):
+    prompt: str = _FalField(..., min_length=3)
+    mode: str = "quick"
+    image_url: _FalOptional[str] = None
+    resolution: str = "720p"
+    num_frames: int = 81
+    frames_per_second: int = 16
+    negative_prompt: str = ""
+    video_quality: str = "high"
+    video_write_mode: str = "balanced"
+
+
+class _FalStoryboardShot(_FalBaseModel):
+    shot_id: _FalOptional[str] = None
+    prompt: str
+    image_url: _FalOptional[str] = None
+    duration_hint: _FalOptional[float] = None
+
+
+class _FalStoryboardRequest(_FalBaseModel):
+    title: str = "全 AI 视频"
+    mode: str = "quick"
+    shots: _FalList[_FalStoryboardShot]
+    resolution: str = "720p"
+    num_frames: int = 81
+    frames_per_second: int = 16
+    negative_prompt: str = "low quality, blurry, watermark, text logo, distorted hands, distorted face"
+    video_quality: str = "high"
+    video_write_mode: str = "balanced"
+    max_shots: int = 8
+
+
+def _run_fal_shot_job(job_id: str, req: _FalShotRequest):
+    job = _fal_video_jobs[job_id]
+    job["status"] = "running"
+    job["updated_at"] = _fal_time.time()
+
+    try:
+        result = _generate_fal_video(
+            prompt=req.prompt,
+            mode=req.mode,
+            image_url=req.image_url,
+            resolution=req.resolution,
+            num_frames=req.num_frames,
+            frames_per_second=req.frames_per_second,
+            negative_prompt=req.negative_prompt,
+            video_quality=req.video_quality,
+            video_write_mode=req.video_write_mode,
+        )
+        job["status"] = "done"
+        job["result"] = result
+        job["video_url"] = result.get("video_url")
+    except Exception as e:
+        job["status"] = "failed"
+        job["result"] = _fal_safe_error(e)
+
+    job["updated_at"] = _fal_time.time()
+
+
+def _run_fal_storyboard_job(job_id: str, req: _FalStoryboardRequest):
+    job = _fal_video_jobs[job_id]
+    job["status"] = "running"
+    job["stage"] = "generating_shots"
+    job["updated_at"] = _fal_time.time()
+
+    outputs = []
+    shots = req.shots[: max(1, min(req.max_shots, 12))]
+
+    try:
+        for idx, shot in enumerate(shots, start=1):
+            job["current_shot"] = idx
+            job["total_shots"] = len(shots)
+            job["message"] = f"正在生成第 {idx}/{len(shots)} 个 AI 视频镜头"
+            job["updated_at"] = _fal_time.time()
+
+            result = _generate_fal_video(
+                prompt=shot.prompt,
+                mode=req.mode,
+                image_url=shot.image_url,
+                resolution=req.resolution,
+                num_frames=req.num_frames,
+                frames_per_second=req.frames_per_second,
+                negative_prompt=req.negative_prompt,
+                video_quality=req.video_quality,
+                video_write_mode=req.video_write_mode,
+            )
+
+            outputs.append({
+                "shot_id": shot.shot_id or f"shot_{idx:02d}",
+                "prompt": shot.prompt,
+                "image_url": shot.image_url,
+                "video_url": result.get("video_url"),
+                "result": result,
+            })
+
+        job["status"] = "done"
+        job["stage"] = "shots_done"
+        job["result"] = {
+            "ok": True,
+            "title": req.title,
+            "provider": "fal",
+            "mode": req.mode,
+            "shots": outputs,
+            "next_step": "compose_with_volc_tts_and_ffmpeg",
+        }
+
+    except Exception as e:
+        job["status"] = "failed"
+        job["stage"] = "failed"
+        job["result"] = _fal_safe_error(e)
+        job["partial_outputs"] = outputs
+
+    job["updated_at"] = _fal_time.time()
+
+
+@app.get("/api/video/fal/health")
+def api_video_fal_health():
+    return {
+        "ok": True,
+        "provider": "fal",
+        "configured": _fal_ready(),
+        "message": "FAL_KEY 已配置" if _fal_ready() else "FAL_KEY 未配置",
+    }
+
+
+@app.post("/api/video/fal/shot/start")
+def api_video_fal_shot_start(req: _FalShotRequest):
+    job_id = _fal_make_job_id("fal_shot")
+    now = _fal_time.time()
+
+    _fal_video_jobs[job_id] = {
+        "ok": True,
+        "job_id": job_id,
+        "type": "fal_shot",
+        "status": "queued",
+        "created_at": now,
+        "updated_at": now,
+        "request": req.model_dump(),
+    }
+
+    t = _fal_threading.Thread(target=_run_fal_shot_job, args=(job_id, req), daemon=True)
+    t.start()
+
+    return _fal_video_jobs[job_id]
+
+
+@app.post("/api/video/fal/storyboard/start")
+def api_video_fal_storyboard_start(req: _FalStoryboardRequest):
+    job_id = _fal_make_job_id("fal_storyboard")
+    now = _fal_time.time()
+
+    _fal_video_jobs[job_id] = {
+        "ok": True,
+        "job_id": job_id,
+        "type": "fal_storyboard",
+        "status": "queued",
+        "stage": "queued",
+        "created_at": now,
+        "updated_at": now,
+        "request": req.model_dump(),
+    }
+
+    t = _fal_threading.Thread(target=_run_fal_storyboard_job, args=(job_id, req), daemon=True)
+    t.start()
+
+    return _fal_video_jobs[job_id]
+
+
+@app.get("/api/video/fal/job/{job_id}")
+def api_video_fal_job(job_id: str):
+    job = _fal_video_jobs.get(job_id)
+    if not job:
+        return {
+            "ok": False,
+            "job_id": job_id,
+            "status": "not_found",
+            "message": "任务不存在，后端重启后内存任务会清空",
+        }
+    return job
+# ===== /FAL VIDEO API HOTFIX =====
+
+
+# ===== VIDEO COMPOSE API HOTFIX =====
+import threading as _compose_threading
+import time as _compose_time
+from typing import List as _ComposeList, Optional as _ComposeOptional
+from pydantic import BaseModel as _ComposeBaseModel, Field as _ComposeField
+
+from app.services.video_compose_provider import (
+    compose_video_urls as _compose_video_urls,
+    make_compose_job_id as _make_compose_job_id,
+    r2_configured as _r2_configured,
+)
+
+_compose_jobs = {}
+
+
+class _ComposeUrlsRequest(_ComposeBaseModel):
+    title: str = "全 AI 视频"
+    video_urls: _ComposeList[str] = _ComposeField(..., min_length=1)
+    audio_url: _ComposeOptional[str] = None
+    width: int = 1080
+    height: int = 1920
+    fps: int = 30
+    upload: bool = True
+    folder: str = "videos/full-ai"
+
+
+def _run_compose_job(job_id: str, req: _ComposeUrlsRequest):
+    job = _compose_jobs[job_id]
+    job["status"] = "running"
+    job["stage"] = "composing"
+    job["updated_at"] = _compose_time.time()
+
+    try:
+        result = _compose_video_urls(
+            video_urls=req.video_urls,
+            title=req.title,
+            audio_url=req.audio_url,
+            width=req.width,
+            height=req.height,
+            fps=req.fps,
+            upload=req.upload,
+            folder=req.folder,
+        )
+        job["status"] = "done" if result.get("ok") else "failed"
+        job["stage"] = "finished" if result.get("ok") else "failed"
+        job["result"] = result
+        job["video_url"] = ((result.get("r2") or {}).get("public_url") or "")
+        job["local_path"] = result.get("local_path")
+    except Exception as e:
+        job["status"] = "failed"
+        job["stage"] = "exception"
+        job["result"] = {"ok": False, "error": str(e)}
+
+    job["updated_at"] = _compose_time.time()
+
+
+def _start_compose_job(req: _ComposeUrlsRequest):
+    job_id = _make_compose_job_id("compose_video")
+    now = _compose_time.time()
+
+    _compose_jobs[job_id] = {
+        "ok": True,
+        "job_id": job_id,
+        "type": "compose_video",
+        "status": "queued",
+        "stage": "queued",
+        "created_at": now,
+        "updated_at": now,
+        "request": req.model_dump(),
+    }
+
+    t = _compose_threading.Thread(target=_run_compose_job, args=(job_id, req), daemon=True)
+    t.start()
+    return _compose_jobs[job_id]
+
+
+@app.get("/api/video/compose/health")
+def api_video_compose_health():
+    return {
+        "ok": True,
+        "ffmpeg": True,
+        "r2_configured": _r2_configured(),
+        "message": "视频拼接服务可用",
+    }
+
+
+@app.post("/api/video/compose/urls/start")
+def api_video_compose_urls_start(req: _ComposeUrlsRequest):
+    return _start_compose_job(req)
+
+
+@app.post("/api/video/compose/fal-storyboard/start/{fal_job_id}")
+def api_video_compose_fal_storyboard_start(fal_job_id: str):
+    fal_jobs = globals().get("_fal_video_jobs", {})
+    fal_job = fal_jobs.get(fal_job_id)
+
+    if not fal_job:
+        return {
+            "ok": False,
+            "status": "not_found",
+            "message": "fal 分镜任务不存在，可能后端重启导致内存任务清空",
+            "fal_job_id": fal_job_id,
+        }
+
+    if fal_job.get("status") != "done":
+        return {
+            "ok": False,
+            "status": "not_ready",
+            "message": "fal 分镜任务还没完成",
+            "fal_job_id": fal_job_id,
+            "fal_status": fal_job.get("status"),
+        }
+
+    shots = ((fal_job.get("result") or {}).get("shots") or [])
+    video_urls = [s.get("video_url") for s in shots if s.get("video_url")]
+
+    if not video_urls:
+        return {
+            "ok": False,
+            "status": "empty",
+            "message": "没有可拼接的视频 URL",
+            "fal_job_id": fal_job_id,
+        }
+
+    req = _ComposeUrlsRequest(
+        title=((fal_job.get("result") or {}).get("title") or "fal 全 AI 视频"),
+        video_urls=video_urls,
+        width=1080,
+        height=1920,
+        fps=30,
+        upload=True,
+        folder="videos/full-ai",
+    )
+
+    return _start_compose_job(req)
+
+
+@app.get("/api/video/compose/job/{job_id}")
+def api_video_compose_job(job_id: str):
+    job = _compose_jobs.get(job_id)
+    if not job:
+        return {
+            "ok": False,
+            "job_id": job_id,
+            "status": "not_found",
+            "message": "任务不存在，后端重启后内存任务会清空",
+        }
+    return job
+# ===== /VIDEO COMPOSE API HOTFIX =====
+
+
+# ===== FULL AI VIDEO PIPELINE API HOTFIX =====
+import threading as _full_ai_threading
+import time as _full_ai_time
+import uuid as _full_ai_uuid
+import requests as _full_ai_requests
+from typing import List as _FullAIList, Optional as _FullAIOptional
+from pydantic import BaseModel as _FullAIBaseModel, Field as _FullAIField
+
+_full_ai_jobs = {}
+
+
+class _FullAIShot(_FullAIBaseModel):
+    shot_id: _FullAIOptional[str] = None
+    prompt: str
+    image_url: _FullAIOptional[str] = None
+
+
+class _FullAIVideoRequest(_FullAIBaseModel):
+    title: str = "全 AI 视频"
+    script_text: str = _FullAIField(..., min_length=3)
+    shots: _FullAIList[_FullAIShot] = _FullAIField(..., min_length=1)
+    mode: str = "quick"
+    resolution: str = "720p"
+    num_frames: int = 81
+    frames_per_second: int = 16
+    max_shots: int = 6
+    voice: str = "default"
+    overall_rate: str = "0%"
+    width: int = 1080
+    height: int = 1920
+    fps: int = 30
+    folder: str = "videos/full-ai-one-click"
+
+
+def _full_ai_job_id() -> str:
+    return "full_ai_" + _full_ai_uuid.uuid4().hex[:18]
+
+
+def _full_ai_base_url() -> str:
+    return "http://127.0.0.1:8000"
+
+
+def _full_ai_get_json(path: str, timeout: int = 60):
+    r = _full_ai_requests.get(_full_ai_base_url() + path, timeout=timeout)
+    r.raise_for_status()
+    return r.json()
+
+
+def _full_ai_post_json(path: str, payload: dict, timeout: int = 300):
+    r = _full_ai_requests.post(_full_ai_base_url() + path, json=payload, timeout=timeout)
+    r.raise_for_status()
+    return r.json()
+
+
+def _poll_full_ai_job(job_id: str, path_template: str, timeout_seconds: int = 1800, interval: int = 5):
+    deadline = _full_ai_time.time() + timeout_seconds
+    last = None
+
+    while _full_ai_time.time() < deadline:
+        last = _full_ai_get_json(path_template.format(job_id=job_id), timeout=60)
+        status = last.get("status")
+
+        if status in {"done", "failed"}:
+            return last
+
+        _full_ai_time.sleep(interval)
+
+    return {
+        "ok": False,
+        "status": "timeout",
+        "job_id": job_id,
+        "last": last,
+    }
+
+
+def _run_full_ai_pipeline(job_id: str, req: _FullAIVideoRequest):
+    job = _full_ai_jobs[job_id]
+    job["status"] = "running"
+    job["stage"] = "fal_storyboard"
+    job["message"] = "正在生成 fal.ai 分镜视频"
+    job["updated_at"] = _full_ai_time.time()
+
+    try:
+        # FULL_AI_SANITIZE_SHOTS_BEFORE_FAL
+        try:
+            _topic_for_visual = str(locals().get("title") or locals().get("topic") or "")
+            _shots_for_visual = locals().get("shots") or []
+            for _i, _shot in enumerate(_shots_for_visual, start=1):
+                if isinstance(_shot, dict):
+                    _shot["prompt"] = _ai_video_visual_prompt(_shot.get("prompt", ""), _topic_for_visual, _i)
+                    _shot["negative_prompt"] = AI_VIDEO_NEGATIVE_PROMPT
+        except Exception as _quality_exc:
+            print("FULL_AI_SANITIZE_SHOTS_BEFORE_FAL_FAILED", _quality_exc)
+        storyboard_payload = {
+            "title": req.title,
+            "mode": req.mode,
+            "resolution": req.resolution,
+            "num_frames": req.num_frames,
+            "frames_per_second": req.frames_per_second,
+            "max_shots": req.max_shots,
+            "shots": [x.model_dump() for x in req.shots[: max(1, min(req.max_shots, 12))]],
+        }
+
+        storyboard_start = _full_ai_post_json("/api/video/fal/storyboard/start", storyboard_payload, timeout=60)
+        fal_job_id = storyboard_start.get("job_id")
+        job["fal_job_id"] = fal_job_id
+        job["fal_start"] = storyboard_start
+        job["updated_at"] = _full_ai_time.time()
+
+        if not fal_job_id:
+            raise RuntimeError("fal storyboard start failed: missing job_id")
+
+        fal_result = _poll_full_ai_job(
+            fal_job_id,
+            "/api/video/fal/job/{job_id}",
+            timeout_seconds=1800,
+            interval=5,
+        )
+
+        job["fal_result"] = fal_result
+        job["updated_at"] = _full_ai_time.time()
+
+        if fal_result.get("status") != "done":
+            raise RuntimeError("fal storyboard failed or timeout: " + str(fal_result)[:1000])
+
+        shots = ((fal_result.get("result") or {}).get("shots") or [])
+        video_urls = [x.get("video_url") for x in shots if x.get("video_url")]
+
+        if not video_urls:
+            raise RuntimeError("fal storyboard done but no video_urls")
+
+        job["stage"] = "tts"
+        job["message"] = "正在生成字节 TTS 口播"
+        job["video_urls"] = video_urls
+        job["updated_at"] = _full_ai_time.time()
+
+        tts_payload = {
+            "text": req.script_text,
+            "voice": req.voice,
+            "overall_rate": req.overall_rate,
+        }
+        tts_result = _full_ai_post_json("/api/tts-segments", tts_payload, timeout=300)
+        audio_url = tts_result.get("file_url") or tts_result.get("audio_url") or tts_result.get("url") or ""
+
+        job["tts_result"] = tts_result
+        job["audio_url"] = audio_url
+        job["updated_at"] = _full_ai_time.time()
+
+        if not audio_url:
+            raise RuntimeError("tts generated but no audio_url/file_url")
+
+        job["stage"] = "compose"
+        job["message"] = "正在合成完整带口播视频"
+        job["updated_at"] = _full_ai_time.time()
+
+        compose_payload = {
+            "title": req.title,
+            "video_urls": video_urls,
+            "audio_url": audio_url,
+            "width": req.width,
+            "height": req.height,
+            "fps": req.fps,
+            "upload": True,
+            "folder": req.folder,
+        }
+
+        compose_start = _full_ai_post_json("/api/video/compose/urls/start", compose_payload, timeout=60)
+        compose_job_id = compose_start.get("job_id")
+
+        job["compose_job_id"] = compose_job_id
+        job["compose_start"] = compose_start
+        job["updated_at"] = _full_ai_time.time()
+
+        if not compose_job_id:
+            raise RuntimeError("compose start failed: missing job_id")
+
+        compose_result = _poll_full_ai_job(
+            compose_job_id,
+            "/api/video/compose/job/{job_id}",
+            timeout_seconds=900,
+            interval=3,
+        )
+
+        job["compose_result"] = compose_result
+        job["updated_at"] = _full_ai_time.time()
+
+        if compose_result.get("status") != "done":
+            raise RuntimeError("compose failed or timeout: " + str(compose_result)[:1000])
+
+        final_url = compose_result.get("video_url") or ((compose_result.get("result") or {}).get("r2") or {}).get("public_url") or ""
+
+        job["status"] = "done"
+        job["stage"] = "finished"
+        job["message"] = "全 AI 带口播视频生成完成"
+        job["video_url"] = final_url
+        job["result"] = {
+            "ok": True,
+            "title": req.title,
+            "video_url": final_url,
+            "audio_url": audio_url,
+            "fal_job_id": fal_job_id,
+            "compose_job_id": compose_job_id,
+            "video_urls": video_urls,
+            "tts": tts_result,
+            "compose": compose_result,
+        }
+
+    except Exception as e:
+        job["status"] = "failed"
+        job["stage"] = "failed"
+        job["message"] = "全 AI 视频生成失败"
+        job["error"] = str(e)
+
+    job["updated_at"] = _full_ai_time.time()
+
+
+@app.post("/api/video/full-ai/start")
+def api_video_full_ai_start(req: _FullAIVideoRequest):
+    job_id = _full_ai_job_id()
+    now = _full_ai_time.time()
+
+    _full_ai_jobs[job_id] = {
+        "ok": True,
+        "job_id": job_id,
+        "type": "full_ai_video",
+        "status": "queued",
+        "stage": "queued",
+        "message": "任务已创建",
+        "created_at": now,
+        "updated_at": now,
+        "request": req.model_dump(),
+    }
+
+    t = _full_ai_threading.Thread(target=_run_full_ai_pipeline, args=(job_id, req), daemon=True)
+    t.start()
+
+    return _full_ai_jobs[job_id]
+
+
+@app.get("/api/video/full-ai/job/{job_id}")
+def api_video_full_ai_job(job_id: str):
+    job = _full_ai_jobs.get(job_id)
+    if not job:
+        return {
+            "ok": False,
+            "job_id": job_id,
+            "status": "not_found",
+            "message": "任务不存在，后端重启后内存任务会清空",
+        }
+    return job
+# ===== /FULL AI VIDEO PIPELINE API HOTFIX =====
+
+
+# ===== FULL AI COST GUARD MIDDLEWARE HOTFIX =====
+import hashlib as _full_ai_guard_hashlib
+import json as _full_ai_guard_json
+import os as _full_ai_guard_os
+import time as _full_ai_guard_time
+from starlette.requests import Request as _FullAIGuardRequest
+from starlette.responses import JSONResponse as _FullAIGuardJSONResponse
+
+_full_ai_submit_guard = {}
+
+_FULL_AI_DUPLICATE_WINDOW_SECONDS = int(_full_ai_guard_os.getenv("FULL_AI_DUPLICATE_WINDOW_SECONDS", "120"))
+_FULL_AI_IP_COOLDOWN_SECONDS = int(_full_ai_guard_os.getenv("FULL_AI_IP_COOLDOWN_SECONDS", "45"))
+_FULL_AI_MAX_SHOTS = int(_full_ai_guard_os.getenv("FULL_AI_MAX_SHOTS", "50"))
+
+
+def _full_ai_guard_client_key(request: _FullAIGuardRequest) -> str:
+    forwarded = request.headers.get("x-forwarded-for", "")
+    if forwarded:
+        return forwarded.split(",")[0].strip() or "unknown"
+    if request.client and request.client.host:
+        return request.client.host
+    return "unknown"
+
+
+def _full_ai_guard_payload_hash(data) -> str:
+    raw = _full_ai_guard_json.dumps(
+        data,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return _full_ai_guard_hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def _full_ai_guard_cleanup(now: float) -> None:
+    ttl = max(_FULL_AI_DUPLICATE_WINDOW_SECONDS, _FULL_AI_IP_COOLDOWN_SECONDS) * 4
+    old_keys = []
+    for k, v in list(_full_ai_submit_guard.items()):
+        if now - float(v.get("time", 0)) > ttl:
+            old_keys.append(k)
+    for k in old_keys:
+        _full_ai_submit_guard.pop(k, None)
+
+
+@app.middleware("http")
+async def _full_ai_cost_guard_middleware(request: _FullAIGuardRequest, call_next):
+    if request.method.upper() != "POST" or request.url.path != "/api/video/full-ai/start":
+        return await call_next(request)
+
+    body = await request.body()
+
+    try:
+        data = _full_ai_guard_json.loads(body.decode("utf-8") or "{}")
+    except Exception:
+        return _FullAIGuardJSONResponse(
+            {
+                "ok": False,
+                "status": "bad_request",
+                "message": "请求体不是合法 JSON，已拦截，未触发视频生成。",
+            },
+            status_code=400,
+        )
+
+    now = _full_ai_guard_time.time()
+    _full_ai_guard_cleanup(now)
+
+    client_key = _full_ai_guard_client_key(request)
+    payload_hash = _full_ai_guard_payload_hash(data)
+
+    shots = data.get("shots") or []
+    try:
+        requested_max_shots = int(data.get("max_shots") or len(shots) or 1)
+    except Exception:
+        requested_max_shots = len(shots) or 1
+
+    effective_shots = max(requested_max_shots, len(shots))
+
+    if effective_shots > _FULL_AI_MAX_SHOTS:
+        return _FullAIGuardJSONResponse(
+            {
+                "ok": False,
+                "status": "blocked_by_cost_guard",
+                "message": f"本次请求镜头数为 {effective_shots}，超过后端限制 {_FULL_AI_MAX_SHOTS}，已拦截，未触发 fal.ai。",
+                "max_shots_allowed": _FULL_AI_MAX_SHOTS,
+            },
+            status_code=400,
+        )
+
+    ip_key = f"ip:{client_key}"
+    duplicate_key = f"payload:{client_key}:{payload_hash}"
+
+    last_ip = _full_ai_submit_guard.get(ip_key)
+    if last_ip and now - float(last_ip.get("time", 0)) < _FULL_AI_IP_COOLDOWN_SECONDS:
+        wait = int(_FULL_AI_IP_COOLDOWN_SECONDS - (now - float(last_ip.get("time", 0))))
+        return _FullAIGuardJSONResponse(
+            {
+                "ok": False,
+                "status": "cooldown",
+                "message": f"后端冷却保护中，请 {max(wait, 1)} 秒后再提交，避免重复生成费用。",
+                "retry_after_seconds": max(wait, 1),
+            },
+            status_code=429,
+        )
+
+    last_duplicate = _full_ai_submit_guard.get(duplicate_key)
+    if last_duplicate and now - float(last_duplicate.get("time", 0)) < _FULL_AI_DUPLICATE_WINDOW_SECONDS:
+        wait = int(_FULL_AI_DUPLICATE_WINDOW_SECONDS - (now - float(last_duplicate.get("time", 0))))
+        return _FullAIGuardJSONResponse(
+            {
+                "ok": False,
+                "status": "duplicate_blocked",
+                "message": f"检测到 { _FULL_AI_DUPLICATE_WINDOW_SECONDS } 秒内提交过完全相同内容，已拦截，避免重复烧费用。",
+                "retry_after_seconds": max(wait, 1),
+            },
+            status_code=409,
+        )
+
+    _full_ai_submit_guard[ip_key] = {"time": now}
+    _full_ai_submit_guard[duplicate_key] = {"time": now}
+
+    async def receive():
+        return {"type": "http.request", "body": body, "more_body": False}
+
+    guarded_request = _FullAIGuardRequest(request.scope, receive)
+    response = await call_next(guarded_request)
+
+    if response.status_code >= 400:
+        _full_ai_submit_guard.pop(ip_key, None)
+        _full_ai_submit_guard.pop(duplicate_key, None)
+
+    return response
+# ===== /FULL AI COST GUARD MIDDLEWARE HOTFIX =====
+
+
+# ===== VIDEO JOB PERSISTENCE HOTFIX =====
+import json as _job_persist_json
+from starlette.responses import Response as _JobPersistResponse
+from starlette.responses import JSONResponse as _JobPersistJSONResponse
+from app.services.job_persistence_provider import (
+    get_job as _job_persist_get_job,
+    health as _job_persist_health,
+    infer_job_type as _job_persist_infer_job_type,
+    list_recent_jobs as _job_persist_list_recent_jobs,
+    save_job_response as _job_persist_save_job_response,
+)
+
+
+def _job_persist_is_interested_path(path: str) -> bool:
+    return (
+        path == "/api/video/full-ai/start"
+        or path.startswith("/api/video/full-ai/job/")
+        or path.startswith("/api/video/fal/job/")
+        or path.startswith("/api/video/compose/job/")
+    )
+
+
+def _job_persist_extract_job_id(path: str, data) -> str:
+    if isinstance(data, dict):
+        for key in ("job_id", "id"):
+            value = data.get(key)
+            if isinstance(value, str) and value:
+                return value
+
+    parts = [x for x in path.split("/") if x]
+    return parts[-1] if parts else ""
+
+
+def _job_persist_is_not_found(data, status_code: int) -> bool:
+    if status_code == 404:
+        return True
+    if not isinstance(data, dict):
+        return False
+
+    status = str(data.get("status") or "").lower()
+    message = str(data.get("message") or "").lower()
+    error = str(data.get("error") or "").lower()
+
+    return (
+        status in {"not_found", "missing", "not found"}
+        or "not_found" in message
+        or "not found" in message
+        or "not_found" in error
+        or "not found" in error
+    )
+
+
+@app.middleware("http")
+async def _video_job_persistence_middleware(request, call_next):
+    path = request.url.path
+
+    if not _job_persist_is_interested_path(path):
+        return await call_next(request)
+
+    response = await call_next(request)
+
+    body = b""
+    async for chunk in response.body_iterator:
+        body += chunk
+
+    headers = {
+        k: v
+        for k, v in response.headers.items()
+        if k.lower() not in {"content-length", "content-encoding"}
+    }
+
+    data = None
+    try:
+        data = _job_persist_json.loads(body.decode("utf-8") or "{}")
+    except Exception:
+        data = None
+
+    job_id = _job_persist_extract_job_id(path, data)
+    job_type = _job_persist_infer_job_type(path, job_id)
+
+    if request.method.upper() == "GET" and job_id and _job_persist_is_not_found(data, response.status_code):
+        restored = _job_persist_get_job(job_id)
+        if restored:
+            return _JobPersistJSONResponse(restored)
+
+    if isinstance(data, dict) and job_id and not _job_persist_is_not_found(data, response.status_code):
+        try:
+            _job_persist_save_job_response(
+                job_id=job_id,
+                job_type=job_type,
+                response_data=data,
+                source_path=path,
+            )
+        except Exception as exc:
+            print(f"[job-persistence] save failed for {job_id}: {exc}")
+
+    return _JobPersistResponse(
+        content=body,
+        status_code=response.status_code,
+        headers=headers,
+        media_type=response.media_type,
+    )
+
+
+@app.get("/api/video/jobs/persistence/health")
+async def _video_job_persistence_health():
+    return _job_persist_health()
+
+
+@app.get("/api/video/jobs/recent")
+async def _video_job_persistence_recent(limit: int = 20):
+    return {
+        "ok": True,
+        "jobs": _job_persist_list_recent_jobs(limit),
+    }
+# ===== /VIDEO JOB PERSISTENCE HOTFIX =====
+
+
+# ===== VIDEO SUBTITLE API HOTFIX =====
+from typing import Any as _SubtitleAny, Optional as _SubtitleOptional
+from pydantic import BaseModel as _SubtitleBaseModel
+from app.services.subtitle_provider import (
+    burn_subtitles as _subtitle_burn_subtitles,
+    create_self_test_video as _subtitle_create_self_test_video,
+    health as _subtitle_health,
+    make_srt as _subtitle_make_srt,
+)
+
+
+class _SubtitleSrtRequest(_SubtitleBaseModel):
+    text: str = ""
+    segments: list[dict[str, _SubtitleAny]] | None = None
+    duration: float = 12.0
+    max_chars: int = 18
+    prefix: str = "subtitle"
+
+
+class _SubtitleBurnRequest(_SubtitleBaseModel):
+    video_url: str = ""
+    video_path: str = ""
+    text: str = ""
+    segments: list[dict[str, _SubtitleAny]] | None = None
+    duration: _SubtitleOptional[float] = None
+    max_chars: int = 18
+    prefix: str = "subtitle_burn"
+
+
+@app.get("/api/video/subtitle/health")
+async def _video_subtitle_health():
+    return _subtitle_health()
+
+
+@app.post("/api/video/subtitle/srt")
+async def _video_subtitle_srt(req: _SubtitleSrtRequest):
+    return _subtitle_make_srt(
+        text=req.text,
+        segments=req.segments,
+        duration=req.duration,
+        max_chars=req.max_chars,
+        prefix=req.prefix,
+    )
+
+
+@app.post("/api/video/subtitle/burn")
+async def _video_subtitle_burn(req: _SubtitleBurnRequest):
+    return _subtitle_burn_subtitles(
+        video_url=req.video_url,
+        video_path=req.video_path,
+        text=req.text,
+        segments=req.segments,
+        duration=req.duration,
+        max_chars=req.max_chars,
+        prefix=req.prefix,
+    )
+
+
+@app.get("/api/video/subtitle/self-test")
+async def _video_subtitle_self_test():
+    video_path = _subtitle_create_self_test_video()
+    return _subtitle_burn_subtitles(
+        video_path=str(video_path),
+        text="这是字幕烧录自测。不调用 fal.ai，也不会产生生成费用。",
+        duration=5.0,
+        max_chars=16,
+        prefix="subtitle_self_test",
+    )
+# ===== /VIDEO SUBTITLE API HOTFIX =====
+
+
+# ===== VIDEO SUBTITLE BURN UPLOAD API HOTFIX =====
+from app.services.subtitle_provider import (
+    burn_subtitles_and_upload as _subtitle_burn_subtitles_and_upload,
+    create_self_test_burn_upload as _subtitle_create_self_test_burn_upload,
+    upload_health as _subtitle_upload_health,
+)
+
+
+class _SubtitleBurnUploadRequest(_SubtitleBaseModel):
+    video_url: str = ""
+    video_path: str = ""
+    text: str = ""
+    segments: list[dict[str, _SubtitleAny]] | None = None
+    duration: _SubtitleOptional[float] = None
+    max_chars: int = 18
+    prefix: str = "subtitle_burn_upload"
+    object_key: str = ""
+
+
+@app.get("/api/video/subtitle/upload-health")
+async def _video_subtitle_upload_health():
+    return _subtitle_upload_health()
+
+
+@app.post("/api/video/subtitle/burn-upload")
+async def _video_subtitle_burn_upload(req: _SubtitleBurnUploadRequest):
+    return _subtitle_burn_subtitles_and_upload(
+        video_url=req.video_url,
+        video_path=req.video_path,
+        text=req.text,
+        segments=req.segments,
+        duration=req.duration,
+        max_chars=req.max_chars,
+        prefix=req.prefix,
+        object_key=req.object_key,
+    )
+
+
+@app.get("/api/video/subtitle/burn-upload-self-test")
+async def _video_subtitle_burn_upload_self_test():
+    return _subtitle_create_self_test_burn_upload()
+# ===== /VIDEO SUBTITLE BURN UPLOAD API HOTFIX =====
+
+
+# ===== FULL AI SUBTITLE BRIDGE HOTFIX =====
+import time as _full_ai_subtitle_time
+from typing import Any as _FullAISubtitleAny
+from pydantic import BaseModel as _FullAISubtitleBaseModel
+from starlette.responses import JSONResponse as _FullAISubtitleJSONResponse
+from app.services.subtitle_provider import (
+    burn_subtitles_and_upload as _full_ai_subtitle_burn_upload,
+    upload_health as _full_ai_subtitle_upload_health,
+)
+
+try:
+    from app.services.job_persistence_provider import (
+        get_job as _full_ai_subtitle_get_persisted_job,
+        save_job_response as _full_ai_subtitle_save_job_response,
+    )
+except Exception:
+    _full_ai_subtitle_get_persisted_job = None
+    _full_ai_subtitle_save_job_response = None
+
+
+class _FullAISubtitleBridgeRequest(_FullAISubtitleBaseModel):
+    video_url: str = ""
+    text: str = ""
+    segments: list[dict[str, _FullAISubtitleAny]] | None = None
+    duration: float | None = None
+    max_chars: int = 18
+    prefix: str = "full_ai_subtitled"
+    object_key: str = ""
+    dry_run: bool = False
+
+
+def _full_ai_subtitle_memory_job(job_id: str):
+    try:
+        jobs = globals().get("_full_ai_jobs")
+        if isinstance(jobs, dict):
+            return jobs.get(job_id)
+    except Exception:
+        pass
+    return None
+
+
+def _full_ai_subtitle_find_job(job_id: str):
+    job = _full_ai_subtitle_memory_job(job_id)
+    if job:
+        return job
+
+    if _full_ai_subtitle_get_persisted_job:
+        try:
+            return _full_ai_subtitle_get_persisted_job(job_id)
+        except Exception:
+            return None
+
+    return None
+
+
+def _full_ai_subtitle_extract_video_url(job) -> str:
+    if not isinstance(job, dict):
+        return ""
+
+    result = job.get("result") if isinstance(job.get("result"), dict) else {}
+
+    return (
+        job.get("subtitled_video_url")
+        or job.get("video_url")
+        or job.get("final_video_url")
+        or result.get("video_url")
+        or result.get("final_video_url")
+        or ""
+    )
+
+
+def _full_ai_subtitle_extract_text(job) -> str:
+    if not isinstance(job, dict):
+        return ""
+
+    result = job.get("result") if isinstance(job.get("result"), dict) else {}
+    request = job.get("request") if isinstance(job.get("request"), dict) else {}
+    payload = job.get("payload") if isinstance(job.get("payload"), dict) else {}
+
+    return (
+        job.get("script_text")
+        or job.get("text")
+        or job.get("copy")
+        or request.get("script_text")
+        or request.get("text")
+        or payload.get("script_text")
+        or payload.get("text")
+        or result.get("script_text")
+        or result.get("text")
+        or ""
+    )
+
+
+@app.get("/api/video/full-ai/subtitle-bridge/health")
+async def _full_ai_subtitle_bridge_health():
+    data = _full_ai_subtitle_upload_health()
+    data.update(
+        {
+            "bridge": True,
+            "endpoint": "/api/video/full-ai/subtitle-bridge/{job_id}",
+            "message": "full-ai 字幕桥接接口可用",
+        }
+    )
+    return data
+
+
+@app.post("/api/video/full-ai/subtitle-bridge/{job_id}")
+async def _full_ai_subtitle_bridge(job_id: str, req: _FullAISubtitleBridgeRequest):
+    job = _full_ai_subtitle_find_job(job_id)
+
+    video_url = (req.video_url or _full_ai_subtitle_extract_video_url(job) or "").strip()
+    text = (req.text or _full_ai_subtitle_extract_text(job) or "").strip()
+    segments = req.segments or None
+
+    if not video_url:
+        return _FullAISubtitleJSONResponse(
+            {
+                "ok": False,
+                "status": "missing_video_url",
+                "message": "没有找到可烧录字幕的视频 URL。请传 video_url，或确认 full-ai job 已完成并有 video_url。",
+                "job_id": job_id,
+            },
+            status_code=400,
+        )
+
+    if not text and not segments:
+        return _FullAISubtitleJSONResponse(
+            {
+                "ok": False,
+                "status": "missing_subtitle_text",
+                "message": "没有找到字幕文本。请传 text，或传 segments。",
+                "job_id": job_id,
+                "video_url": video_url,
+            },
+            status_code=400,
+        )
+
+    subtitled_job_id = f"{job_id}_subtitled_{int(_full_ai_subtitle_time.time())}"
+
+    if req.dry_run:
+        return {
+            "ok": True,
+            "dry_run": True,
+            "job_id": job_id,
+            "subtitled_job_id": subtitled_job_id,
+            "video_url": video_url,
+            "text_length": len(text),
+            "segments_count": len(segments or []),
+            "message": "dry_run 已通过：真实执行时会下载 video_url、烧录字幕、上传 R2，不会调用 fal.ai。",
+        }
+
+    result = _full_ai_subtitle_burn_upload(
+        video_url=video_url,
+        text=text,
+        segments=segments,
+        duration=req.duration,
+        max_chars=req.max_chars,
+        prefix=req.prefix or "full_ai_subtitled",
+        object_key=req.object_key,
+    )
+
+    response_data = {
+        "ok": True,
+        "job_id": subtitled_job_id,
+        "original_job_id": job_id,
+        "type": "full_ai_subtitle",
+        "status": "done",
+        "stage": "subtitle_burn_uploaded",
+        "message": "full-ai 字幕版视频已生成并上传 R2",
+        "video_url": result.get("video_url") or result.get("url"),
+        "result": result,
+    }
+
+    try:
+        memory_jobs = globals().get("_full_ai_jobs")
+        if isinstance(memory_jobs, dict) and isinstance(job, dict):
+            job["subtitled_video_url"] = response_data["video_url"]
+            job["subtitled_job_id"] = subtitled_job_id
+            memory_jobs[job_id] = job
+    except Exception:
+        pass
+
+    if _full_ai_subtitle_save_job_response:
+        try:
+            _full_ai_subtitle_save_job_response(
+                job_id=subtitled_job_id,
+                job_type="full_ai_subtitle",
+                response_data=response_data,
+                source_path=f"/api/video/full-ai/subtitle-bridge/{job_id}",
+            )
+        except Exception as exc:
+            print(f"[full-ai-subtitle-bridge] persist failed: {exc}")
+
+    return response_data
+# ===== /FULL AI SUBTITLE BRIDGE HOTFIX =====
+
+
+# ===== REAL SHOT VIDEO API HOTFIX =====
+from pathlib import Path as _RealShotPath
+from typing import Any as _RealShotAny
+from fastapi import UploadFile as _RealShotUploadFile, File as _RealShotFile, Form as _RealShotForm
+from pydantic import BaseModel as _RealShotBaseModel
+from app.services.real_shot_provider import (
+    UPLOAD_DIR as _real_shot_upload_dir,
+    create_self_test_video as _real_shot_create_self_test_video,
+    health as _real_shot_health,
+    make_job_id as _real_shot_make_job_id,
+    probe_video as _real_shot_probe_video,
+    process_real_shot as _real_shot_process_real_shot,
+    sanitize_filename as _real_shot_sanitize_filename,
+)
+
+try:
+    from app.services.job_persistence_provider import save_job_response as _real_shot_save_job_response
+except Exception:
+    _real_shot_save_job_response = None
+
+
+class _RealShotProcessRequest(_RealShotBaseModel):
+    video_path: str = ""
+    video_url: str = ""
+    text: str = ""
+    segments: list[dict[str, _RealShotAny]] | None = None
+    burn_subtitle: bool = False
+    upload_r2: bool = False
+    dry_run: bool = True
+    max_chars: int = 18
+    prefix: str = "real_shot"
+
+
+@app.get("/api/video/real-shot/health")
+async def _video_real_shot_health():
+    return _real_shot_health()
+
+
+@app.post("/api/video/real-shot/upload")
+async def _video_real_shot_upload(
+    file: _RealShotUploadFile = _RealShotFile(...),
+    source: str = _RealShotForm("upload"),
+):
+    safe_name = _real_shot_sanitize_filename(file.filename or "real_shot_upload.mp4")
+    job_id = _real_shot_make_job_id("real_shot_upload")
+    target = _RealShotPath(_real_shot_upload_dir) / f"{job_id}_{safe_name}"
+
+    target.parent.mkdir(parents=True, exist_ok=True)
+
+    size = 0
+    with target.open("wb") as f:
+        while True:
+            chunk = await file.read(1024 * 1024)
+            if not chunk:
+                break
+            size += len(chunk)
+            f.write(chunk)
+
+    metadata = _real_shot_probe_video(target)
+
+    response_data = {
+        "ok": True,
+        "job_id": job_id,
+        "type": "real_shot_upload",
+        "status": "done",
+        "stage": "uploaded",
+        "message": "实拍视频已上传到服务器，未调用 fal.ai。",
+        "source": source,
+        "filename": safe_name,
+        "video_path": str(target),
+        "size": size,
+        "metadata": metadata,
+    }
+
+    if _real_shot_save_job_response:
+        try:
+            _real_shot_save_job_response(
+                job_id=job_id,
+                job_type="real_shot_upload",
+                response_data=response_data,
+                source_path="/api/video/real-shot/upload",
+            )
+        except Exception as exc:
+            print(f"[real-shot] persist upload failed: {exc}")
+
+    return response_data
+
+
+@app.post("/api/video/real-shot/process")
+async def _video_real_shot_process(req: _RealShotProcessRequest):
+    response_data = _real_shot_process_real_shot(
+        video_path=req.video_path,
+        video_url=req.video_url,
+        text=req.text,
+        segments=req.segments,
+        burn_subtitle=req.burn_subtitle,
+        upload_r2=req.upload_r2,
+        dry_run=req.dry_run,
+        max_chars=req.max_chars,
+        prefix=req.prefix,
+    )
+
+    if _real_shot_save_job_response:
+        try:
+            _real_shot_save_job_response(
+                job_id=response_data.get("job_id", ""),
+                job_type="real_shot",
+                response_data=response_data,
+                source_path="/api/video/real-shot/process",
+            )
+        except Exception as exc:
+            print(f"[real-shot] persist process failed: {exc}")
+
+    return response_data
+
+
+@app.get("/api/video/real-shot/self-test")
+async def _video_real_shot_self_test(dry_run: bool = True):
+    video_path = _real_shot_create_self_test_video()
+
+    return _real_shot_process_real_shot(
+        video_path=str(video_path),
+        text="这是实拍视频处理自测。不调用 fal.ai。",
+        burn_subtitle=False,
+        upload_r2=False,
+        dry_run=dry_run,
+        max_chars=16,
+        prefix="real_shot_self_test",
+    )
+# ===== /REAL SHOT VIDEO API HOTFIX =====
+
+
+# ===== HYBRID VIDEO API HOTFIX =====
+from pydantic import BaseModel as _HybridBaseModel
+from app.services.hybrid_video_provider import (
+    create_test_video as _hybrid_create_test_video,
+    health as _hybrid_health,
+    process_hybrid_video as _hybrid_process_video,
+)
+
+try:
+    from app.services.job_persistence_provider import save_job_response as _hybrid_save_job_response
+except Exception:
+    _hybrid_save_job_response = None
+
+
+class _HybridProcessRequest(_HybridBaseModel):
+    real_video_path: str = ""
+    real_video_url: str = ""
+    ai_video_paths: list[str] | None = None
+    ai_video_urls: list[str] | None = None
+    order: str = "ai_first"
+    text: str = ""
+    burn_subtitle: bool = False
+    upload_r2: bool = False
+    dry_run: bool = True
+    max_chars: int = 18
+    prefix: str = "hybrid"
+
+
+@app.get("/api/video/hybrid/health")
+async def _video_hybrid_health():
+    return _hybrid_health()
+
+
+@app.post("/api/video/hybrid/process")
+async def _video_hybrid_process(req: _HybridProcessRequest):
+    response_data = _hybrid_process_video(
+        real_video_path=req.real_video_path,
+        real_video_url=req.real_video_url,
+        ai_video_paths=req.ai_video_paths,
+        ai_video_urls=req.ai_video_urls,
+        order=req.order,
+        text=req.text,
+        burn_subtitle=req.burn_subtitle,
+        upload_r2=req.upload_r2,
+        dry_run=req.dry_run,
+        max_chars=req.max_chars,
+        prefix=req.prefix,
+    )
+
+    if _hybrid_save_job_response:
+        try:
+            _hybrid_save_job_response(
+                job_id=response_data.get("job_id", ""),
+                job_type="hybrid",
+                response_data=response_data,
+                source_path="/api/video/hybrid/process",
+            )
+        except Exception as exc:
+            print(f"[hybrid] persist failed: {exc}")
+
+    return response_data
+
+
+@app.get("/api/video/hybrid/self-test")
+async def _video_hybrid_self_test(dry_run: bool = True):
+    real_path = _hybrid_create_test_video(label="REAL_SHOT", color="green", duration=3.0)
+    ai_path = _hybrid_create_test_video(label="AI_OPENING", color="blue", duration=2.0)
+
+    return _hybrid_process_video(
+        real_video_path=str(real_path),
+        ai_video_paths=[str(ai_path)],
+        order="ai_first",
+        text="这是混合成片自测。AI 镜头只作为开头，实拍素材为主。",
+        burn_subtitle=False,
+        upload_r2=False,
+        dry_run=dry_run,
+        max_chars=16,
+        prefix="hybrid_self_test",
+    )
+# ===== /HYBRID VIDEO API HOTFIX =====
+
+
+# ===== RUNTIME SAFETY API HOTFIX =====
+from starlette.responses import JSONResponse as _RuntimeSafetyJSONResponse
+from app.services.runtime_safety_provider import (
+    cleanup_runtime_files as _runtime_cleanup_files,
+    health as _runtime_safety_health,
+    is_upload_too_large as _runtime_is_upload_too_large,
+)
+
+
+def _runtime_safety_is_upload_path(path: str) -> bool:
+    return path in {
+        "/api/video/real-shot/upload",
+    }
+
+
+@app.middleware("http")
+async def _runtime_safety_upload_limit_middleware(request, call_next):
+    try:
+        if request.method.upper() == "POST" and _runtime_safety_is_upload_path(str(request.url.path)):
+            too_large, size, max_bytes = _runtime_is_upload_too_large(request.headers.get("content-length"))
+
+            if too_large:
+                return _RuntimeSafetyJSONResponse(
+                    {
+                        "ok": False,
+                        "status": "upload_too_large",
+                        "message": "上传文件过大，已被后端拦截，未写入磁盘。",
+                        "content_length": size,
+                        "max_upload_bytes": max_bytes,
+                        "max_upload_mb": int(max_bytes / 1024 / 1024),
+                    },
+                    status_code=413,
+                )
+    except Exception as exc:
+        print(f"[runtime-safety] upload limit middleware failed open: {exc}")
+
+    return await call_next(request)
+
+
+@app.get("/api/video/runtime-safety/health")
+async def _video_runtime_safety_health():
+    return _runtime_safety_health()
+
+
+@app.post("/api/video/runtime-safety/cleanup")
+async def _video_runtime_safety_cleanup(
+    max_age_hours: float = 24.0,
+    dry_run: bool = True,
+    max_delete_files: int = 200,
+):
+    return _runtime_cleanup_files(
+        max_age_hours=max_age_hours,
+        dry_run=dry_run,
+        max_delete_files=max_delete_files,
+    )
+# ===== /RUNTIME SAFETY API HOTFIX =====
+
+
+# ===== PRODUCTION HARDENING API HOTFIX =====
+from starlette.responses import JSONResponse as _ProductionJSONResponse
+from app.services.api_guard_provider import (
+    check_request as _api_guard_check_request,
+    security_status as _api_guard_security_status,
+)
+from app.services.production_health_provider import (
+    health as _production_health,
+)
+
+
+@app.middleware("http")
+async def _production_api_guard_middleware(request, call_next):
+    try:
+        headers = dict(request.headers)
+        client_ip = request.client.host if request.client else ""
+        blocked = _api_guard_check_request(
+            method=request.method,
+            path=str(request.url.path),
+            headers=headers,
+            client_ip=client_ip,
+        )
+
+        if blocked:
+            return _ProductionJSONResponse(
+                blocked.get("body", {"ok": False, "status": "blocked"}),
+                status_code=int(blocked.get("status_code", 403)),
+            )
+    except Exception as exc:
+        print(f"[production-hardening] api guard failed open: {exc}")
+
+    return await call_next(request)
+
+
+@app.get("/api/video/production/health")
+async def _video_production_health():
+    return _production_health()
+
+
+@app.get("/api/video/production/security")
+async def _video_production_security():
+    return _api_guard_security_status()
+# ===== /PRODUCTION HARDENING API HOTFIX =====
+
+
+# ===== WATERMARK CHECK API HOTFIX =====
+from pydantic import BaseModel as _WatermarkBaseModel
+from app.services.watermark_provider import (
+    check_watermark as _watermark_check,
+    create_self_test_video as _watermark_create_self_test_video,
+    health as _watermark_health,
+)
+
+try:
+    from app.services.job_persistence_provider import save_job_response as _watermark_save_job_response
+except Exception:
+    _watermark_save_job_response = None
+
+
+class _WatermarkCheckRequest(_WatermarkBaseModel):
+    video_path: str = ""
+    video_url: str = ""
+    sample_count: int = 6
+    prefix: str = "watermark"
+
+
+@app.get("/api/video/watermark/health")
+async def _video_watermark_health():
+    return _watermark_health()
+
+
+@app.post("/api/video/watermark/check")
+async def _video_watermark_check(req: _WatermarkCheckRequest):
+    response_data = _watermark_check(
+        video_path=req.video_path,
+        video_url=req.video_url,
+        sample_count=req.sample_count,
+        prefix=req.prefix,
+    )
+
+    if _watermark_save_job_response:
+        try:
+            _watermark_save_job_response(
+                job_id=response_data.get("job_id", ""),
+                job_type="watermark_check",
+                response_data=response_data,
+                source_path="/api/video/watermark/check",
+            )
+        except Exception as exc:
+            print(f"[watermark] persist failed: {exc}")
+
+    return response_data
+
+
+@app.get("/api/video/watermark/self-test")
+async def _video_watermark_self_test(with_logo: bool = True):
+    video_path = _watermark_create_self_test_video(with_logo=with_logo)
+
+    return _watermark_check(
+        video_path=str(video_path),
+        sample_count=5,
+        prefix="watermark_self_test",
+    )
+# ===== /WATERMARK CHECK API HOTFIX =====
+
+
+# ===== TIMELINE ENGINE V1 API HOTFIX =====
+from pydantic import BaseModel as _TimelineBaseModel
+from app.services.timeline_engine_provider import (
+    build_timeline as _timeline_build,
+    health as _timeline_health,
+    self_test as _timeline_self_test,
+)
+
+try:
+    from app.services.job_persistence_provider import save_job_response as _timeline_save_job_response
+except Exception:
+    _timeline_save_job_response = None
+
+
+class _TimelineBuildRequest(_TimelineBaseModel):
+    text: str
+    target_duration: float | None = None
+    speech_rate_cps: float = 4.2
+    min_segment_duration: float = 1.8
+    max_segment_duration: float = 6.5
+
+
+@app.get("/api/video/timeline/health")
+async def _video_timeline_health():
+    return _timeline_health()
+
+
+@app.post("/api/video/timeline/build")
+async def _video_timeline_build(req: _TimelineBuildRequest):
+    response_data = _timeline_build(
+        text=req.text,
+        target_duration=req.target_duration,
+        speech_rate_cps=req.speech_rate_cps,
+        min_segment_duration=req.min_segment_duration,
+        max_segment_duration=req.max_segment_duration,
+    )
+
+    if _timeline_save_job_response:
+        try:
+            _timeline_save_job_response(
+                job_id=response_data.get("timeline_id", ""),
+                job_type="timeline",
+                response_data=response_data,
+                source_path="/api/video/timeline/build",
+            )
+        except Exception as exc:
+            print(f"[timeline] persist failed: {exc}")
+
+    return response_data
+
+
+@app.get("/api/video/timeline/self-test")
+async def _video_timeline_self_test():
+    return _timeline_self_test()
+# ===== /TIMELINE ENGINE V1 API HOTFIX =====
+
+
+# ===== TIMELINE TTS ALIGN API HOTFIX =====
+from pydantic import BaseModel as _TimelineTTSBaseModel
+import asyncio as _timeline_tts_asyncio
+from app.services.timeline_tts_align_provider import (
+    build_tts_aligned_timeline as _timeline_tts_align_build,
+    health as _timeline_tts_align_health,
+    self_test as _timeline_tts_align_self_test,
+)
+
+try:
+    from app.services.job_persistence_provider import save_job_response as _timeline_tts_save_job_response
+except Exception:
+    _timeline_tts_save_job_response = None
+
+
+class _TimelineTTSAlignRequest(_TimelineTTSBaseModel):
+    text: str
+    voice: str = "default"
+    overall_rate: str = "0%"
+    tts_provider: str | None = None
+    target_duration: float | None = None
+    dry_run: bool = True
+    speech_rate_cps: float = 4.2
+    min_segment_duration: float = 1.8
+    max_segment_duration: float = 6.5
+
+
+@app.get("/api/video/timeline/tts-align/health")
+async def _video_timeline_tts_align_health():
+    return _timeline_tts_align_health()
+
+
+@app.post("/api/video/timeline/tts-align")
+async def _video_timeline_tts_align(req: _TimelineTTSAlignRequest):
+    # 真实 TTS 会在 provider 内部通过本机 HTTP 调 /api/tts-segments。
+    # 这里必须放到线程里，否则同步 urllib 会阻塞当前 uvicorn event loop，导致本机自调用卡死/空响应。
+    response_data = await _timeline_tts_asyncio.to_thread(
+        _timeline_tts_align_build,
+        text=req.text,
+        voice=req.voice,
+        overall_rate=req.overall_rate,
+        tts_provider=req.tts_provider,
+        target_duration=req.target_duration,
+        dry_run=req.dry_run,
+        speech_rate_cps=req.speech_rate_cps,
+        min_segment_duration=req.min_segment_duration,
+        max_segment_duration=req.max_segment_duration,
+    )
+
+    if _timeline_tts_save_job_response:
+        try:
+            _timeline_tts_save_job_response(
+                job_id=response_data.get("align_id", ""),
+                job_type="timeline_tts_align",
+                response_data=response_data,
+                source_path="/api/video/timeline/tts-align",
+            )
+        except Exception as exc:
+            print(f"[timeline-tts-align] persist failed: {exc}")
+
+    return response_data
+
+
+@app.get("/api/video/timeline/tts-align/self-test")
+async def _video_timeline_tts_align_self_test(dry_run: bool = True):
+    return _timeline_tts_align_self_test(dry_run=dry_run)
+# ===== /TIMELINE TTS ALIGN API HOTFIX =====
+
+
+# ===== TIMELINE RENDER PLAN API HOTFIX =====
+from pydantic import BaseModel as _TimelineRenderBaseModel
+from fastapi import HTTPException as _TimelineRenderHTTPException
+from app.services.timeline_render_plan_provider import (
+    build_render_plan as _timeline_render_plan_build,
+    health as _timeline_render_plan_health,
+    self_test as _timeline_render_plan_self_test,
+)
+
+try:
+    from app.services.job_persistence_provider import save_job_response as _timeline_render_save_job_response
+except Exception:
+    _timeline_render_save_job_response = None
+
+
+class _TimelineRenderPlanRequest(_TimelineRenderBaseModel):
+    segments: list[dict]
+    materials: list[dict]
+    audio_url: str = ""
+    fit_mode: str = "loop"
+    material_strategy: str = "round_robin"
+    output_profile: str = "vertical_720x1280"
+    burn_subtitle: bool = True
+
+
+@app.get("/api/video/timeline/render-plan/health")
+async def _video_timeline_render_plan_health():
+    return _timeline_render_plan_health()
+
+
+@app.post("/api/video/timeline/render-plan")
+async def _video_timeline_render_plan(req: _TimelineRenderPlanRequest):
+    try:
+        response_data = _timeline_render_plan_build(
+            segments=req.segments,
+            materials=req.materials,
+            audio_url=req.audio_url,
+            fit_mode=req.fit_mode,
+            material_strategy=req.material_strategy,
+            output_profile=req.output_profile,
+            burn_subtitle=req.burn_subtitle,
+        )
+    except ValueError as exc:
+        raise _TimelineRenderHTTPException(status_code=400, detail=str(exc))
+
+    if _timeline_render_save_job_response:
+        try:
+            _timeline_render_save_job_response(
+                job_id=response_data.get("render_id", ""),
+                job_type="timeline_render_plan",
+                response_data=response_data,
+                source_path="/api/video/timeline/render-plan",
+            )
+        except Exception as exc:
+            print(f"[timeline-render-plan] persist failed: {exc}")
+
+    return response_data
+
+
+@app.get("/api/video/timeline/render-plan/self-test")
+async def _video_timeline_render_plan_self_test():
+    return _timeline_render_plan_self_test()
+# ===== /TIMELINE RENDER PLAN API HOTFIX =====
+
+
+# ===== COMMENT LEAD ENGINE API HOTFIX =====
+from fastapi import HTTPException as _CommentLeadHTTPException
+from pydantic import BaseModel as _CommentLeadBaseModel
+from app.services.comment_lead_provider import (
+    analyze_comments as _comment_lead_analyze,
+    health as _comment_lead_health,
+    recent_leads as _comment_lead_recent,
+    self_test as _comment_lead_self_test,
+)
+
+
+class _CommentLeadAnalyzeRequest(_CommentLeadBaseModel):
+    comments: list
+    campaign_context: dict = {}
+    save: bool = True
+    max_items: int = 200
+
+
+@app.get("/api/video/comment-leads/health")
+async def _video_comment_leads_health():
+    return _comment_lead_health()
+
+
+@app.post("/api/video/comment-leads/analyze")
+async def _video_comment_leads_analyze(req: _CommentLeadAnalyzeRequest):
+    try:
+        return _comment_lead_analyze(
+            comments=req.comments,
+            campaign_context=req.campaign_context,
+            save=req.save,
+            max_items=req.max_items,
+        )
+    except ValueError as exc:
+        raise _CommentLeadHTTPException(status_code=400, detail=str(exc))
+
+
+@app.get("/api/video/comment-leads/recent")
+async def _video_comment_leads_recent(limit: int = 50):
+    return _comment_lead_recent(limit=limit)
+
+
+@app.get("/api/video/comment-leads/self-test")
+async def _video_comment_leads_self_test():
+    return _comment_lead_self_test()
+# ===== /COMMENT LEAD ENGINE API HOTFIX =====
+
+
+# ===== OPENCLAW COMMENT ADAPTER API HOTFIX =====
+from fastapi import HTTPException as _OpenClawHTTPException
+from pydantic import BaseModel as _OpenClawBaseModel, Field as _OpenClawField
+from app.services.openclaw_comment_adapter_provider import (
+    analyze_openclaw_comments as _openclaw_comment_analyze,
+    health as _openclaw_comment_health,
+    self_test as _openclaw_comment_self_test,
+)
+
+
+class _OpenClawCommentAnalyzeRequest(_OpenClawBaseModel):
+    raw_export: object | None = None
+    comments: list = _OpenClawField(default_factory=list)
+    campaign_context: dict = _OpenClawField(default_factory=dict)
+    default_platform: str = ""
+    save: bool = True
+    max_items: int = 500
+
+
+@app.get("/api/video/openclaw/comments/health")
+async def _video_openclaw_comments_health():
+    return _openclaw_comment_health()
+
+
+@app.post("/api/video/openclaw/comments/analyze")
+async def _video_openclaw_comments_analyze(req: _OpenClawCommentAnalyzeRequest):
+    try:
+        return _openclaw_comment_analyze(
+            raw_export=req.raw_export,
+            comments=req.comments,
+            campaign_context=req.campaign_context,
+            default_platform=req.default_platform,
+            save=req.save,
+            max_items=req.max_items,
+        )
+    except ValueError as exc:
+        raise _OpenClawHTTPException(status_code=400, detail=str(exc))
+
+
+@app.get("/api/video/openclaw/comments/self-test")
+async def _video_openclaw_comments_self_test():
+    return _openclaw_comment_self_test()
+# ===== /OPENCLAW COMMENT ADAPTER API HOTFIX =====
+
+
+# ===== OPENCLAW CONTENT INTEL API HOTFIX =====
+from fastapi import HTTPException as _OpenClawContentHTTPException
+from pydantic import BaseModel as _OpenClawContentBaseModel, Field as _OpenClawContentField
+from app.services.openclaw_content_intel_provider import (
+    analyze_content as _openclaw_content_analyze,
+    health as _openclaw_content_health,
+    self_test as _openclaw_content_self_test,
+)
+
+
+class _OpenClawContentAnalyzeRequest(_OpenClawContentBaseModel):
+    raw_export: object | None = None
+    items: list = _OpenClawContentField(default_factory=list)
+    campaign_context: dict = _OpenClawContentField(default_factory=dict)
+    save: bool = True
+    max_items: int = 300
+
+
+@app.get("/api/video/openclaw/content/health")
+async def _video_openclaw_content_health():
+    return _openclaw_content_health()
+
+
+@app.post("/api/video/openclaw/content/analyze")
+async def _video_openclaw_content_analyze(req: _OpenClawContentAnalyzeRequest):
+    try:
+        return _openclaw_content_analyze(
+            raw_export=req.raw_export,
+            items=req.items,
+            campaign_context=req.campaign_context,
+            save=req.save,
+            max_items=req.max_items,
+        )
+    except ValueError as exc:
+        raise _OpenClawContentHTTPException(status_code=400, detail=str(exc))
+
+
+@app.get("/api/video/openclaw/content/self-test")
+async def _video_openclaw_content_self_test():
+    return _openclaw_content_self_test()
+# ===== /OPENCLAW CONTENT INTEL API HOTFIX =====
+
+
+# ===== OPENCLAW TO TIMELINE API HOTFIX =====
+from fastapi import HTTPException as _OpenClawTimelineHTTPException
+from pydantic import BaseModel as _OpenClawTimelineBaseModel, Field as _OpenClawTimelineField
+from app.services.openclaw_to_timeline_provider import (
+    build_openclaw_timeline_plan as _openclaw_timeline_plan,
+    health as _openclaw_timeline_health,
+    self_test as _openclaw_timeline_self_test,
+)
+
+
+class _OpenClawTimelinePlanRequest(_OpenClawTimelineBaseModel):
+    raw_export: object | None = None
+    items: list = _OpenClawTimelineField(default_factory=list)
+    campaign_context: dict = _OpenClawTimelineField(default_factory=dict)
+    save_insight: bool = False
+    target_duration: float | None = 28
+    min_score: int = 0
+    max_items: int = 300
+    bgm_policy: dict = _OpenClawTimelineField(default_factory=dict)
+    quality_policy: dict = _OpenClawTimelineField(default_factory=dict)
+
+
+@app.get("/api/video/openclaw/timeline/health")
+async def _video_openclaw_timeline_health():
+    return _openclaw_timeline_health()
+
+
+@app.post("/api/video/openclaw/timeline/plan")
+async def _video_openclaw_timeline_plan(req: _OpenClawTimelinePlanRequest):
+    try:
+        return _openclaw_timeline_plan(
+            raw_export=req.raw_export,
+            items=req.items,
+            campaign_context=req.campaign_context,
+            save_insight=req.save_insight,
+            target_duration=req.target_duration,
+            min_score=req.min_score,
+            max_items=req.max_items,
+            bgm_policy=req.bgm_policy,
+            quality_policy=req.quality_policy,
+        )
+    except ValueError as exc:
+        raise _OpenClawTimelineHTTPException(status_code=400, detail=str(exc))
+
+
+@app.get("/api/video/openclaw/timeline/self-test")
+async def _video_openclaw_timeline_self_test():
+    return _openclaw_timeline_self_test()
+# ===== /OPENCLAW TO TIMELINE API HOTFIX =====
+
+
+# ===== OPENCLAW LLM ENHANCE API HOTFIX =====
+import asyncio as _OpenClawLLMAsyncio
+from fastapi import HTTPException as _OpenClawLLMHTTPException
+from pydantic import BaseModel as _OpenClawLLMBaseModel, Field as _OpenClawLLMField
+from app.services.openclaw_llm_enhance_provider import (
+    enhance_comments as _openclaw_llm_enhance_comments,
+    enhance_content as _openclaw_llm_enhance_content,
+    health as _openclaw_llm_enhance_health,
+    self_test as _openclaw_llm_enhance_self_test,
+)
+
+
+class _OpenClawLLMCommentsRequest(_OpenClawLLMBaseModel):
+    comments: list = _OpenClawLLMField(default_factory=list)
+    raw_export: object | None = None
+    campaign_context: dict = _OpenClawLLMField(default_factory=dict)
+    min_score: int = 55
+    max_llm_items: int = 5
+    dry_run: bool = True
+    save_rule_leads: bool = False
+
+
+class _OpenClawLLMContentRequest(_OpenClawLLMBaseModel):
+    raw_export: object | None = None
+    items: list = _OpenClawLLMField(default_factory=list)
+    campaign_context: dict = _OpenClawLLMField(default_factory=dict)
+    min_score: int = 55
+    max_llm_items: int = 5
+    dry_run: bool = True
+    save_rule_insights: bool = False
+
+
+@app.get("/api/video/openclaw/llm-enhance/health")
+async def _video_openclaw_llm_enhance_health():
+    return _openclaw_llm_enhance_health()
+
+
+@app.post("/api/video/openclaw/llm-enhance/comments")
+async def _video_openclaw_llm_enhance_comments(req: _OpenClawLLMCommentsRequest):
+    try:
+        return await _OpenClawLLMAsyncio.to_thread(
+            _openclaw_llm_enhance_comments,
+            comments=req.comments,
+            raw_export=req.raw_export,
+            campaign_context=req.campaign_context,
+            min_score=req.min_score,
+            max_llm_items=req.max_llm_items,
+            dry_run=req.dry_run,
+            save_rule_leads=req.save_rule_leads,
+        )
+    except ValueError as exc:
+        raise _OpenClawLLMHTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        raise _OpenClawLLMHTTPException(status_code=502, detail=f"openclaw llm comments enhance failed: {exc}")
+
+
+@app.post("/api/video/openclaw/llm-enhance/content")
+async def _video_openclaw_llm_enhance_content(req: _OpenClawLLMContentRequest):
+    try:
+        return await _OpenClawLLMAsyncio.to_thread(
+            _openclaw_llm_enhance_content,
+            raw_export=req.raw_export,
+            items=req.items,
+            campaign_context=req.campaign_context,
+            min_score=req.min_score,
+            max_llm_items=req.max_llm_items,
+            dry_run=req.dry_run,
+            save_rule_insights=req.save_rule_insights,
+        )
+    except ValueError as exc:
+        raise _OpenClawLLMHTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        raise _OpenClawLLMHTTPException(status_code=502, detail=f"openclaw llm content enhance failed: {exc}")
+
+
+@app.get("/api/video/openclaw/llm-enhance/self-test")
+async def _video_openclaw_llm_enhance_self_test():
+    return _openclaw_llm_enhance_self_test()
+# ===== /OPENCLAW LLM ENHANCE API HOTFIX =====
+
+
+# ===== NOTIFICATION CENTER API HOTFIX =====
+import asyncio as _NotifyAsyncio
+from fastapi import HTTPException as _NotifyHTTPException
+from pydantic import BaseModel as _NotifyBaseModel, Field as _NotifyField
+from app.services.notification_provider import (
+    health as _notify_health,
+    self_test as _notify_self_test,
+    send_message as _notify_send_message,
+    send_openclaw_lead as _notify_openclaw_lead,
+    send_video_job as _notify_video_job,
+)
+
+
+class _NotifySendRequest(_NotifyBaseModel):
+    title: str = "AI-VIDEO 通知"
+    message: str
+    level: str = "info"
+    channels: list[str] = _NotifyField(default_factory=list)
+    dry_run: bool = False
+    metadata: dict = _NotifyField(default_factory=dict)
+
+
+class _NotifyOpenClawLeadRequest(_NotifyBaseModel):
+    lead: dict
+    channels: list[str] = _NotifyField(default_factory=list)
+    dry_run: bool = False
+
+
+class _NotifyVideoJobRequest(_NotifyBaseModel):
+    job: dict
+    channels: list[str] = _NotifyField(default_factory=list)
+    dry_run: bool = False
+
+
+@app.get("/api/notify/health")
+async def _api_notify_health():
+    return _notify_health()
+
+
+@app.post("/api/notify/send")
+async def _api_notify_send(req: _NotifySendRequest):
+    try:
+        return await _NotifyAsyncio.to_thread(
+            _notify_send_message,
+            title=req.title,
+            message=req.message,
+            level=req.level,
+            channels=req.channels or None,
+            dry_run=req.dry_run,
+            metadata=req.metadata,
+        )
+    except Exception as exc:
+        raise _NotifyHTTPException(status_code=502, detail=f"notify send failed: {exc}")
+
+
+@app.post("/api/notify/openclaw-lead")
+async def _api_notify_openclaw_lead(req: _NotifyOpenClawLeadRequest):
+    try:
+        return await _NotifyAsyncio.to_thread(
+            _notify_openclaw_lead,
+            lead=req.lead,
+            channels=req.channels or None,
+            dry_run=req.dry_run,
+        )
+    except Exception as exc:
+        raise _NotifyHTTPException(status_code=502, detail=f"notify lead failed: {exc}")
+
+
+@app.post("/api/notify/video-job")
+async def _api_notify_video_job(req: _NotifyVideoJobRequest):
+    try:
+        return await _NotifyAsyncio.to_thread(
+            _notify_video_job,
+            job=req.job,
+            channels=req.channels or None,
+            dry_run=req.dry_run,
+        )
+    except Exception as exc:
+        raise _NotifyHTTPException(status_code=502, detail=f"notify video job failed: {exc}")
+
+
+@app.get("/api/notify/self-test")
+async def _api_notify_self_test(dry_run: bool = True):
+    return _notify_self_test(dry_run=dry_run)
+# ===== /NOTIFICATION CENTER API HOTFIX =====
+
+
+# ===== DOUYIN ACCOUNT LIBRARY API HOTFIX =====
+import asyncio as _DouyinAccountAsyncio
+from fastapi import HTTPException as _DouyinAccountHTTPException
+from pydantic import BaseModel as _DouyinAccountBaseModel, Field as _DouyinAccountField
+from app.services.douyin_account_library_provider import (
+    health as _douyin_account_health,
+    self_test as _douyin_account_self_test,
+    upsert_account as _douyin_account_upsert,
+    bulk_upsert_accounts as _douyin_account_bulk_upsert,
+    list_accounts as _douyin_account_list,
+    traffic_learning as _douyin_account_traffic_learning,
+    competitor_benchmarks as _douyin_account_competitor_benchmarks,
+    seed_mission_targets as _douyin_account_seed_targets,
+)
+
+
+class _DouyinAccountUpsertRequest(_DouyinAccountBaseModel):
+    account: dict
+
+
+class _DouyinAccountBulkRequest(_DouyinAccountBaseModel):
+    accounts: list = _DouyinAccountField(default_factory=list)
+
+
+class _DouyinAccountTrafficLearnRequest(_DouyinAccountBaseModel):
+    dry_run: bool = True
+    min_score: int = 50
+    limit: int = 30
+
+
+class _DouyinAccountBenchmarkRequest(_DouyinAccountBaseModel):
+    min_score: int = 60
+    limit: int = 30
+
+
+@app.get("/api/collector/douyin/accounts/health")
+async def _api_douyin_accounts_health():
+    return _douyin_account_health()
+
+
+@app.post("/api/collector/douyin/accounts/upsert")
+async def _api_douyin_accounts_upsert(req: _DouyinAccountUpsertRequest):
+    try:
+        return await _DouyinAccountAsyncio.to_thread(_douyin_account_upsert, req.account)
+    except ValueError as exc:
+        raise _DouyinAccountHTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        raise _DouyinAccountHTTPException(status_code=502, detail=f"douyin account upsert failed: {exc}")
+
+
+@app.post("/api/collector/douyin/accounts/bulk-upsert")
+async def _api_douyin_accounts_bulk_upsert(req: _DouyinAccountBulkRequest):
+    try:
+        return await _DouyinAccountAsyncio.to_thread(_douyin_account_bulk_upsert, req.accounts)
+    except ValueError as exc:
+        raise _DouyinAccountHTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        raise _DouyinAccountHTTPException(status_code=502, detail=f"douyin account bulk upsert failed: {exc}")
+
+
+@app.get("/api/collector/douyin/accounts/list")
+async def _api_douyin_accounts_list(category: str | None = None, min_score: int = 0, limit: int = 100):
+    return _douyin_account_list(category=category, min_score=min_score, limit=limit)
+
+
+@app.post("/api/collector/douyin/accounts/learn-traffic")
+async def _api_douyin_accounts_learn_traffic(req: _DouyinAccountTrafficLearnRequest):
+    return await _DouyinAccountAsyncio.to_thread(
+        _douyin_account_traffic_learning,
+        dry_run=req.dry_run,
+        min_score=req.min_score,
+        limit=req.limit,
+    )
+
+
+@app.post("/api/collector/douyin/accounts/benchmark-competitors")
+async def _api_douyin_accounts_benchmark_competitors(req: _DouyinAccountBenchmarkRequest):
+    return await _DouyinAccountAsyncio.to_thread(
+        _douyin_account_competitor_benchmarks,
+        min_score=req.min_score,
+        limit=req.limit,
+    )
+
+
+@app.get("/api/collector/douyin/accounts/seed-targets")
+async def _api_douyin_accounts_seed_targets(market: str = "马来西亚"):
+    return _douyin_account_seed_targets(market=market)
+
+
+@app.get("/api/collector/douyin/accounts/self-test")
+async def _api_douyin_accounts_self_test():
+    return _douyin_account_self_test()
+# ===== /DOUYIN ACCOUNT LIBRARY API HOTFIX =====
+
+
+# ===== FRONTEND CORS HOTFIX =====
+try:
+    from fastapi.middleware.cors import CORSMiddleware as _FrontendCORSMiddleware
+
+    if not getattr(app.state, "ai_video_frontend_cors_hotfix", False):
+        app.add_middleware(
+            _FrontendCORSMiddleware,
+            allow_origins=[
+                "https://ai-video-s5v.pages.dev",
+                "http://localhost:5173",
+                "http://127.0.0.1:5173",
+            ],
+            allow_credentials=False,
+            allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+            allow_headers=["*"],
+            expose_headers=["*"],
+            max_age=86400,
+        )
+        app.state.ai_video_frontend_cors_hotfix = True
+except Exception as _cors_exc:
+    print("FRONTEND_CORS_HOTFIX_FAILED", _cors_exc)
+# ===== /FRONTEND CORS HOTFIX =====
+
+
+# ===== FULL AI VISUAL QUALITY HOTFIX =====
+AI_VIDEO_VERTICAL_QUALITY_RULE = """
+Vertical 9:16 short video, full-screen composition, no black bars.
+Realistic clean real-estate/lifestyle B-roll.
+No text, no subtitles, no captions, no Chinese characters, no English words,
+no logo, no watermark, no UI, no signs, no price tag, no floorplan text.
+Do not invent specific property, project name, price, school, transport or ROI.
+Only generic atmosphere: city street, condo exterior, hands checking documents,
+consultation scene, lifestyle, skyline, neutral office, property viewing mood.
+"""
+
+AI_VIDEO_NEGATIVE_PROMPT = (
+    "text, subtitles, captions, words, letters, chinese characters, english words, "
+    "logo, watermark, typography, signboard, price, numbers, UI, poster, banner, "
+    "deformed hands, distorted face, extra fingers, low quality, blurry"
+)
+
+def _ai_video_visual_prompt(prompt: str = "", topic: str = "", index: int = 1) -> str:
+    # 不把口播文案喂给视频模型，避免模型把文案画成乱码。
+    base = str(prompt or "")
+    topic = str(topic or "")
+
+    visual_seed = "real estate consultation, city lifestyle, property documents, modern condo atmosphere"
+    if "区域" in base or "city" in base.lower():
+        visual_seed = "modern Southeast Asian city skyline, street, condo exterior, lifestyle atmosphere"
+    elif "预算" in base or "价格" in base or "price" in base.lower():
+        visual_seed = "hands reviewing property documents and calculator, clean office, realistic"
+    elif "出租" in base or "投资" in base or "rent" in base.lower():
+        visual_seed = "apartment exterior, rental lifestyle scene, city commute, realistic"
+    elif "家庭" in base or "养老" in base:
+        visual_seed = "family lifestyle, clean residential neighborhood, warm realistic atmosphere"
+
+    return (
+        f"{AI_VIDEO_VERTICAL_QUALITY_RULE}\n"
+        f"Shot {index}: {visual_seed}.\n"
+        f"Topic mood: {topic[:80]}.\n"
+        f"Camera: vertical 9:16, medium shot, slow push-in, clean lighting, realistic, cinematic.\n"
+        f"Negative prompt: {AI_VIDEO_NEGATIVE_PROMPT}"
+    )
+# ===== /FULL AI VISUAL QUALITY HOTFIX =====
+
+
+# ===== FULL AI SCRIPT AI PROVIDER HOTFIX =====
+try:
+    from app.services.full_ai_script_ai_provider import router as full_ai_script_ai_router
+    app.include_router(full_ai_script_ai_router)
+except Exception as _full_ai_script_ai_exc:
+    print("FULL_AI_SCRIPT_AI_PROVIDER_LOAD_FAILED", _full_ai_script_ai_exc)
+# ===== /FULL AI SCRIPT AI PROVIDER HOTFIX =====
+
+
+# ===== MALAYSIA REAL ESTATE VISUAL PLANNER =====
+try:
+    from app.services.malaysia_visual_planner_provider import install_malaysia_visual_planner
+    install_malaysia_visual_planner(app)
+except Exception as _malaysia_visual_exc:
+    print("MALAYSIA_VISUAL_PLANNER_LOAD_FAILED", _malaysia_visual_exc)
+# ===== /MALAYSIA REAL ESTATE VISUAL PLANNER =====
+
+
+# ===== FULL AI FINAL GUARD PATCH =====
+try:
+    from app.services.full_ai_final_guard_provider import install_full_ai_final_guard
+    install_full_ai_final_guard(app)
+except Exception as _full_ai_final_guard_exc:
+    print("FULL_AI_FINAL_GUARD_LOAD_FAILED", _full_ai_final_guard_exc)
+# ===== /FULL AI FINAL GUARD PATCH =====
+
+
+
+# ===== FULL AI TTS FIRST PIPELINE =====
+try:
+    from app.services.full_ai_tts_first_provider import install_full_ai_tts_first
+    install_full_ai_tts_first(app)
+except Exception as _full_ai_tts_first_exc:
+    print("FULL_AI_TTS_FIRST_LOAD_FAILED", _full_ai_tts_first_exc)
+# ===== /FULL AI TTS FIRST PIPELINE =====
+
+
+
+# ===== FULL AI POSTPROCESS SUBTITLE TAIL GUARD =====
+try:
+    from app.services.full_ai_postprocess_guard_provider import install_full_ai_postprocess_guard
+    install_full_ai_postprocess_guard(app)
+except Exception as _full_ai_postprocess_guard_exc:
+    print("FULL_AI_POSTPROCESS_GUARD_LOAD_FAILED", _full_ai_postprocess_guard_exc)
+# ===== /FULL AI POSTPROCESS SUBTITLE TAIL GUARD =====
+
+
+
+# ===== CONTENT BRAIN BACKEND PROVIDER =====
+try:
+    from app.services.content_brain_provider import install_content_brain
+    install_content_brain(app)
+except Exception as _content_brain_exc:
+    print("CONTENT_BRAIN_PROVIDER_LOAD_FAILED", _content_brain_exc)
+# ===== /CONTENT BRAIN BACKEND PROVIDER =====
+
+
+
+# ===== WIZARD AI DEEPSEEK PROVIDER =====
+try:
+    from app.services.wizard_ai_provider import install_wizard_ai
+    install_wizard_ai(app)
+except Exception as _wizard_ai_exc:
+    print("WIZARD_AI_PROVIDER_LOAD_FAILED", _wizard_ai_exc)
+# ===== /WIZARD AI DEEPSEEK PROVIDER =====
+# ===== VIDEO WIZARD V10.5 RECOVERY SUBTITLE DIVERSITY =====
+try:
+    from app.services.subtitle_style_library_provider import install_subtitle_style_library
+    install_subtitle_style_library(app)
+    print("OK_SUBTITLE_STYLE_LIBRARY_REGISTERED", flush=True)
+except Exception as exc:
+    print(f"WARN_SUBTITLE_STYLE_LIBRARY_REGISTER_FAILED: {exc}", flush=True)
+
+try:
+    from app.services.wizard_video_recovery_provider import install_wizard_video_recovery
+    install_wizard_video_recovery(app)
+    print("OK_WIZARD_VIDEO_RECOVERY_REGISTERED", flush=True)
+except Exception as exc:
+    print(f"WARN_WIZARD_VIDEO_RECOVERY_REGISTER_FAILED: {exc}", flush=True)
+
+try:
+    from app.services.full_ai_tts_first_v2_provider import install_full_ai_tts_first_v2
+    install_full_ai_tts_first_v2(app)
+    print("OK_FULL_AI_TTS_FIRST_V2_REGISTERED", flush=True)
+except Exception as exc:
+    print(f"WARN_FULL_AI_TTS_FIRST_V2_REGISTER_FAILED: {exc}", flush=True)
+# ===== /VIDEO WIZARD V10.5 RECOVERY SUBTITLE DIVERSITY =====
+
+
+# ===== FAL_PROMPT_GUARD_V10_6 =====
+try:
+    from app.services.fal_prompt_guard_v10_6_provider import install_fal_prompt_guard_v10_6
+    install_fal_prompt_guard_v10_6(app)
+except Exception as exc:
+    print("FAL_PROMPT_GUARD_V10_6_LOAD_FAILED", exc)
+# ===== /FAL_PROMPT_GUARD_V10_6 =====
+
+# ===== FAL_PROMPT_GUARD_V10_7 =====
+try:
+    from app.services.fal_prompt_guard_v10_7_provider import install_fal_prompt_guard_v10_7
+    install_fal_prompt_guard_v10_7(app)
+except Exception as exc:
+    print("FAL_PROMPT_GUARD_V10_7_LOAD_FAILED", exc)
+# ===== /FAL_PROMPT_GUARD_V10_7 =====
+
+# ===== VIDEO_RECOVERY_SUBTITLE_DIVERSITY_V10_7_COMPAT =====
+try:
+    from app.services.subtitle_style_library_provider import install_subtitle_style_library
+    install_subtitle_style_library(app)
+except Exception as exc:
+    print("SUBTITLE_STYLE_LIBRARY_V10_7_LOAD_FAILED", exc)
+try:
+    from app.services.wizard_video_recovery_provider import install_wizard_video_recovery
+    install_wizard_video_recovery(app)
+except Exception as exc:
+    print("WIZARD_VIDEO_RECOVERY_V10_7_LOAD_FAILED", exc)
+try:
+    from app.services.full_ai_tts_first_v2_provider import install_full_ai_tts_first_v2
+    install_full_ai_tts_first_v2(app)
+except Exception as exc:
+    print("FULL_AI_TTS_FIRST_V2_V10_7_LOAD_FAILED", exc)
+# ===== /VIDEO_RECOVERY_SUBTITLE_DIVERSITY_V10_7_COMPAT =====
+
+# ===== FAL_PROMPT_GUARD_V10_12 =====
+try:
+    from app.services.fal_prompt_guard_v10_12_provider import install_fal_prompt_guard_v10_12
+    install_fal_prompt_guard_v10_12(app)
+except Exception as exc:
+    print("FAL_PROMPT_GUARD_V10_12_LOAD_FAILED", exc)
+# ===== /FAL_PROMPT_GUARD_V10_12 =====
+
+# ===== ONE_SCENE_VIDEO_PIPELINE_V10_12 =====
+try:
+    from app.services.full_ai_one_scene_provider import install_full_ai_one_scene
+    install_full_ai_one_scene(app)
+except Exception as exc:
+    print("FULL_AI_ONE_SCENE_LOAD_FAILED", exc)
+try:
+    from app.services.wizard_video_recovery_provider import install_wizard_video_recovery
+    install_wizard_video_recovery(app)
+except Exception as exc:
+    print("WIZARD_VIDEO_RECOVERY_V10_12_LOAD_FAILED", exc)
+# ===== /ONE_SCENE_VIDEO_PIPELINE_V10_12 =====
+
+# ===== FAL_PROMPT_GUARD_V10_13 =====
+try:
+    from app.services.fal_prompt_guard_v10_13_provider import install_fal_prompt_guard_v10_13
+    install_fal_prompt_guard_v10_13(app)
+except Exception as exc:
+    print("FAL_PROMPT_GUARD_V10_13_LOAD_FAILED", exc)
+# ===== /FAL_PROMPT_GUARD_V10_13 =====
+
+# ===== SUBTITLE_STYLE_LIBRARY_V10_13 =====
+try:
+    from app.services.subtitle_style_library_provider import install_subtitle_style_library
+    install_subtitle_style_library(app)
+except Exception as exc:
+    print("SUBTITLE_STYLE_LIBRARY_V10_13_LOAD_FAILED", exc)
+# ===== /SUBTITLE_STYLE_LIBRARY_V10_13 =====
+
+# ===== FAL_PROMPT_GUARD_V10_15 =====
+try:
+    from app.services.fal_prompt_guard_v10_15_provider import install_fal_prompt_guard_v10_15
+    install_fal_prompt_guard_v10_15(app)
+except Exception as exc:
+    print("FAL_PROMPT_GUARD_V10_15_LOAD_FAILED", exc)
+# ===== /FAL_PROMPT_GUARD_V10_15 =====
+
+# ===== FAL_PROMPT_GUARD_V10_16 =====
+try:
+    from app.services.fal_prompt_guard_v10_16_provider import install_fal_prompt_guard_v10_16
+    install_fal_prompt_guard_v10_16(app)
+except Exception as exc:
+    print("FAL_PROMPT_GUARD_V10_16_LOAD_FAILED", exc)
+# ===== /FAL_PROMPT_GUARD_V10_16 =====
+
+# ===== FAL_PROMPT_GUARD_V10_17 =====
+try:
+    from app.services.fal_prompt_guard_v10_17_provider import install_fal_prompt_guard_v10_17
+    install_fal_prompt_guard_v10_17(app)
+except Exception as exc:
+    print("FAL_PROMPT_GUARD_V10_17_LOAD_FAILED", exc)
+# ===== /FAL_PROMPT_GUARD_V10_17 =====
+
+# ===== FAL_PROMPT_GUARD_V10_18 =====
+try:
+    from app.services.fal_prompt_guard_v10_18_provider import install_fal_prompt_guard_v10_18
+    install_fal_prompt_guard_v10_18(app)
+except Exception as exc:
+    print("FAL_PROMPT_GUARD_V10_18_LOAD_FAILED", exc)
+# ===== /FAL_PROMPT_GUARD_V10_18 =====
+
+# AI_VIDEO_V10_19_ROUTE_LOCK_START
+try:
+    from app.services.full_ai_route_lock_provider import install_full_ai_route_lock
+    install_full_ai_route_lock(app)
+except Exception as _ai_video_route_lock_exc:
+    print("V10_19_ROUTE_LOCK_LOAD_FAILED", _ai_video_route_lock_exc)
+# AI_VIDEO_V10_19_ROUTE_LOCK_END
+
