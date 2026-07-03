@@ -106,6 +106,96 @@ def _first_value(obj: Any, keys: List[str]) -> Optional[Any]:
     return None
 
 
+
+def _deep_get_string(obj: Any, key_pred) -> Optional[str]:
+    """Find a string URL/path by key. Never return duration numbers as audio paths."""
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            lk = str(k).lower()
+            if key_pred(lk) and isinstance(v, str) and v.strip():
+                return v.strip()
+        for v in obj.values():
+            got = _deep_get_string(v, key_pred)
+            if got:
+                return got
+    elif isinstance(obj, list):
+        for v in obj:
+            got = _deep_get_string(v, key_pred)
+            if got:
+                return got
+    return None
+
+
+def _looks_like_audio_ref(value: str) -> bool:
+    v = str(value or "").strip()
+    if not v:
+        return False
+    low = v.lower().split("?")[0]
+    return v.startswith("http://") or v.startswith("https://") or v.startswith("/") or low.endswith((".mp3", ".wav", ".m4a", ".aac", ".ogg"))
+
+
+def _extract_audio_url(tts_res: Dict[str, Any]) -> str:
+    # Exact audio-url style keys first. Avoid matching audio_duration_seconds.
+    def exact_audio_key(k: str) -> bool:
+        return k in {
+            "audio_url", "audiofile_url", "audio_file_url", "audio", "url", "output_url",
+            "result_url", "file_url", "mp3_url", "wav_url", "audio_path", "path",
+            "local_path", "public_url", "r2_url",
+        }
+    got = _deep_get_string(tts_res, exact_audio_key)
+    if got and _looks_like_audio_ref(got):
+        return got
+
+    # Fallback: any key that clearly describes an audio/mp3/wav file URL/path, not duration.
+    def fuzzy_audio_key(k: str) -> bool:
+        if "duration" in k or "seconds" in k or "time" in k or "length" in k:
+            return False
+        return ("audio" in k or "mp3" in k or "wav" in k or "m4a" in k or "aac" in k) and ("url" in k or "path" in k or "file" in k)
+    got = _deep_get_string(tts_res, fuzzy_audio_key)
+    if got and _looks_like_audio_ref(got):
+        return got
+    return ""
+
+
+def _extract_duration(tts_res: Dict[str, Any], fallback: float) -> float:
+    names = ["audio_duration_seconds", "duration_seconds", "duration", "total_duration", "audio_duration", "length_seconds"]
+    def walk(obj: Any) -> Optional[float]:
+        if isinstance(obj, dict):
+            for k, v in obj.items():
+                if str(k).lower() in names:
+                    try:
+                        return float(v)
+                    except Exception:
+                        pass
+            for v in obj.values():
+                got = walk(v)
+                if got is not None:
+                    return got
+        elif isinstance(obj, list):
+            # Sum per-segment durations when no total exists.
+            vals = []
+            for item in obj:
+                if isinstance(item, dict):
+                    for key in ("duration_seconds", "duration"):
+                        try:
+                            if key in item:
+                                vals.append(float(item[key]))
+                        except Exception:
+                            pass
+            if vals:
+                return sum(vals)
+            for v in obj:
+                got = walk(v)
+                if got is not None:
+                    return got
+        return None
+    got = walk(tts_res)
+    try:
+        return max(float(got if got is not None else fallback), 1.0)
+    except Exception:
+        return max(float(fallback), 1.0)
+
+
 def _video_url(data: Dict[str, Any]) -> str:
     for k in ("video_url", "url", "output_url", "result_url"):
         v = data.get(k)
@@ -181,20 +271,20 @@ def _tts(script: str, voice: str) -> tuple[float, str, Dict[str, Any]]:
         try:
             res = _post_json("http://127.0.0.1:8000/api/tts-segments", p, timeout=240)
             last = res
-            dur = _first_value(res, ["duration"])
-            url = _first_value(res, ["audio_url", "audio", "mp3", "wav", "path"])
-            try:
-                dur_f = float(dur) if dur is not None else fallback
-            except Exception:
-                dur_f = fallback
-            return max(dur_f, 1.0), str(url or ""), res
+            dur_f = _extract_duration(res, fallback=fallback)
+            audio_url = _extract_audio_url(res)
+            # V10.14: fail early with useful diagnostics instead of treating audio_duration as a file path.
+            if not audio_url:
+                res_keys = list(res.keys()) if isinstance(res, dict) else []
+                raise RuntimeError(f"TTS finished but no downloadable audio_url/path was found; top_keys={res_keys}")
+            return max(dur_f, 1.0), audio_url, res
         except Exception as exc:
             last = {"ok": False, "error": str(exc)}
     return fallback, "", last
 
 
 def _prompt(city: str, topic: str, scene: str = "") -> str:
-    # V10.13: fixed single background. Do not let fal infer “real-estate brochure / storyboard”.
+    # V10.14: fixed single background. Do not let fal infer “real-estate brochure / storyboard”.
     base = str(scene or "").strip()
     if not base:
         base = (
@@ -340,9 +430,16 @@ def _loop_with_audio(video_url: str, audio_url: str, duration: float, prefix: st
         raise RuntimeError("ffmpeg 不可用，无法合成单画面视频")
     _ensure()
     bg = _download(video_url, ".mp4")
-    audio = _download(audio_url, ".mp3") if audio_url.startswith("http") else Path(audio_url)
+    audio_ref = str(audio_url or "").strip()
+    if audio_ref.startswith("http://") or audio_ref.startswith("https://"):
+        audio = _download(audio_ref, Path(urlparse(audio_ref).path).suffix or ".mp3")
+    else:
+        candidates = [Path(audio_ref)]
+        if audio_ref and not Path(audio_ref).is_absolute():
+            candidates.extend([BASE_DIR / audio_ref, BASE_DIR / "data" / audio_ref, Path("/tmp") / audio_ref])
+        audio = next((x for x in candidates if x.exists()), candidates[0] if candidates else Path(""))
     if not audio.exists():
-        raise RuntimeError(f"TTS 音频不存在或不可下载: {audio_url}")
+        raise RuntimeError(f"TTS 音频不存在或不可下载: {audio_url}; checked={ [str(x) for x in (candidates if 'candidates' in locals() else [audio])] }")
     out = WORK_DIR / f"{prefix}_{time.strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}.mp4"
     # Loop one generated visual behind the whole audio. This avoids multiple-shot/collage failure entirely.
     vf = "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,fps=30"
@@ -411,19 +508,26 @@ def _run(job_id: str, raw: Dict[str, Any]) -> None:
 
         final_url = raw_url
         subtitle_res: Dict[str, Any] = {}
+        subtitle_error = ""
         if bool(raw.get("burn_subtitles", True)):
             job.update({"stage": "subtitle_burn_exact_script", "progress": 88, "raw_video_url": raw_url, "updated_at": time.time()}); _persist(job_id)
             cues = _subtitle_cues(script, float(audio_dur), tts_res)
-            subtitle_res = burn_subtitles_with_style_and_upload(
-                video_path=str(composed_path),
-                text=script,
-                segments=cues,
-                duration=float(audio_dur),
-                style_id=str(raw.get("subtitle_style_id") or "douyin_pop"),
-                prefix=f"one_scene_{job_id}",
-                object_key=f"videos/one-scene/subtitled/{time.strftime('%Y/%m/%d')}/{uuid.uuid4().hex}_{job_id}.mp4",
-            )
-            final_url = str(subtitle_res.get("video_url") or raw_url)
+            try:
+                subtitle_res = burn_subtitles_with_style_and_upload(
+                    video_path=str(composed_path),
+                    text=script,
+                    segments=cues,
+                    duration=float(audio_dur),
+                    style_id=str(raw.get("subtitle_style_id") or "douyin_pop"),
+                    prefix=f"one_scene_{job_id}",
+                    object_key=f"videos/one-scene/subtitled/{time.strftime('%Y/%m/%d')}/{uuid.uuid4().hex}_{job_id}.mp4",
+                )
+                final_url = str(subtitle_res.get("video_url") or raw_url)
+            except Exception as sub_exc:
+                subtitle_error = str(sub_exc)
+                print(f"ONE_SCENE_SUBTITLE_BURN_FAILED job_id={job_id} error={subtitle_error}", flush=True)
+                subtitle_res = {"ok": False, "error": subtitle_error, "fallback_raw_video_url": raw_url}
+                final_url = raw_url
 
         thumb = _make_thumbnail(composed_path, prefix=job_id)
         job.update({
@@ -436,26 +540,32 @@ def _run(job_id: str, raw: Dict[str, Any]) -> None:
             "raw_video_url": raw_url,
             "thumbnail_url": thumb.get("thumbnail_url") or "",
             "subtitle_result": subtitle_res,
+            "subtitle_error": subtitle_error,
             "thumbnail_result": thumb,
             "single_scene": True,
             "shot_count": 1,
             "updated_at": time.time(),
         }); _persist(job_id)
     except Exception as exc:
-        job.update({"ok": False, "status": "failed", "stage": "failed", "progress": 100, "error": str(exc), "updated_at": time.time()}); _persist(job_id)
+        err = str(exc)
+        print(f"ONE_SCENE_FAILED job_id={job_id} stage={job.get('stage')} error={err}", flush=True)
+        job.update({"ok": False, "status": "failed", "stage": "failed", "progress": 100, "error": err, "message": err, "audio_url": job.get("audio_url") or "", "background_video_url": job.get("background_video_url") or "", "updated_at": time.time()}); _persist(job_id)
 
 
 @router.get("/health")
 def health() -> Dict[str, Any]:
     return {
         "ok": True,
-        "provider": "full_ai_one_scene_v10_13",
+        "provider": "full_ai_one_scene_v10_14",
         "single_scene": True,
         "shot_count": 1,
         "loop_visual_to_audio": True,
         "exact_script_subtitles": True,
         "douyin_subtitle_styles": True,
         "short_chunk_subtitle_timing": True,
+        "safe_audio_url_extraction": True,
+        "failure_error_exposed": True,
+        "raw_video_fallback": True,
         "no_multi_shots": True,
     }
 
@@ -467,7 +577,7 @@ def start(req: StartReq) -> Dict[str, Any]:
     _jobs[job_id] = {"ok": True, "job_id": job_id, "job_type": "one_scene", "status": "running", "stage": "queued", "progress": 1, "created_at": time.time(), "updated_at": time.time(), "request": raw}
     _persist(job_id)
     threading.Thread(target=_run, args=(job_id, raw), daemon=True).start()
-    return {"ok": True, "job_id": job_id, "status": "running", "stage": "queued", "single_scene": True, "message": "已启动 V10.13 单画面视频：一个背景画面 + 抖音大字字幕 + 按 TTS 实际时长切字幕。"}
+    return {"ok": True, "job_id": job_id, "status": "running", "stage": "queued", "single_scene": True, "message": "已启动 V10.14 单画面视频：一个背景画面 + 抖音大字字幕 + 按 TTS 实际时长切字幕。"}
 
 
 @router.get("/job/{job_id}")
