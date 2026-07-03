@@ -440,6 +440,8 @@ def _tts_duration(script: str, voice: str, raw: Dict[str, Any]) -> Tuple[float, 
 
 def _desired_shot_count(audio_duration: float, unit_count: int = 0) -> int:
     # 以真实配音长度为准：27 秒约 8-10 个镜头；15 秒约 5-6 个镜头。
+    # 注意：不能因为文案只有 3-4 句就把镜头数压到 3-4 个，
+    # 否则 27 秒会出现 10 秒以上长镜头，fal 很容易重复或静止。
     if audio_duration <= 7:
         count = 2
     elif audio_duration <= 12:
@@ -454,11 +456,7 @@ def _desired_shot_count(audio_duration: float, unit_count: int = 0) -> int:
         count = 11
     else:
         count = math.ceil(audio_duration / 4.0)
-    count = max(1, min(18, count))
-    if unit_count:
-        # 单位太少时不要强行重复；单位太多时可合并。
-        count = min(count, max(1, unit_count)) if unit_count <= 3 else count
-    return count
+    return max(1, min(18, count))
 
 
 def _split_long_unit(unit: str) -> List[str]:
@@ -539,6 +537,48 @@ def _merge_units_to_count(units: List[str], count: int) -> List[str]:
         groups = groups[:idx] + pieces[:2] + groups[idx + 1 :]
     return groups[:count]
 
+
+
+
+def _expand_units_to_count(units: List[str], count: int) -> List[str]:
+    """
+    文案句子少但语音很长时，把同一句拆成多个视觉角度。
+    重点：不是重复同一个镜头，而是同一语义下换不同画面主体。
+    例如“生活配套不方便”可以拆成超市、餐饮、药房、商场等不同 B-roll。
+    """
+    units = [u.strip() for u in units if u.strip()]
+    if not units:
+        return []
+    if len(units) >= count:
+        return _merge_units_to_count(units, count)
+
+    weights = [max(8, len(u)) for u in units]
+    total = sum(weights) or len(units)
+    repeats = [max(1, int(round(count * w / total))) for w in weights]
+
+    # 校准重复次数总和。
+    while sum(repeats) < count:
+        idx = max(range(len(units)), key=lambda i: (weights[i] / repeats[i], weights[i]))
+        repeats[idx] += 1
+    while sum(repeats) > count and any(r > 1 for r in repeats):
+        idx = max([i for i, r in enumerate(repeats) if r > 1], key=lambda i: repeats[i])
+        repeats[idx] -= 1
+
+    expanded: List[str] = []
+    for u, r in zip(units, repeats):
+        expanded.extend([u] * r)
+    return expanded[:count]
+
+
+def _enforce_max_shot_duration(segments: List[str], audio_duration: float) -> List[str]:
+    """
+    最终保护：任何正式生成前，保证镜头数量足够。
+    15 秒约 5-6 个，27 秒约 8-10 个；不允许最后一个镜头吃掉 10 秒以上。
+    """
+    desired = _desired_shot_count(audio_duration, unit_count=len(segments))
+    if len(segments) >= desired:
+        return segments
+    return _expand_units_to_count(segments, desired)
 
 def _allocate_durations(segments: List[str], audio_duration: float) -> List[float]:
     n = max(1, len(segments))
@@ -654,7 +694,11 @@ def _apply_manual_override(shot: Dict[str, Any], override: Dict[str, Any]) -> Di
 def _plan_shots(script: str, audio_duration: float, city: str, raw: Dict[str, Any]) -> List[Dict[str, Any]]:
     units = _script_units(script)
     desired = _desired_shot_count(audio_duration, unit_count=len(units))
-    segments = _merge_units_to_count(units, desired)
+    if len(units) > desired:
+        segments = _merge_units_to_count(units, desired)
+    else:
+        segments = _expand_units_to_count(units, desired)
+    segments = _enforce_max_shot_duration(segments, audio_duration)
     durations = _allocate_durations(segments, audio_duration)
 
     manual = raw.get("manual_shot_plan") if isinstance(raw.get("manual_shot_plan"), list) else []
