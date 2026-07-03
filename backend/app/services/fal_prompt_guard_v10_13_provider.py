@@ -7,43 +7,48 @@ from fastapi import APIRouter, FastAPI
 router = APIRouter(prefix="/api/video/fal-prompt-guard-v10-13", tags=["fal-prompt-guard-v10-13"])
 _INSTALLED = False
 
-NEGATIVE = (
-    "collage, split screen, multi panel, multi-panel, panels, grid, storyboard, contact sheet, brochure, poster, magazine layout, "
-    "montage board, picture in picture, frame within frame, black border, white border, static slideshow, single still image, "
-    "people, human, hands, fingers, pen, pencil, documents, papers, file folder, floorplan, floor plan, blueprint, office desk, office table, meeting room, chart, graph, calculator, UI, screenshot, readable text, fake text, logo, watermark, "
-    "Petronas Twin Towers, KLCC Twin Towers, landmark towers, repeated skyline, beach, ocean, island"
+BANNED_VISUAL_NEGATIVE = (
+    "office desk, desk, table paperwork, papers, document, documents, floorplan, floor plan, blueprint, brochure, booklet, contract, "
+    "calculator, pen, pencil, hand, hands, fingers, person, people, human, meeting, consultant, agent at desk, business meeting, "
+    "chart, graph, tablet UI, computer screen, laptop, phone screen, readable text, fake text, labels, logo, watermark, "
+    "collage, split screen, grid, multi panel, storyboard, poster, magazine layout, slideshow, picture in picture, black border, white border, "
+    "Petronas Twin Towers, KLCC, landmark towers, beach, ocean, island"
 )
 
-APPEND_GUARD = (
-    " Full-screen vertical 9:16 realistic phone video. One normal camera view per clip with natural camera motion. "
-    "No collage, no split screen, no grid, no poster, no brochure, no storyboard, no picture-in-picture. "
-    "No readable text, no fake labels, no logo, no watermark, no people, no hands, no papers, no floorplans, no office table, no documents, no charts, no calculator. "
-    "Do not show KLCC or Petronas Twin Towers."
+DEFAULT_INTERIOR_PROMPT = (
+    "vertical 9:16 cinematic smartphone video, clean modern furnished Kuala Lumpur high-rise condominium apartment interior, "
+    "empty residential home, architectural walkthrough, natural daylight, premium realistic condo interior, "
+    "full-screen single camera shot, smooth handheld gimbal motion, realistic apartment viewing footage"
 )
 
-DEFAULT_PROMPT = (
-    "vertical 9:16 realistic smartphone video of a bright furnished Kuala Lumpur condominium living room interior property tour, no people no hands no documents, slow natural camera movement, "
-    "premium but realistic, full-screen single camera view, no readable text, no people"
-)
+BANNED_IN_POSITIVE = [
+    "no people", "no hands", "no desk", "no office", "no paperwork", "no floorplan", "no blueprint", "no brochure", "no calculator",
+    "documents", "papers", "floorplan", "floor plan", "blueprint", "calculator", "office desk", "office table", "meeting room",
+    "hand", "hands", "pen", "pencil", "chart", "graph", "brochure", "business meeting", "consultant"
+]
+
+
+def _needs_replacement(prompt: str) -> bool:
+    low = str(prompt or "").lower()
+    return any(x in low for x in BANNED_IN_POSITIVE) or len(low.strip()) < 20
 
 
 def _rewrite_args(arguments: Any) -> Any:
     if not isinstance(arguments, dict):
         return arguments
     args: Dict[str, Any] = dict(arguments)
-    # Do not force a fixed living-room prompt anymore. Preserve the caller's scene prompt and only append safety constraints.
     args.pop("shots", None)
     args.pop("storyboard", None)
     args.pop("scenes", None)
     for k in ("prompt", "input_prompt", "text_prompt", "visual_prompt"):
         current = str(args.get(k) or "").strip()
-        if not current:
-            current = DEFAULT_PROMPT
-        if "no collage" not in current.lower():
-            current = current.rstrip(" .") + "." + APPEND_GUARD
+        # Critical: do NOT append negative words to the positive prompt.
+        # If an earlier patch injected "no paper/no hands/no calculator" into the prompt, replace it completely.
+        if _needs_replacement(current):
+            current = DEFAULT_INTERIOR_PROMPT
         args[k] = current
     old_neg = str(args.get("negative_prompt") or "")
-    args["negative_prompt"] = (old_neg + ", " + NEGATIVE).strip(", ") if old_neg else NEGATIVE
+    args["negative_prompt"] = (old_neg + ", " + BANNED_VISUAL_NEGATIVE).strip(", ") if old_neg else BANNED_VISUAL_NEGATIVE
     args["aspect_ratio"] = "9:16"
     args["width"] = 1080
     args["height"] = 1920
@@ -55,7 +60,7 @@ def _rewrite_args(arguments: Any) -> Any:
                 args[k] = 5.0
     args["prompt_optimizer"] = False
     try:
-        print("V10_13_FAL_FINAL_ARGUMENTS=" + json.dumps(args, ensure_ascii=False)[:3000], flush=True)
+        print("V10_17_FAL_FINAL_ARGUMENTS=" + json.dumps(args, ensure_ascii=False)[:3000], flush=True)
     except Exception:
         pass
     return args
@@ -103,11 +108,11 @@ def install_fal_prompt_guard_v10_13(app: FastAPI | None = None) -> None:
                 return base_subscribe(*args, **kwargs)
             fal_client.subscribe = guarded_subscribe
 
-        setattr(fal_client, "_ai_video_v10_13_prompt_guard", True)
+        setattr(fal_client, "_ai_video_v10_17_clean_prompt_guard", True)
         _INSTALLED = True
-        print("V10_13_FAL_PROMPT_GUARD_INSTALLED", flush=True)
+        print("V10_17_CLEAN_FAL_PROMPT_GUARD_INSTALLED for v10_13", flush=True)
     except Exception as exc:
-        print("V10_13_FAL_PROMPT_GUARD_INSTALL_FAILED", exc, flush=True)
+        print("V10_17_CLEAN_FAL_PROMPT_GUARD_INSTALL_FAILED for v10_13", exc, flush=True)
     if app is not None:
         try:
             app.include_router(router)
@@ -119,13 +124,11 @@ def install_fal_prompt_guard_v10_13(app: FastAPI | None = None) -> None:
 def health() -> dict[str, Any]:
     return {
         "ok": True,
-        "provider": "fal_prompt_guard_v10_13",
+        "provider": "fal_prompt_guard_v10-13_clean_v10_17",
         "installed": _INSTALLED,
-        "preserve_scene_prompt": True,
-        "dynamic_single_scene": True,
-        "no_fixed_static_prompt": True,
-        "no_collage_split_screen": True,
-        "no_readable_text": True,
-        "no_office_papers_floorplans": True,
-        "force_condo_tour_visuals": True,
+        "clean_positive_prompt": True,
+        "no_negative_words_inside_positive_prompt": True,
+        "interior_apartment_only": True,
+        "replace_contaminated_prompts": True,
+        "negative_prompt_only_for_forbidden_objects": True,
     }

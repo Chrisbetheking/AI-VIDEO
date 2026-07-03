@@ -45,7 +45,7 @@ class StartReq(BaseModel):
     subtitle_style_id: str = "douyin_pop"
     background_scene: str = ""
     visual_mode: str = "single_scene_dynamic"
-    dynamic_shot_count: int = 3
+    dynamic_shot_count: int = 4
 
 
 def _ensure() -> None:
@@ -331,32 +331,38 @@ def _extract_highlight_keywords(raw: Dict[str, Any], title: str, script: str) ->
     return sorted(out[:24], key=len, reverse=True)
 
 
-def _scene_prompts(city: str, topic: str, requested_count: int = 3) -> List[str]:
-    """V10.16: force real condo-tour visuals, not office paperwork.
+BANNED_VISUAL_NEGATIVE = (
+    "office desk, desk, table paperwork, papers, document, documents, floorplan, floor plan, blueprint, brochure, booklet, contract, "
+    "calculator, pen, pencil, hand, hands, fingers, person, people, human, meeting, consultant, agent at desk, business meeting, "
+    "chart, graph, tablet UI, computer screen, laptop, phone screen, readable text, fake text, labels, logo, watermark, "
+    "collage, split screen, grid, multi panel, storyboard, poster, magazine layout, slideshow, picture in picture, black border, white border, "
+    "Petronas Twin Towers, KLCC, landmark towers, beach, ocean, island"
+)
 
-    The previous prompts still let fal drift into desks, floorplans, calculators and hands.
-    This version describes an EMPTY furnished apartment tour, with hard negative language
-    repeated in both prompt and negative_prompt.
+def _scene_prompts(city: str, topic: str, requested_count: int = 4) -> List[str]:
+    """V10.17: positive prompt contains ONLY the desired apartment interior.
+
+    V10.16 still put banned words such as papers/floorplan/calculator inside the positive prompt using "no xxx" language.
+    Some video models still latch onto those objects. This version keeps banned objects only in negative_prompt.
     """
-    count = max(3, min(int(requested_count or 3), 4))
-    base_prefix = (
-        "vertical 9:16 photorealistic smartphone property tour video, real furnished Kuala Lumpur condominium interior, "
-        "empty apartment, no people, no hands, no desk, no office, no paperwork, no floorplan, no blueprint, no brochure, no calculator, "
-        "no documents, no charts, no readable text, no logo, no watermark, no KLCC, no Petronas Twin Towers, "
-        "full screen single camera view, natural smooth camera movement, premium but realistic lighting"
+    count = max(3, min(int(requested_count or 4), 4))
+    base = (
+        "vertical 9:16 cinematic smartphone video, clean modern furnished Kuala Lumpur high-rise condominium apartment interior, "
+        "empty residential home, architectural walkthrough, natural daylight, premium realistic condo interior, "
+        "full-screen single camera shot, smooth handheld gimbal motion, realistic rental viewing footage"
     )
     scenes = [
-        "walk through a bright modern living room with sofa, coffee table, TV wall, curtains, warm daylight, slow forward push in like a real viewing tour",
-        "pan from living room to balcony and floor-to-ceiling windows, show city-facing residential view without famous landmarks, slow left-to-right camera movement",
-        "move through open kitchen and dining area inside the same condo, clean countertop, dining table, cabinets, warm residential lighting, slow dolly movement",
-        "gentle camera move inside master bedroom of the same condo, bed, wardrobe, bedside lights, clean realistic home viewing atmosphere",
+        "bright living room with sofa, coffee table, TV feature wall, curtains and warm daylight, slow forward camera push from entrance into the room",
+        "living room turning toward balcony and floor-to-ceiling windows, residential city view through glass, slow left-to-right pan",
+        "open kitchen and dining area with clean countertop, cabinets and dining table, slow dolly move across the space",
+        "master bedroom with bed, wardrobe, bedside lights and clean hotel-like staging, slow gentle camera move from doorway inward",
     ]
     suffix = (
-        "This clip must look like real apartment viewing footage, not a business meeting. "
-        "Do not show any paper, hand, pen, construction plan, floor plan, office table, calculator, brochure, presentation board, poster, text overlay, split screen, grid, collage or slideshow. "
-        "No subtitles inside the generated video. No text anywhere in the image."
+        "Looks like actual apartment viewing footage captured on a phone. Interior architecture only. "
+        "Furniture, windows, balcony, kitchen, bedroom and residential details are visible. "
+        "No text overlay generated in the image."
     )
-    return [f"{base_prefix}. {scenes[i]}. {suffix}" for i in range(count)]
+    return [f"{base}. {scenes[i]}. {suffix}" for i in range(count)]
 
 def _to_cn_digits(text: str) -> str:
     table = str.maketrans({"0":"零","1":"一","2":"二","3":"三","4":"四","5":"五","6":"六","7":"七","8":"八","9":"九"})
@@ -573,7 +579,7 @@ def _run(job_id: str, raw: Dict[str, Any]) -> None:
         audio_dur, audio_url, tts_res = _tts(script, str(raw.get("voice") or "default"))
         job.update({"stage": "one_scene_fal", "progress": 25, "audio_duration_seconds": round(audio_dur, 2), "audio_url": audio_url, "tts_result": tts_res, "updated_at": time.time()}); _persist(job_id)
 
-        scene_count = max(2, min(int(raw.get("dynamic_shot_count") or raw.get("fal_fill_shots") or 3), 4))
+        scene_count = max(3, min(int(raw.get("dynamic_shot_count") or raw.get("fal_fill_shots") or 4), 4))
         prompts = _scene_prompts(str(raw.get("city") or ""), title, requested_count=scene_count)
         fal_results: List[Dict[str, Any]] = []
         bg_urls: List[str] = []
@@ -587,7 +593,7 @@ def _run(job_id: str, raw: Dict[str, Any]) -> None:
                 "width": 1080,
                 "height": 1920,
                 "fps": int(raw.get("fps") or 30),
-                "negative_prompt": "collage, split screen, multi panel, grid, brochure, poster, storyboard, picture in picture, documents, charts, calculator, readable text, fake text, KLCC, Petronas Twin Towers, static single image, slideshow",
+                "negative_prompt": BANNED_VISUAL_NEGATIVE,
             }, timeout=120)
             fid = start.get("job_id") or start.get("id") or (start.get("data") or {}).get("job_id")
             if not fid:
@@ -657,12 +663,15 @@ def _run(job_id: str, raw: Dict[str, Any]) -> None:
 def health() -> Dict[str, Any]:
     return {
         "ok": True,
-        "provider": "full_ai_one_scene_v10_16",
+        "provider": "full_ai_one_scene_v10_17",
         "single_scene": True,
-        "shot_count": 3,
+        "shot_count": 4,
         "dynamic_single_scene": True,
-        "dynamic_shot_count": 3,
+        "dynamic_shot_count": 4,
         "real_condo_tour_visuals": True,
+        "positive_prompt_without_banned_words": True,
+        "negative_prompt_only_for_forbidden_objects": True,
+        "interior_architecture_only": True,
         "no_office_papers_floorplans": True,
         "same_theme_multi_angle": True,
         "exact_script_subtitles": True,
@@ -687,7 +696,7 @@ def start(req: StartReq) -> Dict[str, Any]:
     _jobs[job_id] = {"ok": True, "job_id": job_id, "job_type": "one_scene", "status": "running", "stage": "queued", "progress": 1, "created_at": time.time(), "updated_at": time.time(), "request": raw}
     _persist(job_id)
     threading.Thread(target=_run, args=(job_id, raw), daemon=True).start()
-    return {"ok": True, "job_id": job_id, "status": "running", "stage": "queued", "single_scene": True, "message": "已启动 V10.16 动态看房视频：真实公寓室内多角度 + 大号抖音关键词字幕。"}
+    return {"ok": True, "job_id": job_id, "status": "running", "stage": "queued", "single_scene": True, "message": "已启动 V10.17 纯公寓内景动态看房视频：禁用桌面纸张计算器，使用干净室内镜头。"}
 
 
 @router.get("/job/{job_id}")

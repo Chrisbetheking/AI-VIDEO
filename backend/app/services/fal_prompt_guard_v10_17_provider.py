@@ -4,7 +4,7 @@ import json
 from typing import Any, Dict
 from fastapi import APIRouter, FastAPI
 
-router = APIRouter(prefix="/api/video/fal-prompt-guard-v10-15", tags=["fal-prompt-guard-v10-15"])
+router = APIRouter(prefix="/api/video/fal-prompt-guard-v10-17", tags=["fal-prompt-guard-v10-17"])
 _INSTALLED = False
 
 BANNED_VISUAL_NEGATIVE = (
@@ -66,7 +66,7 @@ def _rewrite_args(arguments: Any) -> Any:
     return args
 
 
-def install_fal_prompt_guard_v10_15(app: FastAPI | None = None) -> None:
+def install_fal_prompt_guard_v10_17(app: FastAPI | None = None) -> None:
     global _INSTALLED
     if _INSTALLED:
         return
@@ -110,9 +110,9 @@ def install_fal_prompt_guard_v10_15(app: FastAPI | None = None) -> None:
 
         setattr(fal_client, "_ai_video_v10_17_clean_prompt_guard", True)
         _INSTALLED = True
-        print("V10_17_CLEAN_FAL_PROMPT_GUARD_INSTALLED for v10_15", flush=True)
+        print("V10_17_CLEAN_FAL_PROMPT_GUARD_INSTALLED for v10_17", flush=True)
     except Exception as exc:
-        print("V10_17_CLEAN_FAL_PROMPT_GUARD_INSTALL_FAILED for v10_15", exc, flush=True)
+        print("V10_17_CLEAN_FAL_PROMPT_GUARD_INSTALL_FAILED for v10_17", exc, flush=True)
     if app is not None:
         try:
             app.include_router(router)
@@ -124,7 +124,7 @@ def install_fal_prompt_guard_v10_15(app: FastAPI | None = None) -> None:
 def health() -> dict[str, Any]:
     return {
         "ok": True,
-        "provider": "fal_prompt_guard_v10-15_clean_v10_17",
+        "provider": "fal_prompt_guard_v10-17_clean_v10_17",
         "installed": _INSTALLED,
         "clean_positive_prompt": True,
         "no_negative_words_inside_positive_prompt": True,
