@@ -7,6 +7,8 @@ import subprocess
 import threading
 import time
 import uuid
+import shlex
+import requests
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 from urllib import request as urlrequest
@@ -908,7 +910,7 @@ def _v10_22_split_chunks(script: str, max_chars: int = 9) -> List[str]:
     return chunks or [_v10_22_clean_subtitle_text(script)[:max_chars] or " "]
 
 
-def _v10_22_subtitle_cues(script: str, duration: float, tts_result: Any = None) -> List[Dict[str, Any]]:
+def _v10_25_subtitle_cues(script: str, duration: float, tts_result: Any = None) -> List[Dict[str, Any]]:
     # Prefer TTS provider segments when present; fallback to short Douyin chunks.
     segs = []
     if isinstance(tts_result, dict):
@@ -953,6 +955,11 @@ def _v10_22_render_semantic_direct(job_id: str, raw: Dict[str, Any], script: str
     work.mkdir(parents=True, exist_ok=True)
     fixed_clips: List[Path] = []
     _jobs[job_id].update({"stage": "semantic_direct_render", "progress": 66, "updated_at": time.time(), "direct_render_version": "v10_22"})
+
+    # V10_25_VISUAL_LOGIC_APPLIED
+
+    shots = _v10_25_apply_visual_logic(shots, raw, script_text)
+
 
     for idx, shot in enumerate(shots, start=1):
         duration = float(shot.get("duration_seconds") or 3.0)
@@ -1013,7 +1020,7 @@ def _v10_22_render_semantic_direct(job_id: str, raw: Dict[str, Any], script: str
     audio_url = _v10_22_extract_url(tts_result) or str(raw.get("audio_url") or raw.get("voice_url") or "")
     if not audio_url:
         raise RuntimeError("TTS-first direct render missing audio_url; refusing to return unsubtitled raw video")
-    cues = _v10_22_subtitle_cues(script, float(audio_duration), tts_result)
+    cues = _v10_25_subtitle_cues(script, float(audio_duration), tts_result)
     # Expose raw video before subtitle burn so paid fal clips are never lost if burn fails.
     _jobs[job_id].update({"stage": "subtitle_burn_local_v10_23", "progress": 94, "raw_video_url": raw_video_url, "local_raw_video_path": str(raw_video_path), "updated_at": time.time()})
     print("V10_22_SUBTITLE_BURN_START=" + json.dumps({"job_id": job_id, "cue_count": len(cues), "raw_video_url": raw_video_url[:150]}, ensure_ascii=False), flush=True)
@@ -1030,7 +1037,7 @@ def _v10_22_render_semantic_direct(job_id: str, raw: Dict[str, Any], script: str
         raise RuntimeError("local subtitle burn failed; refusing raw fallback: " + str(subtitle_res)[:1200])
     return {
         "ok": True,
-        "provider": "full_ai_tts_first_semantic_direct_render_v10_23",
+        "provider": "full_ai_tts_first_semantic_direct_render_v10_25",
         "video_url": final_url,
         "subtitled_video_url": final_url,
         "raw_video_url": raw_video_url,
@@ -1110,6 +1117,185 @@ def _v10_23_burn_local_subtitles_and_upload(raw_video_path: Path, audio_url: str
 
 # ================= end V10.22 semantic direct renderer =================
 
+
+# ================= AI VIDEO V10.25 COMPREHENSIVE QUALITY UPGRADE =================
+def _v10_25_clean_text(text: str) -> str:
+    text = str(text or '')
+    text = re.sub(r''' + "'" + r'''[，。！？；：、,.!?;:"“”‘’（）()【】\[\]《》<>…]+''' + "'" + r''', ' ', text)
+    return re.sub(r'\s+', ' ', text).strip()
+
+_V10_25_KEYWORDS = ['吉隆坡华人区','生活配套','配套不足','长期持有','自主购买力','护城河','房价','华人区','配套','餐厅','餐饮','吃饭','咖啡','美食','商场','购物','超市','便利店','地铁','MRT','LRT','主干道','交通','通勤','医疗','诊所','药房','医院','教育','学校','户型','采光','阳台','客厅','卧室','厨房','社区','大堂','园林','泳池','健身房','投资','出租','风险','后悔','评论区']
+
+def _v10_25_manual_keywords_from_raw(raw):
+    out = []
+    def add(v):
+        if isinstance(v, str):
+            for x in re.split(r'[,，、\n\s]+', v):
+                x=x.strip()
+                if x and x not in out: out.append(x)
+        elif isinstance(v, list):
+            for x in v: add(x)
+        elif isinstance(v, dict):
+            for k in ['keywords','manual_keywords','highlight_keywords','subtitle_keywords','final_keywords']:
+                add(v.get(k))
+    if isinstance(raw, dict):
+        for k in ['manual_keywords','highlight_keywords','subtitle_keywords','final_keywords']:
+            add(raw.get(k))
+        add(raw.get('keyword_highlight') or {})
+        for seg in raw.get('segment_voice_settings') or []: add(seg)
+    return out[:30]
+
+def _v10_25_auto_keywords(text, manual=None):
+    clean = _v10_25_clean_text(text)
+    found=[]
+    for w in list(manual or []) + _V10_25_KEYWORDS:
+        w=str(w or '').strip()
+        if w and w in clean and w not in found:
+            found.append(w)
+    return found[:3]
+
+def _v10_25_scene_type(text):
+    t=str(text or '').lower()
+    if any(k in t for k in ['地铁','mrt','lrt','交通','通勤','主干道','公交','出行','开车','堵车']): return 'transport'
+    if any(k in t for k in ['医疗','看病','医院','诊所','药房','小毛病']): return 'medical'
+    if any(k in t for k in ['教育','学校','孩子','家长','华人区','学区']): return 'education'
+    if any(k in t for k in ['户型','采光','客厅','卧室','厨房','阳台','装修','空间']): return 'interior'
+    if any(k in t for k in ['社区','大堂','园林','泳池','健身','安保','物业']): return 'community'
+    if any(k in t for k in ['生活配套','配套','餐饮','吃饭','餐厅','咖啡','美食','超市','商场','购物','便利店','买菜','商圈','护城河']): return 'lifestyle_support'
+    if any(k in t for k in ['投资','出租','租客','保值','长期持有','资产','房价','自主购买力']): return 'investment'
+    if any(k in t for k in ['风险','后悔','不方便','不足','远','麻烦','踩坑']): return 'risk'
+    return 'area_value'
+
+def _v10_25_sentiment(text):
+    t=str(text or '')
+    if any(k in t for k in ['不足','风险','后悔','不方便','太远','麻烦','踩坑','弱','差']): return 'warning'
+    if any(k in t for k in ['稳','成熟','完善','保值','强','方便','价值','护城河']): return 'positive'
+    return 'neutral'
+
+def _v10_25_split_subtitle_text(script_text):
+    raw = re.split(r'[。！？!?；;\n]+', str(script_text or ''))
+    chunks=[]
+    for p in raw:
+        p=_v10_25_clean_text(p)
+        if not p: continue
+        buf=''
+        for ch in p:
+            buf += ch
+            if len(buf) >= 14:
+                chunks.append(buf.strip()); buf=''
+        if buf.strip(): chunks.append(buf.strip())
+    return chunks or ([_v10_25_clean_text(script_text)] if script_text else [])
+
+def _v10_25_subtitle_cues(script_text, duration_seconds, raw=None):
+    chunks=_v10_25_split_subtitle_text(script_text)
+    if not chunks: return []
+    duration=max(float(duration_seconds or 0) or len(chunks)*2.0, len(chunks)*1.2)
+    manual=_v10_25_manual_keywords_from_raw(raw)
+    total=sum(max(len(c),1) for c in chunks); cur=0.0; cues=[]
+    for i,c in enumerate(chunks,1):
+        dur=max(1.15,min(3.2,duration*max(len(c),1)/max(total,1)))
+        end=duration if i==len(chunks) else min(duration,cur+dur)
+        clean=_v10_25_clean_text(c)
+        cues.append({'start':round(cur,2),'end':round(max(end,cur+0.85),2),'text':clean,'clean_text':clean,'keywords':_v10_25_auto_keywords(clean,manual),'subtitle_style':'DouyinCleanEmphasisV2'})
+        cur=end
+        if cur>=duration: break
+    return cues
+
+def _v10_25_ass_time(sec):
+    sec=max(0,float(sec or 0)); h=int(sec//3600); sec-=h*3600; m=int(sec//60); sec-=m*60; s=int(sec); cs=int(round((sec-s)*100)); return f'{h}:{m:02d}:{s:02d}.{cs:02d}'
+
+def _v10_25_ass_escape(s):
+    return str(s or '').replace('\\','\\\\').replace('{','').replace('}','').replace('\n',' ')
+
+def _v10_25_ass_line(text, keywords):
+    text=_v10_25_clean_text(text); line=_v10_25_ass_escape(text)
+    colors=['&H0026DFFF','&H0000BFFF','&H00FFD35A']
+    for i,kw in enumerate(keywords or []):
+        kw=_v10_25_clean_text(kw)
+        if kw and kw in text:
+            tag=r'{\b1\fs84\bord5\shad1\c'+colors[i%len(colors)]+'}'+_v10_25_ass_escape(kw)+r'{\rDefault}'
+            line=line.replace(_v10_25_ass_escape(kw),tag,1)
+    return line
+
+def _v10_25_build_ass(cues, ass_path: Path):
+    header='''[Script Info]\nScriptType: v4.00+\nPlayResX: 1080\nPlayResY: 1920\nScaledBorderAndShadow: yes\n\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\nStyle: Default,Arial,66,&H00FFFFFF,&H00FFFFFF,&H00000000,&H90000000,1,0,0,0,100,100,0,0,1,4,1,2,70,70,210,1\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n'''
+    lines=[header]
+    for c in cues or []:
+        lines.append(f"Dialogue: 0,{_v10_25_ass_time(c.get('start',0))},{_v10_25_ass_time(c.get('end',c.get('start',0)+1.5))},Default,,0,0,0,,{_v10_25_ass_line(c.get('clean_text') or c.get('text') or '', c.get('keywords') or [])}\n")
+    ass_path.write_text(''.join(lines),encoding='utf-8'); return ass_path
+
+def _v10_25_run(cmd, timeout=900):
+    print('V10_25_FFMPEG_CMD='+' '.join(shlex.quote(str(x)) for x in cmd))
+    p=subprocess.run(cmd,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,timeout=timeout)
+    if p.returncode!=0:
+        print('V10_25_FFMPEG_STDERR='+(p.stderr or '')[-4000:]); raise RuntimeError('V10.25 ffmpeg failed')
+    return p
+
+def _v10_25_burn_subtitles_local(video_path=None, audio_url=None, cues=None, job_id=None, work_dir=None, raw_video_url=None, raw=None, **kwargs):
+    work=Path(work_dir or kwargs.get('work') or kwargs.get('tmp_dir') or '/tmp'); work.mkdir(parents=True,exist_ok=True)
+    job_id=job_id or kwargs.get('id') or 'tts_first_v10_25'; video_path=Path(video_path or kwargs.get('raw_video_path') or kwargs.get('input_video_path'))
+    if not video_path.exists(): raise FileNotFoundError(f'V10.25 raw video missing: {video_path}')
+    manual=_v10_25_manual_keywords_from_raw(raw); fixed=[]
+    for c in (cues or kwargs.get('subtitle_cues') or []):
+        tx=_v10_25_clean_text(c.get('clean_text') or c.get('text') or '')
+        fixed.append({**c,'text':tx,'clean_text':tx,'keywords':c.get('keywords') or _v10_25_auto_keywords(tx,manual)})
+    ass=work/f'{job_id}_v10_25_douyin_emphasis.ass'; _v10_25_build_ass(fixed,ass)
+    final=work/f'{job_id}_v10_25_subtitled.mp4'
+    print('V10_25_SUBTITLE_BURN_LOCAL_START='+str({'job_id':job_id,'cue_count':len(fixed),'style':'DouyinCleanEmphasisV2'}))
+    audio_path=None
+    if audio_url:
+        try:
+            r=requests.get(audio_url,timeout=120); r.raise_for_status(); audio_path=work/f'{job_id}_audio_v10_25'; audio_path.write_bytes(r.content)
+        except Exception as exc:
+            print('V10_25_AUDIO_DOWNLOAD_FAILED='+str(exc)); audio_path=None
+    ass_arg=str(ass).replace('\\','/').replace(':','\\:')
+    if audio_path and audio_path.exists():
+        cmd=['ffmpeg','-y','-i',str(video_path),'-i',str(audio_path),'-vf',f'ass={ass_arg}','-c:v','libx264','-preset','veryfast','-crf','18','-c:a','aac','-b:a','192k','-shortest',str(final)]
+    else:
+        cmd=['ffmpeg','-y','-i',str(video_path),'-vf',f'ass={ass_arg}','-c:v','libx264','-preset','veryfast','-crf','18','-an',str(final)]
+    _v10_25_run(cmd)
+    upload=upload_file_to_r2(final, object_key=f"videos/tts-first-semantic/subtitled/{time.strftime('%Y/%m/%d')}/{uuid.uuid4().hex}_{job_id}_v10_25.mp4")
+    url=(upload.get('url') or upload.get('public_url') or upload.get('video_url')) if isinstance(upload,dict) else None
+    print('V10_25_SUBTITLE_BURN_LOCAL_DONE='+str({'job_id':job_id,'video_url':url,'style':'DouyinCleanEmphasisV2'}))
+    if isinstance(upload,dict):
+        upload.setdefault('video_url',url); upload.setdefault('final_video_url',url); upload.setdefault('subtitle_style','DouyinCleanEmphasisV2'); upload.setdefault('remove_punctuation',True); upload.setdefault('keyword_highlight',True); return upload
+    return {'ok':True,'video_url':url,'final_video_url':url,'subtitle_style':'DouyinCleanEmphasisV2'}
+
+def _v10_25_visual_policy_for_text(text, idx=1, prev_type=''):
+    clean=_v10_25_clean_text(text); scene=_v10_25_scene_type(clean); sentiment=_v10_25_sentiment(clean)
+    if scene=='lifestyle_support':
+        if sentiment=='warning': subject='quiet Malaysian residential area with sparse shops and inconvenient daily amenities, no readable text signs'
+        else: subject=['Malaysian shopping mall entrance near residential towers with residents walking naturally, no readable text signs','lively food street and casual restaurants near condominium area in Malaysia, people eating naturally, no readable text signs','supermarket and convenience store street-level daily amenities near Malaysian residences, no readable text signs'][idx%3]
+    elif scene=='transport': subject='Malaysia MRT or LRT station entrance with commuters and nearby main road traffic, no readable text signs'
+    elif scene=='medical': subject='community clinic and pharmacy street frontage in Malaysian residential neighborhood, no readable text signs'
+    elif scene=='education': subject='families and children walking safely near school area and condominium towers in Malaysia, no readable text signs'
+    elif scene=='interior': subject='bright modern Malaysian condominium interior with living room balcony daylight and practical layout, no text overlays'
+    elif scene=='community': subject='condominium lobby garden pool or gym community facilities with residents moving naturally, no logos no signs'
+    elif scene=='investment': subject='Malaysian urban residential towers with active street-level life and stable tenant demand atmosphere, no readable text signs'
+    elif scene=='risk': subject='buyer hesitating in a less convenient residential district with long commute road feeling, no readable text signs'
+    else: subject='wide street-level view of Malaysian urban residential district with tropical greenery and modern condominiums, no readable text signs'
+    trans=['cross_dissolve','slow_push_in','pull_out','horizontal_pan_match']; motion=['slow push in','gentle pull out','slow left to right pan','steady street-level dolly']
+    return {'scene_type':scene,'sentiment':sentiment,'visual_subject':subject,'camera_motion':motion[idx%4],'transition_to_next':trans[idx%4],'forbidden_visuals':['KLCC unless explicitly mentioned','ocean unless Penang Langkawi Sabah','readable text signs','logos','subtitles inside generated video'],'shot_duration_policy':'2.2_to_4.0_seconds_no_flash_cut'}
+
+def _v10_25_apply_visual_logic(shots, raw=None, script_text=''):
+    if not isinstance(shots,list): return shots
+    prev=''
+    for i,shot in enumerate(shots,1):
+        if not isinstance(shot,dict): continue
+        tx=shot.get('narration') or shot.get('text') or shot.get('script') or shot.get('subtitle') or script_text
+        p=_v10_25_visual_policy_for_text(tx,i,prev)
+        if prev and p['scene_type']==prev and p['scene_type']=='lifestyle_support': p['visual_subject']='street-level supermarket and convenience shop daily errand scene near Malaysian residence, no readable text signs'
+        prev=p['scene_type']; shot.update({k:v for k,v in p.items() if k not in shot or not shot.get(k)})
+        base=shot.get('visual_prompt') or shot.get('prompt') or shot.get('subject') or ''
+        shot['visual_prompt']=(str(base).strip()+', '+f"{p['visual_subject']}, {p['camera_motion']}, cinematic vertical 9:16, realistic Malaysia property lifestyle, no text, no logos, no subtitles, no readable signs").strip(', ')
+    return shots
+
+_v10_23_burn_subtitles_local = _v10_25_burn_subtitles_local
+# ================= END AI VIDEO V10.25 COMPREHENSIVE QUALITY UPGRADE =================
+
+# V10_25_FORCE_ALIAS_AFTER_LEGACY
+_v10_23_burn_subtitles_local = _v10_25_burn_subtitles_local
+
 def _run_job(job_id: str, raw: Dict[str, Any]) -> None:
     try:
         _jobs[job_id].update({"stage": "script", "progress": 10, "updated_at": time.time()})
@@ -1167,7 +1353,7 @@ def _run_job(job_id: str, raw: Dict[str, Any]) -> None:
                 "status": "completed",
                 "stage": "completed",
                 "progress": 100,
-                "provider": "full_ai_tts_first_semantic_direct_render_v10_23",
+                "provider": "full_ai_tts_first_semantic_direct_render_v10_25",
                 "direct_render": True,
                 "no_child_full_ai_start": True,
                 "video_url": render_result.get("video_url"),
@@ -1194,8 +1380,8 @@ def _run_job(job_id: str, raw: Dict[str, Any]) -> None:
 def health() -> Dict[str, Any]:
     return {
         "ok": True,
-        "provider": "full_ai_tts_first_semantic_direct_render_v10_23",
-        "logic": "script -> real TTS duration -> semantic storyboard -> direct per-shot fal render -> concat -> local ffmpeg subtitle burn",
+        "provider": "full_ai_tts_first_semantic_direct_render_v10_25",
+        "logic": "script -> real TTS duration -> semantic storyboard -> direct per-shot fal render -> concat -> local ffmpeg subtitle burn -> DouyinCleanEmphasisV2 keyword highlight -> semantic transitions",
         "guarantees": [
             "画面片段数按真实配音时长计算",
             "交通口播优先生成地铁/主干道/通勤画面",
@@ -1216,7 +1402,7 @@ def plan_preview(req: TTSFirstStartRequest) -> Dict[str, Any]:
     shots = _plan_shots(script, float(duration), city, req.model_dump())
     return {
         "ok": True,
-        "provider": "full_ai_tts_first_semantic_direct_render_v10_23",
+        "provider": "full_ai_tts_first_semantic_direct_render_v10_25",
         "city": city,
         "duration_seconds": round(float(duration), 2),
         "shot_count": len(shots),
