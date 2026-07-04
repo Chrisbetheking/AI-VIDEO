@@ -363,3 +363,5 @@
 })();
 /* ================= END AI VIDEO V10.27 STRICT NARRATION BEST QUALITY FRONTEND LOCK ================= */
 
+
+/* AI_VIDEO_V10_27B_START_MODEL_BINDING_FIX: start endpoint calls original start with TTSFirstStartRequest model after demand acceptance. */
