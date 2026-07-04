@@ -365,3 +365,5 @@
 
 
 /* AI_VIDEO_V10_27B_START_MODEL_BINDING_FIX: start endpoint calls original start with TTSFirstStartRequest model after demand acceptance. */
+
+/* AI_VIDEO_V10_27C_DIRECT_ORIGINAL_START_FIX: start bypasses stacked wrappers and calls the true original tts-first start with TTSFirstStartRequest after demand acceptance. */
