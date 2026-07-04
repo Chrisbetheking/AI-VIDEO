@@ -275,3 +275,59 @@
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',ensurePanel);else ensurePanel();
 })();
 /* ================= END AI VIDEO V10.25 KEYWORD + QUALITY HOTFIX ================= */
+
+
+/* ================= AI VIDEO V10.26 DEMAND ACCEPTANCE FRONTEND LOCK ================= */
+(function(){
+  if (window.__AI_VIDEO_V10_26_DEMAND_ACCEPTANCE_FRONTEND_LOCK__) return;
+  window.__AI_VIDEO_V10_26_DEMAND_ACCEPTANCE_FRONTEND_LOCK__ = true;
+  function cleanText(s){return String(s||'').replace(/[，。！？；：、,.!?;:"“”‘’（）()【】\[\]《》<>…]+/g,' ').replace(/\s+/g,' ').trim()}
+  function findScript(body){
+    if(!body||typeof body!=='object')return '';
+    var keys=['script','script_text','copy','text','content','full_script','voice_script','narration'];
+    var best='';
+    keys.forEach(function(k){var v=cleanText(body[k]); if(v.length>best.length)best=v});
+    ['script_segments','segments','subtitles','subtitle_cues','voice_segments','tts_segments'].forEach(function(k){
+      var arr=body[k]; if(Array.isArray(arr)){var joined=arr.map(function(x){return typeof x==='string'?x:(x&&(x.text||x.clean_text||x.script||x.copy||x.content||x.sentence||''))}).map(cleanText).filter(Boolean).join(' '); if(joined.length>best.length)best=joined;}
+    });
+    return best;
+  }
+  function findDuration(body){
+    var keys=['duration','duration_seconds','target_duration_seconds','audio_duration','tts_duration','voice_duration','real_audio_duration'];
+    for(var i=0;i<keys.length;i++){var n=Number(body&&body[keys[i]]); if(n>=1&&n<=600)return n;}
+    var s=findScript(body); return Math.max(12, Math.min(90, cleanText(s).length*0.32));
+  }
+  function normalize(body){
+    if(!body||typeof body!=='object')return body;
+    var script=findScript(body), dur=findDuration(body);
+    if(script){['script','script_text','copy','text','content','full_script','voice_script','narration'].forEach(function(k){body[k]=script});}
+    ['duration','duration_seconds','target_duration_seconds','audio_duration','tts_duration','voice_duration','real_audio_duration'].forEach(function(k){body[k]=dur});
+    body.demand_acceptance_lock='v10_26';
+    body.semantic_acceptance_required=true;
+    body.subtitle_style='DouyinCleanEmphasisV2';
+    body.remove_punctuation=true;
+    body.subtitle_rules=Object.assign({}, body.subtitle_rules||{}, {remove_punctuation:true, style:'DouyinCleanEmphasisV2', max_lines:2, max_keywords_per_sentence:3});
+    body.visual_policy=Object.assign({}, body.visual_policy||{}, {enabled:true, semantic_scene_mapping:true, sentiment_aware:true, no_repeat_scene_type:true, no_text_logos_signs:true, no_klcc_unless_explicit:true});
+    body.transition_policy=Object.assign({}, body.transition_policy||{}, {enabled:true, no_flash_cut:true, preferred:['cross_dissolve','slow_push_in','pull_out','horizontal_pan_match'], min_shot_seconds:2.2, max_shot_seconds:4.0});
+    return body;
+  }
+  var prevFetch=window.fetch;
+  window.fetch=function(input,init){
+    try{
+      var url=String(typeof input==='string'?input:(input&&input.url)||'');
+      var method=String((init&&init.method)||'GET').toUpperCase();
+      if(method==='POST' && /\/api\/video\/full-ai\/(one-scene|tts-first|start|script-ai)/.test(url) && init && typeof init.body==='string'){
+        var b=JSON.parse(init.body); b=normalize(b); init=Object.assign({},init,{body:JSON.stringify(b)}); console.log('AI_VIDEO_V10_26_DEMAND_ACCEPTANCE_PAYLOAD',{url:url,script:(b.script||'').slice(0,40),duration:b.duration,lock:b.demand_acceptance_lock});
+      }
+    }catch(e){}
+    return prevFetch.apply(this,arguments);
+  };
+  function markPanel(){
+    var p=document.getElementById('ai-v10-25-keyword-panel');
+    if(p){var ttl=p.querySelector('.ttl'); if(ttl && ttl.innerHTML.indexOf('V10.26')<0) ttl.innerHTML='字幕重点词 <span style="color:#facc15">V10.26</span>';
+      var sub=p.querySelector('.sub'); if(sub) sub.textContent='生成前会做需求验收 口播讲什么画面就必须对应什么 字幕自动去标点 关键词放大变色';}
+  }
+  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',markPanel);else markPanel();
+  setTimeout(markPanel,1200);
+})();
+/* ================= END AI VIDEO V10.26 DEMAND ACCEPTANCE FRONTEND LOCK ================= */
