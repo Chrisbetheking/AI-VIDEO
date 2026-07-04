@@ -1979,3 +1979,315 @@ try:
 except Exception as _v10_26_install_exc:
     print('V10_26_INSTALL_WRAP_FAILED', _v10_26_install_exc)
 # ================= END AI VIDEO V10.26 DEMAND ACCEPTANCE LOCK =================
+
+
+# ================= AI VIDEO V10.27 STRICT NARRATION BEST QUALITY LOCK =================
+try:
+    import re as _v10_27_re
+    import json as _v10_27_json
+    import inspect as _v10_27_inspect
+    from fastapi import Request as _V10_27_Request
+    from fastapi.responses import JSONResponse as _V10_27_JSONResponse
+    from starlette.requests import Request as _V10_27_StarletteRequest
+except Exception as _v10_27_import_exc:
+    print('V10_27_IMPORT_WARNING', _v10_27_import_exc)
+
+_V10_27_OLD_START_ENDPOINT = None
+_V10_27_VERSION = 'v10.27-strict-narration-best-quality'
+_V10_27_PROVIDER = 'full_ai_tts_first_semantic_direct_render_v10_27'
+_V10_27_TRANSITIONS = ['opening_slow_push_in','cross_dissolve','slow_push_in','horizontal_pan_match','pull_out','cross_dissolve','slow_push_in']
+_V10_27_SCRIPT_ALIASES = ['script','script_text','copy','text','content','full_script','voice_script','narration','spoken_text','口播文案','文案']
+_V10_27_DURATION_ALIASES = ['duration','duration_seconds','target_duration_seconds','audio_duration','tts_duration','selected_duration','video_duration']
+_V10_27_DEFAULT_BAD_SCRIPTS = ['马来西亚买房','别只看价格','最后总结这个房子的核心价值','项目周边真实区域环境']
+_V10_27_KEYWORDS = ['生活配套','配套','超市','商场','购物','便利店','餐饮','餐厅','吃饭','咖啡','美食','food court','地铁','MRT','LRT','主干道','交通','通勤','公交','诊所','药房','医院','医疗','看病','买药','学校','教育','户型采光','户型','采光','阳台','客厅','卧室','厨房','装修','空间','出租','租客','投资','自住','看房','人流','风险','后悔','不方便']
+
+def _v10_27_clean_text(text):
+    text = '' if text is None else str(text)
+    text = text.replace('\u3000',' ')
+    text = _v10_27_re.sub(r'[，,。.!！?？;；:：、"“”\'‘’（）()\[\]【】{}《》<>…·•|/\\]+', ' ', text)
+    text = _v10_27_re.sub(r'\s+', ' ', text).strip()
+    return text
+
+def _v10_27_pick_script(payload):
+    if not isinstance(payload, dict): return ''
+    for k in _V10_27_SCRIPT_ALIASES:
+        v = payload.get(k)
+        if isinstance(v, str) and _v10_27_clean_text(v): return _v10_27_clean_text(v)
+    for nk in ['extra','asset_context','keyword_insights','voice','draft','data']:
+        v = payload.get(nk)
+        if isinstance(v, dict):
+            t = _v10_27_pick_script(v)
+            if t: return t
+    segs = payload.get('script_segments') or payload.get('segments')
+    if isinstance(segs, list):
+        parts=[]
+        for seg in segs:
+            if isinstance(seg, str): parts.append(seg)
+            elif isinstance(seg, dict):
+                for k in _V10_27_SCRIPT_ALIASES + ['line','sentence']:
+                    if isinstance(seg.get(k), str): parts.append(seg[k]); break
+        joined=_v10_27_clean_text(' '.join(parts))
+        if joined: return joined
+    return ''
+
+def _v10_27_pick_duration(payload, fallback=20.0):
+    if not isinstance(payload, dict): return fallback
+    for k in _V10_27_DURATION_ALIASES:
+        v=payload.get(k)
+        try:
+            if v is not None and float(v)>0: return max(8.0, min(90.0, float(v)))
+        except Exception: pass
+    for nk in ['extra','asset_context','voice','data']:
+        v=payload.get(nk)
+        if isinstance(v, dict):
+            d=_v10_27_pick_duration(v, 0)
+            if d: return d
+    return fallback
+
+def _v10_27_manual_keywords(payload):
+    out=[]
+    if not isinstance(payload, dict): return out
+    for k in ['manual_keywords','highlight_keywords','keywords','keyword_highlight']:
+        v=payload.get(k)
+        if isinstance(v, list): out += [str(x) for x in v if str(x).strip()]
+        elif isinstance(v, dict) and isinstance(v.get('keywords'), list): out += [str(x) for x in v.get('keywords') if str(x).strip()]
+        elif isinstance(v, str): out += [x for x in _v10_27_re.split(r'[\s,，、]+', v) if x]
+    seen=set(); clean=[]
+    for x in out:
+        x=_v10_27_clean_text(x)
+        if x and x not in seen:
+            seen.add(x); clean.append(x)
+    return clean
+
+def _v10_27_target_shot_count(duration):
+    try: d=float(duration)
+    except Exception: d=20.0
+    if d <= 12: return 4
+    if d <= 16: return 5
+    if d <= 20: return 6
+    if d <= 24: return 8
+    if d <= 32: return 9
+    if d <= 40: return 11
+    return max(10, min(14, int(round(d/3.2))))
+
+def _v10_27_expand_piece(piece):
+    piece=_v10_27_clean_text(piece)
+    if not piece: return []
+    if '适合自住也适合出租' in piece or '自住也适合出租' in piece:
+        return ['适合自住','也适合出租']
+    return [piece]
+
+def _v10_27_split_script(script):
+    script=_v10_27_clean_text(script)
+    if not script: return []
+    if len(script.split(' ')) >= 3:
+        rough=[x for x in script.split(' ') if x.strip()]
+    else:
+        boundaries=['楼下有','通勤','附近有','看病','周边有','户型','适合自住','也适合出租','出租','投资']
+        positions=[]
+        for b in boundaries:
+            i=script.find(b)
+            if i>0: positions.append(i)
+        if positions:
+            positions=sorted(set(positions)); rough=[]; last=0
+            for i in positions:
+                rough.append(script[last:i]); last=i
+            rough.append(script[last:])
+        else:
+            rough=[script]
+    parts=[]
+    for r in rough: parts.extend(_v10_27_expand_piece(r))
+    final=[]
+    for p in [_v10_27_clean_text(x) for x in parts if _v10_27_clean_text(x)]:
+        if '看病买药也方便' in p and '周边有诊所' in p:
+            final += ['看病买药也方便', p.replace('看病买药也方便','').strip()]
+        elif '通勤也不麻烦' in p and '附近有地铁' in p:
+            final += ['通勤也不麻烦', p.replace('通勤也不麻烦','').strip()]
+        else:
+            final.append(p)
+    return [x for x in final if x]
+
+def _v10_27_scene_type(text):
+    t=text.lower()
+    if any(k.lower() in t for k in ['餐饮','餐厅','吃饭','咖啡','美食','food court']): return 'lifestyle_food'
+    if any(k.lower() in t for k in ['超市','商场','购物','便利店','生活配套','配套']): return 'shopping'
+    if any(k.lower() in t for k in ['地铁','mrt','lrt','主干道','交通','通勤','公交','车站']): return 'transport'
+    if any(k.lower() in t for k in ['诊所','药房','医院','医疗','看病','买药']): return 'medical'
+    if any(k.lower() in t for k in ['学校','教育','校区','家长']): return 'education'
+    if any(k.lower() in t for k in ['户型','采光','阳台','客厅','卧室','厨房','装修','空间']): return 'interior'
+    if any(k.lower() in t for k in ['出租','租客','投资','自住','看房','租金','人流']): return 'investment'
+    if any(k.lower() in t for k in ['风险','后悔','不方便','踩坑','远','堵']): return 'risk'
+    if any(k.lower() in t for k in ['社区','大堂','园林','泳池','健身房','会所','安保']): return 'community'
+    if any(k.lower() in t for k in ['区域','地段','周边','楼盘','项目']): return 'area_value'
+    return 'area_value'
+
+_V10_27_SCENE_META={
+ 'shopping': {'label':'购物/超市/商场/便利店','subject':'supermarket and convenience shopping near residential towers with residents carrying grocery bags','must':'supermarket, convenience store, grocery bags, nearby mall or shop lots, daily shopping scene','forbid':'only condo lobby, only bedroom, price tags, readable signs, fake logos','camera':'smooth lateral pan following residents with grocery bags'},
+ 'lifestyle_food': {'label':'餐饮/吃饭/生活配套','subject':'Malaysian restaurant cafe or food court near residential towers with people dining naturally','must':'restaurant, cafe, food court, local dining street, takeaway pickup or people eating naturally','forbid':'empty mall only, office meeting, readable signs, logo, unrelated bedroom','camera':'slow push in toward restaurant or gentle walking pan'},
+ 'transport': {'label':'交通/通勤/地铁/主干道','subject':'MRT or LRT access with main road traffic and commuters near condominium district','must':'MRT or LRT station access, main road traffic, bus stop, commuters, commute route','forbid':'airport, high speed rail, random highway only, readable station text, KLCC close-up','camera':'slow push in to station access or smooth road-side pan'},
+ 'medical': {'label':'医疗/诊所/药房/看病买药','subject':'community clinic and pharmacy street access near Malaysian residential area','must':'clinic, pharmacy, community medical access, person buying medicine, healthcare convenience','forbid':'hospital surgery, scary emergency scene, readable medicine labels, logos','camera':'gentle push in from street to clinic or pharmacy area'},
+ 'education': {'label':'教育/学校/家长接送','subject':'school area pickup scene near residential community with parents and students in natural distance','must':'school exterior context, parents pickup, campus-adjacent road, family living convenience','forbid':'readable school name, classroom close-up with minors faces, fake logos','camera':'calm street-level pan outside education facility'},
+ 'interior': {'label':'户型/采光/客厅/阳台','subject':'interior layout walkthrough from living room to balcony showing good daylight','must':'living room, balcony, window light, bedroom, kitchen, interior layout, daylight','forbid':'dark room, messy room, unrelated villa, floorplan text','camera':'slow interior push in or gentle pull out toward balcony light'},
+ 'investment': {'label':'投资/出租/租客/自住','subject':'tenant or buyer viewing a condo unit naturally with agent and residential demand context','must':'tenant viewing, agent showing unit, residential foot traffic, self-use and rental demand mood','forbid':'money flying, charts, exact ROI numbers, document close-up','camera':'steady viewing-style movement, medium shot, realistic handheld'},
+ 'risk': {'label':'风险/后悔/不方便/踩坑','subject':'buyer hesitating while facing inconvenient commute or weak surrounding amenities','must':'hesitation, inconvenient route, weak amenity contrast, realistic decision pressure','forbid':'horror mood, documents only, fake warning text','camera':'slower handheld movement showing inconvenience'},
+ 'community': {'label':'社区/大堂/园林/泳池/健身房','subject':'condo lobby garden pool and gym community facilities with natural resident movement','must':'lobby, security, garden, pool, gym, residents, community living atmosphere','forbid':'empty luxury hotel only, readable project logo, text sign','camera':'smooth amenity walk-through or slow push in'},
+ 'area_value': {'label':'区域/楼盘外景/地段','subject':'street-level Malaysian residential district with condo towers and shop lots','must':'Malaysian residential district, condo exterior, tropical greenery, real street-level context','forbid':'only indoor living room, only documents, calculator, repeated KLCC close-up, readable signs','camera':'slow push in from street level or gentle left-to-right establishing pan'},
+}
+
+def _v10_27_keywords_for(text, manual=None):
+    seen=set(); out=[]
+    for w in list(manual or [])+_V10_27_KEYWORDS:
+        w=_v10_27_clean_text(w)
+        if w and w not in seen and w in text:
+            seen.add(w); out.append(w)
+        if len(out)>=3: break
+    return out
+
+def _v10_27_required_categories(script):
+    cats=[]
+    for piece in _v10_27_split_script(script):
+        c=_v10_27_scene_type(piece)
+        if c not in cats: cats.append(c)
+    return cats
+
+def _v10_27_select_logic(cats):
+    cs=set(cats)
+    if 'risk' in cs: return 'C_问题导向_痛点到楼盘再到户型'
+    if 'investment' in cs: return 'E_投资出租_人流需求到户型总结'
+    if 'shopping' in cs or 'lifestyle_food' in cs or 'transport' in cs: return 'B_生活方式_配套交通社区室内'
+    if 'community' in cs or 'interior' in cs: return 'D_改善居住_社区会所到室内'
+    return 'A_区域到社区到室内'
+
+def _v10_27_build_preview(payload):
+    payload = payload if isinstance(payload, dict) else {}
+    script = _v10_27_pick_script(payload)
+    duration = _v10_27_pick_duration(payload, 20.0)
+    manual = _v10_27_manual_keywords(payload)
+    if not script:
+        return {'ok':False,'provider':_V10_27_PROVIDER,'version':_V10_27_VERSION,'error':'NO_REAL_SCRIPT','message':'没有拿到真实口播文案 不允许生成','generation_allowed':False,'acceptance':{'passed':False,'problems':['NO_REAL_SCRIPT']}}
+    clean_script = _v10_27_clean_text(script)
+    parts = _v10_27_split_script(clean_script)
+    target = _v10_27_target_shot_count(duration)
+    expanded=[]
+    for x in parts:
+        if '适合自住也适合出租' in x or '自住也适合出租' in x:
+            expanded += ['适合自住','也适合出租']
+        else:
+            expanded.append(x)
+    real_parts=[]
+    for x in expanded:
+        x=_v10_27_clean_text(x)
+        if x and x in clean_script and x not in real_parts:
+            real_parts.append(x)
+    parts=real_parts or [clean_script]
+    if len(parts)>target:
+        while len(parts)>target:
+            parts[-2]=_v10_27_clean_text(parts[-2]+' '+parts[-1]); parts.pop()
+    shot_count=len(parts)
+    per=duration/max(1,shot_count)
+    shots=[]; cues=[]; plan=[]; covered=[]
+    for i,seg in enumerate(parts, start=1):
+        scene=_v10_27_scene_type(seg); covered.append(scene)
+        meta=_V10_27_SCENE_META.get(scene,_V10_27_SCENE_META['area_value'])
+        start=round((i-1)*per,2); end=round(duration if i==shot_count else i*per,2)
+        transition=_V10_27_TRANSITIONS[(i-1)%len(_V10_27_TRANSITIONS)]
+        if transition in ['cut','smooth_cut','flash_cut','hard_cut']: transition='cross_dissolve'
+        kws=_v10_27_keywords_for(seg, manual)
+        prompt=f'Premium realistic vertical 9:16 Malaysia property short-video B-roll. Shot {i}. Narration meaning: {seg}. Semantic category: {meta["label"]}. Required visual subject: {meta["subject"]}. Must show: {meta["must"]}. Camera motion: {meta["camera"]}. Transition to next: {transition}. Real Malaysian urban residential environment, tropical daylight, natural residents, no fake model posing, no readable text signs, no logos, no subtitles, no watermark, no KLCC unless explicitly required, no ocean unless Penang Langkawi or Sabah.'
+        shot={'index':i,'shot_id':f'v10_27_{i:02d}_{scene}','start_seconds':start,'end_seconds':end,'duration_seconds':round(end-start,2),'narration_segment':seg,'clean_subtitle':seg,'highlight_keywords':kws,'keywords':kws,'semantic_type':scene,'semantic_label':meta['label'],'scene_type':scene,'visual_subject':meta['subject'],'must_show':meta['must'],'forbidden_visuals':meta['forbid'],'camera_motion':meta['camera'],'transition':transition,'transition_to_next':transition,'visual_prompt':prompt,'prompt':prompt,'negative_prompt':'readable text, subtitles, captions, chinese characters, english words, random letters, logo, watermark, fake UI, poster, banner, signboard with text, price tag, exact numbers, document close-up, calculator close-up, unrelated office meeting, cartoon, anime, low quality, blurry, black bars, distorted face, deformed hands','source_priority':'strict_real_script_first_then_semantic_rule_then_deepseek_polish_then_ai_broll','demand_acceptance_lock':'v10_27'}
+        shots.append(shot)
+        plan.append({'index':i,'time':f'{start}-{end}s','narration_segment':seg,'semantic_label':meta['label'],'must_show':meta['must'],'forbidden_visuals':meta['forbid'],'transition_to_next':transition,'camera_motion':meta['camera']})
+        cues.append({'start':start,'end':end,'text':seg,'clean_text':seg,'keywords':kws,'subtitle_style':'DouyinCleanEmphasisV2'})
+    required=_v10_27_required_categories(clean_script)
+    covered_unique=[]
+    for c in covered:
+        if c not in covered_unique: covered_unique.append(c)
+    problems=[]
+    for bad in _V10_27_DEFAULT_BAD_SCRIPTS:
+        if bad not in clean_script:
+            for c in cues:
+                if bad in c.get('text',''): problems.append('INVENTED_DEFAULT_TEXT:'+bad)
+    for c in cues:
+        txt=_v10_27_clean_text(c.get('text',''))
+        if txt and txt not in clean_script: problems.append('INVENTED_SUBTITLE:'+txt)
+    seen_txt=set()
+    for c in cues:
+        txt=c.get('text','')
+        if txt in seen_txt: problems.append('REPEATED_SUBTITLE:'+txt)
+        seen_txt.add(txt)
+    for rc in required:
+        if rc not in covered_unique: problems.append('MISSING_CATEGORY:'+rc)
+    for shot in shots:
+        if shot.get('transition') in ['cut','smooth_cut','flash_cut','hard_cut']: problems.append('BAD_TRANSITION:'+str(shot.get('transition')))
+    if duration>=25 and shot_count<7: problems.append('TOO_FEW_SHOTS_FOR_DURATION')
+    passed=not problems
+    return {'ok':True,'provider':_V10_27_PROVIDER,'version':_V10_27_VERSION,'city':payload.get('city') or payload.get('location') or 'kuala_lumpur','script_text':clean_script,'duration_seconds':round(float(duration),2),'shot_count':shot_count,'target_shot_count':target,'selected_logic_template':_v10_27_select_logic(required),'semantic_shot_plan':plan,'shots':shots,'subtitle_cues':cues,'subtitles':cues,'manual_keywords':manual,'generation_allowed':passed,'acceptance':{'passed':passed,'problems':problems,'required_categories':required,'covered_categories':covered_unique,'manual_keywords':manual,'rule':'V10.27 no invented narration/subtitles; every cue must be a real substring of script before fal generation'},'locks':['real_script_only','no_invented_subtitle','no_repeated_subtitle','semantic_scene_required','no_cut_transition','no_fal_before_acceptance']}
+
+async def _v10_27_health():
+    return {'ok':True,'provider':_V10_27_PROVIDER,'version':_V10_27_VERSION,'logic':'real script only -> strict clause split -> rule-first semantic storyboard -> no invented subtitles -> demand acceptance before fal -> DouyinCleanEmphasisV2','guarantees':['字幕和narration_segment只能来自真实口播','不自动添加开头总结句','不自动添加结尾总结句','不为补时长重复同一句字幕','吃饭购物交通医疗户型投资按语义强制匹配','plan-preview不过不允许正式生成','转场禁止闪切'],'locks':['real_script_only','no_invented_subtitle','no_repeated_subtitle','semantic_scene_required','no_cut_transition','no_fal_before_acceptance']}
+
+async def _v10_27_plan_preview(request: _V10_27_Request):
+    try: payload = await request.json()
+    except Exception: payload = {}
+    preview = _v10_27_build_preview(payload)
+    return _V10_27_JSONResponse(status_code=(200 if preview.get('ok') else 422), content=preview)
+
+async def _v10_27_call_old_start(request, payload):
+    global _V10_27_OLD_START_ENDPOINT
+    if _V10_27_OLD_START_ENDPOINT is None:
+        return _V10_27_JSONResponse(status_code=500, content={'ok':False,'provider':_V10_27_PROVIDER,'error':'OLD_START_ENDPOINT_MISSING'})
+    body = _v10_27_json.dumps(payload, ensure_ascii=False).encode('utf-8')
+    async def receive(): return {'type':'http.request','body':body,'more_body':False}
+    new_req = _V10_27_StarletteRequest(request.scope, receive)
+    ep = _V10_27_OLD_START_ENDPOINT
+    try:
+        sig = _v10_27_inspect.signature(ep); params=list(sig.parameters.values())
+        if params:
+            ann=params[0].annotation; name=params[0].name.lower()
+            if 'request' in name or ann in (_V10_27_Request, _V10_27_StarletteRequest): result=ep(new_req)
+            else: result=ep(TTSFirstStartRequest(**payload))
+        else: result=ep()
+        if _v10_27_inspect.isawaitable(result): result = await result
+        return result
+    except Exception as exc:
+        return _V10_27_JSONResponse(status_code=500, content={'ok':False,'provider':_V10_27_PROVIDER,'error':'OLD_START_CALL_FAILED','detail':str(exc),'normalized_payload_keys':sorted(list(payload.keys()))})
+
+async def _v10_27_start(request: _V10_27_Request):
+    try: payload = await request.json()
+    except Exception: payload = {}
+    preview = _v10_27_build_preview(payload)
+    if not preview.get('generation_allowed'):
+        return _V10_27_JSONResponse(status_code=422, content={'ok':False,'provider':_V10_27_PROVIDER,'error':'DEMAND_ACCEPTANCE_FAILED','message':'需求验收未通过 不允许扣 fal 生成','preview':preview})
+    payload=dict(payload)
+    payload['script']=preview.get('script_text'); payload['script_text']=preview.get('script_text')
+    payload['duration']=preview.get('duration_seconds'); payload['duration_seconds']=preview.get('duration_seconds')
+    payload['manual_shot_plan']=preview.get('shots'); payload['semantic_shot_plan']=preview.get('semantic_shot_plan'); payload['shot_overrides']=preview.get('shots')
+    payload['subtitle_cues']=preview.get('subtitle_cues'); payload['manual_keywords']=preview.get('manual_keywords')
+    payload['demand_acceptance']=preview.get('acceptance'); payload['demand_acceptance_lock']='v10_27'; payload['generation_allowed']=True
+    return await _v10_27_call_old_start(request, payload)
+
+def _v10_27_patch_routes(app):
+    global _V10_27_OLD_START_ENDPOINT
+    old_start=None
+    for r in list(getattr(app.router, 'routes', [])):
+        p=getattr(r,'path',''); methods=set(getattr(r,'methods',[]) or [])
+        if p == '/api/video/full-ai/tts-first/start' and 'POST' in methods: old_start=getattr(r,'endpoint',None)
+    if old_start is not None: _V10_27_OLD_START_ENDPOINT=old_start
+    remove={'/api/video/full-ai/tts-first/health','/api/video/full-ai/tts-first/plan-preview','/api/video/full-ai/tts-first/start'}
+    app.router.routes[:] = [r for r in app.router.routes if getattr(r,'path','') not in remove]
+    app.add_api_route('/api/video/full-ai/tts-first/health', _v10_27_health, methods=['GET'])
+    app.add_api_route('/api/video/full-ai/tts-first/plan-preview', _v10_27_plan_preview, methods=['POST'])
+    app.add_api_route('/api/video/full-ai/tts-first/start', _v10_27_start, methods=['POST'])
+    print('V10_27_STRICT_NARRATION_ROUTES_PATCHED', {'old_start': bool(_V10_27_OLD_START_ENDPOINT), 'routes': sorted(list(remove))})
+
+try:
+    if 'install_full_ai_tts_first' in globals() and not globals().get('_V10_27_INSTALL_WRAPPED'):
+        _V10_27_ORIGINAL_INSTALL = install_full_ai_tts_first
+        def install_full_ai_tts_first(app):
+            _V10_27_ORIGINAL_INSTALL(app)
+            _v10_27_patch_routes(app)
+        _V10_27_INSTALL_WRAPPED = True
+except Exception as _v10_27_wrap_exc:
+    print('V10_27_INSTALL_WRAP_FAILED', _v10_27_wrap_exc)
+# ================= END AI VIDEO V10.27 STRICT NARRATION BEST QUALITY LOCK =================
+

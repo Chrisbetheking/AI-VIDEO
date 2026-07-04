@@ -333,3 +333,33 @@
 /* ================= END AI VIDEO V10.26 DEMAND ACCEPTANCE FRONTEND LOCK ================= */
 
 /* AI_VIDEO_V10_26B_REQUEST_BINDING_FIX: backend request body binding fixed */
+
+
+/* ================= AI VIDEO V10.27 STRICT NARRATION BEST QUALITY FRONTEND LOCK ================= */
+(function(){
+  if(window.__AI_VIDEO_V10_27_STRICT_NARRATION_BEST_QUALITY__) return;
+  window.__AI_VIDEO_V10_27_STRICT_NARRATION_BEST_QUALITY__ = true;
+  var oldFetch = window.fetch;
+  window.fetch = function(input, init){
+    try{
+      var url=String(typeof input==='string'?input:(input&&input.url)||'');
+      var method=String((init&&init.method)||'GET').toUpperCase();
+      if(method==='POST' && /\/api\/video\/full-ai\/(one-scene|tts-first|start|script-ai)/.test(url) && init && typeof init.body==='string'){
+        var body=JSON.parse(init.body);
+        body.strict_narration_alignment=true;
+        body.no_invented_subtitles=true;
+        body.no_repeated_subtitles=true;
+        body.no_default_fallback_script=true;
+        body.require_plan_acceptance_before_generation=true;
+        body.demand_acceptance_lock='v10_27';
+        body.transition_policy=Object.assign({}, body.transition_policy||{}, {enabled:true,no_flash_cut:true,forbidden:['cut','smooth_cut','flash_cut','hard_cut'],preferred:['cross_dissolve','slow_push_in','pull_out','horizontal_pan_match'],min_shot_seconds:2.2,max_shot_seconds:4.0});
+        body.subtitle_rules=Object.assign({}, body.subtitle_rules||{}, {style:'DouyinCleanEmphasisV2',remove_punctuation:true,real_script_only:true,no_invented_text:true,max_keywords_per_sentence:3});
+        init=Object.assign({}, init, {body:JSON.stringify(body)});
+        console.log('AI_VIDEO_V10_27_STRICT_NARRATION_PAYLOAD',{url:url,lock:'v10_27'});
+      }
+    }catch(e){}
+    return oldFetch.apply(this, arguments);
+  };
+})();
+/* ================= END AI VIDEO V10.27 STRICT NARRATION BEST QUALITY FRONTEND LOCK ================= */
+
