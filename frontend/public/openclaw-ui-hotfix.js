@@ -331,3 +331,5 @@
   setTimeout(markPanel,1200);
 })();
 /* ================= END AI VIDEO V10.26 DEMAND ACCEPTANCE FRONTEND LOCK ================= */
+
+/* AI_VIDEO_V10_26B_REQUEST_BINDING_FIX: backend request body binding fixed */

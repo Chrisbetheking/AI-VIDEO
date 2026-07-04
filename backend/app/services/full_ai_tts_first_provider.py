@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 from urllib import request as urlrequest
 
-from fastapi import APIRouter, FastAPI
+from fastapi import APIRouter, FastAPI, Request
 from pydantic import BaseModel, Field
 
 router = APIRouter(prefix="/api/video/full-ai/tts-first", tags=["full-ai-tts-first"])
@@ -1731,7 +1731,7 @@ def _v10_26_build_preview_payload(raw):
     duration=_v10_26_extract_duration(raw, script)
     manual=_v10_26_manual_keywords(raw)
     if not script:
-        return {'ok':False,'provider':'full_ai_tts_first_semantic_direct_render_v10_26','error':'NO_REAL_SCRIPT','message':'没有拿到真实口播文案 不允许生成'}
+        return {'ok':False,'provider':'full_ai_tts_first_semantic_direct_render_v10_26b','error':'NO_REAL_SCRIPT','message':'没有拿到真实口播文案 不允许生成'}
     phrases=_v10_26_split_phrases(script)
     cats=_v10_26_required_categories(script, manual)
     # Build logical sequence: far -> near -> lifestyle/transport -> community/interior -> investment/summary
@@ -1810,7 +1810,7 @@ def _v10_26_build_preview_payload(raw):
     acceptance=_v10_26_validate_preview(script, duration, shots, subtitles, manual)
     return {
         'ok': bool(acceptance.get('passed')),
-        'provider':'full_ai_tts_first_semantic_direct_render_v10_26',
+        'provider':'full_ai_tts_first_semantic_direct_render_v10_26b',
         'version':'v10.26-demand-acceptance-lock',
         'city': 'kuala_lumpur',
         'script_text':script,
@@ -1868,13 +1868,13 @@ def _v10_26_normalize_payload(raw):
         data['subtitle_cues']=preview['subtitle_cues']
         data['script_segments']=preview['subtitle_cues']
         data['demand_acceptance']=preview['acceptance']
-    data['demand_acceptance_lock']='v10_26'
+    data['demand_acceptance_lock']='v10_26b'
     data['semantic_acceptance_required']=True
     data['subtitle_style']='DouyinCleanEmphasisV2'
     data['remove_punctuation']=True
     return data
 
-async def _v10_26_plan_preview(request):
+async def _v10_26_plan_preview(request: Request):
     from fastapi.responses import JSONResponse
     try:
         raw=await request.json()
@@ -1887,7 +1887,7 @@ async def _v10_26_plan_preview(request):
 def _v10_26_health():
     return {
         'ok':True,
-        'provider':'full_ai_tts_first_semantic_direct_render_v10_26',
+        'provider':'full_ai_tts_first_semantic_direct_render_v10_26b',
         'logic':'script aliases normalized -> rule-first semantic storyboard -> demand acceptance before fal -> DouyinCleanEmphasisV2 punctuation-free keyword subtitles',
         'guarantees':['真实口播必须进入分镜','生活/餐饮/购物/交通/医疗/教育/户型/投资按语义强制匹配','plan-preview不过不允许正式生成','字幕去标点','关键词放大变色','转场禁止闪切'],
         'locks':['no_default_fallback_script','no_three_same_scene_in_row','no_cut_transition','no_fal_before_acceptance']
@@ -1899,7 +1899,7 @@ async def _v10_26_call_old_start(request, payload):
     from fastapi.responses import JSONResponse
     endpoint=globals().get('_V10_26_OLD_START_ENDPOINT')
     if endpoint is None:
-        return JSONResponse(status_code=500, content={'ok':False,'provider':'v10_26','error':'OLD_START_ENDPOINT_MISSING'})
+        return JSONResponse(status_code=500, content={'ok':False,'provider':'v10_26b','error':'OLD_START_ENDPOINT_MISSING'})
     body=json.dumps(payload, ensure_ascii=False).encode('utf-8')
     async def receive():
         return {'type':'http.request','body':body,'more_body':False}
@@ -1925,9 +1925,9 @@ async def _v10_26_call_old_start(request, payload):
         if inspect.isawaitable(res): res=await res
         return res
     except Exception as exc:
-        return JSONResponse(status_code=500, content={'ok':False,'provider':'v10_26','error':'OLD_START_CALL_FAILED','detail':str(exc),'normalized_payload_keys':sorted(list(payload.keys()))})
+        return JSONResponse(status_code=500, content={'ok':False,'provider':'v10_26b','error':'OLD_START_CALL_FAILED','detail':str(exc),'normalized_payload_keys':sorted(list(payload.keys()))})
 
-async def _v10_26_start(request):
+async def _v10_26_start(request: Request):
     from fastapi.responses import JSONResponse
     try:
         raw=await request.json()
@@ -1936,7 +1936,7 @@ async def _v10_26_start(request):
     normalized=_v10_26_normalize_payload(raw)
     preview=_v10_26_build_preview_payload(normalized)
     if not preview.get('acceptance',{}).get('passed'):
-        return JSONResponse(status_code=422, content={'ok':False,'provider':'full_ai_tts_first_semantic_direct_render_v10_26','error':'DEMAND_ACCEPTANCE_FAILED','message':'需求验收未通过 不允许扣 fal 生成','preview':preview})
+        return JSONResponse(status_code=422, content={'ok':False,'provider':'full_ai_tts_first_semantic_direct_render_v10_26b','error':'DEMAND_ACCEPTANCE_FAILED','message':'需求验收未通过 不允许扣 fal 生成','preview':preview})
     normalized['manual_shot_plan']=preview['shots']
     normalized['shot_overrides']=preview['shots']
     normalized['semantic_shot_plan']=preview['semantic_shot_plan']
