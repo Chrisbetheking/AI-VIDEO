@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from app.config import Settings
+from app.services.video_quality_tools import build_input_video_filter, inspect_video_quality, polish_final_vertical_no_edge
 from app.services.effect_planner import (
     StickerCue,
     TimedSegment,
@@ -253,8 +254,30 @@ def estimate_segments_for_existing_audio(script: str, total_duration: float) -> 
     return segments
 
 
+
+
+def _media_like_to_path(item) -> Path:
+    """Accept Path or MediaClip-like objects and return a Path.
+
+    Older /api/compose-video passes MediaClip objects into compose_video.
+    build_video_base expects Path and calls .exists(), so normalize here.
+    """
+    if isinstance(item, Path):
+        return item
+
+    value = getattr(item, "path", None)
+    if value is None:
+        value = getattr(item, "file_path", None)
+    if value is None:
+        value = getattr(item, "local_path", None)
+    if value is None:
+        value = item
+
+    return value if isinstance(value, Path) else Path(str(value))
+
 def build_video_base(asset_paths: List[Path], duration: float, output_path: Path) -> Tuple[Path, List[str]]:
     warnings: List[str] = []
+    asset_paths = [_media_like_to_path(p) for p in asset_paths]
     duration = max(3.0, duration)
     if not asset_paths:
         cmd = [
@@ -289,10 +312,7 @@ def build_video_base(asset_paths: List[Path], duration: float, output_path: Path
     for i, _path in enumerate(valid_paths):
         label = f"v{i}"
         # 9:16 full-screen crop. No random generated objects.
-        filter_parts.append(
-            f"[{i}:v]scale=1080:1920:force_original_aspect_ratio=increase,"
-            f"crop=1080:1920,setsar=1,fps=30,format=yuv420p[{label}]"
-        )
+        filter_parts.append(build_input_video_filter(i, _path, label))
         video_labels.append(f"[{label}]")
     filter_parts.append("".join(video_labels) + f"concat=n={len(valid_paths)}:v=1:a=0[outv]")
 
@@ -423,6 +443,11 @@ async def compose_video(
     base_video, base_warnings = build_video_base(list(asset_paths), duration, base_video)
     warnings.extend(base_warnings)
     warnings.extend(burn_ass_and_audio(base_video, ass_path, audio_path, output_video, duration))
+    polish_final_vertical_no_edge(output_video)
+    quality = inspect_video_quality(output_video, max_black_ratio=0.002)
+    if not quality.get("ok"):
+        raise RuntimeError(f"视频质检失败：{quality.get('message')} | detail={quality}")
+    warnings.append(str(quality.get("message") or "9:16 质检通过"))
 
     try:
         base_video.unlink(missing_ok=True)
@@ -439,3 +464,114 @@ async def compose_video(
         duration_seconds=duration,
         warnings=warnings,
     )
+
+
+def ai_video_vertical_cover_filter(width: int = 1080, height: int = 1920, fps: int = 30) -> str:
+    """Return ffmpeg filter that fills vertical canvas without black bars."""
+    return (
+        f"scale={width}:{height}:force_original_aspect_ratio=increase,"
+        f"crop={width}:{height},setsar=1,fps={fps},format=yuv420p"
+    )
+
+
+# ================= AI VIDEO V10.27I RUNTIME PROMPT CLEANER =================
+def _v10_27i_clean_prompt_text(_v10_27i_text):
+    try:
+        import re as _v10_27i_re
+        t = str(_v10_27i_text or '')
+        patterns = [
+            r"\s*,\s*Malaysia MRT or LRT station entrance with commuters and nearby main road traffic,\s*no readable text signs,\s*(?:gentle pull out|slow left to right pan|steady street-level dolly|slow push in),\s*cinematic vertical 9:16,\s*realistic Malaysia property lifestyle,\s*no text,\s*no logos,\s*no subtitles,\s*no readable signs",
+            r"\s*,\s*Malaysia MRT or LRT station entrance with commuters and nearby main road traffic,\s*no readable text signs",
+            r"Malaysia MRT or LRT station entrance with commuters and nearby main road traffic,\s*no readable text signs,\s*(?:gentle pull out|slow left to right pan|steady street-level dolly|slow push in),\s*cinematic vertical 9:16,\s*realistic Malaysia property lifestyle,\s*no text,\s*no logos,\s*no subtitles,\s*no readable signs",
+            r"Malaysia MRT or LRT station entrance with commuters and nearby main road traffic",
+        ]
+        old=t
+        for pat in patterns:
+            t=_v10_27i_re.sub(pat, '', t, flags=_v10_27i_re.I)
+        t=_v10_27i_re.sub(r'\s+,', ',', t)
+        t=_v10_27i_re.sub(r'\s{2,}', ' ', t).strip(' ,')
+        if old != t:
+            print('V10_27I_PURGED_GLOBAL_TRAFFIC_PROMPT_TEXT')
+        return t
+    except Exception:
+        return _v10_27i_text
+
+def _v10_27i_clean_prompt_obj(_v10_27i_obj, _v10_27i_seen=None):
+    try:
+        if _v10_27i_seen is None:
+            _v10_27i_seen=set()
+        oid=id(_v10_27i_obj)
+        if oid in _v10_27i_seen:
+            return _v10_27i_obj
+        _v10_27i_seen.add(oid)
+        if isinstance(_v10_27i_obj, str):
+            return _v10_27i_clean_prompt_text(_v10_27i_obj)
+        if isinstance(_v10_27i_obj, dict):
+            for k in list(_v10_27i_obj.keys()):
+                v=_v10_27i_obj.get(k)
+                kl=str(k).lower()
+                if isinstance(v, str) and any(x in kl for x in ['prompt','visual','image_prompt','text_prompt','description']):
+                    _v10_27i_obj[k]=_v10_27i_clean_prompt_text(v)
+                else:
+                    _v10_27i_obj[k]=_v10_27i_clean_prompt_obj(v, _v10_27i_seen)
+            # keep metadata visible for job JSON / health checks
+            if any(k in _v10_27i_obj for k in ['visual_prompt','prompt','semantic_type','scene_type','shot_id']):
+                _v10_27i_obj['runtime_prompt_cleaner']='v10_27i'
+            return _v10_27i_obj
+        if isinstance(_v10_27i_obj, list):
+            for i,v in enumerate(list(_v10_27i_obj)):
+                _v10_27i_obj[i]=_v10_27i_clean_prompt_obj(v, _v10_27i_seen)
+            return _v10_27i_obj
+        if isinstance(_v10_27i_obj, tuple):
+            for v in _v10_27i_obj:
+                _v10_27i_clean_prompt_obj(v, _v10_27i_seen)
+            return _v10_27i_obj
+    except Exception as _v10_27i_exc:
+        try: print('V10_27I_CLEAN_PROMPT_OBJ_FAILED='+str(_v10_27i_exc))
+        except Exception: pass
+    return _v10_27i_obj
+
+def _v10_27i_wrap_callable(_v10_27i_name, _v10_27i_fn):
+    try:
+        import inspect as _v10_27i_inspect, functools as _v10_27i_functools
+        if getattr(_v10_27i_fn, '_v10_27i_wrapped', False):
+            return _v10_27i_fn
+        if _v10_27i_inspect.iscoroutinefunction(_v10_27i_fn):
+            @_v10_27i_functools.wraps(_v10_27i_fn)
+            async def _v10_27i_async_wrapped(*args, **kwargs):
+                _v10_27i_clean_prompt_obj(args); _v10_27i_clean_prompt_obj(kwargs)
+                res = await _v10_27i_fn(*args, **kwargs)
+                _v10_27i_clean_prompt_obj(args); _v10_27i_clean_prompt_obj(kwargs)
+                return _v10_27i_clean_prompt_obj(res)
+            _v10_27i_async_wrapped._v10_27i_wrapped=True
+            return _v10_27i_async_wrapped
+        @_v10_27i_functools.wraps(_v10_27i_fn)
+        def _v10_27i_sync_wrapped(*args, **kwargs):
+            _v10_27i_clean_prompt_obj(args); _v10_27i_clean_prompt_obj(kwargs)
+            res = _v10_27i_fn(*args, **kwargs)
+            _v10_27i_clean_prompt_obj(args); _v10_27i_clean_prompt_obj(kwargs)
+            return _v10_27i_clean_prompt_obj(res)
+        _v10_27i_sync_wrapped._v10_27i_wrapped=True
+        return _v10_27i_sync_wrapped
+    except Exception:
+        return _v10_27i_fn
+
+def _v10_27i_install_runtime_prompt_cleaner():
+    try:
+        _targets = ('prompt','guard','fal','render','video','shot','semantic','start','generate','compose')
+        _count=0
+        for _name,_fn in list(globals().items()):
+            if _name.startswith('_v10_27i_'):
+                continue
+            if not callable(_fn):
+                continue
+            lname=_name.lower()
+            if any(t in lname for t in _targets):
+                globals()[_name]=_v10_27i_wrap_callable(_name,_fn)
+                _count+=1
+        print('V10_27I_RUNTIME_PROMPT_CLEANER_INSTALLED='+str({'module':__name__,'wrapped':_count}))
+    except Exception as _v10_27i_exc:
+        print('V10_27I_RUNTIME_PROMPT_CLEANER_INSTALL_FAILED='+str(_v10_27i_exc))
+
+_v10_27i_install_runtime_prompt_cleaner()
+# ================= END AI VIDEO V10.27I RUNTIME PROMPT CLEANER =================
