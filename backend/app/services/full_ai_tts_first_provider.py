@@ -1,4 +1,4 @@
-# AI_VIDEO_V10_27J_BUILD_PROMPT_KWARGS_FIX
+# AI_VIDEO_V10_27K_BUILD_PROMPT_KWARGS_FIX
 from __future__ import annotations
 
 import json
@@ -633,14 +633,12 @@ def _city_context_for_type(city: str, semantic_type: str) -> str:
     return CITY_HINTS.get(city, CITY_HINTS["kuala_lumpur"])
 
 
-def _build_prompt(
-    *,
+def _build_prompt(*,
     city: str,
     index: int,
     narration_segment: str,
     semantic_type: str,
-    previous_visual_subject: str = "",
-) -> Dict[str, Any]:
+    previous_visual_subject: str = "", **_v10_27k_ignored_kwargs) -> Dict[str, Any]:
     recipe = SCENE_RECIPES.get(semantic_type) or SCENE_RECIPES["city_location"]
     visual_options = recipe["visuals"]
     visual_subject = visual_options[(index - 1) % len(visual_options)]
@@ -790,10 +788,10 @@ def _semantic_summary(shots: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
 # ================= AI VIDEO V10.27G SAFE RUNTIME PROMPT LOCK =================
 try:
-    import re as _v10_27j_re
+    import re as _v10_27k_re
 except Exception:
-    _v10_27j_re = None
-_V10_27J_PROVIDER = 'full_ai_tts_first_semantic_direct_render_v10_27j'
+    _v10_27k_re = None
+_V10_27K_PROVIDER = 'full_ai_tts_first_semantic_direct_render_v10_27k'
 
 try:
     _v10_25_manual_keywords_from_raw
@@ -809,8 +807,8 @@ except NameError:
                 elif isinstance(val, dict) and isinstance(val.get('keywords'), list):
                     out.extend([str(x).strip() for x in val.get('keywords') if str(x).strip()])
                 elif isinstance(val, str):
-                    if _v10_27j_re:
-                        out.extend([x.strip() for x in _v10_27j_re.split(r'[\s,，、]+', val) if x.strip()])
+                    if _v10_27k_re:
+                        out.extend([x.strip() for x in _v10_27k_re.split(r'[\s,，、]+', val) if x.strip()])
                     elif val.strip():
                         out.append(val.strip())
             for group_key in ['manual_shot_plan','shot_overrides','subtitle_cues','subtitles']:
@@ -829,7 +827,7 @@ except NameError:
                 seen.add(x); clean.append(x)
         return clean
 
-def _v10_27j_sort_shots(v):
+def _v10_27k_sort_shots(v):
     if isinstance(v, dict):
         arr=[]
         for k,item in v.items():
@@ -842,12 +840,12 @@ def _v10_27j_sort_shots(v):
         return sorted([dict(x) for x in v if isinstance(x, dict)], key=lambda x: int(x.get('index') or 9999))
     return []
 
-def _v10_27j_runtime_manual_shots(raw=None):
+def _v10_27k_runtime_manual_shots(raw=None):
     raw = raw or {}
     if not isinstance(raw, dict):
         return []
     for c in [raw.get('shot_overrides'), raw.get('manual_shot_plan'), raw.get('semantic_shot_plan')]:
-        shots = _v10_27j_sort_shots(c)
+        shots = _v10_27k_sort_shots(c)
         fixed=[]
         for i, sh in enumerate(shots, 1):
             if not isinstance(sh, dict):
@@ -868,16 +866,16 @@ def _v10_27j_runtime_manual_shots(raw=None):
             sh['prompt'] = sh.get('visual_prompt') or sh.get('prompt')
             sh['visual_prompt'] = sh.get('visual_prompt') or sh.get('prompt')
             sh['semantic_direct_render'] = True
-            sh['runtime_semantic_lock'] = 'v10_27j'
-            sh['demand_acceptance_lock'] = 'v10_27j'
+            sh['runtime_semantic_lock'] = 'v10_27k'
+            sh['demand_acceptance_lock'] = 'v10_27k'
             fixed.append(sh)
         if fixed:
             return fixed
     return []
 
-def _v10_27j_apply_runtime_plan_lock(raw=None, shots=None, audio_duration=None):
+def _v10_27k_apply_runtime_plan_lock(raw=None, shots=None, audio_duration=None):
     raw = raw or {}
-    locked = _v10_27j_runtime_manual_shots(raw)
+    locked = _v10_27k_runtime_manual_shots(raw)
     if locked:
         dur = raw.get('target_duration_seconds') or raw.get('duration_seconds') or raw.get('duration') or audio_duration
         try:
@@ -889,16 +887,16 @@ def _v10_27j_apply_runtime_plan_lock(raw=None, shots=None, audio_duration=None):
             for idx, sh in enumerate(locked,1):
                 nd = base if idx < n else max(2.0, dur - t)
                 sh['start_seconds'] = round(t,2); t += nd; sh['end_seconds'] = round(t,2); sh['duration_seconds'] = round(nd,2)
-        print('V10_27J_RUNTIME_MANUAL_SHOT_LOCK=' + __import__('json').dumps({'count': len(locked), 'target_duration': raw.get('target_duration_seconds') or raw.get('duration_seconds') or raw.get('duration')}, ensure_ascii=False), flush=True)
-        # V10_27J_PURGE_AFTER_MANUAL_SHOT_LOCK
+        print('V10_27K_RUNTIME_MANUAL_SHOT_LOCK=' + __import__('json').dumps({'count': len(locked), 'target_duration': raw.get('target_duration_seconds') or raw.get('duration_seconds') or raw.get('duration')}, ensure_ascii=False), flush=True)
+        # V10_27K_PURGE_AFTER_MANUAL_SHOT_LOCK
         try:
-            shots = _v10_27j_clean_runtime_shots(shots)
-        except Exception as _v10_27j_exc:
-            print('V10_27J_PURGE_AFTER_MANUAL_SHOT_LOCK_FAILED='+str(_v10_27j_exc))
+            shots = _v10_27k_clean_runtime_shots(shots)
+        except Exception as _v10_27k_exc:
+            print('V10_27K_PURGE_AFTER_MANUAL_SHOT_LOCK_FAILED='+str(_v10_27k_exc))
         return locked
     return shots or []
 
-def _v10_27j_force_semantic_fal_payload(payload=None, shot=None):
+def _v10_27k_force_semantic_fal_payload(payload=None, shot=None):
     payload = dict(payload or {}) if isinstance(payload, dict) else {}
     prompt = ''
     if isinstance(shot, dict):
@@ -908,8 +906,8 @@ def _v10_27j_force_semantic_fal_payload(payload=None, shot=None):
         for k in ['prompt','input_prompt','text_prompt','visual_prompt']:
             payload[k] = prompt
     payload['semantic_direct_render'] = True
-    payload['runtime_semantic_lock'] = 'v10_27j'
-    payload['demand_acceptance_lock'] = 'v10_27j'
+    payload['runtime_semantic_lock'] = 'v10_27k'
+    payload['demand_acceptance_lock'] = 'v10_27k'
     payload['prompt_optimizer'] = False
     return payload
 # ================= END AI VIDEO V10.27G SAFE RUNTIME PROMPT LOCK =================
@@ -1082,8 +1080,8 @@ def _v10_22_render_semantic_direct(job_id: str, raw: Dict[str, Any], script: str
     work = Path("/tmp") / f"tts_first_semantic_v10_22_{job_id}"
     work.mkdir(parents=True, exist_ok=True)
     fixed_clips: List[Path] = []
-    # V10_27J_APPLY_RUNTIME_PLAN_LOCK
-    shots = _v10_27j_apply_runtime_plan_lock(raw=raw, shots=shots, audio_duration=audio_duration)
+    # V10_27K_APPLY_RUNTIME_PLAN_LOCK
+    shots = _v10_27k_apply_runtime_plan_lock(raw=raw, shots=shots, audio_duration=audio_duration)
     raw['manual_shot_plan'] = shots
     raw['shot_overrides'] = {str(int(x.get('index') or i+1)): x for i, x in enumerate(shots)}
 
@@ -1122,8 +1120,8 @@ def _v10_22_render_semantic_direct(job_id: str, raw: Dict[str, Any], script: str
             "forbidden_visuals": shot.get("forbidden_visuals"),
         }
         print("V10_22_SEMANTIC_SHOT_START=" + json.dumps({"idx": idx, "duration": duration, "label": shot.get("semantic_label"), "subject": shot.get("visual_subject")}, ensure_ascii=False), flush=True)
-        # V10_27J_FORCE_SEMANTIC_FAL_PAYLOAD
-        payload = _v10_27j_force_semantic_fal_payload(payload, shot)
+        # V10_27K_FORCE_SEMANTIC_FAL_PAYLOAD
+        payload = _v10_27k_force_semantic_fal_payload(payload, shot)
         start = _post_json("http://127.0.0.1:8000/api/video/fal/shot/start", payload, timeout=80)
         fal_job_id = start.get("job_id") or start.get("id") or start.get("data", {}).get("job_id")
         if not fal_job_id:
@@ -2019,12 +2017,12 @@ async def _v10_27b_call_original_start_with_model(old_start, payload):
     """
     import inspect
     try:
-        # V10_27J_SHOT_OVERRIDES_DICT_BINDING_FIX
+        # V10_27K_SHOT_OVERRIDES_DICT_BINDING_FIX
         if isinstance(payload, dict) and isinstance(payload.get("shot_overrides"), list):
-            _v10_27j_shot_list = payload.get("shot_overrides") or []
+            _v10_27k_shot_list = payload.get("shot_overrides") or []
             payload["shot_overrides"] = {
                 str((_s or {}).get("index", _i + 1)): _s
-                for _i, _s in enumerate(_v10_27j_shot_list)
+                for _i, _s in enumerate(_v10_27k_shot_list)
                 if isinstance(_s, dict)
             }
         if isinstance(payload, dict) and isinstance(payload.get("manual_shot_plan"), list):
@@ -2032,38 +2030,38 @@ async def _v10_27b_call_original_start_with_model(old_start, payload):
                 _s for _s in (payload.get("manual_shot_plan") or [])
                 if isinstance(_s, dict)
             ]
-        # V10_27J_SCRIPT_TEXT_SCOPE_RUNTIME_FIX
+        # V10_27K_SCRIPT_TEXT_SCOPE_RUNTIME_FIX
         try:
-            _v10_27j_payload = payload if isinstance(payload, dict) else {}
-            _v10_27j_script_text = (_v10_27j_payload.get("script_text") or _v10_27j_payload.get("script") or _v10_27j_payload.get("text") or _v10_27j_payload.get("content") or _v10_27j_payload.get("narration") or "")
-            _v10_27j_script_text = str(_v10_27j_script_text).strip()
-            if _v10_27j_script_text:
-                _v10_27j_payload["script_text"] = _v10_27j_script_text
-                _v10_27j_payload["script"] = _v10_27j_script_text
-                _v10_27j_payload.setdefault("text", _v10_27j_script_text)
-                _v10_27j_payload.setdefault("content", _v10_27j_script_text)
-                _v10_27j_payload.setdefault("narration", _v10_27j_script_text)
-                _v10_27j_payload.setdefault("voice_script", _v10_27j_script_text)
-                globals()["script_text"] = _v10_27j_script_text
-                import builtins as _v10_27j_builtins
-                setattr(_v10_27j_builtins, "script_text", _v10_27j_script_text)
-                if not _v10_27j_payload.get("title") or str(_v10_27j_payload.get("title")).strip() in ["马来西亚买房，别只看价格", "马来西亚买房,别只看价格"]:
-                    _v10_27j_payload["title"] = _v10_27j_script_text[:24]
-            _v10_27j_dur = (_v10_27j_payload.get("duration_seconds") or _v10_27j_payload.get("duration") or _v10_27j_payload.get("target_duration_seconds"))
-            if _v10_27j_dur:
+            _v10_27k_payload = payload if isinstance(payload, dict) else {}
+            _v10_27k_script_text = (_v10_27k_payload.get("script_text") or _v10_27k_payload.get("script") or _v10_27k_payload.get("text") or _v10_27k_payload.get("content") or _v10_27k_payload.get("narration") or "")
+            _v10_27k_script_text = str(_v10_27k_script_text).strip()
+            if _v10_27k_script_text:
+                _v10_27k_payload["script_text"] = _v10_27k_script_text
+                _v10_27k_payload["script"] = _v10_27k_script_text
+                _v10_27k_payload.setdefault("text", _v10_27k_script_text)
+                _v10_27k_payload.setdefault("content", _v10_27k_script_text)
+                _v10_27k_payload.setdefault("narration", _v10_27k_script_text)
+                _v10_27k_payload.setdefault("voice_script", _v10_27k_script_text)
+                globals()["script_text"] = _v10_27k_script_text
+                import builtins as _v10_27k_builtins
+                setattr(_v10_27k_builtins, "script_text", _v10_27k_script_text)
+                if not _v10_27k_payload.get("title") or str(_v10_27k_payload.get("title")).strip() in ["马来西亚买房，别只看价格", "马来西亚买房,别只看价格"]:
+                    _v10_27k_payload["title"] = _v10_27k_script_text[:24]
+            _v10_27k_dur = (_v10_27k_payload.get("duration_seconds") or _v10_27k_payload.get("duration") or _v10_27k_payload.get("target_duration_seconds"))
+            if _v10_27k_dur:
                 try:
-                    _v10_27j_dur = float(_v10_27j_dur)
-                    _v10_27j_payload["duration_seconds"] = _v10_27j_dur
-                    _v10_27j_payload["duration"] = _v10_27j_dur
-                    _v10_27j_payload["target_duration_seconds"] = _v10_27j_dur
+                    _v10_27k_dur = float(_v10_27k_dur)
+                    _v10_27k_payload["duration_seconds"] = _v10_27k_dur
+                    _v10_27k_payload["duration"] = _v10_27k_dur
+                    _v10_27k_payload["target_duration_seconds"] = _v10_27k_dur
                 except Exception:
                     pass
-            payload = _v10_27j_payload
-        except Exception as _v10_27j_scope_exc:
-            print("V10_27J_SCRIPT_TEXT_SCOPE_FIX_WARNING", _v10_27j_scope_exc)
-        model = (_v10_27j_clean_payload(payload) and TTSFirstStartRequest(**payload))
+            payload = _v10_27k_payload
+        except Exception as _v10_27k_scope_exc:
+            print("V10_27K_SCRIPT_TEXT_SCOPE_FIX_WARNING", _v10_27k_scope_exc)
+        model = (_v10_27k_clean_payload(payload) and TTSFirstStartRequest(**payload))
     except Exception as exc:
-        return {'ok': False, 'provider': 'full_ai_tts_first_semantic_direct_render_v10_27j', 'error': 'START_MODEL_BIND_FAILED', 'detail': str(exc), 'payload_keys': sorted(list((payload or {}).keys()))}
+        return {'ok': False, 'provider': 'full_ai_tts_first_semantic_direct_render_v10_27k', 'error': 'START_MODEL_BIND_FAILED', 'detail': str(exc), 'payload_keys': sorted(list((payload or {}).keys()))}
     try:
         if inspect.iscoroutinefunction(old_start):
             return await old_start(model)
@@ -2075,9 +2073,9 @@ async def _v10_27b_call_original_start_with_model(old_start, payload):
                 return await old_start(**payload)
             return old_start(**payload)
         except Exception as exc2:
-            return {'ok': False, 'provider': 'full_ai_tts_first_semantic_direct_render_v10_27j', 'error': 'OLD_START_MODEL_CALL_FAILED', 'detail': str(exc2), 'first_detail': str(exc), 'payload_keys': sorted(list((payload or {}).keys()))}
+            return {'ok': False, 'provider': 'full_ai_tts_first_semantic_direct_render_v10_27k', 'error': 'OLD_START_MODEL_CALL_FAILED', 'detail': str(exc2), 'first_detail': str(exc), 'payload_keys': sorted(list((payload or {}).keys()))}
     except Exception as exc:
-        return {'ok': False, 'provider': 'full_ai_tts_first_semantic_direct_render_v10_27j', 'error': 'OLD_START_MODEL_CALL_FAILED', 'detail': str(exc), 'payload_keys': sorted(list((payload or {}).keys()))}
+        return {'ok': False, 'provider': 'full_ai_tts_first_semantic_direct_render_v10_27k', 'error': 'OLD_START_MODEL_CALL_FAILED', 'detail': str(exc), 'payload_keys': sorted(list((payload or {}).keys()))}
 # ================= END AI VIDEO V10.27B START MODEL BINDING FIX =================
 
 async def _v10_26_plan_preview(request: Request):
@@ -2105,7 +2103,7 @@ async def _v10_26_call_old_start(request, payload):
     from fastapi.responses import JSONResponse
     endpoint=globals().get('_V10_26_OLD_START_ENDPOINT')
     if endpoint is None:
-        return JSONResponse(status_code=500, content={'ok':False,'provider':'full_ai_tts_first_semantic_direct_render_v10_27j','error':'OLD_START_ENDPOINT_MISSING'})
+        return JSONResponse(status_code=500, content={'ok':False,'provider':'full_ai_tts_first_semantic_direct_render_v10_27k','error':'OLD_START_ENDPOINT_MISSING'})
     body=json.dumps(payload, ensure_ascii=False).encode('utf-8')
     async def receive():
         return {'type':'http.request','body':body,'more_body':False}
@@ -2131,7 +2129,7 @@ async def _v10_26_call_old_start(request, payload):
         if inspect.isawaitable(res): res=await res
         return res
     except Exception as exc:
-        return JSONResponse(status_code=500, content={'ok':False,'provider':'full_ai_tts_first_semantic_direct_render_v10_27j','error':'OLD_START_CALL_FAILED','detail':str(exc),'normalized_payload_keys':sorted(list(payload.keys()))})
+        return JSONResponse(status_code=500, content={'ok':False,'provider':'full_ai_tts_first_semantic_direct_render_v10_27k','error':'OLD_START_CALL_FAILED','detail':str(exc),'normalized_payload_keys':sorted(list(payload.keys()))})
 
 async def _v10_26_start(request: Request):
     from fastapi.responses import JSONResponse
@@ -2199,8 +2197,8 @@ except Exception as _v10_27_import_exc:
     print('V10_27_IMPORT_WARNING', _v10_27_import_exc)
 
 _V10_27_OLD_START_ENDPOINT = None
-_V10_27_VERSION = 'v10.27j-runtime-prompt-cleaner'
-_V10_27_PROVIDER = 'full_ai_tts_first_semantic_direct_render_v10_27j'
+_V10_27_VERSION = 'v10.27k-build-prompt-hard-kwargs-fix'
+_V10_27_PROVIDER = 'full_ai_tts_first_semantic_direct_render_v10_27k'
 _V10_27_TRANSITIONS = ['opening_slow_push_in','cross_dissolve','slow_push_in','horizontal_pan_match','pull_out','cross_dissolve','slow_push_in']
 _V10_27_SCRIPT_ALIASES = ['script','script_text','copy','text','content','full_script','voice_script','narration','spoken_text','口播文案','文案']
 _V10_27_DURATION_ALIASES = ['duration','duration_seconds','target_duration_seconds','audio_duration','tts_duration','selected_duration','video_duration']
@@ -2400,7 +2398,7 @@ def _v10_27_build_preview(payload):
         if transition in ['cut','smooth_cut','flash_cut','hard_cut']: transition='cross_dissolve'
         kws=_v10_27_keywords_for(seg, manual)
         prompt=f'Premium realistic vertical 9:16 Malaysia property short-video B-roll. Shot {i}. Narration meaning: {seg}. Semantic category: {meta["label"]}. Required visual subject: {meta["subject"]}. Must show: {meta["must"]}. Camera motion: {meta["camera"]}. Transition to next: {transition}. Real Malaysian urban residential environment, tropical daylight, natural residents, no fake model posing, no readable text signs, no logos, no subtitles, no watermark, no KLCC unless explicitly required, no ocean unless Penang Langkawi or Sabah.'
-        shot={'index':i,'shot_id':f'v10_27_{i:02d}_{scene}','start_seconds':start,'end_seconds':end,'duration_seconds':round(end-start,2),'narration_segment':seg,'clean_subtitle':seg,'highlight_keywords':kws,'keywords':kws,'semantic_type':scene,'semantic_label':meta['label'],'scene_type':scene,'visual_subject':meta['subject'],'must_show':meta['must'],'forbidden_visuals':meta['forbid'],'camera_motion':meta['camera'],'transition':transition,'transition_to_next':transition,'visual_prompt':prompt,'prompt':prompt,'negative_prompt':'readable text, subtitles, captions, chinese characters, english words, random letters, logo, watermark, fake UI, poster, banner, signboard with text, price tag, exact numbers, document close-up, calculator close-up, unrelated office meeting, cartoon, anime, low quality, blurry, black bars, distorted face, deformed hands','source_priority':'strict_real_script_first_then_semantic_rule_then_deepseek_polish_then_ai_broll','demand_acceptance_lock':'v10_27j'}
+        shot={'index':i,'shot_id':f'v10_27_{i:02d}_{scene}','start_seconds':start,'end_seconds':end,'duration_seconds':round(end-start,2),'narration_segment':seg,'clean_subtitle':seg,'highlight_keywords':kws,'keywords':kws,'semantic_type':scene,'semantic_label':meta['label'],'scene_type':scene,'visual_subject':meta['subject'],'must_show':meta['must'],'forbidden_visuals':meta['forbid'],'camera_motion':meta['camera'],'transition':transition,'transition_to_next':transition,'visual_prompt':prompt,'prompt':prompt,'negative_prompt':'readable text, subtitles, captions, chinese characters, english words, random letters, logo, watermark, fake UI, poster, banner, signboard with text, price tag, exact numbers, document close-up, calculator close-up, unrelated office meeting, cartoon, anime, low quality, blurry, black bars, distorted face, deformed hands','source_priority':'strict_real_script_first_then_semantic_rule_then_deepseek_polish_then_ai_broll','demand_acceptance_lock':'v10_27k'}
         shots.append(shot)
         plan.append({'index':i,'time':f'{start}-{end}s','narration_segment':seg,'semantic_label':meta['label'],'must_show':meta['must'],'forbidden_visuals':meta['forbid'],'transition_to_next':transition,'camera_motion':meta['camera']})
         cues.append({'start':start,'end':end,'text':seg,'clean_text':seg,'keywords':kws,'subtitle_style':'DouyinCleanEmphasisV2'})
@@ -2440,7 +2438,7 @@ async def _v10_27_plan_preview(request: _V10_27_Request):
 
 
 # ================= AI VIDEO V10.27C DIRECT ORIGINAL START FIX =================
-async def _v10_27j_call_true_original_start(request, payload):
+async def _v10_27k_call_true_original_start(request, payload):
     """Bypass stacked V10.26/V10.27 wrapper endpoints and call the real tts-first
     original start endpoint with TTSFirstStartRequest.
 
@@ -2451,21 +2449,21 @@ async def _v10_27j_call_true_original_start(request, payload):
     """
     import inspect
     try:
-        from fastapi.responses import JSONResponse as _V10_27J_JSONResponse
+        from fastapi.responses import JSONResponse as _V10_27K_JSONResponse
     except Exception:
-        _V10_27J_JSONResponse = None
+        _V10_27K_JSONResponse = None
 
-    provider = 'full_ai_tts_first_semantic_direct_render_v10_27j'
+    provider = 'full_ai_tts_first_semantic_direct_render_v10_27k'
     payload = payload if isinstance(payload, dict) else {}
 
     # Build the Pydantic request object expected by the original start endpoint.
     try:
-        # V10_27J_SHOT_OVERRIDES_DICT_BINDING_FIX
+        # V10_27K_SHOT_OVERRIDES_DICT_BINDING_FIX
         if isinstance(payload, dict) and isinstance(payload.get("shot_overrides"), list):
-            _v10_27j_shot_list = payload.get("shot_overrides") or []
+            _v10_27k_shot_list = payload.get("shot_overrides") or []
             payload["shot_overrides"] = {
                 str((_s or {}).get("index", _i + 1)): _s
-                for _i, _s in enumerate(_v10_27j_shot_list)
+                for _i, _s in enumerate(_v10_27k_shot_list)
                 if isinstance(_s, dict)
             }
         if isinstance(payload, dict) and isinstance(payload.get("manual_shot_plan"), list):
@@ -2473,40 +2471,40 @@ async def _v10_27j_call_true_original_start(request, payload):
                 _s for _s in (payload.get("manual_shot_plan") or [])
                 if isinstance(_s, dict)
             ]
-        # V10_27J_SCRIPT_TEXT_SCOPE_RUNTIME_FIX
+        # V10_27K_SCRIPT_TEXT_SCOPE_RUNTIME_FIX
         try:
-            _v10_27j_payload = payload if isinstance(payload, dict) else {}
-            _v10_27j_script_text = (_v10_27j_payload.get("script_text") or _v10_27j_payload.get("script") or _v10_27j_payload.get("text") or _v10_27j_payload.get("content") or _v10_27j_payload.get("narration") or "")
-            _v10_27j_script_text = str(_v10_27j_script_text).strip()
-            if _v10_27j_script_text:
-                _v10_27j_payload["script_text"] = _v10_27j_script_text
-                _v10_27j_payload["script"] = _v10_27j_script_text
-                _v10_27j_payload.setdefault("text", _v10_27j_script_text)
-                _v10_27j_payload.setdefault("content", _v10_27j_script_text)
-                _v10_27j_payload.setdefault("narration", _v10_27j_script_text)
-                _v10_27j_payload.setdefault("voice_script", _v10_27j_script_text)
-                globals()["script_text"] = _v10_27j_script_text
-                import builtins as _v10_27j_builtins
-                setattr(_v10_27j_builtins, "script_text", _v10_27j_script_text)
-                if not _v10_27j_payload.get("title") or str(_v10_27j_payload.get("title")).strip() in ["马来西亚买房，别只看价格", "马来西亚买房,别只看价格"]:
-                    _v10_27j_payload["title"] = _v10_27j_script_text[:24]
-            _v10_27j_dur = (_v10_27j_payload.get("duration_seconds") or _v10_27j_payload.get("duration") or _v10_27j_payload.get("target_duration_seconds"))
-            if _v10_27j_dur:
+            _v10_27k_payload = payload if isinstance(payload, dict) else {}
+            _v10_27k_script_text = (_v10_27k_payload.get("script_text") or _v10_27k_payload.get("script") or _v10_27k_payload.get("text") or _v10_27k_payload.get("content") or _v10_27k_payload.get("narration") or "")
+            _v10_27k_script_text = str(_v10_27k_script_text).strip()
+            if _v10_27k_script_text:
+                _v10_27k_payload["script_text"] = _v10_27k_script_text
+                _v10_27k_payload["script"] = _v10_27k_script_text
+                _v10_27k_payload.setdefault("text", _v10_27k_script_text)
+                _v10_27k_payload.setdefault("content", _v10_27k_script_text)
+                _v10_27k_payload.setdefault("narration", _v10_27k_script_text)
+                _v10_27k_payload.setdefault("voice_script", _v10_27k_script_text)
+                globals()["script_text"] = _v10_27k_script_text
+                import builtins as _v10_27k_builtins
+                setattr(_v10_27k_builtins, "script_text", _v10_27k_script_text)
+                if not _v10_27k_payload.get("title") or str(_v10_27k_payload.get("title")).strip() in ["马来西亚买房，别只看价格", "马来西亚买房,别只看价格"]:
+                    _v10_27k_payload["title"] = _v10_27k_script_text[:24]
+            _v10_27k_dur = (_v10_27k_payload.get("duration_seconds") or _v10_27k_payload.get("duration") or _v10_27k_payload.get("target_duration_seconds"))
+            if _v10_27k_dur:
                 try:
-                    _v10_27j_dur = float(_v10_27j_dur)
-                    _v10_27j_payload["duration_seconds"] = _v10_27j_dur
-                    _v10_27j_payload["duration"] = _v10_27j_dur
-                    _v10_27j_payload["target_duration_seconds"] = _v10_27j_dur
+                    _v10_27k_dur = float(_v10_27k_dur)
+                    _v10_27k_payload["duration_seconds"] = _v10_27k_dur
+                    _v10_27k_payload["duration"] = _v10_27k_dur
+                    _v10_27k_payload["target_duration_seconds"] = _v10_27k_dur
                 except Exception:
                     pass
-            payload = _v10_27j_payload
-        except Exception as _v10_27j_scope_exc:
-            print("V10_27J_SCRIPT_TEXT_SCOPE_FIX_WARNING", _v10_27j_scope_exc)
-        model = (_v10_27j_clean_payload(payload) and TTSFirstStartRequest(**payload))
+            payload = _v10_27k_payload
+        except Exception as _v10_27k_scope_exc:
+            print("V10_27K_SCRIPT_TEXT_SCOPE_FIX_WARNING", _v10_27k_scope_exc)
+        model = (_v10_27k_clean_payload(payload) and TTSFirstStartRequest(**payload))
     except Exception as exc:
         content = {'ok': False, 'provider': provider, 'error': 'START_MODEL_BIND_FAILED', 'detail': str(exc), 'payload_keys': sorted(list(payload.keys()))}
-        if _V10_27J_JSONResponse:
-            return _V10_27J_JSONResponse(status_code=422, content=content)
+        if _V10_27K_JSONResponse:
+            return _V10_27K_JSONResponse(status_code=422, content=content)
         return content
 
     # The V10.26 installer saved the true pre-wrapper endpoint here. Prefer it.
@@ -2562,8 +2560,8 @@ async def _v10_27j_call_true_original_start(request, payload):
         'payload_keys': sorted(list(payload.keys())),
         'hint': 'Expected _V10_26_OLD_START_ENDPOINT to point to the real original start endpoint.'
     }
-    if _V10_27J_JSONResponse:
-        return _V10_27J_JSONResponse(status_code=500, content=content)
+    if _V10_27K_JSONResponse:
+        return _V10_27K_JSONResponse(status_code=500, content=content)
     return content
 # ================= END AI VIDEO V10.27C DIRECT ORIGINAL START FIX =================
 
@@ -2580,12 +2578,12 @@ async def _v10_27_call_old_start(request, payload):
         if params:
             ann=params[0].annotation; name=params[0].name.lower()
             if 'request' in name or ann in (_V10_27_Request, _V10_27_StarletteRequest): result=ep(new_req)
-            # V10_27J_SHOT_OVERRIDES_DICT_BINDING_FIX
+            # V10_27K_SHOT_OVERRIDES_DICT_BINDING_FIX
             if isinstance(payload, dict) and isinstance(payload.get("shot_overrides"), list):
-                _v10_27j_shot_list = payload.get("shot_overrides") or []
+                _v10_27k_shot_list = payload.get("shot_overrides") or []
                 payload["shot_overrides"] = {
                     str((_s or {}).get("index", _i + 1)): _s
-                    for _i, _s in enumerate(_v10_27j_shot_list)
+                    for _i, _s in enumerate(_v10_27k_shot_list)
                     if isinstance(_s, dict)
                 }
             if isinstance(payload, dict) and isinstance(payload.get("manual_shot_plan"), list):
@@ -2593,36 +2591,36 @@ async def _v10_27_call_old_start(request, payload):
                     _s for _s in (payload.get("manual_shot_plan") or [])
                     if isinstance(_s, dict)
                 ]
-            # V10_27J_SCRIPT_TEXT_SCOPE_RUNTIME_FIX
+            # V10_27K_SCRIPT_TEXT_SCOPE_RUNTIME_FIX
             try:
-                _v10_27j_payload = payload if isinstance(payload, dict) else {}
-                _v10_27j_script_text = (_v10_27j_payload.get("script_text") or _v10_27j_payload.get("script") or _v10_27j_payload.get("text") or _v10_27j_payload.get("content") or _v10_27j_payload.get("narration") or "")
-                _v10_27j_script_text = str(_v10_27j_script_text).strip()
-                if _v10_27j_script_text:
-                    _v10_27j_payload["script_text"] = _v10_27j_script_text
-                    _v10_27j_payload["script"] = _v10_27j_script_text
-                    _v10_27j_payload.setdefault("text", _v10_27j_script_text)
-                    _v10_27j_payload.setdefault("content", _v10_27j_script_text)
-                    _v10_27j_payload.setdefault("narration", _v10_27j_script_text)
-                    _v10_27j_payload.setdefault("voice_script", _v10_27j_script_text)
-                    globals()["script_text"] = _v10_27j_script_text
-                    import builtins as _v10_27j_builtins
-                    setattr(_v10_27j_builtins, "script_text", _v10_27j_script_text)
-                    if not _v10_27j_payload.get("title") or str(_v10_27j_payload.get("title")).strip() in ["马来西亚买房，别只看价格", "马来西亚买房,别只看价格"]:
-                        _v10_27j_payload["title"] = _v10_27j_script_text[:24]
-                _v10_27j_dur = (_v10_27j_payload.get("duration_seconds") or _v10_27j_payload.get("duration") or _v10_27j_payload.get("target_duration_seconds"))
-                if _v10_27j_dur:
+                _v10_27k_payload = payload if isinstance(payload, dict) else {}
+                _v10_27k_script_text = (_v10_27k_payload.get("script_text") or _v10_27k_payload.get("script") or _v10_27k_payload.get("text") or _v10_27k_payload.get("content") or _v10_27k_payload.get("narration") or "")
+                _v10_27k_script_text = str(_v10_27k_script_text).strip()
+                if _v10_27k_script_text:
+                    _v10_27k_payload["script_text"] = _v10_27k_script_text
+                    _v10_27k_payload["script"] = _v10_27k_script_text
+                    _v10_27k_payload.setdefault("text", _v10_27k_script_text)
+                    _v10_27k_payload.setdefault("content", _v10_27k_script_text)
+                    _v10_27k_payload.setdefault("narration", _v10_27k_script_text)
+                    _v10_27k_payload.setdefault("voice_script", _v10_27k_script_text)
+                    globals()["script_text"] = _v10_27k_script_text
+                    import builtins as _v10_27k_builtins
+                    setattr(_v10_27k_builtins, "script_text", _v10_27k_script_text)
+                    if not _v10_27k_payload.get("title") or str(_v10_27k_payload.get("title")).strip() in ["马来西亚买房，别只看价格", "马来西亚买房,别只看价格"]:
+                        _v10_27k_payload["title"] = _v10_27k_script_text[:24]
+                _v10_27k_dur = (_v10_27k_payload.get("duration_seconds") or _v10_27k_payload.get("duration") or _v10_27k_payload.get("target_duration_seconds"))
+                if _v10_27k_dur:
                     try:
-                        _v10_27j_dur = float(_v10_27j_dur)
-                        _v10_27j_payload["duration_seconds"] = _v10_27j_dur
-                        _v10_27j_payload["duration"] = _v10_27j_dur
-                        _v10_27j_payload["target_duration_seconds"] = _v10_27j_dur
+                        _v10_27k_dur = float(_v10_27k_dur)
+                        _v10_27k_payload["duration_seconds"] = _v10_27k_dur
+                        _v10_27k_payload["duration"] = _v10_27k_dur
+                        _v10_27k_payload["target_duration_seconds"] = _v10_27k_dur
                     except Exception:
                         pass
-                payload = _v10_27j_payload
-            except Exception as _v10_27j_scope_exc:
-                print("V10_27J_SCRIPT_TEXT_SCOPE_FIX_WARNING", _v10_27j_scope_exc)
-            else: result=ep((_v10_27j_clean_payload(payload) and TTSFirstStartRequest(**payload)))
+                payload = _v10_27k_payload
+            except Exception as _v10_27k_scope_exc:
+                print("V10_27K_SCRIPT_TEXT_SCOPE_FIX_WARNING", _v10_27k_scope_exc)
+            else: result=ep((_v10_27k_clean_payload(payload) and TTSFirstStartRequest(**payload)))
         else: result=ep()
         if _v10_27_inspect.isawaitable(result): result = await result
         return result
@@ -2636,19 +2634,19 @@ async def _v10_27_start(request: _V10_27_Request):
     if not preview.get('generation_allowed'):
         return _V10_27_JSONResponse(status_code=422, content={'ok':False,'provider':_V10_27_PROVIDER,'error':'DEMAND_ACCEPTANCE_FAILED','message':'需求验收未通过 不允许扣 fal 生成','preview':preview})
     payload=dict(payload)
-    # V10_27J_START_PAYLOAD_GLOBAL_SCRIPT_TEXT
+    # V10_27K_START_PAYLOAD_GLOBAL_SCRIPT_TEXT
     try:
         globals()['script_text'] = str((preview or {}).get('script_text') or payload.get('script_text') or payload.get('script') or '')
-        import builtins as _v10_27j_builtins
-        setattr(_v10_27j_builtins, 'script_text', globals().get('script_text',''))
-    except Exception as _v10_27j_global_exc:
-        print('V10_27J_START_GLOBAL_SCRIPT_TEXT_WARNING', _v10_27j_global_exc)
+        import builtins as _v10_27k_builtins
+        setattr(_v10_27k_builtins, 'script_text', globals().get('script_text',''))
+    except Exception as _v10_27k_global_exc:
+        print('V10_27K_START_GLOBAL_SCRIPT_TEXT_WARNING', _v10_27k_global_exc)
     payload['script']=preview.get('script_text'); payload['script_text']=preview.get('script_text')
     payload['duration']=preview.get('duration_seconds'); payload['duration_seconds']=preview.get('duration_seconds'); payload['target_duration_seconds']=preview.get('duration_seconds')
     payload['manual_shot_plan']=preview.get('shots'); payload['semantic_shot_plan']=preview.get('semantic_shot_plan'); payload['shot_overrides']=preview.get('shots')
     payload['subtitle_cues']=preview.get('subtitle_cues'); payload['manual_keywords']=preview.get('manual_keywords')
-    payload['demand_acceptance']=preview.get('acceptance'); payload['demand_acceptance_lock']='v10_27j'; payload['generation_allowed']=True
-    return await _v10_27j_call_true_original_start(request, payload)
+    payload['demand_acceptance']=preview.get('acceptance'); payload['demand_acceptance_lock']='v10_27k'; payload['generation_allowed']=True
+    return await _v10_27k_call_true_original_start(request, payload)
 
 def _v10_27_patch_routes(app):
     global _V10_27_OLD_START_ENDPOINT
@@ -2674,31 +2672,31 @@ try:
 except Exception as _v10_27_wrap_exc:
     print('V10_27_INSTALL_WRAP_FAILED', _v10_27_wrap_exc)
 # ================= END AI VIDEO V10.27 STRICT NARRATION BEST QUALITY LOCK =================
-# V10_27J_MODULE_SCRIPT_TEXT_DEFAULT
+# V10_27K_MODULE_SCRIPT_TEXT_DEFAULT
 try:
     script_text
 except NameError:
     script_text = ''
 try:
-    import builtins as _v10_27j_default_builtins
-    if not hasattr(_v10_27j_default_builtins, 'script_text'):
-        setattr(_v10_27j_default_builtins, 'script_text', '')
+    import builtins as _v10_27k_default_builtins
+    if not hasattr(_v10_27k_default_builtins, 'script_text'):
+        setattr(_v10_27k_default_builtins, 'script_text', '')
 except Exception:
     pass
 
 
 
 # ================= AI VIDEO V10.27H STRICT FINAL FAL PROMPT PURGE =================
-def _v10_27j_text(x):
+def _v10_27k_text(x):
     try:
         return str(x or '').strip()
     except Exception:
         return ''
 
-def _v10_27j_semantic_type(shot):
+def _v10_27k_semantic_type(shot):
     if not isinstance(shot, dict): return ''
-    st = _v10_27j_text(shot.get('semantic_type') or shot.get('scene_type') or shot.get('category')).lower()
-    label = _v10_27j_text(shot.get('semantic_label') or shot.get('narration_segment') or shot.get('clean_subtitle')).lower()
+    st = _v10_27k_text(shot.get('semantic_type') or shot.get('scene_type') or shot.get('category')).lower()
+    label = _v10_27k_text(shot.get('semantic_label') or shot.get('narration_segment') or shot.get('clean_subtitle')).lower()
     joined = st + ' ' + label
     if any(k in joined for k in ['shopping','超市','购物','商场','便利店','配套']): return 'shopping'
     if any(k in joined for k in ['food','餐饮','吃饭','restaurant','cafe','food court']): return 'lifestyle_food'
@@ -2708,7 +2706,7 @@ def _v10_27j_semantic_type(shot):
     if any(k in joined for k in ['investment','出租','自住','租客','tenant','buyer']): return 'investment'
     return st or 'general'
 
-def _v10_27j_subjects(semantic_type):
+def _v10_27k_subjects(semantic_type):
     table = {
         'shopping': ('shopping / supermarket / convenience store / daily life amenities', 'supermarket and convenience shopping near Malaysian residential towers, residents carrying grocery bags, nearby shop lots and daily shopping scene', 'supermarket, convenience store, grocery bags, nearby mall or shop lots, daily shopping scene', 'smooth lateral pan following residents with grocery bags', 'only condo lobby, only bedroom, price tags, readable signs, fake logos, MRT station as main subject'),
         'lifestyle_food': ('food / restaurant / cafe / food court / lifestyle amenities', 'Malaysian restaurant, cafe or food court near residential towers with people dining naturally and takeaway pickup', 'restaurant, cafe, food court, local dining street, takeaway pickup or people eating naturally', 'slow push in toward restaurant or gentle walking pan', 'empty mall only, office meeting, readable signs, logo, unrelated bedroom, MRT station as main subject'),
@@ -2720,73 +2718,73 @@ def _v10_27j_subjects(semantic_type):
     }
     return table.get(semantic_type, table['general'])
 
-def _v10_27j_build_clean_visual_prompt(shot):
+def _v10_27k_build_clean_visual_prompt(shot):
     if not isinstance(shot, dict): return ''
     idx = shot.get('index') or shot.get('shot_index') or ''
-    narration = _v10_27j_text(shot.get('narration_segment') or shot.get('clean_subtitle') or shot.get('text'))
-    semantic_type = _v10_27j_semantic_type(shot)
-    label, subject, must, motion, forbid = _v10_27j_subjects(semantic_type)
-    transition = _v10_27j_text(shot.get('transition_to_next') or shot.get('transition') or 'cross_dissolve')
-    camera = _v10_27j_text(shot.get('camera_motion') or motion)
+    narration = _v10_27k_text(shot.get('narration_segment') or shot.get('clean_subtitle') or shot.get('text'))
+    semantic_type = _v10_27k_semantic_type(shot)
+    label, subject, must, motion, forbid = _v10_27k_subjects(semantic_type)
+    transition = _v10_27k_text(shot.get('transition_to_next') or shot.get('transition') or 'cross_dissolve')
+    camera = _v10_27k_text(shot.get('camera_motion') or motion)
     prompt = f"Premium realistic vertical 9:16 Malaysia property short-video B-roll. Shot {idx}. Narration meaning: {narration}. Semantic category: {label}. Required visual subject: {subject}. Must show: {must}. Camera motion: {camera}. Transition to next: {transition}. Real Malaysian urban residential environment, tropical daylight, natural residents, no fake model posing, no readable text signs, no logos, no subtitles, no watermark, no KLCC unless explicitly required, no ocean unless Penang Langkawi or Sabah. Forbidden: {forbid}."
     return ' '.join(prompt.split())
 
-def _v10_27j_clean_one_shot(shot):
+def _v10_27k_clean_one_shot(shot):
     if not isinstance(shot, dict): return shot
-    old = _v10_27j_text(shot.get('visual_prompt') or shot.get('prompt'))
-    semantic_type = _v10_27j_semantic_type(shot)
-    clean = _v10_27j_build_clean_visual_prompt(shot)
+    old = _v10_27k_text(shot.get('visual_prompt') or shot.get('prompt'))
+    semantic_type = _v10_27k_semantic_type(shot)
+    clean = _v10_27k_build_clean_visual_prompt(shot)
     shot['visual_prompt'] = clean
     shot['prompt'] = clean
-    shot['runtime_semantic_lock'] = 'v10_27j'
-    shot['prompt_purge_lock'] = 'v10_27j'
+    shot['runtime_semantic_lock'] = 'v10_27k'
+    shot['prompt_purge_lock'] = 'v10_27k'
     shot['semantic_direct_render'] = True
     shot['shot_duration_policy'] = '2.2_to_4.0_seconds_no_flash_cut'
     if 'MRT or LRT station entrance' in old and semantic_type != 'transport':
-        print('V10_27J_PURGED_GLOBAL_TRAFFIC_PROMPT='+str({'index': shot.get('index'), 'semantic_type': semantic_type}))
+        print('V10_27K_PURGED_GLOBAL_TRAFFIC_PROMPT='+str({'index': shot.get('index'), 'semantic_type': semantic_type}))
     return shot
 
-def _v10_27j_clean_runtime_shots(shots):
+def _v10_27k_clean_runtime_shots(shots):
     try:
         if isinstance(shots, dict):
             for k,v in list(shots.items()):
-                if isinstance(v, dict): shots[k] = _v10_27j_clean_one_shot(v)
-            print('V10_27J_STRICT_FINAL_PROMPT_PURGE='+str({'shape':'dict','count':len(shots)}))
+                if isinstance(v, dict): shots[k] = _v10_27k_clean_one_shot(v)
+            print('V10_27K_STRICT_FINAL_PROMPT_PURGE='+str({'shape':'dict','count':len(shots)}))
             return shots
         if isinstance(shots, list):
             for i,v in enumerate(list(shots)):
-                if isinstance(v, dict): shots[i] = _v10_27j_clean_one_shot(v)
-            print('V10_27J_STRICT_FINAL_PROMPT_PURGE='+str({'shape':'list','count':len(shots)}))
+                if isinstance(v, dict): shots[i] = _v10_27k_clean_one_shot(v)
+            print('V10_27K_STRICT_FINAL_PROMPT_PURGE='+str({'shape':'list','count':len(shots)}))
             return shots
     except Exception as exc:
-        print('V10_27J_STRICT_FINAL_PROMPT_PURGE_FAILED='+str(exc))
+        print('V10_27K_STRICT_FINAL_PROMPT_PURGE_FAILED='+str(exc))
     return shots
 
-def _v10_27j_clean_payload(payload):
+def _v10_27k_clean_payload(payload):
     try:
         if isinstance(payload, dict):
             for key in ('manual_shot_plan','semantic_shot_plan','shots'):
-                if isinstance(payload.get(key), list): payload[key] = _v10_27j_clean_runtime_shots(payload.get(key))
+                if isinstance(payload.get(key), list): payload[key] = _v10_27k_clean_runtime_shots(payload.get(key))
             if isinstance(payload.get('shot_overrides'), dict):
-                payload['shot_overrides'] = _v10_27j_clean_runtime_shots(payload.get('shot_overrides'))
+                payload['shot_overrides'] = _v10_27k_clean_runtime_shots(payload.get('shot_overrides'))
             elif isinstance(payload.get('shot_overrides'), list):
-                cleaned = _v10_27j_clean_runtime_shots(payload.get('shot_overrides'))
+                cleaned = _v10_27k_clean_runtime_shots(payload.get('shot_overrides'))
                 payload['shot_overrides'] = {str((s or {}).get('index', i+1)): s for i,s in enumerate(cleaned) if isinstance(s, dict)}
-            payload['demand_acceptance_lock'] = 'v10_27j'
-            payload['prompt_purge_lock'] = 'v10_27j'
+            payload['demand_acceptance_lock'] = 'v10_27k'
+            payload['prompt_purge_lock'] = 'v10_27k'
     except Exception as exc:
-        print('V10_27J_CLEAN_PAYLOAD_FAILED='+str(exc))
+        print('V10_27K_CLEAN_PAYLOAD_FAILED='+str(exc))
     return payload
 # ================= END AI VIDEO V10.27H STRICT FINAL FAL PROMPT PURGE =================
 
-# V10_27J_CLEAN_PAYLOAD_BEFORE_MODEL_BIND
+# V10_27K_CLEAN_PAYLOAD_BEFORE_MODEL_BIND
 
 
 # ================= AI VIDEO V10.27I RUNTIME PROMPT CLEANER =================
-def _v10_27j_clean_prompt_text(_v10_27j_text):
+def _v10_27k_clean_prompt_text(_v10_27k_text):
     try:
-        import re as _v10_27j_re
-        t = str(_v10_27j_text or '')
+        import re as _v10_27k_re
+        t = str(_v10_27k_text or '')
         patterns = [
             r"\s*,\s*Malaysia MRT or LRT station entrance with commuters and nearby main road traffic,\s*no readable text signs,\s*(?:gentle pull out|slow left to right pan|steady street-level dolly|slow push in),\s*cinematic vertical 9:16,\s*realistic Malaysia property lifestyle,\s*no text,\s*no logos,\s*no subtitles,\s*no readable signs",
             r"\s*,\s*Malaysia MRT or LRT station entrance with commuters and nearby main road traffic,\s*no readable text signs",
@@ -2795,91 +2793,94 @@ def _v10_27j_clean_prompt_text(_v10_27j_text):
         ]
         old=t
         for pat in patterns:
-            t=_v10_27j_re.sub(pat, '', t, flags=_v10_27j_re.I)
-        t=_v10_27j_re.sub(r'\s+,', ',', t)
-        t=_v10_27j_re.sub(r'\s{2,}', ' ', t).strip(' ,')
+            t=_v10_27k_re.sub(pat, '', t, flags=_v10_27k_re.I)
+        t=_v10_27k_re.sub(r'\s+,', ',', t)
+        t=_v10_27k_re.sub(r'\s{2,}', ' ', t).strip(' ,')
         if old != t:
-            print('V10_27J_PURGED_GLOBAL_TRAFFIC_PROMPT_TEXT')
+            print('V10_27K_PURGED_GLOBAL_TRAFFIC_PROMPT_TEXT')
         return t
     except Exception:
-        return _v10_27j_text
+        return _v10_27k_text
 
-def _v10_27j_clean_prompt_obj(_v10_27j_obj, _v10_27j_seen=None):
+def _v10_27k_clean_prompt_obj(_v10_27k_obj, _v10_27k_seen=None):
     try:
-        if _v10_27j_seen is None:
-            _v10_27j_seen=set()
-        oid=id(_v10_27j_obj)
-        if oid in _v10_27j_seen:
-            return _v10_27j_obj
-        _v10_27j_seen.add(oid)
-        if isinstance(_v10_27j_obj, str):
-            return _v10_27j_clean_prompt_text(_v10_27j_obj)
-        if isinstance(_v10_27j_obj, dict):
-            for k in list(_v10_27j_obj.keys()):
-                v=_v10_27j_obj.get(k)
+        if _v10_27k_seen is None:
+            _v10_27k_seen=set()
+        oid=id(_v10_27k_obj)
+        if oid in _v10_27k_seen:
+            return _v10_27k_obj
+        _v10_27k_seen.add(oid)
+        if isinstance(_v10_27k_obj, str):
+            return _v10_27k_clean_prompt_text(_v10_27k_obj)
+        if isinstance(_v10_27k_obj, dict):
+            for k in list(_v10_27k_obj.keys()):
+                v=_v10_27k_obj.get(k)
                 kl=str(k).lower()
                 if isinstance(v, str) and any(x in kl for x in ['prompt','visual','image_prompt','text_prompt','description']):
-                    _v10_27j_obj[k]=_v10_27j_clean_prompt_text(v)
+                    _v10_27k_obj[k]=_v10_27k_clean_prompt_text(v)
                 else:
-                    _v10_27j_obj[k]=_v10_27j_clean_prompt_obj(v, _v10_27j_seen)
+                    _v10_27k_obj[k]=_v10_27k_clean_prompt_obj(v, _v10_27k_seen)
             # keep metadata visible for job JSON / health checks
-            if any(k in _v10_27j_obj for k in ['visual_prompt','prompt','semantic_type','scene_type','shot_id']):
-                _v10_27j_obj['runtime_prompt_cleaner']='v10_27j'
-            return _v10_27j_obj
-        if isinstance(_v10_27j_obj, list):
-            for i,v in enumerate(list(_v10_27j_obj)):
-                _v10_27j_obj[i]=_v10_27j_clean_prompt_obj(v, _v10_27j_seen)
-            return _v10_27j_obj
-        if isinstance(_v10_27j_obj, tuple):
-            for v in _v10_27j_obj:
-                _v10_27j_clean_prompt_obj(v, _v10_27j_seen)
-            return _v10_27j_obj
-    except Exception as _v10_27j_exc:
-        try: print('V10_27J_CLEAN_PROMPT_OBJ_FAILED='+str(_v10_27j_exc))
+            if any(k in _v10_27k_obj for k in ['visual_prompt','prompt','semantic_type','scene_type','shot_id']):
+                _v10_27k_obj['runtime_prompt_cleaner']='v10_27k'
+            return _v10_27k_obj
+        if isinstance(_v10_27k_obj, list):
+            for i,v in enumerate(list(_v10_27k_obj)):
+                _v10_27k_obj[i]=_v10_27k_clean_prompt_obj(v, _v10_27k_seen)
+            return _v10_27k_obj
+        if isinstance(_v10_27k_obj, tuple):
+            for v in _v10_27k_obj:
+                _v10_27k_clean_prompt_obj(v, _v10_27k_seen)
+            return _v10_27k_obj
+    except Exception as _v10_27k_exc:
+        try: print('V10_27K_CLEAN_PROMPT_OBJ_FAILED='+str(_v10_27k_exc))
         except Exception: pass
-    return _v10_27j_obj
+    return _v10_27k_obj
 
-def _v10_27j_wrap_callable(_v10_27j_name, _v10_27j_fn):
+def _v10_27k_wrap_callable(_v10_27k_name, _v10_27k_fn):
     try:
-        import inspect as _v10_27j_inspect, functools as _v10_27j_functools
-        if getattr(_v10_27j_fn, '_v10_27j_wrapped', False):
-            return _v10_27j_fn
-        if _v10_27j_inspect.iscoroutinefunction(_v10_27j_fn):
-            @_v10_27j_functools.wraps(_v10_27j_fn)
-            async def _v10_27j_async_wrapped(*args, **kwargs):
-                _v10_27j_clean_prompt_obj(args); _v10_27j_clean_prompt_obj(kwargs)
-                res = await _v10_27j_fn(*args, **kwargs)
-                _v10_27j_clean_prompt_obj(args); _v10_27j_clean_prompt_obj(kwargs)
-                return _v10_27j_clean_prompt_obj(res)
-            _v10_27j_async_wrapped._v10_27j_wrapped=True
-            return _v10_27j_async_wrapped
-        @_v10_27j_functools.wraps(_v10_27j_fn)
-        def _v10_27j_sync_wrapped(*args, **kwargs):
-            _v10_27j_clean_prompt_obj(args); _v10_27j_clean_prompt_obj(kwargs)
-            res = _v10_27j_fn(*args, **kwargs)
-            _v10_27j_clean_prompt_obj(args); _v10_27j_clean_prompt_obj(kwargs)
-            return _v10_27j_clean_prompt_obj(res)
-        _v10_27j_sync_wrapped._v10_27j_wrapped=True
-        return _v10_27j_sync_wrapped
+        import inspect as _v10_27k_inspect, functools as _v10_27k_functools
+        if getattr(_v10_27k_fn, '_v10_27k_wrapped', False):
+            return _v10_27k_fn
+        if _v10_27k_inspect.iscoroutinefunction(_v10_27k_fn):
+            @_v10_27k_functools.wraps(_v10_27k_fn)
+            async def _v10_27k_async_wrapped(*args, **kwargs):
+                _v10_27k_clean_prompt_obj(args); _v10_27k_clean_prompt_obj(kwargs)
+                res = await _v10_27k_fn(*args, **kwargs)
+                _v10_27k_clean_prompt_obj(args); _v10_27k_clean_prompt_obj(kwargs)
+                return _v10_27k_clean_prompt_obj(res)
+            _v10_27k_async_wrapped._v10_27k_wrapped=True
+            return _v10_27k_async_wrapped
+        @_v10_27k_functools.wraps(_v10_27k_fn)
+        def _v10_27k_sync_wrapped(*args, **kwargs):
+            _v10_27k_clean_prompt_obj(args); _v10_27k_clean_prompt_obj(kwargs)
+            res = _v10_27k_fn(*args, **kwargs)
+            _v10_27k_clean_prompt_obj(args); _v10_27k_clean_prompt_obj(kwargs)
+            return _v10_27k_clean_prompt_obj(res)
+        _v10_27k_sync_wrapped._v10_27k_wrapped=True
+        return _v10_27k_sync_wrapped
     except Exception:
-        return _v10_27j_fn
+        return _v10_27k_fn
 
-def _v10_27j_install_runtime_prompt_cleaner():
+def _v10_27k_install_runtime_prompt_cleaner():
     try:
         _targets = ('prompt','guard','fal','render','video','shot','semantic','start','generate','compose')
         _count=0
         for _name,_fn in list(globals().items()):
-            if _name.startswith('_v10_27j_'):
+            if _name.startswith('_v10_27k_'):
                 continue
             if not callable(_fn):
                 continue
             lname=_name.lower()
             if any(t in lname for t in _targets):
-                globals()[_name]=_v10_27j_wrap_callable(_name,_fn)
+                globals()[_name]=_v10_27k_wrap_callable(_name,_fn)
                 _count+=1
-        print('V10_27J_RUNTIME_PROMPT_CLEANER_INSTALLED='+str({'module':__name__,'wrapped':_count}))
-    except Exception as _v10_27j_exc:
-        print('V10_27J_RUNTIME_PROMPT_CLEANER_INSTALL_FAILED='+str(_v10_27j_exc))
+        print('V10_27K_RUNTIME_PROMPT_CLEANER_INSTALLED='+str({'module':__name__,'wrapped':_count}))
+    except Exception as _v10_27k_exc:
+        print('V10_27K_RUNTIME_PROMPT_CLEANER_INSTALL_FAILED='+str(_v10_27k_exc))
 
-_v10_27j_install_runtime_prompt_cleaner()
+_v10_27k_install_runtime_prompt_cleaner()
 # ================= END AI VIDEO V10.27I RUNTIME PROMPT CLEANER =================
+
+
+# AI_VIDEO_V10_27K_BUILD_PROMPT_HARD_KWARGS_FIX: _build_prompt accepts runtime metadata kwargs safely.
