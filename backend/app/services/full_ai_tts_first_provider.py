@@ -1884,12 +1884,12 @@ async def _v10_27b_call_original_start_with_model(old_start, payload):
     """
     import inspect
     try:
-        # V10_27D_SHOT_OVERRIDES_DICT_BINDING_FIX
+        # V10_27E_SHOT_OVERRIDES_DICT_BINDING_FIX
         if isinstance(payload, dict) and isinstance(payload.get("shot_overrides"), list):
-            _v10_27d_shot_list = payload.get("shot_overrides") or []
+            _v10_27e_shot_list = payload.get("shot_overrides") or []
             payload["shot_overrides"] = {
                 str((_s or {}).get("index", _i + 1)): _s
-                for _i, _s in enumerate(_v10_27d_shot_list)
+                for _i, _s in enumerate(_v10_27e_shot_list)
                 if isinstance(_s, dict)
             }
         if isinstance(payload, dict) and isinstance(payload.get("manual_shot_plan"), list):
@@ -1897,9 +1897,38 @@ async def _v10_27b_call_original_start_with_model(old_start, payload):
                 _s for _s in (payload.get("manual_shot_plan") or [])
                 if isinstance(_s, dict)
             ]
+        # V10_27E_SCRIPT_TEXT_SCOPE_RUNTIME_FIX
+        try:
+            _v10_27e_payload = payload if isinstance(payload, dict) else {}
+            _v10_27e_script_text = (_v10_27e_payload.get("script_text") or _v10_27e_payload.get("script") or _v10_27e_payload.get("text") or _v10_27e_payload.get("content") or _v10_27e_payload.get("narration") or "")
+            _v10_27e_script_text = str(_v10_27e_script_text).strip()
+            if _v10_27e_script_text:
+                _v10_27e_payload["script_text"] = _v10_27e_script_text
+                _v10_27e_payload["script"] = _v10_27e_script_text
+                _v10_27e_payload.setdefault("text", _v10_27e_script_text)
+                _v10_27e_payload.setdefault("content", _v10_27e_script_text)
+                _v10_27e_payload.setdefault("narration", _v10_27e_script_text)
+                _v10_27e_payload.setdefault("voice_script", _v10_27e_script_text)
+                globals()["script_text"] = _v10_27e_script_text
+                import builtins as _v10_27e_builtins
+                setattr(_v10_27e_builtins, "script_text", _v10_27e_script_text)
+                if not _v10_27e_payload.get("title") or str(_v10_27e_payload.get("title")).strip() in ["马来西亚买房，别只看价格", "马来西亚买房,别只看价格"]:
+                    _v10_27e_payload["title"] = _v10_27e_script_text[:24]
+            _v10_27e_dur = (_v10_27e_payload.get("duration_seconds") or _v10_27e_payload.get("duration") or _v10_27e_payload.get("target_duration_seconds"))
+            if _v10_27e_dur:
+                try:
+                    _v10_27e_dur = float(_v10_27e_dur)
+                    _v10_27e_payload["duration_seconds"] = _v10_27e_dur
+                    _v10_27e_payload["duration"] = _v10_27e_dur
+                    _v10_27e_payload["target_duration_seconds"] = _v10_27e_dur
+                except Exception:
+                    pass
+            payload = _v10_27e_payload
+        except Exception as _v10_27e_scope_exc:
+            print("V10_27E_SCRIPT_TEXT_SCOPE_FIX_WARNING", _v10_27e_scope_exc)
         model = TTSFirstStartRequest(**payload)
     except Exception as exc:
-        return {'ok': False, 'provider': 'full_ai_tts_first_semantic_direct_render_v10_27dc', 'error': 'START_MODEL_BIND_FAILED', 'detail': str(exc), 'payload_keys': sorted(list((payload or {}).keys()))}
+        return {'ok': False, 'provider': 'full_ai_tts_first_semantic_direct_render_v10_27ec', 'error': 'START_MODEL_BIND_FAILED', 'detail': str(exc), 'payload_keys': sorted(list((payload or {}).keys()))}
     try:
         if inspect.iscoroutinefunction(old_start):
             return await old_start(model)
@@ -1911,9 +1940,9 @@ async def _v10_27b_call_original_start_with_model(old_start, payload):
                 return await old_start(**payload)
             return old_start(**payload)
         except Exception as exc2:
-            return {'ok': False, 'provider': 'full_ai_tts_first_semantic_direct_render_v10_27dc', 'error': 'OLD_START_MODEL_CALL_FAILED', 'detail': str(exc2), 'first_detail': str(exc), 'payload_keys': sorted(list((payload or {}).keys()))}
+            return {'ok': False, 'provider': 'full_ai_tts_first_semantic_direct_render_v10_27ec', 'error': 'OLD_START_MODEL_CALL_FAILED', 'detail': str(exc2), 'first_detail': str(exc), 'payload_keys': sorted(list((payload or {}).keys()))}
     except Exception as exc:
-        return {'ok': False, 'provider': 'full_ai_tts_first_semantic_direct_render_v10_27dc', 'error': 'OLD_START_MODEL_CALL_FAILED', 'detail': str(exc), 'payload_keys': sorted(list((payload or {}).keys()))}
+        return {'ok': False, 'provider': 'full_ai_tts_first_semantic_direct_render_v10_27ec', 'error': 'OLD_START_MODEL_CALL_FAILED', 'detail': str(exc), 'payload_keys': sorted(list((payload or {}).keys()))}
 # ================= END AI VIDEO V10.27B START MODEL BINDING FIX =================
 
 async def _v10_26_plan_preview(request: Request):
@@ -1941,7 +1970,7 @@ async def _v10_26_call_old_start(request, payload):
     from fastapi.responses import JSONResponse
     endpoint=globals().get('_V10_26_OLD_START_ENDPOINT')
     if endpoint is None:
-        return JSONResponse(status_code=500, content={'ok':False,'provider':'full_ai_tts_first_semantic_direct_render_v10_27dc','error':'OLD_START_ENDPOINT_MISSING'})
+        return JSONResponse(status_code=500, content={'ok':False,'provider':'full_ai_tts_first_semantic_direct_render_v10_27ec','error':'OLD_START_ENDPOINT_MISSING'})
     body=json.dumps(payload, ensure_ascii=False).encode('utf-8')
     async def receive():
         return {'type':'http.request','body':body,'more_body':False}
@@ -1967,7 +1996,7 @@ async def _v10_26_call_old_start(request, payload):
         if inspect.isawaitable(res): res=await res
         return res
     except Exception as exc:
-        return JSONResponse(status_code=500, content={'ok':False,'provider':'full_ai_tts_first_semantic_direct_render_v10_27dc','error':'OLD_START_CALL_FAILED','detail':str(exc),'normalized_payload_keys':sorted(list(payload.keys()))})
+        return JSONResponse(status_code=500, content={'ok':False,'provider':'full_ai_tts_first_semantic_direct_render_v10_27ec','error':'OLD_START_CALL_FAILED','detail':str(exc),'normalized_payload_keys':sorted(list(payload.keys()))})
 
 async def _v10_26_start(request: Request):
     from fastapi.responses import JSONResponse
@@ -2035,8 +2064,8 @@ except Exception as _v10_27_import_exc:
     print('V10_27_IMPORT_WARNING', _v10_27_import_exc)
 
 _V10_27_OLD_START_ENDPOINT = None
-_V10_27_VERSION = 'v10.27d-direct-original-start'
-_V10_27_PROVIDER = 'full_ai_tts_first_semantic_direct_render_v10_27dc'
+_V10_27_VERSION = 'v10.27e-direct-original-start'
+_V10_27_PROVIDER = 'full_ai_tts_first_semantic_direct_render_v10_27ec'
 _V10_27_TRANSITIONS = ['opening_slow_push_in','cross_dissolve','slow_push_in','horizontal_pan_match','pull_out','cross_dissolve','slow_push_in']
 _V10_27_SCRIPT_ALIASES = ['script','script_text','copy','text','content','full_script','voice_script','narration','spoken_text','口播文案','文案']
 _V10_27_DURATION_ALIASES = ['duration','duration_seconds','target_duration_seconds','audio_duration','tts_duration','selected_duration','video_duration']
@@ -2236,7 +2265,7 @@ def _v10_27_build_preview(payload):
         if transition in ['cut','smooth_cut','flash_cut','hard_cut']: transition='cross_dissolve'
         kws=_v10_27_keywords_for(seg, manual)
         prompt=f'Premium realistic vertical 9:16 Malaysia property short-video B-roll. Shot {i}. Narration meaning: {seg}. Semantic category: {meta["label"]}. Required visual subject: {meta["subject"]}. Must show: {meta["must"]}. Camera motion: {meta["camera"]}. Transition to next: {transition}. Real Malaysian urban residential environment, tropical daylight, natural residents, no fake model posing, no readable text signs, no logos, no subtitles, no watermark, no KLCC unless explicitly required, no ocean unless Penang Langkawi or Sabah.'
-        shot={'index':i,'shot_id':f'v10_27_{i:02d}_{scene}','start_seconds':start,'end_seconds':end,'duration_seconds':round(end-start,2),'narration_segment':seg,'clean_subtitle':seg,'highlight_keywords':kws,'keywords':kws,'semantic_type':scene,'semantic_label':meta['label'],'scene_type':scene,'visual_subject':meta['subject'],'must_show':meta['must'],'forbidden_visuals':meta['forbid'],'camera_motion':meta['camera'],'transition':transition,'transition_to_next':transition,'visual_prompt':prompt,'prompt':prompt,'negative_prompt':'readable text, subtitles, captions, chinese characters, english words, random letters, logo, watermark, fake UI, poster, banner, signboard with text, price tag, exact numbers, document close-up, calculator close-up, unrelated office meeting, cartoon, anime, low quality, blurry, black bars, distorted face, deformed hands','source_priority':'strict_real_script_first_then_semantic_rule_then_deepseek_polish_then_ai_broll','demand_acceptance_lock':'v10_27d'}
+        shot={'index':i,'shot_id':f'v10_27_{i:02d}_{scene}','start_seconds':start,'end_seconds':end,'duration_seconds':round(end-start,2),'narration_segment':seg,'clean_subtitle':seg,'highlight_keywords':kws,'keywords':kws,'semantic_type':scene,'semantic_label':meta['label'],'scene_type':scene,'visual_subject':meta['subject'],'must_show':meta['must'],'forbidden_visuals':meta['forbid'],'camera_motion':meta['camera'],'transition':transition,'transition_to_next':transition,'visual_prompt':prompt,'prompt':prompt,'negative_prompt':'readable text, subtitles, captions, chinese characters, english words, random letters, logo, watermark, fake UI, poster, banner, signboard with text, price tag, exact numbers, document close-up, calculator close-up, unrelated office meeting, cartoon, anime, low quality, blurry, black bars, distorted face, deformed hands','source_priority':'strict_real_script_first_then_semantic_rule_then_deepseek_polish_then_ai_broll','demand_acceptance_lock':'v10_27e'}
         shots.append(shot)
         plan.append({'index':i,'time':f'{start}-{end}s','narration_segment':seg,'semantic_label':meta['label'],'must_show':meta['must'],'forbidden_visuals':meta['forbid'],'transition_to_next':transition,'camera_motion':meta['camera']})
         cues.append({'start':start,'end':end,'text':seg,'clean_text':seg,'keywords':kws,'subtitle_style':'DouyinCleanEmphasisV2'})
@@ -2276,7 +2305,7 @@ async def _v10_27_plan_preview(request: _V10_27_Request):
 
 
 # ================= AI VIDEO V10.27C DIRECT ORIGINAL START FIX =================
-async def _v10_27d_call_true_original_start(request, payload):
+async def _v10_27e_call_true_original_start(request, payload):
     """Bypass stacked V10.26/V10.27 wrapper endpoints and call the real tts-first
     original start endpoint with TTSFirstStartRequest.
 
@@ -2287,21 +2316,21 @@ async def _v10_27d_call_true_original_start(request, payload):
     """
     import inspect
     try:
-        from fastapi.responses import JSONResponse as _V10_27D_JSONResponse
+        from fastapi.responses import JSONResponse as _V10_27E_JSONResponse
     except Exception:
-        _V10_27D_JSONResponse = None
+        _V10_27E_JSONResponse = None
 
-    provider = 'full_ai_tts_first_semantic_direct_render_v10_27d'
+    provider = 'full_ai_tts_first_semantic_direct_render_v10_27e'
     payload = payload if isinstance(payload, dict) else {}
 
     # Build the Pydantic request object expected by the original start endpoint.
     try:
-        # V10_27D_SHOT_OVERRIDES_DICT_BINDING_FIX
+        # V10_27E_SHOT_OVERRIDES_DICT_BINDING_FIX
         if isinstance(payload, dict) and isinstance(payload.get("shot_overrides"), list):
-            _v10_27d_shot_list = payload.get("shot_overrides") or []
+            _v10_27e_shot_list = payload.get("shot_overrides") or []
             payload["shot_overrides"] = {
                 str((_s or {}).get("index", _i + 1)): _s
-                for _i, _s in enumerate(_v10_27d_shot_list)
+                for _i, _s in enumerate(_v10_27e_shot_list)
                 if isinstance(_s, dict)
             }
         if isinstance(payload, dict) and isinstance(payload.get("manual_shot_plan"), list):
@@ -2309,11 +2338,40 @@ async def _v10_27d_call_true_original_start(request, payload):
                 _s for _s in (payload.get("manual_shot_plan") or [])
                 if isinstance(_s, dict)
             ]
+        # V10_27E_SCRIPT_TEXT_SCOPE_RUNTIME_FIX
+        try:
+            _v10_27e_payload = payload if isinstance(payload, dict) else {}
+            _v10_27e_script_text = (_v10_27e_payload.get("script_text") or _v10_27e_payload.get("script") or _v10_27e_payload.get("text") or _v10_27e_payload.get("content") or _v10_27e_payload.get("narration") or "")
+            _v10_27e_script_text = str(_v10_27e_script_text).strip()
+            if _v10_27e_script_text:
+                _v10_27e_payload["script_text"] = _v10_27e_script_text
+                _v10_27e_payload["script"] = _v10_27e_script_text
+                _v10_27e_payload.setdefault("text", _v10_27e_script_text)
+                _v10_27e_payload.setdefault("content", _v10_27e_script_text)
+                _v10_27e_payload.setdefault("narration", _v10_27e_script_text)
+                _v10_27e_payload.setdefault("voice_script", _v10_27e_script_text)
+                globals()["script_text"] = _v10_27e_script_text
+                import builtins as _v10_27e_builtins
+                setattr(_v10_27e_builtins, "script_text", _v10_27e_script_text)
+                if not _v10_27e_payload.get("title") or str(_v10_27e_payload.get("title")).strip() in ["马来西亚买房，别只看价格", "马来西亚买房,别只看价格"]:
+                    _v10_27e_payload["title"] = _v10_27e_script_text[:24]
+            _v10_27e_dur = (_v10_27e_payload.get("duration_seconds") or _v10_27e_payload.get("duration") or _v10_27e_payload.get("target_duration_seconds"))
+            if _v10_27e_dur:
+                try:
+                    _v10_27e_dur = float(_v10_27e_dur)
+                    _v10_27e_payload["duration_seconds"] = _v10_27e_dur
+                    _v10_27e_payload["duration"] = _v10_27e_dur
+                    _v10_27e_payload["target_duration_seconds"] = _v10_27e_dur
+                except Exception:
+                    pass
+            payload = _v10_27e_payload
+        except Exception as _v10_27e_scope_exc:
+            print("V10_27E_SCRIPT_TEXT_SCOPE_FIX_WARNING", _v10_27e_scope_exc)
         model = TTSFirstStartRequest(**payload)
     except Exception as exc:
         content = {'ok': False, 'provider': provider, 'error': 'START_MODEL_BIND_FAILED', 'detail': str(exc), 'payload_keys': sorted(list(payload.keys()))}
-        if _V10_27D_JSONResponse:
-            return _V10_27D_JSONResponse(status_code=422, content=content)
+        if _V10_27E_JSONResponse:
+            return _V10_27E_JSONResponse(status_code=422, content=content)
         return content
 
     # The V10.26 installer saved the true pre-wrapper endpoint here. Prefer it.
@@ -2369,8 +2427,8 @@ async def _v10_27d_call_true_original_start(request, payload):
         'payload_keys': sorted(list(payload.keys())),
         'hint': 'Expected _V10_26_OLD_START_ENDPOINT to point to the real original start endpoint.'
     }
-    if _V10_27D_JSONResponse:
-        return _V10_27D_JSONResponse(status_code=500, content=content)
+    if _V10_27E_JSONResponse:
+        return _V10_27E_JSONResponse(status_code=500, content=content)
     return content
 # ================= END AI VIDEO V10.27C DIRECT ORIGINAL START FIX =================
 
@@ -2387,12 +2445,12 @@ async def _v10_27_call_old_start(request, payload):
         if params:
             ann=params[0].annotation; name=params[0].name.lower()
             if 'request' in name or ann in (_V10_27_Request, _V10_27_StarletteRequest): result=ep(new_req)
-            # V10_27D_SHOT_OVERRIDES_DICT_BINDING_FIX
+            # V10_27E_SHOT_OVERRIDES_DICT_BINDING_FIX
             if isinstance(payload, dict) and isinstance(payload.get("shot_overrides"), list):
-                _v10_27d_shot_list = payload.get("shot_overrides") or []
+                _v10_27e_shot_list = payload.get("shot_overrides") or []
                 payload["shot_overrides"] = {
                     str((_s or {}).get("index", _i + 1)): _s
-                    for _i, _s in enumerate(_v10_27d_shot_list)
+                    for _i, _s in enumerate(_v10_27e_shot_list)
                     if isinstance(_s, dict)
                 }
             if isinstance(payload, dict) and isinstance(payload.get("manual_shot_plan"), list):
@@ -2400,6 +2458,35 @@ async def _v10_27_call_old_start(request, payload):
                     _s for _s in (payload.get("manual_shot_plan") or [])
                     if isinstance(_s, dict)
                 ]
+            # V10_27E_SCRIPT_TEXT_SCOPE_RUNTIME_FIX
+            try:
+                _v10_27e_payload = payload if isinstance(payload, dict) else {}
+                _v10_27e_script_text = (_v10_27e_payload.get("script_text") or _v10_27e_payload.get("script") or _v10_27e_payload.get("text") or _v10_27e_payload.get("content") or _v10_27e_payload.get("narration") or "")
+                _v10_27e_script_text = str(_v10_27e_script_text).strip()
+                if _v10_27e_script_text:
+                    _v10_27e_payload["script_text"] = _v10_27e_script_text
+                    _v10_27e_payload["script"] = _v10_27e_script_text
+                    _v10_27e_payload.setdefault("text", _v10_27e_script_text)
+                    _v10_27e_payload.setdefault("content", _v10_27e_script_text)
+                    _v10_27e_payload.setdefault("narration", _v10_27e_script_text)
+                    _v10_27e_payload.setdefault("voice_script", _v10_27e_script_text)
+                    globals()["script_text"] = _v10_27e_script_text
+                    import builtins as _v10_27e_builtins
+                    setattr(_v10_27e_builtins, "script_text", _v10_27e_script_text)
+                    if not _v10_27e_payload.get("title") or str(_v10_27e_payload.get("title")).strip() in ["马来西亚买房，别只看价格", "马来西亚买房,别只看价格"]:
+                        _v10_27e_payload["title"] = _v10_27e_script_text[:24]
+                _v10_27e_dur = (_v10_27e_payload.get("duration_seconds") or _v10_27e_payload.get("duration") or _v10_27e_payload.get("target_duration_seconds"))
+                if _v10_27e_dur:
+                    try:
+                        _v10_27e_dur = float(_v10_27e_dur)
+                        _v10_27e_payload["duration_seconds"] = _v10_27e_dur
+                        _v10_27e_payload["duration"] = _v10_27e_dur
+                        _v10_27e_payload["target_duration_seconds"] = _v10_27e_dur
+                    except Exception:
+                        pass
+                payload = _v10_27e_payload
+            except Exception as _v10_27e_scope_exc:
+                print("V10_27E_SCRIPT_TEXT_SCOPE_FIX_WARNING", _v10_27e_scope_exc)
             else: result=ep(TTSFirstStartRequest(**payload))
         else: result=ep()
         if _v10_27_inspect.isawaitable(result): result = await result
@@ -2414,12 +2501,19 @@ async def _v10_27_start(request: _V10_27_Request):
     if not preview.get('generation_allowed'):
         return _V10_27_JSONResponse(status_code=422, content={'ok':False,'provider':_V10_27_PROVIDER,'error':'DEMAND_ACCEPTANCE_FAILED','message':'需求验收未通过 不允许扣 fal 生成','preview':preview})
     payload=dict(payload)
+    # V10_27E_START_PAYLOAD_GLOBAL_SCRIPT_TEXT
+    try:
+        globals()['script_text'] = str((preview or {}).get('script_text') or payload.get('script_text') or payload.get('script') or '')
+        import builtins as _v10_27e_builtins
+        setattr(_v10_27e_builtins, 'script_text', globals().get('script_text',''))
+    except Exception as _v10_27e_global_exc:
+        print('V10_27E_START_GLOBAL_SCRIPT_TEXT_WARNING', _v10_27e_global_exc)
     payload['script']=preview.get('script_text'); payload['script_text']=preview.get('script_text')
-    payload['duration']=preview.get('duration_seconds'); payload['duration_seconds']=preview.get('duration_seconds')
+    payload['duration']=preview.get('duration_seconds'); payload['duration_seconds']=preview.get('duration_seconds'); payload['target_duration_seconds']=preview.get('duration_seconds')
     payload['manual_shot_plan']=preview.get('shots'); payload['semantic_shot_plan']=preview.get('semantic_shot_plan'); payload['shot_overrides']=preview.get('shots')
     payload['subtitle_cues']=preview.get('subtitle_cues'); payload['manual_keywords']=preview.get('manual_keywords')
-    payload['demand_acceptance']=preview.get('acceptance'); payload['demand_acceptance_lock']='v10_27d'; payload['generation_allowed']=True
-    return await _v10_27d_call_true_original_start(request, payload)
+    payload['demand_acceptance']=preview.get('acceptance'); payload['demand_acceptance_lock']='v10_27e'; payload['generation_allowed']=True
+    return await _v10_27e_call_true_original_start(request, payload)
 
 def _v10_27_patch_routes(app):
     global _V10_27_OLD_START_ENDPOINT
@@ -2445,4 +2539,15 @@ try:
 except Exception as _v10_27_wrap_exc:
     print('V10_27_INSTALL_WRAP_FAILED', _v10_27_wrap_exc)
 # ================= END AI VIDEO V10.27 STRICT NARRATION BEST QUALITY LOCK =================
+# V10_27E_MODULE_SCRIPT_TEXT_DEFAULT
+try:
+    script_text
+except NameError:
+    script_text = ''
+try:
+    import builtins as _v10_27e_default_builtins
+    if not hasattr(_v10_27e_default_builtins, 'script_text'):
+        setattr(_v10_27e_default_builtins, 'script_text', '')
+except Exception:
+    pass
 
