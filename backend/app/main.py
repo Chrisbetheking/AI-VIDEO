@@ -5826,3 +5826,316 @@ except Exception as _ai_video_route_lock_exc:
     print("V10_19_ROUTE_LOCK_LOAD_FAILED", _ai_video_route_lock_exc)
 # AI_VIDEO_V10_19_ROUTE_LOCK_END
 
+# V10_28_REVIEW_RAW_ASSET_WORKFLOW
+# Manual review workflow for generated videos:
+# - completed generation enters pending/manual review on the frontend
+# - approved assets save RAW video before burnt subtitles
+# - future slicing uses local raw_no_subtitle.mp4 only and never calls FAL
+try:
+    import json as _v10_28_json
+    import os as _v10_28_os
+    import re as _v10_28_re
+    import shutil as _v10_28_shutil
+    import subprocess as _v10_28_subprocess
+    import time as _v10_28_time
+    import uuid as _v10_28_uuid
+    import urllib.request as _v10_28_urllib_request
+    from pathlib import Path as _V1028Path
+    from typing import Any as _V1028Any, Dict as _V1028Dict, List as _V1028List, Optional as _V1028Optional
+
+    from fastapi import HTTPException as _V1028HTTPException
+    from fastapi.responses import FileResponse as _V1028FileResponse
+    from pydantic import BaseModel as _V1028BaseModel
+
+    _V1028_STORAGE_ROOT = _V1028Path(_v10_28_os.environ.get("AI_VIDEO_STORAGE_ROOT", "/opt/ai-video/storage"))
+    _V1028_APPROVED_ROOT = _V1028_STORAGE_ROOT / "approved_raw_assets"
+    _V1028_REJECTED_ROOT = _V1028_STORAGE_ROOT / "rejected_raw_assets"
+    _V1028_SLICE_ROOT = _V1028_STORAGE_ROOT / "asset_slices"
+
+    def _v10_28_safe_asset_id(value: str) -> str:
+        value = str(value or "").strip()
+        value = _v10_28_re.sub(r"[^A-Za-z0-9_.-]+", "_", value)
+        value = value.strip("._-")
+        return value[:120] or ("asset_" + _v10_28_uuid.uuid4().hex[:16])
+
+    def _v10_28_json_load(path: _V1028Path) -> _V1028Dict[str, _V1028Any]:
+        try:
+            if path.exists() and path.stat().st_size > 0:
+                return _v10_28_json.loads(path.read_text())
+        except Exception:
+            return {}
+        return {}
+
+    def _v10_28_find_nested_url(data: _V1028Any, key: str) -> _V1028Optional[str]:
+        if isinstance(data, dict):
+            val = data.get(key)
+            if isinstance(val, str) and val.strip():
+                return val.strip()
+            for child in data.values():
+                got = _v10_28_find_nested_url(child, key)
+                if got:
+                    return got
+        elif isinstance(data, list):
+            for child in data:
+                got = _v10_28_find_nested_url(child, key)
+                if got:
+                    return got
+        return None
+
+    def _v10_28_get_job_payload(job_id: str) -> _V1028Dict[str, _V1028Any]:
+        job_id = _v10_28_safe_asset_id(job_id)
+        candidates = [
+            _V1028Path(f"/tmp/{job_id}_final_success.json"),
+            _V1028Path(f"/tmp/{job_id}_final.json"),
+            _V1028Path(f"/tmp/{job_id}_check.json"),
+        ]
+        for c in candidates:
+            payload = _v10_28_json_load(c)
+            if payload:
+                return payload
+        # Best-effort fallback: query the local backend. This endpoint is sync; keep timeout short.
+        try:
+            with _v10_28_urllib_request.urlopen(
+                f"http://127.0.0.1:8000/api/video/full-ai/tts-first/job/{job_id}",
+                timeout=15,
+            ) as r:
+                if getattr(r, "status", 200) == 200:
+                    return _v10_28_json.loads(r.read().decode("utf-8"))
+        except Exception:
+            return {}
+        return {}
+
+    def _v10_28_download_or_copy(src: str, dst: _V1028Path) -> None:
+        src = str(src or "").strip()
+        if not src:
+            raise ValueError("EMPTY_RAW_VIDEO_URL")
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        if src.startswith("file://"):
+            local = _V1028Path(src[7:])
+            if not local.exists():
+                raise FileNotFoundError(str(local))
+            _v10_28_shutil.copy2(local, dst)
+            return
+        if src.startswith("/"):
+            local = _V1028Path(src)
+            if not local.exists():
+                raise FileNotFoundError(str(local))
+            _v10_28_shutil.copy2(local, dst)
+            return
+        req = _v10_28_urllib_request.Request(src, headers={"User-Agent": "ai-video-v10.28-raw-asset-saver"})
+        with _v10_28_urllib_request.urlopen(req, timeout=180) as r, open(dst, "wb") as f:
+            _v10_28_shutil.copyfileobj(r, f)
+        if not dst.exists() or dst.stat().st_size < 1024:
+            raise ValueError("DOWNLOADED_RAW_VIDEO_TOO_SMALL")
+
+    def _v10_28_ffprobe(path: _V1028Path) -> _V1028Dict[str, _V1028Any]:
+        cmd = [
+            "ffprobe", "-v", "error",
+            "-show_entries", "format=duration",
+            "-show_entries", "stream=width,height,r_frame_rate",
+            "-of", "json",
+            str(path),
+        ]
+        try:
+            out = _v10_28_subprocess.check_output(cmd, text=True, stderr=_v10_28_subprocess.STDOUT, timeout=30)
+            return _v10_28_json.loads(out or "{}")
+        except Exception as exc:
+            return {"ffprobe_error": repr(exc)}
+
+    class V1028ApproveRawRequest(_V1028BaseModel):
+        job_id: _V1028Optional[str] = None
+        asset_id: _V1028Optional[str] = None
+        raw_video_url: _V1028Optional[str] = None
+        subtitled_video_url: _V1028Optional[str] = None
+        video_url: _V1028Optional[str] = None
+        script_text: _V1028Optional[str] = None
+        quality_note: _V1028Optional[str] = None
+        approved_by: _V1028Optional[str] = None
+        job_result: _V1028Optional[_V1028Dict[str, _V1028Any]] = None
+
+    class V1028RejectRawRequest(_V1028BaseModel):
+        job_id: str
+        reason: _V1028Optional[str] = None
+        raw_video_url: _V1028Optional[str] = None
+        subtitled_video_url: _V1028Optional[str] = None
+        rejected_by: _V1028Optional[str] = None
+        job_result: _V1028Optional[_V1028Dict[str, _V1028Any]] = None
+
+    class V1028SliceRequest(_V1028BaseModel):
+        start_seconds: float = 0.0
+        end_seconds: _V1028Optional[float] = None
+        duration_seconds: _V1028Optional[float] = None
+        filename: _V1028Optional[str] = None
+        note: _V1028Optional[str] = None
+
+    @app.post("/api/video/assets/approve-raw")
+    def v10_28_approve_raw_asset(req: V1028ApproveRawRequest):
+        job_payload = req.job_result or {}
+        if not job_payload and req.job_id:
+            job_payload = _v10_28_get_job_payload(req.job_id)
+
+        raw_url = (
+            req.raw_video_url
+            or _v10_28_find_nested_url(job_payload, "raw_video_url")
+        )
+        subtitled_url = (
+            req.subtitled_video_url
+            or req.video_url
+            or _v10_28_find_nested_url(job_payload, "subtitled_video_url")
+            or _v10_28_find_nested_url(job_payload, "video_url")
+        )
+        job_id = req.job_id or str(job_payload.get("job_id") or job_payload.get("id") or "")
+        asset_id = _v10_28_safe_asset_id(req.asset_id or job_id or ("asset_" + _v10_28_uuid.uuid4().hex[:16]))
+
+        if not raw_url:
+            raise _V1028HTTPException(status_code=400, detail="RAW_VIDEO_URL_REQUIRED_OR_JOB_RESULT_MISSING")
+
+        asset_dir = _V1028_APPROVED_ROOT / asset_id
+        raw_path = asset_dir / "raw_no_subtitle.mp4"
+        meta_path = asset_dir / "asset_meta.json"
+        asset_dir.mkdir(parents=True, exist_ok=True)
+
+        try:
+            _v10_28_download_or_copy(raw_url, raw_path)
+        except Exception as exc:
+            raise _V1028HTTPException(status_code=502, detail=f"RAW_VIDEO_SAVE_FAILED: {exc!r}")
+
+        probe = _v10_28_ffprobe(raw_path)
+        script_text = req.script_text or _v10_28_find_nested_url(job_payload.get("request") or {}, "script_text") or ((job_payload.get("request") or {}).get("script_text") if isinstance(job_payload.get("request"), dict) else None)
+        meta = {
+            "asset_id": asset_id,
+            "status": "approved_raw_saved",
+            "source_job_id": job_id,
+            "approved_at": int(_v10_28_time.time()),
+            "approved_by": req.approved_by,
+            "quality_note": req.quality_note,
+            "raw_video_url": raw_url,
+            "subtitled_video_url": subtitled_url,
+            "video_url": subtitled_url,
+            "raw_video_path": str(raw_path),
+            "script_text": script_text,
+            "ffprobe": probe,
+            "cost_policy": "future_slice_reuses_raw_no_subtitle_mp4_no_fal",
+            "must_not_use_for_slice": ["video_url", "subtitled_video_url"],
+            "slice_source": "raw_no_subtitle.mp4",
+        }
+        meta_path.write_text(_v10_28_json.dumps(meta, ensure_ascii=False, indent=2))
+        return {"ok": True, "asset": meta}
+
+    @app.post("/api/video/assets/reject")
+    def v10_28_reject_raw_asset(req: V1028RejectRawRequest):
+        asset_id = _v10_28_safe_asset_id(req.job_id)
+        out = _V1028_REJECTED_ROOT / asset_id
+        out.mkdir(parents=True, exist_ok=True)
+        meta = {
+            "asset_id": asset_id,
+            "status": "rejected",
+            "source_job_id": req.job_id,
+            "rejected_at": int(_v10_28_time.time()),
+            "rejected_by": req.rejected_by,
+            "reason": req.reason,
+            "raw_video_url": req.raw_video_url or _v10_28_find_nested_url(req.job_result or {}, "raw_video_url"),
+            "subtitled_video_url": req.subtitled_video_url or _v10_28_find_nested_url(req.job_result or {}, "subtitled_video_url"),
+            "cost_policy": "rejected_assets_are_not_saved_for_reuse",
+        }
+        (out / "reject_meta.json").write_text(_v10_28_json.dumps(meta, ensure_ascii=False, indent=2))
+        return {"ok": True, "asset": meta}
+
+    @app.get("/api/video/assets")
+    def v10_28_list_raw_assets():
+        assets = []
+        _V1028_APPROVED_ROOT.mkdir(parents=True, exist_ok=True)
+        for meta_path in sorted(_V1028_APPROVED_ROOT.glob("*/asset_meta.json"), key=lambda x: x.stat().st_mtime, reverse=True):
+            meta = _v10_28_json_load(meta_path)
+            if meta:
+                assets.append(meta)
+        return {"ok": True, "count": len(assets), "assets": assets}
+
+    @app.get("/api/video/assets/{asset_id}")
+    def v10_28_get_raw_asset(asset_id: str):
+        asset_id = _v10_28_safe_asset_id(asset_id)
+        meta_path = _V1028_APPROVED_ROOT / asset_id / "asset_meta.json"
+        meta = _v10_28_json_load(meta_path)
+        if not meta:
+            raise _V1028HTTPException(status_code=404, detail="ASSET_NOT_FOUND")
+        return {"ok": True, "asset": meta}
+
+    @app.post("/api/video/assets/{asset_id}/slice")
+    def v10_28_slice_raw_asset(asset_id: str, req: V1028SliceRequest):
+        asset_id = _v10_28_safe_asset_id(asset_id)
+        meta_path = _V1028_APPROVED_ROOT / asset_id / "asset_meta.json"
+        meta = _v10_28_json_load(meta_path)
+        if not meta:
+            raise _V1028HTTPException(status_code=404, detail="ASSET_NOT_FOUND")
+        raw_path = _V1028Path(meta.get("raw_video_path") or (_V1028_APPROVED_ROOT / asset_id / "raw_no_subtitle.mp4"))
+        if not raw_path.exists():
+            raise _V1028HTTPException(status_code=404, detail="RAW_NO_SUBTITLE_FILE_NOT_FOUND")
+
+        start = max(0.0, float(req.start_seconds or 0.0))
+        if req.duration_seconds is not None:
+            duration = float(req.duration_seconds)
+        elif req.end_seconds is not None:
+            duration = float(req.end_seconds) - start
+        else:
+            duration = 5.0
+        if duration <= 0:
+            raise _V1028HTTPException(status_code=400, detail="SLICE_DURATION_MUST_BE_POSITIVE")
+        duration = min(duration, 120.0)
+
+        out_dir = _V1028_SLICE_ROOT / asset_id
+        out_dir.mkdir(parents=True, exist_ok=True)
+        filename = req.filename or f"slice_{int(start*1000)}_{int((start+duration)*1000)}_{_v10_28_uuid.uuid4().hex[:8]}.mp4"
+        filename = _v10_28_safe_asset_id(filename)
+        if not filename.endswith(".mp4"):
+            filename += ".mp4"
+        out_path = out_dir / filename
+
+        cmd = [
+            "ffmpeg", "-y",
+            "-ss", f"{start:.3f}",
+            "-i", str(raw_path),
+            "-t", f"{duration:.3f}",
+            "-c:v", "libx264",
+            "-preset", "veryfast",
+            "-crf", "20",
+            "-c:a", "aac",
+            "-movflags", "+faststart",
+            str(out_path),
+        ]
+        try:
+            proc = _v10_28_subprocess.run(cmd, stdout=_v10_28_subprocess.PIPE, stderr=_v10_28_subprocess.PIPE, text=True, timeout=300)
+        except Exception as exc:
+            raise _V1028HTTPException(status_code=500, detail=f"SLICE_FFMPEG_FAILED: {exc!r}")
+        if proc.returncode != 0 or not out_path.exists():
+            raise _V1028HTTPException(status_code=500, detail=("SLICE_FFMPEG_FAILED: " + (proc.stderr or "")[-2000:]))
+
+        slice_meta = {
+            "asset_id": asset_id,
+            "slice_id": filename,
+            "status": "completed",
+            "created_at": int(_v10_28_time.time()),
+            "source_raw_video_path": str(raw_path),
+            "output_path": str(out_path),
+            "download_url": f"/api/video/assets/{asset_id}/slices/{filename}",
+            "start_seconds": start,
+            "duration_seconds": duration,
+            "end_seconds": start + duration,
+            "uses_fal": False,
+            "note": req.note,
+        }
+        (out_dir / (filename + ".json")).write_text(_v10_28_json.dumps(slice_meta, ensure_ascii=False, indent=2))
+        return {"ok": True, "slice": slice_meta}
+
+    @app.get("/api/video/assets/{asset_id}/slices/{filename}")
+    def v10_28_get_raw_asset_slice(asset_id: str, filename: str):
+        asset_id = _v10_28_safe_asset_id(asset_id)
+        filename = _v10_28_safe_asset_id(filename)
+        path = _V1028_SLICE_ROOT / asset_id / filename
+        if not path.exists():
+            raise _V1028HTTPException(status_code=404, detail="SLICE_NOT_FOUND")
+        return _V1028FileResponse(str(path), media_type="video/mp4", filename=filename)
+
+    print("V10_28_REVIEW_RAW_ASSET_WORKFLOW_INSTALLED")
+except Exception as _v10_28_exc:
+    print("V10_28_REVIEW_RAW_ASSET_WORKFLOW_INSTALL_FAILED=" + repr(_v10_28_exc))
+
