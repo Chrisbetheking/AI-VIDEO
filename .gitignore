@@ -61,3 +61,4 @@ dist/
 build/
 node_modules/
 storage/
+frontend/tsconfig.tsbuildinfo
