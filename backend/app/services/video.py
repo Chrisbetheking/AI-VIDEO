@@ -1,3 +1,4 @@
+# V10_27L_FINAL_FAL_PROMPT_PURGE
 # AI_VIDEO_V10_27K_BUILD_PROMPT_KWARGS_FIX
 from __future__ import annotations
 
@@ -166,7 +167,7 @@ Format: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text
         text = _ass_escape(wrap_cn(seg.text, max_chars=14))
         override = r"{\fad(60,80)}"
         lines.append(
-            f"Dialogue: 0,{fmt_ass_time(seg.start)},{fmt_ass_time(seg.end)},Main,,0,0,0,,{override}{text}\n"
+            f"Dialogue: 0,{fmt_ass_time(seg.start)},{fmt_ass_time(seg.end)},Main,0,0,0,{override}{text}\n"
         )
 
     for cue in stickers:
@@ -185,7 +186,7 @@ Format: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text
             r"}"
         )
         lines.append(
-            f"Dialogue: 2,{fmt_ass_time(cue.start)},{fmt_ass_time(cue.end)},Sticker,,0,0,0,,{override}{keyword_text}\n"
+            f"Dialogue: 2,{fmt_ass_time(cue.start)},{fmt_ass_time(cue.end)},Sticker,0,0,0,{override}{keyword_text}\n"
         )
     output_path.write_text("".join(lines), encoding="utf-8")
 
@@ -481,16 +482,16 @@ def _v10_27k_clean_prompt_text(_v10_27k_text):
         import re as _v10_27k_re
         t = str(_v10_27k_text or '')
         patterns = [
-            r"\s*,\s*Malaysia MRT or LRT station entrance with commuters and nearby main road traffic,\s*no readable text signs,\s*(?:gentle pull out|slow left to right pan|steady street-level dolly|slow push in),\s*cinematic vertical 9:16,\s*realistic Malaysia property lifestyle,\s*no text,\s*no logos,\s*no subtitles,\s*no readable signs",
-            r"\s*,\s*Malaysia MRT or LRT station entrance with commuters and nearby main road traffic,\s*no readable text signs",
-            r"Malaysia MRT or LRT station entrance with commuters and nearby main road traffic,\s*no readable text signs,\s*(?:gentle pull out|slow left to right pan|steady street-level dolly|slow push in),\s*cinematic vertical 9:16,\s*realistic Malaysia property lifestyle,\s*no text,\s*no logos,\s*no subtitles,\s*no readable signs",
-            r"Malaysia MRT or LRT station entrance with commuters and nearby main road traffic",
+            r"\s*,\s*,\s*no readable text signs,\s*(?:gentle pull out|slow left to right pan|steady street-level dolly|slow push in),\s*cinematic vertical 9:16,\s*realistic Malaysia property lifestyle,\s*no text,\s*no logos,\s*no subtitles,\s*no readable signs",
+            r"\s*,\s*,\s*no readable text signs",
+            r",\s*no readable text signs,\s*(?:gentle pull out|slow left to right pan|steady street-level dolly|slow push in),\s*cinematic vertical 9:16,\s*realistic Malaysia property lifestyle,\s*no text,\s*no logos,\s*no subtitles,\s*no readable signs",
+            r"",
         ]
         old=t
         for pat in patterns:
             t=_v10_27k_re.sub(pat, '', t, flags=_v10_27k_re.I)
         t=_v10_27k_re.sub(r'\s+,', ',', t)
-        t=_v10_27k_re.sub(r'\s{2,}', ' ', t).strip(' ,')
+        t=_v10_27k_re.sub(r'\s{2,}', ' ', t).strip(',')
         if old != t:
             print('V10_27K_PURGED_GLOBAL_TRAFFIC_PROMPT_TEXT')
         return t

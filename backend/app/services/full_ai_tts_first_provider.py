@@ -1,3 +1,4 @@
+# V10_27L_FINAL_FAL_PROMPT_PURGE
 # AI_VIDEO_V10_27K_BUILD_PROMPT_KWARGS_FIX
 from __future__ import annotations
 
@@ -1216,7 +1217,7 @@ def _v10_23_write_ass(cues: List[Dict[str, Any]], ass_path: Path) -> Path:
         end = float(cue.get("end") or cue.get("end_seconds") or start + 1.2)
         if end <= start:
             end = start + 1.2
-        lines.append(f"Dialogue: 0,{_v10_23_ass_time(start)},{_v10_23_ass_time(end)},Main,,0,0,0,,{text}")
+        lines.append(f"Dialogue: 0,{_v10_23_ass_time(start)},{_v10_23_ass_time(end)},Main,0,0,0,{text}")
     ass_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return ass_path
 
@@ -1346,7 +1347,7 @@ def _v10_25_build_ass(cues, ass_path: Path):
     header='''[Script Info]\nScriptType: v4.00+\nPlayResX: 1080\nPlayResY: 1920\nScaledBorderAndShadow: yes\n\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\nStyle: Default,Arial,66,&H00FFFFFF,&H00FFFFFF,&H00000000,&H90000000,1,0,0,0,100,100,0,0,1,4,1,2,70,70,210,1\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n'''
     lines=[header]
     for c in cues or []:
-        lines.append(f"Dialogue: 0,{_v10_25_ass_time(c.get('start',0))},{_v10_25_ass_time(c.get('end',c.get('start',0)+1.5))},Default,,0,0,0,,{_v10_25_ass_line(c.get('clean_text') or c.get('text') or '', c.get('keywords') or [])}\n")
+        lines.append(f"Dialogue: 0,{_v10_25_ass_time(c.get('start',0))},{_v10_25_ass_time(c.get('end',c.get('start',0)+1.5))},Default,0,0,0,{_v10_25_ass_line(c.get('clean_text') or c.get('text') or '', c.get('keywords') or [])}\n")
     ass_path.write_text(''.join(lines),encoding='utf-8'); return ass_path
 
 def _v10_25_run(cmd, timeout=900):
@@ -1391,7 +1392,7 @@ def _v10_25_visual_policy_for_text(text, idx=1, prev_type=''):
     if scene=='lifestyle_support':
         if sentiment=='warning': subject='quiet Malaysian residential area with sparse shops and inconvenient daily amenities, no readable text signs'
         else: subject=['Malaysian shopping mall entrance near residential towers with residents walking naturally, no readable text signs','lively food street and casual restaurants near condominium area in Malaysia, people eating naturally, no readable text signs','supermarket and convenience store street-level daily amenities near Malaysian residences, no readable text signs'][idx%3]
-    elif scene=='transport': subject='Malaysia MRT or LRT station entrance with commuters and nearby main road traffic, no readable text signs'
+    elif scene=='transport': subject=', no readable text signs'
     elif scene=='medical': subject='community clinic and pharmacy street frontage in Malaysian residential neighborhood, no readable text signs'
     elif scene=='education': subject='families and children walking safely near school area and condominium towers in Malaysia, no readable text signs'
     elif scene=='interior': subject='bright modern Malaysian condominium interior with living room balcony daylight and practical layout, no text overlays'
@@ -2786,16 +2787,16 @@ def _v10_27k_clean_prompt_text(_v10_27k_text):
         import re as _v10_27k_re
         t = str(_v10_27k_text or '')
         patterns = [
-            r"\s*,\s*Malaysia MRT or LRT station entrance with commuters and nearby main road traffic,\s*no readable text signs,\s*(?:gentle pull out|slow left to right pan|steady street-level dolly|slow push in),\s*cinematic vertical 9:16,\s*realistic Malaysia property lifestyle,\s*no text,\s*no logos,\s*no subtitles,\s*no readable signs",
-            r"\s*,\s*Malaysia MRT or LRT station entrance with commuters and nearby main road traffic,\s*no readable text signs",
-            r"Malaysia MRT or LRT station entrance with commuters and nearby main road traffic,\s*no readable text signs,\s*(?:gentle pull out|slow left to right pan|steady street-level dolly|slow push in),\s*cinematic vertical 9:16,\s*realistic Malaysia property lifestyle,\s*no text,\s*no logos,\s*no subtitles,\s*no readable signs",
-            r"Malaysia MRT or LRT station entrance with commuters and nearby main road traffic",
+            r"\s*,\s*,\s*no readable text signs,\s*(?:gentle pull out|slow left to right pan|steady street-level dolly|slow push in),\s*cinematic vertical 9:16,\s*realistic Malaysia property lifestyle,\s*no text,\s*no logos,\s*no subtitles,\s*no readable signs",
+            r"\s*,\s*,\s*no readable text signs",
+            r",\s*no readable text signs,\s*(?:gentle pull out|slow left to right pan|steady street-level dolly|slow push in),\s*cinematic vertical 9:16,\s*realistic Malaysia property lifestyle,\s*no text,\s*no logos,\s*no subtitles,\s*no readable signs",
+            r"",
         ]
         old=t
         for pat in patterns:
             t=_v10_27k_re.sub(pat, '', t, flags=_v10_27k_re.I)
         t=_v10_27k_re.sub(r'\s+,', ',', t)
-        t=_v10_27k_re.sub(r'\s{2,}', ' ', t).strip(' ,')
+        t=_v10_27k_re.sub(r'\s{2,}', ' ', t).strip(',')
         if old != t:
             print('V10_27K_PURGED_GLOBAL_TRAFFIC_PROMPT_TEXT')
         return t
