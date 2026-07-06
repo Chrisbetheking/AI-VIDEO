@@ -1,3 +1,4 @@
+# V10_27M_NO_FINAL_PROMPT_APPEND
 # V10_27L_FINAL_FAL_PROMPT_PURGE
 # AI_VIDEO_V10_27K_BUILD_PROMPT_KWARGS_FIX
 from __future__ import annotations
@@ -1413,7 +1414,16 @@ def _v10_25_apply_visual_logic(shots, raw=None, script_text=''):
         if prev and p['scene_type']==prev and p['scene_type']=='lifestyle_support': p['visual_subject']='street-level supermarket and convenience shop daily errand scene near Malaysian residence, no readable text signs'
         prev=p['scene_type']; shot.update({k:v for k,v in p.items() if k not in shot or not shot.get(k)})
         base=shot.get('visual_prompt') or shot.get('prompt') or shot.get('subject') or ''
-        shot['visual_prompt']=(str(base).strip()+', '+f"{p['visual_subject']}, {p['camera_motion']}, cinematic vertical 9:16, realistic Malaysia property lifestyle, no text, no logos, no subtitles, no readable signs").strip(', ')
+        _v10_27m_base_prompt = str(base).strip()
+        if ("Premium realistic vertical 9:16 Malaysia property short-video B-roll" in _v10_27m_base_prompt
+            and "Narration meaning:" in _v10_27m_base_prompt
+            and "Required visual subject:" in _v10_27m_base_prompt):
+            shot['visual_prompt'] = _v10_27m_base_prompt
+            shot['prompt'] = _v10_27m_base_prompt
+            shot['v10_27m_no_final_prompt_append'] = True
+        else:
+            shot['visual_prompt'] = (_v10_27m_base_prompt + ', ' + f"{p['visual_subject']}, {p['camera_motion']}, cinematic vertical 9:16, realistic Malaysia property lifestyle, no text, no logos, no subtitles, no readable signs").strip(', ')
+            shot['prompt'] = shot['visual_prompt']
     return shots
 
 _v10_23_burn_subtitles_local = _v10_25_burn_subtitles_local
