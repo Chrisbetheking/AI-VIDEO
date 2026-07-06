@@ -786,3 +786,282 @@
   }
 })();
 
+
+
+/* AI VIDEO V10.30 - TTS-first route guard + keyword / voice tone workbench
+ * 1) Force legacy one-scene/start requests to tts-first/start.
+ * 2) Add visible keyword + AI voice tone workbench.
+ * 3) Inject keyword / voice / tone settings into generation payload.
+ */
+(function () {
+  'use strict';
+  if (window.__AI_VIDEO_V10_30_TTS_FIRST_VOICE_KEYWORDS__) return;
+  window.__AI_VIDEO_V10_30_TTS_FIRST_VOICE_KEYWORDS__ = true;
+
+  var STORE = 'ai_video_v10_30_voice_keyword_settings';
+  var PANEL_ID = 'ai-video-v10-30-workbench';
+  var CSS_ID = 'ai-video-v10-30-workbench-css';
+
+  function safeJsonParse(s, fallback) { try { return JSON.parse(s); } catch (e) { return fallback; } }
+  function text(x, fallback) {
+    if (x === null || x === undefined) return fallback || '';
+    var s = String(x).trim();
+    return s || (fallback || '');
+  }
+  function splitWords(s) {
+    return String(s || '')
+      .split(/[,，、\n\s]+/)
+      .map(function(x){ return x.trim(); })
+      .filter(Boolean);
+  }
+  function uniq(arr) {
+    var out = [], seen = {};
+    (arr || []).forEach(function(x) {
+      x = text(x);
+      if (!x || seen[x]) return;
+      seen[x] = true;
+      out.push(x);
+    });
+    return out;
+  }
+  function readSettings() {
+    var def = {
+      keywords: '华人区, 保守投资者, 房产贬值焦虑, 菜市场, 诊所, 补习中心',
+      persona: '马来西亚房产顾问',
+      voiceStyle: '真实聊天感',
+      tone: '真诚、直接、有提醒感',
+      pace: '正常偏快',
+      intensity: '标准',
+      sentenceStyle: '短句，像真人口播，不要长书面句',
+      forbidden: '宝子们, 家人们, 闭眼入, 永久升值, 保证回报'
+    };
+    var saved = safeJsonParse(localStorage.getItem(STORE) || 'null', null);
+    return Object.assign({}, def, saved || {});
+  }
+  function saveSettings(patch) {
+    var next = Object.assign({}, readSettings(), patch || {});
+    try { localStorage.setItem(STORE, JSON.stringify(next)); } catch(e) {}
+    return next;
+  }
+
+  function ensureCss() {
+    if (document.getElementById(CSS_ID)) return;
+    var style = document.createElement('style');
+    style.id = CSS_ID;
+    style.textContent = [
+      '#' + PANEL_ID + '{position:fixed;right:18px;top:118px;z-index:2147483645;width:min(370px,calc(100vw - 36px));max-height:78vh;overflow:auto;background:rgba(255,255,255,.98);color:#111827;border:1px solid rgba(124,58,237,.22);box-shadow:0 18px 60px rgba(76,29,149,.18);border-radius:18px;padding:14px;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Arial,sans-serif}',
+      '#' + PANEL_ID + ' *{box-sizing:border-box}',
+      '#' + PANEL_ID + ' .v1030-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:10px}',
+      '#' + PANEL_ID + ' .v1030-head strong{font-size:15px}',
+      '#' + PANEL_ID + ' .v1030-badge{font-size:11px;font-weight:900;color:#6d28d9;background:#f3e8ff;border-radius:999px;padding:4px 8px}',
+      '#' + PANEL_ID + ' .v1030-tip{font-size:12px;line-height:1.45;color:#64748b;margin:6px 0 10px}',
+      '#' + PANEL_ID + ' label{display:block;font-size:12px;font-weight:800;color:#334155;margin:8px 0 4px}',
+      '#' + PANEL_ID + ' input,#' + PANEL_ID + ' textarea,#' + PANEL_ID + ' select{width:100%;border:1px solid #e2e8f0;border-radius:10px;padding:8px 9px;font-size:12px;background:#fff;color:#111827;outline:none}',
+      '#' + PANEL_ID + ' textarea{min-height:54px;resize:vertical}',
+      '#' + PANEL_ID + ' .v1030-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}',
+      '#' + PANEL_ID + ' .v1030-chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}',
+      '#' + PANEL_ID + ' .v1030-chip{border:0;border-radius:999px;background:#f3e8ff;color:#6d28d9;font-size:11px;font-weight:800;padding:5px 8px;cursor:pointer}',
+      '#' + PANEL_ID + ' .v1030-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}',
+      '#' + PANEL_ID + ' button.v1030-primary{border:0;background:#7c3aed;color:#fff;border-radius:10px;padding:8px 10px;font-size:12px;font-weight:900;cursor:pointer}',
+      '#' + PANEL_ID + ' button.v1030-soft{border:0;background:#e2e8f0;color:#111827;border-radius:10px;padding:8px 10px;font-size:12px;font-weight:900;cursor:pointer}',
+      '#' + PANEL_ID + ' .v1030-status{font-size:12px;line-height:1.45;border-radius:10px;padding:8px;background:#eff6ff;color:#1d4ed8;margin-top:10px;word-break:break-all}',
+      '#' + PANEL_ID + '.v1030-min{width:auto;max-height:none;padding:10px 12px}',
+      '#' + PANEL_ID + '.v1030-min .v1030-body{display:none}',
+      '@media(max-width:900px){#' + PANEL_ID + '{right:10px;left:10px;top:auto;bottom:10px;width:auto;max-height:55vh}}'
+    ].join('\n');
+    document.head.appendChild(style);
+  }
+
+  function renderPanel() {
+    ensureCss();
+    var st = readSettings();
+    var el = document.getElementById(PANEL_ID);
+    if (!el) {
+      el = document.createElement('div');
+      el.id = PANEL_ID;
+      document.body.appendChild(el);
+    }
+
+    el.innerHTML = '';
+    var head = document.createElement('div');
+    head.className = 'v1030-head';
+    head.innerHTML = '<strong>关键词 / AI语气语调</strong><span class="v1030-badge">V10.30</span>';
+    el.appendChild(head);
+
+    var body = document.createElement('div');
+    body.className = 'v1030-body';
+    body.innerHTML = [
+      '<div class="v1030-tip">这里会自动写入成片生成请求。以后点生成时，会强制走 TTS-first，不再走 one-scene。</div>',
+      '<label>第二步补充关键词</label>',
+      '<textarea class="v1030-keywords" placeholder="例如：150万、华语、出租、流动性、诊所、菜市场">' + esc(st.keywords) + '</textarea>',
+      '<div class="v1030-chips">',
+      ['TRX','Mont Kiara','公寓客厅','公寓阳台','大堂','泳池','华人区','诊所','菜市场','补习中心','保守投资者','出租回报'].map(function(x){ return '<button class="v1030-chip" data-word="' + esc(x) + '">' + esc(x) + '</button>'; }).join(''),
+      '</div>',
+      '<div class="v1030-grid">',
+      '<div><label>口播人设</label><select class="v1030-persona"><option>马来西亚房产顾问</option><option>朋友聊天式顾问</option><option>专业投资顾问</option><option>犀利避坑顾问</option><option>温柔种草顾问</option></select></div>',
+      '<div><label>配音风格</label><select class="v1030-style"><option>真实聊天感</option><option>老板压迫感</option><option>短视频强钩子</option><option>销售转化感</option><option>案例讲述感</option><option>沉稳信任感</option></select></div>',
+      '<div><label>语气</label><select class="v1030-tone"><option>真诚、直接、有提醒感</option><option>专业克制、建立信任</option><option>轻微焦虑感、提醒避坑</option><option>朋友聊天、自然口语</option><option>成交导向、但不夸张</option></select></div>',
+      '<div><label>语速</label><select class="v1030-pace"><option>正常偏快</option><option>正常</option><option>偏慢稳重</option><option>快节奏短视频</option></select></div>',
+      '<div><label>情绪强度</label><select class="v1030-intensity"><option>标准</option><option>轻微</option><option>强烈</option></select></div>',
+      '<div><label>句子风格</label><select class="v1030-sentence"><option>短句，像真人口播，不要长书面句</option><option>更像朋友聊天，少用术语</option><option>专业判断逻辑，适合投资客</option><option>强钩子，前三秒更有压迫感</option></select></div>',
+      '</div>',
+      '<label>禁用表达</label>',
+      '<input class="v1030-forbidden" value="' + esc(st.forbidden) + '" />',
+      '<div class="v1030-actions"><button class="v1030-primary v1030-save">保存设置</button><button class="v1030-soft v1030-minbtn">收起</button></div>',
+      '<div class="v1030-status">当前：TTS-first 强制开启；one-scene/start 会被自动改写。</div>'
+    ].join('');
+    el.appendChild(body);
+
+    setSelectValue(body.querySelector('.v1030-persona'), st.persona);
+    setSelectValue(body.querySelector('.v1030-style'), st.voiceStyle);
+    setSelectValue(body.querySelector('.v1030-tone'), st.tone);
+    setSelectValue(body.querySelector('.v1030-pace'), st.pace);
+    setSelectValue(body.querySelector('.v1030-intensity'), st.intensity);
+    setSelectValue(body.querySelector('.v1030-sentence'), st.sentenceStyle);
+
+    body.querySelectorAll('.v1030-chip').forEach(function(btn) {
+      btn.onclick = function() {
+        var word = btn.getAttribute('data-word') || '';
+        var ta = body.querySelector('.v1030-keywords');
+        var words = uniq(splitWords(ta.value).concat([word]));
+        ta.value = words.join('，');
+        saveFromPanel(body);
+      };
+    });
+
+    body.querySelector('.v1030-save').onclick = function() {
+      saveFromPanel(body);
+      setStatus('已保存：关键词和 AI 语气语调会写入下一次生成请求。');
+    };
+    body.querySelector('.v1030-minbtn').onclick = function() {
+      el.classList.toggle('v1030-min');
+      if (el.classList.contains('v1030-min')) {
+        el.innerHTML = '<div class="v1030-head"><strong>关键词 / 语气</strong><span class="v1030-badge">V10.30</span></div>';
+        el.onclick = function(){ el.classList.remove('v1030-min'); el.onclick = null; renderPanel(); };
+      }
+    };
+  }
+
+  function esc(s) {
+    return String(s || '').replace(/[&<>"']/g, function(ch) {
+      return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[ch];
+    });
+  }
+  function setSelectValue(sel, value) {
+    if (!sel) return;
+    var found = false;
+    Array.from(sel.options).forEach(function(o){ if (o.value === value) found = true; });
+    if (!found && value) {
+      var opt = document.createElement('option');
+      opt.value = value;
+      opt.textContent = value;
+      sel.appendChild(opt);
+    }
+    if (value) sel.value = value;
+  }
+  function saveFromPanel(body) {
+    var next = saveSettings({
+      keywords: text(body.querySelector('.v1030-keywords') && body.querySelector('.v1030-keywords').value),
+      persona: text(body.querySelector('.v1030-persona') && body.querySelector('.v1030-persona').value),
+      voiceStyle: text(body.querySelector('.v1030-style') && body.querySelector('.v1030-style').value),
+      tone: text(body.querySelector('.v1030-tone') && body.querySelector('.v1030-tone').value),
+      pace: text(body.querySelector('.v1030-pace') && body.querySelector('.v1030-pace').value),
+      intensity: text(body.querySelector('.v1030-intensity') && body.querySelector('.v1030-intensity').value),
+      sentenceStyle: text(body.querySelector('.v1030-sentence') && body.querySelector('.v1030-sentence').value),
+      forbidden: text(body.querySelector('.v1030-forbidden') && body.querySelector('.v1030-forbidden').value)
+    });
+    return next;
+  }
+  function setStatus(msg) {
+    var el = document.querySelector('#' + PANEL_ID + ' .v1030-status');
+    if (el) el.textContent = msg;
+  }
+
+  function patchPayload(payload) {
+    if (!payload || typeof payload !== 'object') return payload;
+    var st = readSettings();
+    var words = splitWords(st.keywords);
+
+    payload.extra_keywords = uniq([].concat(payload.extra_keywords || [], payload.keywords || [], words));
+    payload.manual_keywords = payload.extra_keywords;
+    payload.subtitle_keywords = uniq([].concat(splitWords(payload.subtitle_keywords || ''), words)).join(',');
+
+    payload.keyword_sfx_enabled = true;
+    payload.voice_persona = st.persona;
+    payload.voice_style = st.voiceStyle;
+    payload.voice_tone = st.tone;
+    payload.voice_pace = st.pace;
+    payload.voice_intensity = st.intensity;
+    payload.sentence_style = st.sentenceStyle;
+    payload.forbidden_expressions = splitWords(st.forbidden);
+
+    var speechNote = [
+      'AI口播语气语调要求：',
+      '人设=' + st.persona,
+      '配音风格=' + st.voiceStyle,
+      '语气=' + st.tone,
+      '语速=' + st.pace,
+      '情绪强度=' + st.intensity,
+      '句子风格=' + st.sentenceStyle,
+      '必须融入关键词=' + words.join('、'),
+      '禁用表达=' + splitWords(st.forbidden).join('、')
+    ].join('；');
+
+    payload.speech_direction = speechNote;
+    payload.voice_director_note = speechNote;
+    payload.style = text(payload.style) ? (payload.style + '；' + speechNote) : speechNote;
+
+    return payload;
+  }
+
+  function patchInitBody(init) {
+    init = Object.assign({}, init || {});
+    if (!init.body || typeof init.body !== 'string') return init;
+    var raw = init.body;
+    var data = safeJsonParse(raw, null);
+    if (!data || typeof data !== 'object') return init;
+    init.body = JSON.stringify(patchPayload(data));
+    return init;
+  }
+
+  function rewriteUrl(url) {
+    if (!url) return url;
+    if (url.indexOf('/api/video/full-ai/one-scene/start') >= 0) {
+      return url.replace('/api/video/full-ai/one-scene/start', '/api/video/full-ai/tts-first/start');
+    }
+    return url;
+  }
+
+  var prevFetch = window.fetch;
+  window.fetch = async function(input, init) {
+    var url = '';
+    try { url = typeof input === 'string' ? input : (input && input.url) || ''; } catch(e) {}
+
+    var nextUrl = rewriteUrl(url);
+    var isStart = /\/api\/video\/full-ai\/(one-scene|tts-first)\/start/.test(url || '');
+
+    if (nextUrl !== url) {
+      setStatus('已拦截旧路由：one-scene/start → tts-first/start');
+      if (typeof input === 'string') {
+        input = nextUrl;
+      } else if (input && input.url) {
+        try { input = new Request(nextUrl, input); } catch(e) {}
+      }
+    }
+
+    if (isStart) {
+      init = patchInitBody(init || {});
+    }
+
+    return prevFetch.call(this, input, init);
+  };
+
+  function boot() {
+    renderPanel();
+    setTimeout(renderPanel, 600);
+    setTimeout(renderPanel, 1800);
+  }
+
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot); else boot();
+})();
+
