@@ -377,3 +377,412 @@
 /* AI_VIDEO_V10_27H_STRICT_FINAL_PROMPT_PURGE */
 
 /* AI_VIDEO_V10_27I_RUNTIME_PROMPT_CLEANER */
+
+
+
+/* AI VIDEO V10.29 - raw review / approved asset / slice panel
+ * Purpose:
+ * 1) After generation completes, show subtitle preview and raw preview separately.
+ * 2) Human approves only the RAW no-subtitle source.
+ * 3) Approved raw assets can be sliced without FAL cost.
+ */
+(function () {
+  'use strict';
+  if (window.__AI_VIDEO_V10_29_RAW_REVIEW_PANEL__) return;
+  window.__AI_VIDEO_V10_29_RAW_REVIEW_PANEL__ = true;
+
+  var STORE_KEY = 'ai_video_wizard_resume_v10_24';
+  var PANEL_ID = 'ai-video-v10-29-raw-review-panel';
+  var CSS_ID = 'ai-video-v10-29-raw-review-css';
+  var ASSET_REFRESH_MS = 8000;
+  var assetTimer = null;
+
+  function isObj(x) { return x && typeof x === 'object'; }
+  function text(x, fallback) {
+    if (x === null || x === undefined) return fallback || '';
+    var s = String(x).trim();
+    return s || (fallback || '');
+  }
+  function safeJsonParse(s, fallback) { try { return JSON.parse(s); } catch (e) { return fallback; } }
+  function readState() {
+    try { return safeJsonParse(localStorage.getItem(STORE_KEY) || 'null', null); } catch (e) { return null; }
+  }
+  function findNested(data, keys) {
+    if (!isObj(data)) return '';
+    for (var i = 0; i < keys.length; i++) {
+      var v = text(data[keys[i]]);
+      if (v) return v;
+    }
+    if (isObj(data.job)) {
+      var a = findNested(data.job, keys);
+      if (a) return a;
+    }
+    if (isObj(data.result)) {
+      var b = findNested(data.result, keys);
+      if (b) return b;
+    }
+    if (isObj(data.data)) {
+      var c = findNested(data.data, keys);
+      if (c) return c;
+    }
+    return '';
+  }
+  function getJobId(st) {
+    return text(st && (st.job_id || st.task_id || st.id));
+  }
+  function getStatus(st) {
+    return text(st && st.status, 'running').toLowerCase();
+  }
+  function isCompleted(st) {
+    var s = getStatus(st);
+    return s === 'completed' || s === 'done' || s === 'success' || s === 'succeeded';
+  }
+  function getSubUrl(st) {
+    return text(
+      (st && (st.subtitled_video_url || st.final_video_url || st.video_url)) ||
+      findNested(st && st.last_response, ['subtitled_video_url', 'final_video_url', 'video_url'])
+    );
+  }
+  function getRawUrl(st) {
+    return text(
+      (st && st.raw_video_url) ||
+      findNested(st && st.last_response, ['raw_video_url'])
+    );
+  }
+  function ensureCss() {
+    if (document.getElementById(CSS_ID)) return;
+    var style = document.createElement('style');
+    style.id = CSS_ID;
+    style.textContent = [
+      '#' + PANEL_ID + '{position:fixed;left:18px;bottom:18px;z-index:2147483646;width:min(440px,calc(100vw - 36px));max-height:88vh;overflow:auto;background:rgba(15,23,42,.97);color:#fff;border:1px solid rgba(255,255,255,.16);box-shadow:0 20px 60px rgba(0,0,0,.38);border-radius:18px;padding:14px;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Arial,sans-serif}',
+      '#' + PANEL_ID + ' *{box-sizing:border-box}',
+      '#' + PANEL_ID + ' .v1029-title{font-size:15px;font-weight:900;margin-bottom:8px;display:flex;align-items:center;justify-content:space-between;gap:8px}',
+      '#' + PANEL_ID + ' .v1029-badge{font-size:11px;font-weight:900;border-radius:999px;padding:3px 8px;background:rgba(59,130,246,.22);color:#bfdbfe}',
+      '#' + PANEL_ID + ' .v1029-line{font-size:12px;line-height:1.45;color:rgba(255,255,255,.78);word-break:break-all;margin:5px 0}',
+      '#' + PANEL_ID + ' .v1029-warn{font-size:12px;line-height:1.45;color:#fde68a;background:rgba(245,158,11,.14);border:1px solid rgba(245,158,11,.25);border-radius:12px;padding:8px;margin-top:8px}',
+      '#' + PANEL_ID + ' .v1029-ok{font-size:12px;line-height:1.45;color:#bbf7d0;background:rgba(16,185,129,.14);border:1px solid rgba(16,185,129,.25);border-radius:12px;padding:8px;margin-top:8px}',
+      '#' + PANEL_ID + ' .v1029-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px}',
+      '#' + PANEL_ID + ' video{width:100%;max-height:300px;border-radius:12px;background:#000;border:1px solid rgba(255,255,255,.12)}',
+      '#' + PANEL_ID + ' .v1029-video-label{font-size:11px;font-weight:800;color:rgba(255,255,255,.76);margin:0 0 5px}',
+      '#' + PANEL_ID + ' .v1029-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}',
+      '#' + PANEL_ID + ' button,#' + PANEL_ID + ' a{border:0;border-radius:10px;padding:8px 10px;font-size:12px;font-weight:800;cursor:pointer;text-decoration:none}',
+      '#' + PANEL_ID + ' .v1029-primary{background:#fff;color:#111827}',
+      '#' + PANEL_ID + ' .v1029-green{background:#10b981;color:white}',
+      '#' + PANEL_ID + ' .v1029-red{background:#ef4444;color:white}',
+      '#' + PANEL_ID + ' .v1029-ghost{background:rgba(255,255,255,.12);color:#fff}',
+      '#' + PANEL_ID + ' .v1029-section{margin-top:14px;padding-top:12px;border-top:1px solid rgba(255,255,255,.12)}',
+      '#' + PANEL_ID + ' .v1029-asset{border:1px solid rgba(255,255,255,.12);border-radius:12px;padding:10px;margin-top:8px;background:rgba(255,255,255,.05)}',
+      '#' + PANEL_ID + ' .v1029-input{width:78px;background:rgba(255,255,255,.1);color:#fff;border:1px solid rgba(255,255,255,.18);border-radius:8px;padding:7px;font-size:12px}',
+      '#' + PANEL_ID + ' .v1029-minirow{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:8px}',
+      '@media (max-width:720px){#' + PANEL_ID + '{left:10px;right:10px;width:auto;bottom:10px}#' + PANEL_ID + ' .v1029-grid{grid-template-columns:1fr}}'
+    ].join('\n');
+    document.head.appendChild(style);
+  }
+
+  async function postJson(url, body) {
+    var res = await fetch(url, {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      credentials: 'include',
+      cache: 'no-store',
+      body: JSON.stringify(body || {})
+    });
+    var data = await res.json().catch(function(){ return {}; });
+    if (!res.ok || data.ok === false) {
+      throw new Error(text(data.detail || data.error || data.message, '请求失败'));
+    }
+    return data;
+  }
+  async function getJson(url) {
+    var res = await fetch(url, { credentials:'include', cache:'no-store' });
+    var data = await res.json().catch(function(){ return {}; });
+    if (!res.ok || data.ok === false) throw new Error(text(data.detail || data.error || data.message, '请求失败'));
+    return data;
+  }
+
+  async function approveRaw(jobId) {
+    var note = prompt('确认保存烧字幕前 raw 原片？可填写质量备注：', '人工确认通过，保存 raw 无字幕原片');
+    if (note === null) return;
+    setMessage('正在保存 raw 原片...', 'warn');
+    try {
+      var data = await postJson('/api/video/assets/approve-raw', {
+        job_id: jobId,
+        quality_note: note || '人工确认通过'
+      });
+      setMessage('已保存 raw 原片：' + (data.asset && data.asset.raw_video_path ? data.asset.raw_video_path : jobId), 'ok');
+      await loadAssets();
+    } catch (e) {
+      setMessage('保存失败：' + (e && e.message ? e.message : String(e)), 'warn');
+    }
+  }
+
+  async function rejectRaw(jobId) {
+    var reason = prompt('确认废弃这个视频？填写原因：', '画面质量不通过，不保存 raw 原片');
+    if (reason === null) return;
+    setMessage('正在标记废弃...', 'warn');
+    try {
+      await postJson('/api/video/assets/reject', {
+        job_id: jobId,
+        reason: reason || '人工拒绝'
+      });
+      setMessage('已标记 rejected，不会进入 raw 素材库。', 'ok');
+      await loadAssets();
+    } catch (e) {
+      setMessage('废弃失败：' + (e && e.message ? e.message : String(e)), 'warn');
+    }
+  }
+
+  function setMessage(msg, type) {
+    var el = document.querySelector('#' + PANEL_ID + ' .v1029-message');
+    if (!el) return;
+    el.className = 'v1029-message ' + (type === 'ok' ? 'v1029-ok' : 'v1029-warn');
+    el.textContent = msg;
+    el.style.display = msg ? 'block' : 'none';
+  }
+
+  async function loadAssets() {
+    var box = document.querySelector('#' + PANEL_ID + ' .v1029-assets');
+    if (!box) return;
+    try {
+      var data = await getJson('/api/video/assets');
+      var assets = Array.isArray(data.assets) ? data.assets : [];
+      box.innerHTML = '';
+      if (!assets.length) {
+        var empty = document.createElement('div');
+        empty.className = 'v1029-line';
+        empty.textContent = '暂无已确认 raw 原片素材。';
+        box.appendChild(empty);
+        return;
+      }
+      assets.slice(0, 6).forEach(function(asset) {
+        box.appendChild(renderAsset(asset));
+      });
+    } catch (e) {
+      box.innerHTML = '<div class="v1029-warn">素材库加载失败：' + escapeHtml(e && e.message ? e.message : String(e)) + '</div>';
+    }
+  }
+
+  function escapeHtml(s) {
+    return String(s || '').replace(/[&<>"']/g, function(ch) {
+      return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[ch];
+    });
+  }
+
+  function renderAsset(asset) {
+    var wrap = document.createElement('div');
+    wrap.className = 'v1029-asset';
+
+    var id = text(asset.asset_id);
+    var rawPath = text(asset.raw_video_path);
+    var duration = text(asset.ffprobe && asset.ffprobe.format && asset.ffprobe.format.duration);
+    var rawUrl = text(asset.raw_video_url);
+
+    wrap.innerHTML = [
+      '<div class="v1029-line"><b>asset_id：</b>' + escapeHtml(id) + '</div>',
+      '<div class="v1029-line"><b>raw：</b>' + escapeHtml(rawPath || rawUrl) + '</div>',
+      duration ? '<div class="v1029-line"><b>duration：</b>' + escapeHtml(duration) + 's</div>' : '',
+      '<div class="v1029-minirow">',
+      '<label class="v1029-line">开始 <input class="v1029-input v1029-start" value="0" /></label>',
+      '<label class="v1029-line">时长 <input class="v1029-input v1029-duration" value="5" /></label>',
+      '</div>'
+    ].join('');
+
+    var row = document.createElement('div');
+    row.className = 'v1029-actions';
+
+    var btnSlice = document.createElement('button');
+    btnSlice.className = 'v1029-green';
+    btnSlice.textContent = '从 raw 切片';
+    btnSlice.onclick = async function() {
+      var start = parseFloat((wrap.querySelector('.v1029-start') || {}).value || '0');
+      var dur = parseFloat((wrap.querySelector('.v1029-duration') || {}).value || '5');
+      if (!isFinite(start) || start < 0) start = 0;
+      if (!isFinite(dur) || dur <= 0) dur = 5;
+      setMessage('正在从 raw 原片切片，不调用 FAL...', 'warn');
+      try {
+        var data = await postJson('/api/video/assets/' + encodeURIComponent(id) + '/slice', {
+          start_seconds: start,
+          duration_seconds: dur,
+          note: '前端 V10.29 从 raw 无字幕原片切片'
+        });
+        var sl = data.slice || {};
+        setMessage('切片完成 uses_fal=' + sl.uses_fal + '：' + sl.download_url, 'ok');
+        if (sl.download_url) {
+          window.open(sl.download_url, '_blank', 'noreferrer');
+        }
+      } catch (e) {
+        setMessage('切片失败：' + (e && e.message ? e.message : String(e)), 'warn');
+      }
+    };
+    row.appendChild(btnSlice);
+
+    if (rawUrl) {
+      var a = document.createElement('a');
+      a.className = 'v1029-ghost';
+      a.href = rawUrl;
+      a.target = '_blank';
+      a.rel = 'noreferrer';
+      a.textContent = '打开 raw';
+      row.appendChild(a);
+    }
+
+    wrap.appendChild(row);
+    return wrap;
+  }
+
+  function renderPanel() {
+    ensureCss();
+    var st = readState() || {};
+    var jobId = getJobId(st);
+    var subUrl = getSubUrl(st);
+    var rawUrl = getRawUrl(st);
+    var completed = isCompleted(st);
+    var status = text(st.status, '暂无任务');
+
+    var el = document.getElementById(PANEL_ID);
+    if (!el) {
+      el = document.createElement('div');
+      el.id = PANEL_ID;
+      document.body.appendChild(el);
+    }
+
+    el.innerHTML = '';
+
+    var title = document.createElement('div');
+    title.className = 'v1029-title';
+    title.innerHTML = '<span>人工确认 raw 原片</span><span class="v1029-badge">V10.29</span>';
+    el.appendChild(title);
+
+    var info = document.createElement('div');
+    info.className = 'v1029-line';
+    info.textContent = jobId ? ('任务：' + jobId + ' ｜ 状态：' + status) : '等待生成任务完成后自动显示确认按钮。';
+    el.appendChild(info);
+
+    var msg = document.createElement('div');
+    msg.className = 'v1029-message v1029-warn';
+    msg.style.display = 'none';
+    el.appendChild(msg);
+
+    if (jobId && completed) {
+      if (!rawUrl) {
+        var warn = document.createElement('div');
+        warn.className = 'v1029-warn';
+        warn.textContent = '当前任务没有 raw_video_url，不能保存为可复用 raw 原片。';
+        el.appendChild(warn);
+      }
+
+      var grid = document.createElement('div');
+      grid.className = 'v1029-grid';
+
+      var left = document.createElement('div');
+      left.innerHTML = '<div class="v1029-video-label">字幕版预览 video_url</div>';
+      if (subUrl) {
+        var v1 = document.createElement('video');
+        v1.controls = true;
+        v1.playsInline = true;
+        v1.src = subUrl;
+        left.appendChild(v1);
+      } else {
+        left.innerHTML += '<div class="v1029-line">暂无字幕版链接</div>';
+      }
+      grid.appendChild(left);
+
+      var right = document.createElement('div');
+      right.innerHTML = '<div class="v1029-video-label">无字幕 raw 原片 raw_video_url</div>';
+      if (rawUrl) {
+        var v2 = document.createElement('video');
+        v2.controls = true;
+        v2.playsInline = true;
+        v2.src = rawUrl;
+        right.appendChild(v2);
+      } else {
+        right.innerHTML += '<div class="v1029-line">暂无 raw 原片链接</div>';
+      }
+      grid.appendChild(right);
+
+      el.appendChild(grid);
+
+      var actions = document.createElement('div');
+      actions.className = 'v1029-actions';
+
+      var btnApprove = document.createElement('button');
+      btnApprove.className = 'v1029-green';
+      btnApprove.textContent = '确认保存 raw 原片';
+      btnApprove.disabled = !rawUrl;
+      btnApprove.onclick = function() { approveRaw(jobId); };
+      actions.appendChild(btnApprove);
+
+      var btnReject = document.createElement('button');
+      btnReject.className = 'v1029-red';
+      btnReject.textContent = '不满意，废弃';
+      btnReject.onclick = function() { rejectRaw(jobId); };
+      actions.appendChild(btnReject);
+
+      if (subUrl) {
+        var a1 = document.createElement('a');
+        a1.className = 'v1029-primary';
+        a1.href = subUrl;
+        a1.target = '_blank';
+        a1.rel = 'noreferrer';
+        a1.textContent = '打开字幕版';
+        actions.appendChild(a1);
+      }
+
+      if (rawUrl) {
+        var a2 = document.createElement('a');
+        a2.className = 'v1029-ghost';
+        a2.href = rawUrl;
+        a2.target = '_blank';
+        a2.rel = 'noreferrer';
+        a2.textContent = '打开 raw 原片';
+        actions.appendChild(a2);
+      }
+
+      el.appendChild(actions);
+    } else if (jobId) {
+      var running = document.createElement('div');
+      running.className = 'v1029-warn';
+      running.textContent = '任务还没完成，完成后这里会出现“确认保存 raw 原片 / 废弃”按钮。';
+      el.appendChild(running);
+    }
+
+    var section = document.createElement('div');
+    section.className = 'v1029-section';
+    section.innerHTML = '<div class="v1029-title"><span>已确认 raw 素材库</span><button class="v1029-ghost v1029-refresh-assets">刷新</button></div><div class="v1029-assets"><div class="v1029-line">正在加载...</div></div>';
+    el.appendChild(section);
+
+    var refresh = section.querySelector('.v1029-refresh-assets');
+    if (refresh) refresh.onclick = loadAssets;
+
+    loadAssets();
+  }
+
+  function boot() {
+    renderPanel();
+    if (!assetTimer) assetTimer = setInterval(renderPanel, ASSET_REFRESH_MS);
+  }
+
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot); else boot();
+  window.addEventListener('storage', function(e) { if (e.key === STORE_KEY) setTimeout(renderPanel, 100); });
+
+  var originalFetch = window.fetch;
+  if (!window.__AI_VIDEO_V10_29_FETCH_WRAPPED__) {
+    window.__AI_VIDEO_V10_29_FETCH_WRAPPED__ = true;
+    window.fetch = async function(input, init) {
+      var response = await originalFetch.apply(this, arguments);
+      try {
+        var url = typeof input === 'string' ? input : (input && input.url) || '';
+        var method = text((init && init.method) || (input && input.method) || 'GET').toUpperCase();
+        if (
+          /\/api\/video\/full-ai\/(one-scene|tts-first)\/job\//.test(url) ||
+          /\/api\/video\/full-ai\/(one-scene|tts-first)\/start/.test(url) ||
+          /\/api\/video\/assets/.test(url)
+        ) {
+          setTimeout(renderPanel, 600);
+        }
+      } catch(e) {}
+      return response;
+    };
+  }
+})();
+
