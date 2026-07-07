@@ -1,1 +1,2 @@
-/* V10.34 complete: old floating hotfix disabled. Native UI is in frontend/src/App.tsx */
+/* V10.34 original UI package: legacy floating hotfix panels disabled intentionally. */
+window.__AI_VIDEO_FLOATING_HOTFIX_DISABLED__ = true;

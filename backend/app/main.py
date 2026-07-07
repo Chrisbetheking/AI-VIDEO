@@ -6141,10 +6141,9 @@ except Exception as _v10_28_exc:
 
 
 
-# ===== V10.34 A-G COMPLETE PROVIDER =====
+# === V10.34 A-G original UI complete extension ===
 try:
-    from app.services.v10_34_complete_provider import install_v10_34_complete
-    install_v10_34_complete(app)
-except Exception as exc:
-    print("V10_34_A_TO_G_COMPLETE_LOAD_FAILED", repr(exc), flush=True)
-# ===== /V10.34 A-G COMPLETE PROVIDER =====
+    from app.services.v10_34_complete_provider import install_v10_34_complete as _install_v10_34_complete
+    _install_v10_34_complete(app)
+except Exception as _v10_34_complete_exc:
+    print('V10_34_A_TO_G_ORIGINAL_UI_INSTALL_FAILED', _v10_34_complete_exc, flush=True)

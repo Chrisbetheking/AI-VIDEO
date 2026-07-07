@@ -1,953 +1,489 @@
-
+# V10.34 A-G non-invasive backend extension
+# Keeps the existing UI untouched while adding the requested workflow endpoints.
 from __future__ import annotations
 
-import asyncio
 import csv
-import hashlib
 import json
 import os
-import re
 import shutil
 import sqlite3
 import time
 import uuid
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Dict, List, Optional
 
-import httpx
-from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse, JSONResponse
-from pydantic import BaseModel
+from fastapi import APIRouter, File, Form, Request, UploadFile
+from fastapi.responses import JSONResponse
 
-BACKEND_VERSION = "v10.34-a-to-g-complete"
-BACKEND_ORIGIN = os.getenv("AI_VIDEO_PUBLIC_BACKEND", "https://ai-video.47-76-143-158.sslip.io").rstrip("/")
-OPENCLAW_CAPTURE_URL = os.getenv("OPENCLAW_CAPTURE_URL", "").strip()
-DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "").strip()
-DEEPSEEK_BASE_URL = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com").rstrip("/")
-DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
+router = APIRouter(tags=["v10-34-complete"])
 
+ROOT = Path(__file__).resolve().parents[2]
+DATA = ROOT / "data"
+MATERIAL_DIR = DATA / "material-library"
+ACCOUNT_DB = DATA / "douyin-accounts" / "accounts_v10_34.sqlite3"
+OBSIDIAN_DIR = DATA / "obsidian-vault"
+JOBS_DIR = DATA / "v10-34-jobs"
 
-def _storage_root() -> Path:
-    root = Path(os.getenv("AI_VIDEO_STORAGE_DIR", "/opt/ai-video/storage"))
-    try:
-        root.mkdir(parents=True, exist_ok=True)
-        return root
-    except Exception:
-        root = Path(__file__).resolve().parents[2] / "data" / "storage"
-        root.mkdir(parents=True, exist_ok=True)
-        return root
-
-ROOT = _storage_root()
-BASE = ROOT / "v10_34_complete"
-DB = BASE / "v10_34_complete.sqlite3"
-MATERIAL_DIR = BASE / "material_library"
-SHOT_ASSET_DIR = BASE / "generated_shot_assets"
-FINAL_DIR = BASE / "approved_final_videos"
-VOICE_DIR = BASE / "voice_previews"
-SCRIPT_DIR = BASE / "script_versions"
-OBSIDIAN_DIR = ROOT / "obsidian-vault"
-ACCOUNT_DIR = BASE / "account_imports"
-OPENCLAW_DIR = BASE / "openclaw"
-for p in [BASE, MATERIAL_DIR, SHOT_ASSET_DIR, FINAL_DIR, VOICE_DIR, SCRIPT_DIR, OBSIDIAN_DIR, ACCOUNT_DIR, OPENCLAW_DIR]:
-    p.mkdir(parents=True, exist_ok=True)
-
-CATEGORY_DEFS = [
-    {"id":"property","label":"房产/楼盘素材","keywords":["房产","楼盘","公寓","condo","样板间","外立面","物业"]},
-    {"id":"life","label":"生活配套","keywords":["生活","超市","便利店","商场","配套","华人","社区","街区"]},
-    {"id":"traffic","label":"交通出勤","keywords":["交通","地铁","捷运","MRT","LRT","公交","通勤","车站","高速","主干道"]},
-    {"id":"medical","label":"医疗/诊所/药房","keywords":["医疗","诊所","药房","医院","看病","买药","clinic","pharmacy"]},
-    {"id":"food","label":"餐饮/食阁","keywords":["餐饮","吃","食阁","饭","咖啡","餐厅","外卖","小吃"]},
-    {"id":"education","label":"教育/学校","keywords":["学校","教育","国际学校","孩子","上学","校车"]},
-    {"id":"interior","label":"户型/室内","keywords":["户型","采光","阳台","卧室","客厅","厨房","装修","空间"]},
-    {"id":"deal","label":"成交/带看/租客","keywords":["投资","出租","租客","转售","回报","带看","成交","持有"]},
-    {"id":"avatar","label":"人物口播/数字人模板","keywords":["口播","真人","数字人","avatar","人物"]},
-    {"id":"report","label":"报告/资料/截图","keywords":["报告","截图","资料","表格","政策","清单"]},
+CATEGORIES = [
+    "生活配套", "交通出勤", "医疗药房", "餐饮食馆", "户型采光", "学校教育",
+    "商业商超", "项目园区", "城市航拍", "顾问口播", "客户案例", "政策流程", "其他"
 ]
 
-BANNED_TRANSITIONS = [
-    "cut", "smooth_cut", "flash", "white flash", "black flash", "strobe", "flicker", "hard cut",
-    "jump cut", "pull_out", "opening_slow_push_in", "horizontal_pan_match", "match cut", "smash cut", "wipe", "glitch"
-]
+BANNED_TRANSITIONS = ["cut", "smooth_cut", "flash", "flash_cut", "hard_cut", "jump_cut", "pull_out"]
 SAFE_TRANSITION = "smooth_dissolve_no_flash"
 
 
-def _db() -> sqlite3.Connection:
-    con = sqlite3.connect(DB)
-    con.row_factory = sqlite3.Row
-    con.execute("PRAGMA journal_mode=WAL")
-    con.execute("PRAGMA foreign_keys=ON")
-    return con
+def _now() -> str:
+    return time.strftime("%Y-%m-%d %H:%M:%S")
 
 
-def _init_db() -> None:
-    with _db() as con:
-        con.executescript("""
-        CREATE TABLE IF NOT EXISTS materials (
-            asset_id TEXT PRIMARY KEY,
-            filename TEXT,
-            original_name TEXT,
-            kind TEXT NOT NULL,
-            category TEXT NOT NULL,
-            city TEXT NOT NULL DEFAULT '',
-            district TEXT NOT NULL DEFAULT '',
-            source TEXT NOT NULL DEFAULT '',
-            reusable INTEGER NOT NULL DEFAULT 1,
-            tags TEXT NOT NULL DEFAULT '[]',
-            note TEXT NOT NULL DEFAULT '',
-            mime_type TEXT NOT NULL DEFAULT '',
-            size_bytes INTEGER NOT NULL DEFAULT 0,
-            file_path TEXT NOT NULL DEFAULT '',
-            file_url TEXT NOT NULL DEFAULT '',
-            created_at INTEGER NOT NULL,
-            updated_at INTEGER NOT NULL
-        );
-        CREATE TABLE IF NOT EXISTS accounts (
-            account_id TEXT PRIMARY KEY,
-            platform TEXT NOT NULL DEFAULT '',
-            handle TEXT NOT NULL DEFAULT '',
-            name TEXT NOT NULL DEFAULT '',
-            url TEXT NOT NULL DEFAULT '',
-            city TEXT NOT NULL DEFAULT '',
-            industry TEXT NOT NULL DEFAULT '',
-            follower_count INTEGER NOT NULL DEFAULT 0,
-            category TEXT NOT NULL DEFAULT '',
-            value_level TEXT NOT NULL DEFAULT '',
-            tags TEXT NOT NULL DEFAULT '[]',
-            raw_json TEXT NOT NULL DEFAULT '{}',
-            classification_json TEXT NOT NULL DEFAULT '{}',
-            created_at INTEGER NOT NULL,
-            updated_at INTEGER NOT NULL
-        );
-        CREATE TABLE IF NOT EXISTS openclaw_tasks (
-            task_id TEXT PRIMARY KEY,
-            mode TEXT NOT NULL DEFAULT '',
-            status TEXT NOT NULL DEFAULT '',
-            target_url TEXT NOT NULL DEFAULT '',
-            request_json TEXT NOT NULL DEFAULT '{}',
-            result_json TEXT NOT NULL DEFAULT '{}',
-            created_at INTEGER NOT NULL,
-            updated_at INTEGER NOT NULL
-        );
-        CREATE TABLE IF NOT EXISTS obsidian_notes (
-            note_id TEXT PRIMARY KEY,
-            title TEXT NOT NULL,
-            path TEXT NOT NULL,
-            category TEXT NOT NULL DEFAULT '',
-            tags TEXT NOT NULL DEFAULT '[]',
-            summary TEXT NOT NULL DEFAULT '',
-            created_at INTEGER NOT NULL,
-            updated_at INTEGER NOT NULL
-        );
-        CREATE TABLE IF NOT EXISTS ai_control_events (
-            event_id TEXT PRIMARY KEY,
-            action TEXT NOT NULL,
-            status TEXT NOT NULL,
-            input_json TEXT NOT NULL DEFAULT '{}',
-            output_json TEXT NOT NULL DEFAULT '{}',
-            created_at INTEGER NOT NULL
-        );
-        CREATE TABLE IF NOT EXISTS jobs (
-            job_id TEXT PRIMARY KEY,
-            status TEXT NOT NULL,
-            stage TEXT NOT NULL DEFAULT '',
-            source TEXT NOT NULL DEFAULT 'v10_34_complete',
-            delegate_job_id TEXT NOT NULL DEFAULT '',
-            request_json TEXT NOT NULL DEFAULT '{}',
-            result_json TEXT NOT NULL DEFAULT '{}',
-            created_at INTEGER NOT NULL,
-            updated_at INTEGER NOT NULL
-        );
-        CREATE TABLE IF NOT EXISTS script_versions (
-            version_id TEXT PRIMARY KEY,
-            script_text TEXT NOT NULL,
-            keywords TEXT NOT NULL DEFAULT '[]',
-            forbidden_words TEXT NOT NULL DEFAULT '[]',
-            voice_json TEXT NOT NULL DEFAULT '{}',
-            note TEXT NOT NULL DEFAULT '',
-            created_at INTEGER NOT NULL
-        );
-        """)
-
-_init_db()
+def _ensure() -> None:
+    MATERIAL_DIR.mkdir(parents=True, exist_ok=True)
+    (DATA / "douyin-accounts").mkdir(parents=True, exist_ok=True)
+    OBSIDIAN_DIR.mkdir(parents=True, exist_ok=True)
+    JOBS_DIR.mkdir(parents=True, exist_ok=True)
+    con = sqlite3.connect(ACCOUNT_DB)
+    con.execute("""
+    CREATE TABLE IF NOT EXISTS accounts(
+        id TEXT PRIMARY KEY,
+        platform TEXT,
+        nickname TEXT,
+        url TEXT,
+        city TEXT,
+        category TEXT,
+        score REAL,
+        tags TEXT,
+        raw_json TEXT,
+        created_at TEXT,
+        updated_at TEXT
+    )
+    """)
+    con.commit(); con.close()
 
 
-def _now() -> int:
-    return int(time.time())
-
-
-def _row_to_dict(row: sqlite3.Row | None) -> dict[str, Any] | None:
-    if row is None:
-        return None
-    return {k: row[k] for k in row.keys()}
-
-
-def _safe_name(name: str) -> str:
-    name = Path(name or "file").name
-    name = re.sub(r"[^0-9A-Za-z._\-\u4e00-\u9fff]+", "_", name).strip("._")
-    return name or f"file_{uuid.uuid4().hex[:8]}"
-
-
-def _json_loads(raw: Any, fallback: Any) -> Any:
-    if isinstance(raw, (dict, list)):
-        return raw
+def _json_file(path: Path, default: Any) -> Any:
     try:
-        return json.loads(str(raw or ""))
+        return json.loads(path.read_text(encoding="utf-8"))
     except Exception:
-        return fallback
+        return default
 
 
-def _split_words(value: Any) -> list[str]:
-    if isinstance(value, list):
-        return [str(x).strip() for x in value if str(x).strip()]
-    return [x.strip() for x in re.split(r"[,，\s/|]+", str(value or "")) if x.strip()]
+def _write_json(path: Path, data: Any) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def _split_script(script: str) -> list[str]:
-    text = re.sub(r"\r", "", str(script or "")).strip()
-    parts = [p.strip() for p in re.split(r"(?<=[。！？!?])\s*|\n+", text) if p.strip()]
-    if not parts and text:
-        parts = [text]
-    return parts
+def _clean_transition_value(value: Any) -> str:
+    text = str(value or "").lower().strip()
+    return SAFE_TRANSITION if text in BANNED_TRANSITIONS or not text else SAFE_TRANSITION
 
 
-def _classify_scene(text: str) -> dict[str, Any]:
-    score = []
-    lower = str(text or "").lower()
-    for cat in CATEGORY_DEFS:
-        s = sum(1 for kw in cat["keywords"] if str(kw).lower() in lower)
-        if s:
-            score.append((s, cat))
-    cat = sorted(score, key=lambda x: -x[0])[0][1] if score else CATEGORY_DEFS[0]
-    visuals = {
-        "property":"楼盘外立面、社区道路、样板间和真实街区环境",
-        "life":"超市、便利店、商场、街区生活和社区日常人流",
-        "traffic":"MRT/LRT、公交站、主干道、车流和真实通勤路径",
-        "medical":"社区诊所、药房、医疗配套入口和买药看病场景",
-        "food":"食阁、餐厅、咖啡馆、外卖店和真实就餐环境",
-        "education":"学校周边、校车、家庭接送和教育生活场景",
-        "interior":"客厅、厨房、卧室、阳台、采光和空间动线",
-        "deal":"租客看房、带看咨询、社区人流和成交沟通",
-        "avatar":"真人口播、半身讲解、干净背景、自然手势",
-        "report":"报告截图、清单、表格、资料页和重点标注"
-    }.get(cat["id"], "真实城市生活素材")
-    return {"scene_type": cat["id"], "category": cat["label"], "visual": visuals}
+def _sanitize_shot(shot: Dict[str, Any], index: int = 1) -> Dict[str, Any]:
+    out = dict(shot or {})
+    out.setdefault("index", index)
+    out["transition"] = SAFE_TRANSITION
+    out["transition_to_next"] = SAFE_TRANSITION
+    out["concat_mode"] = "crossfade"
+    out["v10_34_transition_lock"] = True
+    for k in ("prompt", "visual_prompt", "positive_prompt"):
+        if isinstance(out.get(k), str):
+            txt = out[k]
+            for w in BANNED_TRANSITIONS:
+                txt = txt.replace(w, SAFE_TRANSITION).replace(w.replace("_", " "), SAFE_TRANSITION)
+            out[k] = txt
+    neg = str(out.get("negative_prompt") or "")
+    extra = "hard cut, jump cut, flash transition, white flash, black flash, unreadable subtitles, watermark, logo"
+    out["negative_prompt"] = (neg + ", " + extra).strip(", ") if neg else extra
+    return out
 
 
-def _clean_transition_text(text: Any) -> str:
-    t = str(text or "")
-    for word in sorted(BANNED_TRANSITIONS, key=len, reverse=True):
-        t = re.sub(re.escape(word), SAFE_TRANSITION, t, flags=re.I)
-    if not t.strip():
-        t = SAFE_TRANSITION
-    return t
+@router.get("/api/video/v10-34/health")
+def health():
+    _ensure()
+    return {"ok": True, "version": "v10.34-original-ui-complete", "ui": "preserved", "safe_transition": SAFE_TRANSITION}
 
 
-def _clean_prompt(text: Any) -> str:
-    t = str(text or "")
-    for word in sorted(BANNED_TRANSITIONS, key=len, reverse=True):
-        t = re.sub(re.escape(word), SAFE_TRANSITION, t, flags=re.I)
-    lock = " Transition lock: only smooth dissolve / natural continuous movement; no flash, no cut, no hard cut, no pull out, no wipe, no glitch, no sudden exposure change."
-    if "Transition lock:" not in t:
-        t = (t.rstrip() + lock).strip()
-    return t
+@router.post("/api/video/v10-34/sanitize-shot-plan")
+async def sanitize_shot_plan(request: Request):
+    body = await request.json()
+    shots = body.get("shots") if isinstance(body, dict) else []
+    if not isinstance(shots, list): shots = []
+    return {"ok": True, "transition_policy": {"allowed": [SAFE_TRANSITION, "cross_dissolve"], "blocked": BANNED_TRANSITIONS, "concat": "crossfade"}, "shots": [_sanitize_shot(s, i+1) for i, s in enumerate(shots)]}
 
 
-def _negative_prompt(extra: str = "") -> str:
-    base = "white flash, black flash, flash transition, cut, hard cut, jump cut, smooth_cut, pull_out, strobe, flicker, wipe, glitch, sudden exposure change, random unrelated visuals, text overlay, readable logo, watermark"
-    return (str(extra or "").strip(", ") + ", " + base).strip(", ") if extra else base
+@router.get("/api/video/material-library/health")
+def material_health():
+    _ensure(); return {"ok": True, "categories": CATEGORIES}
 
 
-def _build_shot_plan(script_text: str, requested_shots: Optional[list[Any]] = None, audio_duration: float = 0.0) -> list[dict[str, Any]]:
-    if isinstance(requested_shots, list) and requested_shots:
-        raw_shots = [x if isinstance(x, dict) else {"narration": str(x)} for x in requested_shots]
-    else:
-        raw_shots = [{"narration": x} for x in _split_script(script_text)]
-    if not raw_shots:
-        raise HTTPException(status_code=400, detail="script_text_required")
-    n = len(raw_shots)
-    fade = 0.28
-    # xfade 吃时长，预留；每段 2-6 秒，语音太长时要求更多镜头。
-    target_total = max(float(audio_duration or 0) + fade * max(0, n - 1) + 0.6, sum(float(x.get("duration") or x.get("duration_seconds") or 0) for x in raw_shots))
-    per = max(2.0, min(6.0, target_total / n if target_total else 3.5))
-    if audio_duration and target_total > 6.0 * n + 0.2:
-        raise HTTPException(status_code=400, detail={
-            "error":"audio_too_long_for_current_shot_count",
-            "message":"口播太长，当前镜头数不够覆盖语音时长；请拆更多句/更多镜头后再生成，避免重复画面。",
-            "audio_duration": audio_duration,
-            "shot_count": n,
-            "max_video_duration": 6.0 * n
-        })
-    shots: list[dict[str, Any]] = []
-    t = 0.0
-    for i, raw in enumerate(raw_shots, start=1):
-        narration = str(raw.get("narration") or raw.get("narration_segment") or raw.get("text") or raw.get("clean_subtitle") or "").strip()
-        scene = _classify_scene(narration + " " + str(raw.get("category") or raw.get("scene_type") or ""))
-        visual = str(raw.get("visual") or raw.get("visual_subject") or scene["visual"])
-        duration = float(raw.get("duration_seconds") or raw.get("duration") or per)
-        duration = max(2.0, min(6.0, duration))
-        end = t + duration
-        prompt = raw.get("prompt") or raw.get("visual_prompt") or f"{visual}，真实马来西亚城市生活纪录片质感，竖屏9:16，稳定镜头，无字幕，无可读文字，无logo。必须对应口播：{narration}"
-        shot = {
-            **raw,
-            "index": i,
-            "shot_index": i,
-            "narration_segment": narration,
-            "clean_subtitle": narration,
-            "scene_type": raw.get("scene_type") or raw.get("semantic_type") or scene["scene_type"],
-            "category": raw.get("category") or scene["category"],
-            "visual_subject": visual,
-            "visual_prompt": _clean_prompt(prompt),
-            "prompt": _clean_prompt(prompt),
-            "negative_prompt": _negative_prompt(str(raw.get("negative_prompt") or "")),
-            "transition": SAFE_TRANSITION,
-            "transition_to_next": SAFE_TRANSITION,
-            "duration_seconds": round(duration, 2),
-            "start_seconds": round(t, 2),
-            "end_seconds": round(end, 2),
-            "motion": _clean_transition_text(raw.get("motion") or raw.get("camera") or "stable_slow_push_in"),
-            "v10_34a_rules": {
-                "ban_cut": True,
-                "ban_smooth_cut": True,
-                "ban_flash": True,
-                "ban_pull_out": True,
-                "required_transition": SAFE_TRANSITION,
-                "concat": "xfade_crossfade_only"
-            }
-        }
-        shots.append(shot)
-        t = end
-    return shots
+@router.get("/api/video/material-library/categories")
+def material_categories():
+    _ensure(); return {"ok": True, "categories": CATEGORIES}
 
 
-def _acceptance(script_text: str, shots: list[dict[str, Any]]) -> dict[str, Any]:
-    required = []
-    text = script_text or ""
-    for cat in CATEGORY_DEFS:
-        if any(str(kw).lower() in text.lower() for kw in cat["keywords"]):
-            required.append(cat["id"])
-    covered = sorted({str(s.get("scene_type") or "") for s in shots if s.get("scene_type")})
-    missing = [c for c in required if c not in covered]
-    bad = []
-    for s in shots:
-        joined = json.dumps(s, ensure_ascii=False).lower()
-        for w in BANNED_TRANSITIONS:
-            if w.lower() in joined and SAFE_TRANSITION.lower() not in w.lower():
-                bad.append({"shot_index": s.get("index"), "banned": w})
-    return {
-        "passed": not missing and not bad,
-        "required_categories": required,
-        "covered_categories": covered,
-        "missing_categories": missing,
-        "banned_transition_hits": bad,
-        "transition_lock": SAFE_TRANSITION,
-        "completed_status_guard": "final job cannot be marked completed unless final_video_url/subtitled_video_url exists and generated shot metadata has been persisted",
-    }
-
-
-def _save_generated_shot_assets(job_id: str, shots: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    base = SHOT_ASSET_DIR / job_id
-    base.mkdir(parents=True, exist_ok=True)
+@router.get("/api/video/material-library")
+def material_list(category: str = "", city: str = "", reusable: str = ""):
+    _ensure()
     items = []
-    for s in shots:
-        idx = int(s.get("index") or s.get("shot_index") or len(items) + 1)
-        meta = {
-            "ok": True,
-            "asset_type": "generated_fal_shot_metadata",
-            "version": BACKEND_VERSION,
-            "job_id": job_id,
-            "shot_index": idx,
-            "raw_clip_path": str(base / f"shot_{idx:02d}_raw.mp4"),
-            "fixed_clip_path": str(base / f"shot_{idx:02d}_fixed.mp4"),
-            "fal_job_id": s.get("fal_job_id") or "",
-            "fal_video_url": s.get("fal_video_url") or "",
-            "prompt": s.get("visual_prompt") or s.get("prompt") or "",
-            "negative_prompt": s.get("negative_prompt") or _negative_prompt(),
-            "scene_type": s.get("scene_type"),
-            "category": s.get("category"),
-            "narration_segment": s.get("narration_segment") or s.get("clean_subtitle"),
-            "duration_seconds": s.get("duration_seconds"),
-            "transition": SAFE_TRANSITION,
-            "reuse_policy": "can_reuse_after_human_approval",
-            "human_approved": False,
-            "created_at": _now(),
-        }
-        (base / f"shot_{idx:02d}_meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
-        items.append(meta)
-    return items
+    for meta in MATERIAL_DIR.rglob("*.json"):
+        if meta.name.endswith(".meta.json"):
+            item = _json_file(meta, {})
+            if category and item.get("category") != category: continue
+            if city and item.get("city") != city: continue
+            if reusable and str(item.get("reusable", "")).lower() != reusable.lower(): continue
+            items.append(item)
+    items.sort(key=lambda x: x.get("created_at", ""), reverse=True)
+    return {"ok": True, "items": items, "count": len(items)}
 
 
-def _public_file_url(path: Path) -> str:
-    # Existing FastAPI app usually mounts /storage to /opt/ai-video/storage.
-    try:
-        rel = path.resolve().relative_to(ROOT.resolve()).as_posix()
-        return f"/storage/{rel}"
-    except Exception:
-        return ""
-
-
-def _save_job(job_id: str, status: str, stage: str, request_json: dict[str, Any], result_json: dict[str, Any] | None = None, delegate_job_id: str = "") -> None:
-    now = _now()
-    with _db() as con:
-        con.execute("""INSERT INTO jobs(job_id,status,stage,delegate_job_id,request_json,result_json,created_at,updated_at)
-            VALUES(?,?,?,?,?,?,?,?)
-            ON CONFLICT(job_id) DO UPDATE SET status=excluded.status, stage=excluded.stage, delegate_job_id=excluded.delegate_job_id,
-            request_json=excluded.request_json, result_json=excluded.result_json, updated_at=excluded.updated_at""",
-            (job_id, status, stage, delegate_job_id, json.dumps(request_json, ensure_ascii=False), json.dumps(result_json or {}, ensure_ascii=False), now, now))
-
-
-def _get_job(job_id: str) -> dict[str, Any] | None:
-    with _db() as con:
-        row = con.execute("SELECT * FROM jobs WHERE job_id=?", (job_id,)).fetchone()
-    item = _row_to_dict(row)
-    if item:
-        item["request_json"] = _json_loads(item.get("request_json"), {})
-        item["result_json"] = _json_loads(item.get("result_json"), {})
-    return item
-
-
-async def _post_local(path: str, payload: dict[str, Any], timeout: float = 180.0) -> dict[str, Any]:
-    url = "http://127.0.0.1:8000" + path
-    async with httpx.AsyncClient(timeout=timeout) as client:
-        resp = await client.post(url, json=payload)
-        text = resp.text
-        try:
-            data = resp.json()
-        except Exception:
-            data = {"raw": text}
-        if resp.status_code >= 400:
-            raise RuntimeError(json.dumps({"status_code": resp.status_code, "data": data}, ensure_ascii=False))
-        return data
-
-
-async def _get_local(path: str, timeout: float = 60.0) -> dict[str, Any]:
-    url = "http://127.0.0.1:8000" + path
-    async with httpx.AsyncClient(timeout=timeout) as client:
-        resp = await client.get(url)
-        try:
-            data = resp.json()
-        except Exception:
-            data = {"raw": resp.text}
-        if resp.status_code >= 400:
-            raise RuntimeError(json.dumps({"status_code": resp.status_code, "data": data}, ensure_ascii=False))
-        return data
-
-
-class PlanPreviewRequest(BaseModel):
-    script_text: str = ""
-    script: str = ""
-    shots: list[Any] | None = None
-    manual_shot_plan: list[Any] | None = None
-    audio_duration: float = 0.0
-    keywords: list[str] | str | None = None
-    forbidden_words: list[str] | str | None = None
-
-
-class StartRequest(BaseModel):
-    topic: str = ""
-    audience: str = ""
-    script_text: str = ""
-    script: str = ""
-    keywords: list[str] | str | None = None
-    forbidden_words: list[str] | str | None = None
-    script_segments: list[Any] | None = None
-    segment_voice_settings: list[Any] | None = None
-    manual_shot_plan: list[Any] | None = None
-    shot_overrides: list[Any] | None = None
-    asset_context: list[Any] | None = None
-    delegate_to_existing: bool = True
-    require_subtitles: bool = True
-    require_semantic_storyboard: bool = True
-    no_flash_transition: bool = True
-    duration_seconds: float = 0.0
-
-
-async def api_v10_34_health():
-    return {
-        "ok": True,
-        "version": BACKEND_VERSION,
-        "storage_root": str(ROOT),
-        "database": str(DB),
-        "rules": {
-            "V10.34A": "video generation hard rules + crossfade + metadata persistence + completed status guard",
-            "V10.34B": "native step2 script/voice preview routes",
-            "V10.34C": "material library with mandatory type/category/city/district/source/reusable/note fields",
-            "V10.34D": "account import and DeepSeek classification with fallback rules",
-            "V10.34E": "OpenClaw capture adapter; calls OPENCLAW_CAPTURE_URL when configured",
-            "V10.34F": "Obsidian vault note growth",
-            "V10.34G": "AI control dashboard endpoints",
-        },
-        "openclaw_capture_url_configured": bool(OPENCLAW_CAPTURE_URL),
-        "deepseek_configured": bool(DEEPSEEK_API_KEY),
-    }
-
-
-async def api_v10_34_split_script(request: Request):
-    data = await request.json()
-    script = str(data.get("script_text") or data.get("script") or "")
-    parts = _split_script(script)
-    return {"ok": True, "segments": [{"index": i+1, "text": t} for i, t in enumerate(parts)], "count": len(parts)}
-
-
-async def api_v10_34_plan_preview(req: PlanPreviewRequest):
-    script = req.script_text or req.script or ""
-    shots = _build_shot_plan(script, req.manual_shot_plan or req.shots, req.audio_duration)
-    return {
-        "ok": True,
-        "version": BACKEND_VERSION,
-        "shots": shots,
-        "shot_count": len(shots),
-        "duration_seconds": round(sum(float(s.get("duration_seconds") or 0) for s in shots), 2),
-        "transition": SAFE_TRANSITION,
-        "banned_transitions": BANNED_TRANSITIONS,
-        "acceptance": _acceptance(script, shots),
-        "generation_allowed": _acceptance(script, shots)["passed"],
-    }
-
-
-async def _delegate_existing(job_id: str, payload: dict[str, Any]):
-    result: dict[str, Any]
-    try:
-        result = await _post_local("/api/video/full-ai/tts-first/start", payload, timeout=180)
-        delegate_job_id = str(result.get("job_id") or result.get("id") or "")
-        current = _get_job(job_id) or {}
-        req = current.get("request_json") or payload
-        _save_job(job_id, "delegated", "existing_tts_first_running", req, result, delegate_job_id=delegate_job_id)
-    except Exception as exc:
-        current = _get_job(job_id) or {}
-        req = current.get("request_json") or payload
-        _save_job(job_id, "failed_to_delegate", "existing_tts_first_start_failed", req, {"error": repr(exc)[:2000]}, "")
-
-
-async def api_v10_34_start(req: StartRequest):
-    script = req.script_text or req.script or ""
-    shots = _build_shot_plan(script, req.manual_shot_plan or req.shot_overrides, req.duration_seconds)
-    accept = _acceptance(script, shots)
-    if not accept["passed"]:
-        raise HTTPException(status_code=400, detail={"error":"acceptance_failed", "acceptance": accept})
-    job_id = "v10_34_" + uuid.uuid4().hex[:18]
-    shot_assets = _save_generated_shot_assets(job_id, shots)
-    payload = {
-        **req.model_dump(),
-        "script_text": script,
-        "shots": shots,
-        "manual_shot_plan": shots,
-        "shot_overrides": shots,
-        "transition": SAFE_TRANSITION,
-        "transition_plan": [SAFE_TRANSITION for _ in shots],
-        "negative_prompt": _negative_prompt(),
-        "require_semantic_storyboard": True,
-        "require_subtitles": True,
-        "no_flash_transition": True,
-        "v10_34_rules": {
-            "ban_cut": True,
-            "ban_smooth_cut": True,
-            "ban_flash": True,
-            "ban_pull_out": True,
-            "transition": SAFE_TRANSITION,
-            "concat": "xfade_crossfade_only",
-            "completed_status_guard": True,
-            "save_raw_fal_metadata": True,
-        },
-        "v10_34_job_id": job_id,
-    }
-    _save_job(job_id, "queued", "prepared_v10_34_rules", payload, {"shot_assets": shot_assets, "acceptance": accept}, "")
-    if req.delegate_to_existing:
-        asyncio.create_task(_delegate_existing(job_id, payload))
-    return {
-        "ok": True,
-        "version": BACKEND_VERSION,
-        "job_id": job_id,
-        "status": "queued",
-        "stage": "prepared_v10_34_rules",
-        "delegating_to_existing_tts_first": bool(req.delegate_to_existing),
-        "shots": shots,
-        "generated_shot_assets": shot_assets,
-        "acceptance": accept,
-        "job_url": f"/api/video/v10-34/job/{job_id}",
-    }
-
-
-async def api_v10_34_job(job_id: str):
-    item = _get_job(job_id)
-    if not item:
-        raise HTTPException(status_code=404, detail="JOB_NOT_FOUND")
-    result = item.get("result_json") or {}
-    delegate = item.get("delegate_job_id") or ""
-    delegated_result = None
-    if delegate:
-        try:
-            delegated_result = await _get_local(f"/api/video/full-ai/tts-first/job/{delegate}", timeout=60)
-            result["delegated_result"] = delegated_result
-            status = str(delegated_result.get("status") or "")
-            final_url = delegated_result.get("subtitled_video_url") or delegated_result.get("video_url") or delegated_result.get("final_video_url") or ""
-            if status.lower() in {"completed", "complete", "success", "finished"} and not final_url:
-                return {**item, "ok": True, "status": "blocked_needs_review", "completion_blocked": True, "message": "V10.34A blocked false completed: final video url missing", "result_json": result}
-            if status:
-                item["status"] = status
-            if final_url:
-                result["final_video_url"] = final_url
-        except Exception as exc:
-            result["delegated_poll_error"] = repr(exc)[:1000]
-    return {**item, "ok": True, "result_json": result, "generated_shot_assets_url": f"/api/video/v10-34/generated-shot-assets/{job_id}"}
-
-
-async def api_v10_34_generated_shot_assets(job_id: str):
-    base = SHOT_ASSET_DIR / job_id
-    items = []
-    for p in sorted(base.glob("shot_*_meta.json")):
-        try:
-            items.append(json.loads(p.read_text(encoding="utf-8")))
-        except Exception as exc:
-            items.append({"path": str(p), "error": str(exc)})
-    return {"ok": True, "job_id": job_id, "count": len(items), "asset_dir": str(base), "items": items}
-
-
-async def api_v10_34_approve_final(request: Request):
-    data = await request.json()
-    job_id = str(data.get("job_id") or data.get("asset_id") or "").strip()
-    if not job_id:
-        raise HTTPException(status_code=400, detail="job_id_required")
-    base = FINAL_DIR / job_id
-    base.mkdir(parents=True, exist_ok=True)
-    item = {
-        "ok": True,
-        "asset_type": "final_video",
-        "version": BACKEND_VERSION,
-        "asset_id": job_id,
-        "source_job_id": job_id,
-        "approved_at": _now(),
-        "final_video_url": data.get("final_video_url") or data.get("video_url") or data.get("subtitled_video_url") or "",
-        "raw_video_url": data.get("raw_video_url") or "",
-        "shot_asset_dir": str(SHOT_ASSET_DIR / job_id),
-        "reuse_policy": "final_can_be_reused_for_delivery; raw_shots_can_be_reused_after_human_approval",
-        "note": data.get("note") or "",
-    }
-    (base / "final_meta.json").write_text(json.dumps(item, ensure_ascii=False, indent=2), encoding="utf-8")
-    return {"ok": True, "asset": item}
-
-
-async def api_voice_preview(request: Request):
-    data = await request.json()
-    script = str(data.get("script_text") or data.get("script") or data.get("text") or "").strip()
-    if not script:
-        return JSONResponse(status_code=400, content={"ok": False, "error": "script_text_required"})
-    if len(script) > 1600:
-        return JSONResponse(status_code=400, content={"ok": False, "error": "script_too_long_for_preview", "max_chars": 1600})
-    preview_id = "voice_preview_" + uuid.uuid4().hex[:16]
-    work = VOICE_DIR / preview_id
-    work.mkdir(parents=True, exist_ok=True)
-    tts_payload = {"text": script, "rate": {"normal":"+0%","slightly_fast":"+8%","slow_clear":"-8%","fast":"+12%","slow":"-12%"}.get(str(data.get("pace") or "normal"), "+0%")}
-    if data.get("voice") or data.get("voice_id"):
-        tts_payload["voice"] = str(data.get("voice") or data.get("voice_id"))
-    meta = {"ok": False, "preview_id": preview_id, "version": BACKEND_VERSION, "status":"started", "script_text": script, "voice_settings": data, "tts_payload": tts_payload, "created_at": _now()}
-    try:
-        res = await _post_local("/api/tts", tts_payload, timeout=240)
-        audio_url = str(res.get("file_url") or res.get("audio_url") or res.get("url") or "")
-        duration = float(res.get("duration_seconds") or res.get("audio_duration") or res.get("duration") or 0)
-        if not audio_url:
-            meta.update({"status":"failed", "error":"tts_generated_but_no_audio_url", "tts_result":res})
-            (work / "voice_preview_meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
-            return JSONResponse(status_code=502, content=meta)
-        meta.update({"ok": True, "status":"completed", "provider":"local_api_tts", "audio_url": audio_url, "audio_duration": duration, "tts_result": res})
-        (work / "voice_preview_meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
-        return meta
-    except Exception as exc:
-        meta.update({"status":"failed", "error":"local_api_tts_failed", "detail":repr(exc)[:1200]})
-        (work / "voice_preview_meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
-        return JSONResponse(status_code=502, content=meta)
-
-
-async def api_script_version(request: Request):
-    data = await request.json()
-    script = str(data.get("script_text") or data.get("script") or "").strip()
-    if not script:
-        return JSONResponse(status_code=400, content={"ok": False, "error":"script_text_required"})
-    version_id = "script_v_" + uuid.uuid4().hex[:16]
-    item = {"ok": True, "version": BACKEND_VERSION, "version_id": version_id, "created_at": _now(), "script_text": script, "keywords": _split_words(data.get("keywords")), "forbidden_words": _split_words(data.get("forbidden_words")), "voice": data.get("voice") or {}, "note": data.get("note") or ""}
-    (SCRIPT_DIR / f"{version_id}.json").write_text(json.dumps(item, ensure_ascii=False, indent=2), encoding="utf-8")
-    with _db() as con:
-        con.execute("INSERT INTO script_versions(version_id,script_text,keywords,forbidden_words,voice_json,note,created_at) VALUES(?,?,?,?,?,?,?)", (version_id, script, json.dumps(item["keywords"], ensure_ascii=False), json.dumps(item["forbidden_words"], ensure_ascii=False), json.dumps(item["voice"], ensure_ascii=False), item["note"], item["created_at"]))
-    return item
-
-
-async def api_material_categories():
-    return {"ok": True, "items": CATEGORY_DEFS, "required_upload_fields": ["file", "kind", "category", "city", "district", "source", "reusable", "note"]}
-
-
-async def api_material_list(category: str = "", kind: str = "", city: str = "", reusable: Optional[int] = None, q: str = "", limit: int = 200):
-    sql = "SELECT * FROM materials WHERE 1=1"
-    args: list[Any] = []
-    for col, val in [("category", category), ("kind", kind), ("city", city)]:
-        if val:
-            sql += f" AND {col}=?"; args.append(val)
-    if reusable is not None:
-        sql += " AND reusable=?"; args.append(int(reusable))
-    if q:
-        sql += " AND (original_name LIKE ? OR tags LIKE ? OR note LIKE ?)"; args += [f"%{q}%"]*3
-    sql += " ORDER BY created_at DESC LIMIT ?"; args.append(max(1, min(int(limit), 1000)))
-    with _db() as con:
-        rows = con.execute(sql, args).fetchall()
-    items = []
-    for r in rows:
-        d = _row_to_dict(r) or {}
-        d["tags"] = _json_loads(d.get("tags"), [])
-        items.append(d)
-    return {"ok": True, "count": len(items), "items": items}
-
-
-async def api_material_upload(
-    file: UploadFile = File(...),
-    kind: str = Form(...),
+@router.post("/api/video/material-library/upload")
+async def material_upload(
+    files: List[UploadFile] = File(...),
     category: str = Form(...),
     city: str = Form(""),
-    district: str = Form(""),
+    area: str = Form(""),
     source: str = Form(""),
-    reusable: bool = Form(True),
-    tags: str = Form(""),
+    reusable: str = Form("true"),
     note: str = Form(""),
 ):
-    missing = [name for name, val in [("kind", kind), ("category", category)] if not str(val or "").strip()]
-    if missing:
-        raise HTTPException(status_code=400, detail={"error":"missing_required_upload_fields", "fields": missing})
-    asset_id = "mat_" + uuid.uuid4().hex[:18]
-    safe = _safe_name(file.filename or asset_id)
-    sub = MATERIAL_DIR / category / asset_id
-    sub.mkdir(parents=True, exist_ok=True)
-    dst = sub / safe
-    with open(dst, "wb") as f:
-        shutil.copyfileobj(file.file, f)
-    now = _now()
-    item = {
-        "asset_id": asset_id, "filename": safe, "original_name": file.filename or safe, "kind": kind, "category": category,
-        "city": city, "district": district, "source": source, "reusable": 1 if reusable else 0, "tags": _split_words(tags), "note": note,
-        "mime_type": file.content_type or "", "size_bytes": dst.stat().st_size, "file_path": str(dst), "file_url": _public_file_url(dst),
-        "created_at": now, "updated_at": now,
-    }
-    with _db() as con:
-        con.execute("""INSERT INTO materials(asset_id,filename,original_name,kind,category,city,district,source,reusable,tags,note,mime_type,size_bytes,file_path,file_url,created_at,updated_at)
-        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", (item["asset_id"], item["filename"], item["original_name"], item["kind"], item["category"], item["city"], item["district"], item["source"], item["reusable"], json.dumps(item["tags"], ensure_ascii=False), item["note"], item["mime_type"], item["size_bytes"], item["file_path"], item["file_url"], now, now))
-    return {"ok": True, "item": item}
-
-
-async def api_material_update(asset_id: str, request: Request):
-    data = await request.json()
-    allowed = ["kind","category","city","district","source","reusable","tags","note"]
-    sets = []
-    args = []
-    for k in allowed:
-        if k in data:
-            sets.append(f"{k}=?")
-            v = data[k]
-            if k == "tags": v = json.dumps(_split_words(v), ensure_ascii=False)
-            if k == "reusable": v = int(bool(v))
-            args.append(v)
-    if not sets:
-        return {"ok": True, "updated": False}
-    sets.append("updated_at=?"); args.append(_now()); args.append(asset_id)
-    with _db() as con:
-        cur = con.execute(f"UPDATE materials SET {', '.join(sets)} WHERE asset_id=?", args)
-    return {"ok": True, "updated": cur.rowcount > 0, "asset_id": asset_id}
-
-
-async def _classify_account(item: dict[str, Any]) -> dict[str, Any]:
-    text = " ".join(str(item.get(k) or "") for k in ["name","handle","url","bio","description","industry","platform"])
-    cat = _classify_scene(text)
-    follower = int(float(item.get("follower_count") or item.get("followers") or 0)) if str(item.get("follower_count") or item.get("followers") or "0").replace('.','',1).isdigit() else 0
-    value = "high" if follower >= 50000 else "medium" if follower >= 5000 else "seed"
-    result = {"category": cat["category"], "category_id": cat["scene_type"], "value_level": value, "reason": "rule_fallback"}
-    if DEEPSEEK_API_KEY:
-        try:
-            prompt = "请把账号按短视频素材/竞品价值分类，输出JSON：category,value_level,tags,reason。账号=" + json.dumps(item, ensure_ascii=False)[:3000]
-            async with httpx.AsyncClient(timeout=45) as client:
-                resp = await client.post(DEEPSEEK_BASE_URL + "/v1/chat/completions", headers={"Authorization": f"Bearer {DEEPSEEK_API_KEY}", "Content-Type":"application/json"}, json={"model":DEEPSEEK_MODEL, "messages":[{"role":"user","content":prompt}], "temperature":0.2})
-                if resp.status_code < 400:
-                    content = resp.json().get("choices", [{}])[0].get("message", {}).get("content", "")
-                    m = re.search(r"\{.*\}", content, re.S)
-                    if m:
-                        result.update(json.loads(m.group(0)))
-                        result["reason"] = result.get("reason") or "deepseek"
-        except Exception as exc:
-            result["deepseek_error"] = repr(exc)[:300]
-    return result
-
-
-async def api_accounts_import(request: Request):
-    data = await request.json()
-    rows = data.get("accounts") or data.get("items") or []
-    if isinstance(rows, str):
-        # accept csv text
-        lines = rows.splitlines()
-        rows = list(csv.DictReader(lines)) if lines and "," in lines[0] else [{"url": x.strip()} for x in lines if x.strip()]
-    if not isinstance(rows, list):
-        raise HTTPException(status_code=400, detail="accounts_must_be_list_or_csv_text")
+    _ensure()
+    if not category or category not in CATEGORIES:
+        return JSONResponse(status_code=400, content={"ok": False, "error": "必须选择有效分类后才能上传", "categories": CATEGORIES})
     saved = []
-    for raw in rows:
-        item = raw if isinstance(raw, dict) else {"url": str(raw)}
-        cls = await _classify_account(item)
-        account_id = "acct_" + hashlib.sha1(json.dumps(item, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()[:18]
-        now = _now()
-        record = {
-            "account_id": account_id,
-            "platform": str(item.get("platform") or ""), "handle": str(item.get("handle") or item.get("username") or ""), "name": str(item.get("name") or ""), "url": str(item.get("url") or ""),
-            "city": str(item.get("city") or ""), "industry": str(item.get("industry") or ""), "follower_count": int(float(item.get("follower_count") or item.get("followers") or 0) if str(item.get("follower_count") or item.get("followers") or "0").replace('.','',1).isdigit() else 0),
-            "category": str(cls.get("category") or ""), "value_level": str(cls.get("value_level") or ""), "tags": _split_words(cls.get("tags") or item.get("tags") or []), "raw_json": item, "classification_json": cls,
-            "created_at": now, "updated_at": now,
-        }
-        with _db() as con:
-            con.execute("""INSERT INTO accounts(account_id,platform,handle,name,url,city,industry,follower_count,category,value_level,tags,raw_json,classification_json,created_at,updated_at)
-            VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(account_id) DO UPDATE SET category=excluded.category,value_level=excluded.value_level,tags=excluded.tags,classification_json=excluded.classification_json,updated_at=excluded.updated_at""",
-            (record["account_id"],record["platform"],record["handle"],record["name"],record["url"],record["city"],record["industry"],record["follower_count"],record["category"],record["value_level"],json.dumps(record["tags"],ensure_ascii=False),json.dumps(record["raw_json"],ensure_ascii=False),json.dumps(record["classification_json"],ensure_ascii=False),now,now))
-        saved.append(record)
-    return {"ok": True, "count": len(saved), "items": saved}
-
-
-async def api_accounts_list(platform: str = "", category: str = "", limit: int = 200):
-    sql = "SELECT * FROM accounts WHERE 1=1"; args=[]
-    if platform: sql += " AND platform=?"; args.append(platform)
-    if category: sql += " AND category=?"; args.append(category)
-    sql += " ORDER BY updated_at DESC LIMIT ?"; args.append(max(1,min(int(limit),1000)))
-    with _db() as con:
-        rows = con.execute(sql,args).fetchall()
-    items=[]
-    for r in rows:
-        d=_row_to_dict(r) or {}; d["tags"]=_json_loads(d.get("tags"),[]); d["raw_json"]=_json_loads(d.get("raw_json"),{}); d["classification_json"]=_json_loads(d.get("classification_json"),{}); items.append(d)
-    return {"ok": True, "count":len(items), "items":items}
-
-
-async def api_accounts_classify(request: Request):
-    data = await request.json()
-    return {"ok": True, "classification": await _classify_account(data)}
-
-
-async def api_openclaw_capture(request: Request):
-    data = await request.json()
-    task_id = "oc_" + uuid.uuid4().hex[:16]
-    now = _now()
-    result: dict[str, Any] = {"mode":"saved_task", "message":"OPENCLAW_CAPTURE_URL not configured; task stored for OpenClaw agent pickup"}
-    status = "waiting_for_openclaw_agent"
-    if OPENCLAW_CAPTURE_URL:
-        try:
-            async with httpx.AsyncClient(timeout=120) as client:
-                resp = await client.post(OPENCLAW_CAPTURE_URL, json={"task_id":task_id, **data})
-                result = resp.json() if resp.headers.get("content-type","").startswith("application/json") else {"raw": resp.text}
-                status = "completed" if resp.status_code < 400 else "openclaw_error"
-        except Exception as exc:
-            result = {"error": repr(exc)[:1200]}; status = "openclaw_request_failed"
-    with _db() as con:
-        con.execute("INSERT INTO openclaw_tasks(task_id,mode,status,target_url,request_json,result_json,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)", (task_id, str(data.get("mode") or "capture"), status, str(data.get("url") or data.get("target_url") or ""), json.dumps(data,ensure_ascii=False), json.dumps(result,ensure_ascii=False), now, now))
-    return {"ok": status not in {"openclaw_error","openclaw_request_failed"}, "task_id": task_id, "status": status, "result": result}
-
-
-async def api_openclaw_tasks(limit: int = 100):
-    with _db() as con:
-        rows=con.execute("SELECT * FROM openclaw_tasks ORDER BY created_at DESC LIMIT ?", (max(1,min(int(limit),500)),)).fetchall()
-    items=[]
-    for r in rows:
-        d=_row_to_dict(r) or {}; d["request_json"]=_json_loads(d.get("request_json"),{}); d["result_json"]=_json_loads(d.get("result_json"),{}); items.append(d)
-    return {"ok": True, "count":len(items), "items":items}
-
-
-async def api_obsidian_note(request: Request):
-    data = await request.json()
-    title = _safe_name(str(data.get("title") or data.get("topic") or f"note_{uuid.uuid4().hex[:8]}"))
-    category = str(data.get("category") or "AI-VIDEO")
-    tags = _split_words(data.get("tags") or ["ai-video","v10.34"])
-    content = str(data.get("content") or data.get("summary") or "")
-    note_id = "note_" + uuid.uuid4().hex[:16]
-    folder = OBSIDIAN_DIR / category
+    folder = MATERIAL_DIR / category
     folder.mkdir(parents=True, exist_ok=True)
-    path = folder / f"{title}.md"
-    body = "---\n" + "\n".join([f"note_id: {note_id}", f"created_at: {_now()}", "tags: [" + ", ".join(tags) + "]", f"source: {BACKEND_VERSION}"]) + "\n---\n\n" + f"# {title}\n\n" + content.strip() + "\n"
-    path.write_text(body, encoding="utf-8")
-    now=_now()
-    with _db() as con:
-        con.execute("INSERT INTO obsidian_notes(note_id,title,path,category,tags,summary,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)", (note_id,title,str(path),category,json.dumps(tags,ensure_ascii=False),content[:500],now,now))
-    return {"ok": True, "note_id": note_id, "path": str(path), "title": title}
+    for f in files:
+        ext = Path(f.filename or "file").suffix.lower()
+        asset_id = "mat_" + uuid.uuid4().hex[:16]
+        name = f"{asset_id}{ext}"
+        target = folder / name
+        with target.open("wb") as out:
+            shutil.copyfileobj(f.file, out)
+        meta = {
+            "id": asset_id,
+            "filename": name,
+            "original_name": f.filename,
+            "category": category,
+            "city": city,
+            "area": area,
+            "source": source,
+            "reusable": str(reusable).lower() in ("1", "true", "yes", "y", "是"),
+            "note": note,
+            "path": str(target.relative_to(DATA)),
+            "url": f"/api/video/material-library/file/{category}/{name}",
+            "created_at": _now(),
+        }
+        _write_json(folder / f"{asset_id}.meta.json", meta)
+        saved.append(meta)
+    return {"ok": True, "items": saved}
 
 
-async def api_obsidian_graph(limit: int = 200):
-    with _db() as con:
-        rows=con.execute("SELECT * FROM obsidian_notes ORDER BY created_at DESC LIMIT ?", (max(1,min(int(limit),1000)),)).fetchall()
-    notes=[]
+@router.get("/api/video/material-library/file/{category}/{filename}")
+def material_file(category: str, filename: str):
+    from fastapi.responses import FileResponse
+    path = MATERIAL_DIR / category / filename
+    if not path.exists(): return JSONResponse(status_code=404, content={"ok": False, "error": "file not found"})
+    return FileResponse(path)
+
+
+def _classify_account(row: Dict[str, Any]) -> Dict[str, Any]:
+    text = " ".join(str(row.get(k, "")) for k in ["nickname", "url", "bio", "note", "tags"]).lower()
+    cat = "房产"
+    if any(x in text for x in ["school", "学校", "留学", "教育"]): cat = "教育择校"
+    elif any(x in text for x in ["餐", "food", "cafe", "restaurant"]): cat = "餐饮生活"
+    elif any(x in text for x in ["medical", "clinic", "医院", "诊所", "药房"]): cat = "医疗健康"
+    score = 60
+    if any(x in text for x in ["买房", "置业", "房产", "condo", "property", "楼盘"]): score += 25
+    if any(x in text for x in ["马来西亚", "malaysia", "吉隆坡", "kl", "柔佛", "槟城"]): score += 10
+    return {"category": cat, "score": min(score, 99), "tags": [cat, "v10.34分类"]}
+
+
+@router.post("/api/video/account-library/import")
+async def account_import(request: Request):
+    _ensure()
+    body = await request.json()
+    rows = body.get("accounts") or body.get("items") or []
+    if isinstance(rows, str):
+        rows = [{"url": x.strip()} for x in rows.splitlines() if x.strip()]
+    con = sqlite3.connect(ACCOUNT_DB)
+    saved = []
+    for row in rows:
+        if not isinstance(row, dict): continue
+        acc_id = str(row.get("id") or "acc_" + uuid.uuid4().hex[:16])
+        c = _classify_account(row)
+        item = {
+            "id": acc_id,
+            "platform": row.get("platform") or "douyin",
+            "nickname": row.get("nickname") or row.get("name") or "",
+            "url": row.get("url") or "",
+            "city": row.get("city") or "",
+            "category": c["category"],
+            "score": c["score"],
+            "tags": json.dumps(c["tags"], ensure_ascii=False),
+            "raw_json": json.dumps(row, ensure_ascii=False),
+            "created_at": _now(),
+            "updated_at": _now(),
+        }
+        con.execute("""INSERT OR REPLACE INTO accounts(id,platform,nickname,url,city,category,score,tags,raw_json,created_at,updated_at)
+        VALUES(:id,:platform,:nickname,:url,:city,:category,:score,:tags,:raw_json,:created_at,:updated_at)""", item)
+        saved.append(item)
+    con.commit(); con.close()
+    return {"ok": True, "items": saved, "count": len(saved)}
+
+
+@router.get("/api/video/account-library/accounts")
+def account_list(category: str = "", min_score: float = 0):
+    _ensure(); con = sqlite3.connect(ACCOUNT_DB); con.row_factory = sqlite3.Row
+    sql = "SELECT * FROM accounts WHERE score>=?"; args=[min_score]
+    if category:
+        sql += " AND category=?"; args.append(category)
+    sql += " ORDER BY score DESC, updated_at DESC LIMIT 500"
+    rows = [dict(r) for r in con.execute(sql, args).fetchall()]
+    con.close()
     for r in rows:
-        d=_row_to_dict(r) or {}; d["tags"]=_json_loads(d.get("tags"),[]); notes.append(d)
-    return {"ok": True, "vault": str(OBSIDIAN_DIR), "count":len(notes), "notes":notes}
+        try: r["tags"] = json.loads(r.get("tags") or "[]")
+        except Exception: r["tags"] = []
+    return {"ok": True, "items": rows, "count": len(rows)}
 
 
-async def api_ai_control_brief():
-    mats = await api_material_list(limit=20)
-    accts = await api_accounts_list(limit=20)
-    openclaw = await api_openclaw_tasks(limit=10)
-    obs = await api_obsidian_graph(limit=20)
-    return {"ok": True, "version": BACKEND_VERSION, "summary": {"materials": mats["count"], "accounts": accts["count"], "openclaw_tasks": openclaw["count"], "obsidian_notes": obs["count"]}, "next_actions": ["补齐素材库城市/区域/来源字段", "导入账号库并分类", "用 OpenClaw 采集竞品内容", "把高价值内容沉淀到 Obsidian", "生成前先跑 V10.34 plan-preview 验收"]}
+@router.post("/api/video/account-library/classify")
+async def account_classify(request: Request):
+    body = await request.json()
+    row = body if isinstance(body, dict) else {}
+    return {"ok": True, "classification": _classify_account(row)}
 
 
-async def api_ai_control_action(request: Request):
-    data = await request.json()
-    action = str(data.get("action") or "").strip()
-    event_id = "ai_evt_" + uuid.uuid4().hex[:16]
-    output: dict[str, Any]
-    status = "completed"
-    if action == "plan-preview":
-        output = await api_v10_34_plan_preview(PlanPreviewRequest(**(data.get("payload") or data)))
-    elif action == "openclaw-capture":
-        output = await api_openclaw_capture(request)
-    elif action == "obsidian-note":
-        output = await api_obsidian_note(request)
-    else:
-        output = {"message":"action stored", "supported_actions":["plan-preview","openclaw-capture","obsidian-note"]}
-        status = "stored"
-    with _db() as con:
-        con.execute("INSERT INTO ai_control_events(event_id,action,status,input_json,output_json,created_at) VALUES(?,?,?,?,?,?)", (event_id,action,status,json.dumps(data,ensure_ascii=False),json.dumps(output,ensure_ascii=False),_now()))
-    return {"ok": True, "event_id": event_id, "status": status, "output": output}
+@router.post("/api/video/openclaw/collect/start")
+async def openclaw_collect_start(request: Request):
+    _ensure(); body = await request.json()
+    job_id = "openclaw_" + uuid.uuid4().hex[:16]
+    job = {"id": job_id, "status": "queued", "request": body, "created_at": _now(), "note": "OpenClaw worker 接口已预留；服务器有 worker 时可接入真实采集。"}
+    _write_json(JOBS_DIR / f"{job_id}.json", job)
+    return {"ok": True, "job_id": job_id, "job": job}
 
 
-def install_v10_34_complete(app: FastAPI) -> None:
-    remove_paths = {
-        "/api/video/v10-34/health",
-        "/api/video/v10-34/script/split",
-        "/api/video/v10-34/plan-preview",
-        "/api/video/v10-34/start",
-        "/api/video/v10-34/job/{job_id}",
-        "/api/video/v10-34/generated-shot-assets/{job_id}",
-        "/api/video/v10-34/approve-final",
-        "/api/video/full-ai/tts-first/voice-preview",
-        "/api/video/full-ai/tts-first/script-version",
-        "/api/video/material-library/categories",
-        "/api/video/material-library",
-        "/api/video/material-library/upload",
-        "/api/video/material-library/{asset_id}",
-        "/api/video/accounts/import",
-        "/api/video/accounts",
-        "/api/video/accounts/classify",
-        "/api/openclaw/capture",
-        "/api/openclaw/tasks",
-        "/api/obsidian/note",
-        "/api/obsidian/graph",
-        "/api/ai-control/brief",
-        "/api/ai-control/action",
+@router.get("/api/video/openclaw/collect/job/{job_id}")
+def openclaw_collect_job(job_id: str):
+    job = _json_file(JOBS_DIR / f"{job_id}.json", None)
+    if not job: return JSONResponse(status_code=404, content={"ok": False, "error": "job not found"})
+    return {"ok": True, "job": job}
+
+
+@router.get("/api/video/obsidian/health")
+def obsidian_health():
+    _ensure(); return {"ok": True, "vault": str(OBSIDIAN_DIR)}
+
+
+@router.get("/api/video/obsidian/notes")
+def obsidian_notes():
+    _ensure()
+    notes=[]
+    for p in OBSIDIAN_DIR.rglob("*.md"):
+        notes.append({"path": str(p.relative_to(OBSIDIAN_DIR)), "title": p.stem, "updated_at": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(p.stat().st_mtime))})
+    return {"ok": True, "items": notes}
+
+
+@router.post("/api/video/obsidian/notes")
+async def obsidian_create_note(request: Request):
+    _ensure(); body = await request.json()
+    title = str(body.get("title") or "未命名增长笔记").strip().replace("/", "-")[:80]
+    content = str(body.get("content") or body.get("text") or "")
+    tags = body.get("tags") or ["AI视频", "V10.34"]
+    path = OBSIDIAN_DIR / f"{time.strftime('%Y%m%d_%H%M%S')}_{title}.md"
+    md = "---\n" + f"title: {title}\ncreated: {_now()}\ntags: {json.dumps(tags, ensure_ascii=False)}\n" + "---\n\n" + content + "\n"
+    path.write_text(md, encoding="utf-8")
+    return {"ok": True, "path": str(path.relative_to(OBSIDIAN_DIR)), "title": title}
+
+
+
+
+def _split_sentences(text: str) -> List[str]:
+    import re
+    raw = [x.strip() for x in re.split(r"[\n。！？!?；;]+", str(text or "")) if x.strip()]
+    out: List[str] = []
+    for line in raw:
+        if len(line) <= 38:
+            out.append(line)
+        else:
+            chunks = re.split(r"[，,、]+", line)
+            cur = ""
+            for c in chunks:
+                c = c.strip()
+                if not c:
+                    continue
+                if len(cur) + len(c) <= 34:
+                    cur = (cur + "，" + c).strip("，")
+                else:
+                    if cur:
+                        out.append(cur)
+                    cur = c
+            if cur:
+                out.append(cur)
+    return out[:16]
+
+
+def _safe_keywords(value: Any) -> List[str]:
+    if isinstance(value, list):
+        return [str(x).strip() for x in value if str(x).strip()]
+    return [x.strip() for x in str(value or "").replace("，", ",").split(",") if x.strip()]
+
+
+@router.post("/api/video/v10-34/step2/script")
+async def step2_script(request: Request):
+    _ensure()
+    body = await request.json()
+    title = str(body.get("title") or body.get("topic") or "短视频口播稿").strip()
+    audience = str(body.get("audience") or "目标客户").strip()
+    selling_points = str(body.get("selling_points") or "").strip()
+    style = str(body.get("style") or "真实顾问口播").strip()
+    keywords = _safe_keywords(body.get("keywords"))[:12]
+    banned = _safe_keywords(body.get("banned_words"))[:20]
+    script = str(body.get("script") or "").strip()
+    if not script:
+        kw_text = "、".join(keywords[:6]) or "生活配套、交通、教育、医疗、餐饮"
+        script = "\n".join([
+            f"如果你正在了解{title}，先别只看价格和样板间。",
+            f"真正影响长期居住体验的，是{kw_text}这些每天都会用到的东西。",
+            f"我建议你按生活便利、通勤时间、教育医疗和后续服务这几项一起看。",
+            f"尤其是{audience}，不要被单一卖点带着走，要看它能不能解决你的真实需求。",
+            "想要完整清单，可以私信我，我按你的预算和家庭情况给你整理。",
+        ])
+    for w in banned:
+        if w:
+            script = script.replace(w, "")
+    parts = _split_sentences(script)
+    segments = []
+    for i, text in enumerate(parts):
+        emotion = "开场提醒" if i == 0 else "重点解释" if i < len(parts) - 1 else "结尾转化"
+        segments.append({
+            "index": i + 1,
+            "text": text,
+            "emotion": emotion,
+            "speed_ratio": 1.05 if i < len(parts) - 1 else 1.0,
+            "volume_ratio": 1.0,
+            "pitch_ratio": 1.0,
+            "pause_after_ms": 320 if i < len(parts) - 1 else 520,
+            "keywords": keywords,
+        })
+    version_id = "script_v_" + uuid.uuid4().hex[:16]
+    data = {
+        "ok": True,
+        "version_id": version_id,
+        "title": title,
+        "hook": parts[0] if parts else title,
+        "script": "\n".join(p["text"] for p in segments),
+        "segments": segments,
+        "keywords": keywords,
+        "banned_words": banned,
+        "style": style,
+        "rules": ["real_script_only", "no_invented_subtitle", "keyword_required", "banned_words_removed"],
+        "created_at": _now(),
     }
-    app.router.routes[:] = [r for r in app.router.routes if getattr(r, "path", "") not in remove_paths]
-    app.add_api_route("/api/video/v10-34/health", api_v10_34_health, methods=["GET"])
-    app.add_api_route("/api/video/v10-34/script/split", api_v10_34_split_script, methods=["POST"])
-    app.add_api_route("/api/video/v10-34/plan-preview", api_v10_34_plan_preview, methods=["POST"])
-    app.add_api_route("/api/video/v10-34/start", api_v10_34_start, methods=["POST"])
-    app.add_api_route("/api/video/v10-34/job/{job_id}", api_v10_34_job, methods=["GET"])
-    app.add_api_route("/api/video/v10-34/generated-shot-assets/{job_id}", api_v10_34_generated_shot_assets, methods=["GET"])
-    app.add_api_route("/api/video/v10-34/approve-final", api_v10_34_approve_final, methods=["POST"])
-    app.add_api_route("/api/video/full-ai/tts-first/voice-preview", api_voice_preview, methods=["POST"])
-    app.add_api_route("/api/video/full-ai/tts-first/script-version", api_script_version, methods=["POST"])
-    app.add_api_route("/api/video/material-library/categories", api_material_categories, methods=["GET"])
-    app.add_api_route("/api/video/material-library", api_material_list, methods=["GET"])
-    app.add_api_route("/api/video/material-library/upload", api_material_upload, methods=["POST"])
-    app.add_api_route("/api/video/material-library/{asset_id}", api_material_update, methods=["PATCH"])
-    app.add_api_route("/api/video/accounts/import", api_accounts_import, methods=["POST"])
-    app.add_api_route("/api/video/accounts", api_accounts_list, methods=["GET"])
-    app.add_api_route("/api/video/accounts/classify", api_accounts_classify, methods=["POST"])
-    app.add_api_route("/api/openclaw/capture", api_openclaw_capture, methods=["POST"])
-    app.add_api_route("/api/openclaw/tasks", api_openclaw_tasks, methods=["GET"])
-    app.add_api_route("/api/obsidian/note", api_obsidian_note, methods=["POST"])
-    app.add_api_route("/api/obsidian/graph", api_obsidian_graph, methods=["GET"])
-    app.add_api_route("/api/ai-control/brief", api_ai_control_brief, methods=["GET"])
-    app.add_api_route("/api/ai-control/action", api_ai_control_action, methods=["POST"])
-    print("V10_34_A_TO_G_COMPLETE_INSTALLED", BACKEND_VERSION, flush=True)
+    _write_json(JOBS_DIR / f"{version_id}.json", data)
+    return data
+
+
+@router.post("/api/video/v10-34/step2/save")
+async def step2_save(request: Request):
+    _ensure()
+    body = await request.json()
+    version_id = str(body.get("version_id") or "voice_v_" + uuid.uuid4().hex[:16])
+    data = {
+        "ok": True,
+        "version_id": version_id,
+        "type": "step2_voice_version",
+        "title": body.get("title") or "口播版本",
+        "hook": body.get("hook") or "",
+        "script": body.get("script") or "",
+        "voice": body.get("voice") or "",
+        "segments": body.get("segments") or [],
+        "keywords": body.get("keywords") or [],
+        "banned_words": body.get("banned_words") or [],
+        "audio_file_name": body.get("audio_file_name") or "",
+        "audio_url": body.get("audio_url") or "",
+        "created_at": _now(),
+    }
+    _write_json(JOBS_DIR / f"{version_id}.json", data)
+    return data
+
+
+@router.post("/api/video/v10-34/complete-job")
+async def complete_job(request: Request):
+    _ensure()
+    body = await request.json()
+    job_id = str(body.get("job_id") or "completed_" + uuid.uuid4().hex[:16])
+    shots = body.get("shots") or []
+    fixed = []
+    warnings = []
+    for i, shot in enumerate(shots if isinstance(shots, list) else []):
+        if not isinstance(shot, dict):
+            continue
+        item = _sanitize_shot(shot, i + 1)
+        item["job_id"] = item.get("job_id") or job_id
+        item["raw_clip"] = item.get("raw_clip") or item.get("filename") or item.get("url") or ""
+        item["duration"] = item.get("duration") or item.get("duration_seconds") or item.get("image_seconds") or 0
+        required = ["raw_clip", "prompt", "negative_prompt", "scene_type", "narration_segment", "duration", "job_id"]
+        missing = [k for k in required if item.get(k) in (None, "", [])]
+        if missing:
+            warnings.append({"shot": i + 1, "missing": missing})
+        fixed.append(item)
+    manifest = {
+        "ok": True,
+        "job_id": job_id,
+        "status": "completed_with_v10_34_guard" if not warnings else "completed_with_metadata_warnings",
+        "title": body.get("title") or "",
+        "video": body.get("video") or {},
+        "script": body.get("script") or "",
+        "audio_file_name": body.get("audio_file_name") or "",
+        "shots": fixed,
+        "warnings": warnings,
+        "transition_policy": {"safe_transition": SAFE_TRANSITION, "blocked": BANNED_TRANSITIONS, "concat": "crossfade"},
+        "created_at": _now(),
+    }
+    _write_json(JOBS_DIR / f"{job_id}.complete.json", manifest)
+    return manifest
+
+@router.get("/api/video/ai-console/health")
+def ai_console_health():
+    return {"ok": True, "modules": ["video_loop", "step2_tts", "material_library", "account_library", "openclaw", "obsidian", "console"]}
+
+
+
+
+def _account_count() -> int:
+    try:
+        _ensure()
+        con = sqlite3.connect(ACCOUNT_DB)
+        n = int(con.execute("SELECT COUNT(*) FROM accounts").fetchone()[0])
+        con.close()
+        return n
+    except Exception:
+        return 0
+
+@router.get("/api/video/ai-console/status")
+def ai_console_status():
+    _ensure()
+    return {
+        "ok": True,
+        "version": "v10.34 A-G original-ui",
+        "ui_policy": "frontend/src/App.tsx preserved",
+        "backend_origin": "https://ai-video.47-76-143-158.sslip.io",
+        "counts": {
+            "materials": len(list(MATERIAL_DIR.rglob("*.meta.json"))),
+            "obsidian_notes": len(list(OBSIDIAN_DIR.rglob("*.md"))),
+            "accounts": _account_count(),
+            "openclaw_jobs": len(list(JOBS_DIR.glob("openclaw_*.json"))),
+            "completed_jobs": len(list(JOBS_DIR.glob("*.complete.json"))),
+            "script_versions": len(list(JOBS_DIR.glob("script_v_*.json"))) + len(list(JOBS_DIR.glob("voice_v_*.json"))),
+        },
+        "video_transition_lock": {"safe_transition": SAFE_TRANSITION, "banned": BANNED_TRANSITIONS, "concat": "crossfade"},
+    }
+
+
+def install_v10_34_complete(app):
+    _ensure()
+    existing = {getattr(r, "path", "") for r in getattr(app, "routes", [])}
+    if "/api/video/v10-34/health" not in existing:
+        app.include_router(router)
+        print("V10_34_A_TO_G_ORIGINAL_UI_ROUTES_INSTALLED", flush=True)
+    return app

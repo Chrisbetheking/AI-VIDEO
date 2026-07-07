@@ -1,5 +1,5 @@
 const envApiBase = (import.meta.env.VITE_API_BASE || '').replace(/\/$/, '')
-const defaultRenderApi = 'https://ai-video-u8jd.onrender.com'
+const defaultRenderApi = 'https://ai-video.47-76-143-158.sslip.io'
 const isLocal = typeof window !== 'undefined' && /^(localhost|127\.0\.0\.1)$/i.test(window.location.hostname)
 
 // Cloudflare Pages 如果忘记配置 VITE_API_BASE，默认会请求当前 pages.dev 的 /api，
@@ -47,7 +47,7 @@ async function parseResponse<T>(res: Response, url: string): Promise<T> {
   }
   if (contentType.includes('application/json')) return res.json() as Promise<T>
   const text = await res.text()
-  throw new Error(`后端没有返回 JSON，请检查 Cloudflare 的 VITE_API_BASE 是否指向 Render 后端。\n请求地址：${url}\n返回：${text.slice(0, 220)}`)
+  throw new Error(`后端没有返回 JSON，请检查 VITE_API_BASE 或后端地址是否正确。\n请求地址：${url}\n返回：${text.slice(0, 220)}`)
 }
 
 async function safeFetch<T>(url: string, init?: RequestInit, timeoutMs = 240000): Promise<T> {
@@ -57,11 +57,11 @@ async function safeFetch<T>(url: string, init?: RequestInit, timeoutMs = 240000)
     return parseResponse<T>(res, url)
   } catch (err: any) {
     if (err?.name === 'AbortError') {
-      throw new Error(`请求超时：${url}\nRender 免费实例可能冷启动、内存爆掉或接口耗时过长。`)
+      throw new Error(`请求超时：${url}\n后端服务可能冷启动、内存爆掉或接口耗时过长。`)
     }
     const msg = err?.message || String(err)
     if (msg === 'Failed to fetch') {
-      throw new Error(`无法连接后端：${url}\n大概率是 Render 免费实例冷启动、网络采集被平台阻断或接口耗时过长。请等 30-60 秒后先打开 ${defaultRenderApi}/api/health，显示 ok 后再试；若仍失败，请发 Render 最新 Logs。`)
+      throw new Error(`无法连接后端：${url}\n大概率是 后端服务冷启动、网络采集被平台阻断或接口耗时过长。请等 30-60 秒后先打开 ${defaultRenderApi}/api/health，显示 ok 后再试；若仍失败，请发 Render 最新 Logs。`)
     }
     throw err
   } finally {
@@ -605,4 +605,33 @@ export interface JobItem {
 
 export function listJobs(limit = 50): Promise<JobItem[]> {
   return apiGet<JobItem[]>(`/api/jobs?limit=${limit}`)
+}
+
+export interface V1034MaterialUploadMeta {
+  category: string
+  city: string
+  area: string
+  source: string
+  reusable: boolean
+  note: string
+}
+
+export interface V1034MaterialUploadResponse {
+  ok: boolean
+  items: any[]
+  error?: string
+  categories?: string[]
+}
+
+export async function uploadV1034Material(files: FileList, meta: V1034MaterialUploadMeta): Promise<V1034MaterialUploadResponse> {
+  const form = new FormData()
+  form.append('category', meta.category)
+  form.append('city', meta.city)
+  form.append('area', meta.area)
+  form.append('source', meta.source)
+  form.append('reusable', meta.reusable ? 'true' : 'false')
+  form.append('note', meta.note)
+  Array.from(files).forEach(file => form.append('files', file))
+  const url = `${API_BASE}/api/video/material-library/upload`
+  return safeFetch<V1034MaterialUploadResponse>(url, { method: 'POST', body: form }, 240000)
 }
