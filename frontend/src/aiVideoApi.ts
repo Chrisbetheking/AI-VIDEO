@@ -3,7 +3,15 @@ const defaultApiBase = 'https://ai-video.47-76-143-158.sslip.io'
 const isLocal =
   typeof window !== 'undefined' && /^(localhost|127\.0\.0\.1)$/i.test(window.location.hostname)
 
-export const API_BASE = envApiBase || (isLocal ? 'http://localhost:8000' : defaultApiBase)
+export const API_BASE = (envApiBase || (isLocal ? 'http://localhost:8000' : defaultApiBase)).replace(/\/+$/, '')
+
+export function buildApiUrl(path: string): string {
+  const raw = String(path || '').trim()
+  if (/^https?:\/\//i.test(raw)) return raw
+  const normalized = raw.startsWith('/') ? raw : `/${raw}`
+  return `${API_BASE}${normalized}`
+}
+
 export const TOKEN_KEY = 'ai_video_api_token'
 export const BACKEND_MAX_FULL_AI_SHOTS = 50
 
@@ -147,7 +155,7 @@ function authHeaders(extra?: HeadersInit): HeadersInit {
 }
 
 export async function apiGet(path: string, timeoutMs = 120000): Promise<any> {
-  const url = `${API_BASE}${path}`
+  const url = buildApiUrl(path)
   const controller = new AbortController()
   const timer = window.setTimeout(() => controller.abort(), timeoutMs)
   try {
@@ -165,7 +173,7 @@ export async function apiGet(path: string, timeoutMs = 120000): Promise<any> {
 }
 
 export async function apiPost(path: string, body: unknown, timeoutMs = 240000): Promise<any> {
-  const url = `${API_BASE}${path}`
+  const url = buildApiUrl(path)
   const controller = new AbortController()
   const timer = window.setTimeout(() => controller.abort(), timeoutMs)
   try {
