@@ -7,7 +7,11 @@ export default defineConfig({
     port: 5173,
     proxy: {
       '/api': 'http://localhost:8000',
-      '/files': 'http://localhost:8000'
+      '/storage': 'http://localhost:8000',
+      '/outputs': 'http://localhost:8000',
+      '/uploads': 'http://localhost:8000',
+      '/download': 'http://localhost:8000',
+      '/static': 'http://localhost:8000'
     }
   }
 })
