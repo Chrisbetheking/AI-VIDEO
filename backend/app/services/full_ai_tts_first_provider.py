@@ -2935,3 +2935,409 @@ _v10_27k_install_runtime_prompt_cleaner()
 
 
 # AI_VIDEO_V10_27K_BUILD_PROMPT_HARD_KWARGS_FIX: _build_prompt accepts runtime metadata kwargs safely.
+
+
+
+# V10_32_AREA_FOOD_MEDICAL_SEMANTICS
+# Fix semantic coverage for Malaysia property scripts:
+# - 华人区/长期价值/保值/转售市场 => area_value
+# - 诊所/药房/看病 => medical
+# - 食阁/餐饮/吃饭/food court => food
+# Also split mixed clauses like “超市和诊所” so shots can match narration.
+try:
+    _V10_32_OLD_SPLIT_SCRIPT = _v10_27_split_script
+    _V10_32_OLD_SCENE_TYPE = _v10_27_scene_type
+    _V10_32_OLD_REQUIRED_CATEGORIES = _v10_27_required_categories
+except Exception:
+    _V10_32_OLD_SPLIT_SCRIPT = None
+    _V10_32_OLD_SCENE_TYPE = None
+    _V10_32_OLD_REQUIRED_CATEGORIES = None
+
+def _v10_32_has_any(text, words):
+    t = str(text or "").lower()
+    return any(str(w).lower() in t for w in words)
+
+def _v10_27_split_script(script):
+    import re
+    text = _v10_27_clean_text(script)
+    # 强制把“第一/第二/第三”这种口播结构拆开
+    text = re.sub(r'(第一|第二|第三|第四|第五)', r' \1', text)
+    rough = re.split(r'\s+', text)
+    out = []
+
+    for part in rough:
+        part = _v10_27_clean_text(part)
+        if not part:
+            continue
+
+        # “超市和诊所”必须拆，不然只会命中 shopping
+        if ("超市" in part or "便利店" in part) and ("诊所" in part or "药房" in part or "看病" in part):
+            left = part
+            left = left.replace("和诊所", "").replace("和药房", "").strip()
+            if left:
+                out.append(left)
+            if "诊所" in part:
+                out.append("步行可达的诊所")
+            if "药房" in part:
+                out.append("步行可达的药房")
+            continue
+
+        # “本地食阁 + 租客转售”必须拆，否则会被 investment 吃掉
+        if ("食阁" in part or "餐饮" in part or "吃饭" in part or "food court" in part.lower()) and ("租客" in part or "转售" in part or "保值" in part):
+            if "食阁" in part:
+                out.append("足够多的本地食阁")
+            elif "餐饮" in part:
+                out.append("周边餐饮配套")
+            else:
+                out.append("吃饭方便")
+            rest = part
+            rest = rest.replace("第三有没有足够多的本地食阁", "")
+            rest = rest.replace("有没有足够多的本地食阁", "")
+            rest = rest.replace("足够多的本地食阁", "")
+            rest = _v10_27_clean_text(rest)
+            if rest:
+                out.append(rest)
+            continue
+
+        out.append(part)
+
+    # 如果拆得太少，回退旧逻辑
+    if len(out) < 3 and _V10_32_OLD_SPLIT_SCRIPT:
+        old = _V10_32_OLD_SPLIT_SCRIPT(script)
+        if len(old) > len(out):
+            out = old
+
+    # 去空、保序
+    final = []
+    for x in out:
+        x = _v10_27_clean_text(x)
+        if x:
+            final.append(x)
+    return final
+
+def _v10_27_scene_type(text):
+    t = str(text or "").lower()
+
+    # 先判强语义，避免被 investment/shopping 抢走
+    if _v10_32_has_any(t, ["诊所", "药房", "医院", "看病", "买药", "clinic", "pharmacy"]):
+        return "medical"
+
+    if _v10_32_has_any(t, ["食阁", "餐饮", "吃饭", "餐厅", "咖啡", "food court", "restaurant", "cafe"]):
+        return "food"
+
+    if _v10_32_has_any(t, ["华人区", "长期价值", "保值", "转售", "转售市场", "地段价值", "区域价值", "生活圈", "成熟社区"]):
+        return "area_value"
+
+    if _v10_32_has_any(t, ["超市", "便利店", "商场", "买菜", "购物", "grocery", "supermarket", "mall"]):
+        return "shopping"
+
+    if _v10_32_has_any(t, ["24小时安全", "安全", "社区环境", "大堂", "园林", "泳池", "健身房", "保安"]):
+        return "community"
+
+    if _v10_32_has_any(t, ["租客", "出租", "投资", "自住", "回报", "需求"]):
+        return "investment"
+
+    if _V10_32_OLD_SCENE_TYPE:
+        return _V10_32_OLD_SCENE_TYPE(text)
+
+    return "investment"
+
+def _v10_27_required_categories(script):
+    cats = []
+    for piece in _v10_27_split_script(script):
+        c = _v10_27_scene_type(piece)
+        if c and c not in cats:
+            cats.append(c)
+
+    full = str(script or "").lower()
+
+    # 全文补充 required，避免被拆句漏掉
+    if _v10_32_has_any(full, ["华人区", "长期价值", "保值", "转售市场", "地段价值", "区域价值"]) and "area_value" not in cats:
+        cats.append("area_value")
+    if _v10_32_has_any(full, ["诊所", "药房", "看病", "买药"]) and "medical" not in cats:
+        cats.append("medical")
+    if _v10_32_has_any(full, ["食阁", "餐饮", "吃饭", "food court"]) and "food" not in cats:
+        cats.append("food")
+    if _v10_32_has_any(full, ["超市", "便利店", "购物", "商场"]) and "shopping" not in cats:
+        cats.append("shopping")
+    if _v10_32_has_any(full, ["安全", "社区环境", "大堂", "园林", "泳池", "健身房"]) and "community" not in cats:
+        cats.append("community")
+    if _v10_32_has_any(full, ["投资", "租客", "出租", "自住", "需求"]) and "investment" not in cats:
+        cats.append("investment")
+
+    return cats
+
+print("V10_32_AREA_FOOD_MEDICAL_SEMANTICS_LOADED")
+
+
+
+# V10_33_FORCE_MISSING_SEMANTIC_SHOTS
+# If required semantic categories are missing from preview shots, force-add real-script shots before generation.
+try:
+    _V10_33_OLD_BUILD_PREVIEW = _v10_27_build_preview
+except Exception:
+    _V10_33_OLD_BUILD_PREVIEW = None
+
+try:
+    _V10_33_OLD_SUBJECTS = _v10_27k_subjects
+except Exception:
+    _V10_33_OLD_SUBJECTS = None
+
+def _v10_33_contains(text, words):
+    t = str(text or "").lower()
+    return any(str(w).lower() in t for w in words)
+
+def _v10_33_meta(cat):
+    metas = {
+        "area_value": {
+            "label": "区域/楼盘外景/地段",
+            "subject": "street-level Malaysian residential district with condo towers, shop lots, tropical greenery and real daily foot traffic",
+            "must": "Malaysian residential district, condo exterior, shop lots, tropical greenery, real street-level context",
+            "forbid": "only indoor living room, only documents, calculator, repeated KLCC close-up, readable signs",
+            "camera": "slow push in from street level or gentle left-to-right establishing pan",
+        },
+        "shopping": {
+            "label": "购物/超市/商场/便利店",
+            "subject": "supermarket and convenience shopping near residential towers with residents carrying grocery bags",
+            "must": "supermarket, convenience store, grocery bags, nearby mall or shop lots, daily shopping scene",
+            "forbid": "only condo lobby, only bedroom, price tags, readable signs, fake logos",
+            "camera": "smooth lateral pan following residents with grocery bags",
+        },
+        "medical": {
+            "label": "医疗/诊所/药房/看病买药",
+            "subject": "small neighborhood clinic or pharmacy near residential area with residents entering or buying medicine",
+            "must": "clinic, pharmacy, community medical access, resident entering clinic or buying medicine",
+            "forbid": "hospital surgery, ambulance emergency, readable medical sign text, only condo interior",
+            "camera": "steady street-level push in or gentle handheld follow shot",
+        },
+        "food": {
+            "label": "餐饮/食阁/咖啡店/吃饭",
+            "subject": "local Malaysian food court or kopitiam near residential towers with residents eating naturally",
+            "must": "food court, local eateries, kopitiam, people eating, daily dining convenience",
+            "forbid": "fine dining only, hotel buffet, readable menu text, fake logos",
+            "camera": "smooth walk-through or lateral pan across local dining scene",
+        },
+        "community": {
+            "label": "社区/大堂/园林/泳池/健身房",
+            "subject": "condo lobby garden pool and gym community facilities with natural resident movement",
+            "must": "lobby, security, garden, pool, gym, residents, community living atmosphere",
+            "forbid": "empty luxury hotel only, readable project logo, text sign",
+            "camera": "smooth amenity walk-through or slow push in",
+        },
+        "investment": {
+            "label": "投资/出租/租客/自住",
+            "subject": "tenant or buyer viewing a condo unit naturally with agent and residential demand context",
+            "must": "tenant viewing, agent showing unit, residential foot traffic, self-use and rental demand mood",
+            "forbid": "money flying, charts, exact ROI numbers, document close-up",
+            "camera": "steady viewing-style movement, medium shot, realistic handheld",
+        },
+    }
+    return metas.get(cat) or metas["investment"]
+
+def _v10_27k_subjects(semantic_type):
+    cat = str(semantic_type or "").strip().lower()
+    if cat in {"area_value", "shopping", "medical", "food", "community", "investment"}:
+        m = _v10_33_meta(cat)
+        return m["label"], m["subject"], m["must"], m["camera"], m["forbid"]
+    if _V10_33_OLD_SUBJECTS:
+        return _V10_33_OLD_SUBJECTS(semantic_type)
+    m = _v10_33_meta("investment")
+    return m["label"], m["subject"], m["must"], m["camera"], m["forbid"]
+
+def _v10_33_pick_segment(script, cat):
+    s = str(script or "")
+
+    candidates = {
+        "medical": ["诊所", "药房", "看病", "买药"],
+        "food": ["本地食阁", "食阁", "餐饮", "吃饭"],
+        "area_value": ["华人区的长期价值", "华人区", "长期价值", "更保值", "转售市场"],
+        "shopping": ["华人超市", "超市", "便利店"],
+        "community": ["24小时安全的社区环境", "社区环境", "安全"],
+        "investment": ["在吉隆坡投资别只看地段", "租客和转售市场", "租客", "投资"],
+    }
+
+    for kw in candidates.get(cat, []):
+        if kw in s:
+            # 优先返回真实原文里的短片段，不造字幕
+            if cat == "medical" and "第一步行可达的华人超市和诊所" in s:
+                return "诊所"
+            if cat == "food" and "本地食阁" in s:
+                return "本地食阁"
+            return kw
+
+    # 兜底：绝不编字幕，只从原文截取
+    return s[:12] if s else cat
+
+def _v10_33_keywords(segment, cat):
+    seg = str(segment or "")
+    kws = []
+    for w in ["华人区", "投资", "超市", "诊所", "药房", "社区环境", "本地食阁", "租客", "转售市场", "保值"]:
+        if w in seg:
+            kws.append(w)
+    if not kws:
+        if cat == "medical": kws = ["诊所"]
+        elif cat == "food": kws = ["本地食阁"]
+        elif cat == "area_value": kws = ["华人区"]
+        elif cat == "shopping": kws = ["超市"]
+        elif cat == "community": kws = ["社区环境"]
+        elif cat == "investment": kws = ["投资"]
+    return kws
+
+def _v10_33_build_shot(index, cat, segment, duration, start=0.0, end=0.0):
+    m = _v10_33_meta(cat)
+    kws = _v10_33_keywords(segment, cat)
+    transition = "cross_dissolve"
+    prompt = (
+        f"Premium realistic vertical 9:16 Malaysia property short-video B-roll. "
+        f"Shot {index}. Narration meaning: {segment}. "
+        f"Semantic category: {m['label']}. "
+        f"Required visual subject: {m['subject']}. "
+        f"Must show: {m['must']}. "
+        f"Camera motion: {m['camera']}. "
+        f"Transition to next: {transition}. "
+        f"Real Malaysian urban residential environment, tropical daylight, natural residents, "
+        f"no fake model posing, no readable text signs, no logos, no subtitles, no watermark, "
+        f"no KLCC unless explicitly required, no ocean unless Penang Langkawi or Sabah."
+    )
+    return {
+        "index": index,
+        "shot_id": f"v10_33_{index:02d}_{cat}",
+        "start_seconds": round(start, 2),
+        "end_seconds": round(end, 2),
+        "duration_seconds": round(float(duration), 2),
+        "narration_segment": segment,
+        "clean_subtitle": segment,
+        "highlight_keywords": kws,
+        "keywords": kws,
+        "semantic_type": cat,
+        "semantic_label": m["label"],
+        "scene_type": cat,
+        "visual_subject": m["subject"],
+        "must_show": m["must"],
+        "forbidden_visuals": m["forbid"],
+        "camera_motion": m["camera"],
+        "transition": transition,
+        "transition_to_next": transition,
+        "visual_prompt": prompt,
+        "prompt": prompt,
+        "negative_prompt": "readable text, subtitles, captions, chinese characters, english words, random letters, logo, watermark, fake UI, poster, banner, signboard with text, price tag, exact numbers, document close-up, calculator close-up, unrelated office meeting, cartoon, anime, low quality, blurry, black bars, distorted face, deformed hands",
+        "source_priority": "v10_33_force_missing_required_semantic_category_real_script_only",
+        "demand_acceptance_lock": "v10_33",
+    }
+
+def _v10_33_retime(shots, total_duration):
+    n = max(1, len(shots))
+    per = max(2.0, float(total_duration or 15.0) / n)
+    t = 0.0
+    for i, sh in enumerate(shots, 1):
+        sh["index"] = i
+        sh["shot_id"] = f"v10_33_{i:02d}_{sh.get('scene_type') or sh.get('semantic_type') or 'shot'}"
+        sh["start_seconds"] = round(t, 2)
+        end = float(total_duration or 15.0) if i == n else min(float(total_duration or 15.0), t + per)
+        sh["end_seconds"] = round(end, 2)
+        sh["duration_seconds"] = round(max(2.0, end - t), 2)
+        t = end
+    return shots
+
+def _v10_33_rebuild_plan_and_cues(preview):
+    shots = list(preview.get("shots") or [])
+    total = float(preview.get("duration_seconds") or 15.0)
+    shots = _v10_33_retime(shots, total)
+
+    plan = []
+    cues = []
+    covered = []
+    for sh in shots:
+        cat = str(sh.get("scene_type") or sh.get("semantic_type") or "")
+        if cat and cat not in covered:
+            covered.append(cat)
+        plan.append({
+            "index": sh.get("index"),
+            "time": f"{sh.get('start_seconds')}-{sh.get('end_seconds')}s",
+            "narration_segment": sh.get("narration_segment"),
+            "semantic_label": sh.get("semantic_label"),
+            "must_show": sh.get("must_show"),
+            "forbidden_visuals": sh.get("forbidden_visuals"),
+            "transition_to_next": sh.get("transition_to_next"),
+            "camera_motion": sh.get("camera_motion"),
+        })
+        cues.append({
+            "start": sh.get("start_seconds"),
+            "end": sh.get("end_seconds"),
+            "text": sh.get("clean_subtitle") or sh.get("narration_segment"),
+            "clean_text": sh.get("clean_subtitle") or sh.get("narration_segment"),
+            "keywords": sh.get("keywords") or [],
+            "subtitle_style": "DouyinCleanEmphasisV2",
+        })
+
+    preview["shots"] = shots
+    preview["semantic_shot_plan"] = plan
+    preview["subtitle_cues"] = cues
+    preview["subtitles"] = cues
+    preview["shot_count"] = len(shots)
+    preview["target_shot_count"] = len(shots)
+    return covered
+
+def _v10_27_build_preview(payload):
+    if not _V10_33_OLD_BUILD_PREVIEW:
+        return {"ok": False, "provider": "full_ai_tts_first_semantic_direct_render_v10_27k", "error": "V10_33_OLD_BUILD_PREVIEW_MISSING"}
+
+    preview = _V10_33_OLD_BUILD_PREVIEW(payload)
+
+    try:
+        script = str(preview.get("script_text") or payload.get("script_text") or payload.get("script") or "")
+        total = float(preview.get("duration_seconds") or payload.get("duration_seconds") or 15.0)
+
+        required = _v10_27_required_categories(script)
+        shots = list(preview.get("shots") or [])
+        covered = []
+        for sh in shots:
+            c = str(sh.get("scene_type") or sh.get("semantic_type") or "").strip()
+            if c and c not in covered:
+                covered.append(c)
+
+        missing = [c for c in required if c not in covered]
+
+        # 强制补齐 required 中缺失的语义，不再因为 target_shot_count 把 medical/food 挤掉
+        for cat in missing:
+            seg = _v10_33_pick_segment(script, cat)
+            shot = _v10_33_build_shot(len(shots) + 1, cat, seg, 2.0)
+
+            if cat == "medical":
+                insert_at = 0
+                for i, sh in enumerate(shots):
+                    if str(sh.get("scene_type") or sh.get("semantic_type")) == "shopping":
+                        insert_at = i + 1
+                shots.insert(insert_at, shot)
+            elif cat == "food":
+                insert_at = len(shots)
+                for i, sh in enumerate(shots):
+                    if str(sh.get("scene_type") or sh.get("semantic_type")) in {"community", "shopping"}:
+                        insert_at = i + 1
+                shots.insert(insert_at, shot)
+            else:
+                shots.append(shot)
+
+        preview["shots"] = shots
+        covered2 = _v10_33_rebuild_plan_and_cues(preview)
+
+        missing2 = [c for c in required if c not in covered2]
+        preview["acceptance"] = dict(preview.get("acceptance") or {})
+        preview["acceptance"]["required_categories"] = required
+        preview["acceptance"]["covered_categories"] = covered2
+        preview["acceptance"]["problems"] = [f"MISSING_CATEGORY:{c}" for c in missing2]
+        preview["acceptance"]["passed"] = not missing2
+        preview["generation_allowed"] = not missing2
+        preview["version"] = "v10.33-force-missing-semantic-shots"
+        preview["provider"] = "full_ai_tts_first_semantic_direct_render_v10_27k"
+        preview["v10_33_forced_missing_categories"] = missing
+        return preview
+    except Exception as exc:
+        preview["generation_allowed"] = False
+        preview["acceptance"] = dict(preview.get("acceptance") or {})
+        preview["acceptance"]["passed"] = False
+        preview["acceptance"]["problems"] = list(preview["acceptance"].get("problems") or []) + [f"V10_33_POSTPROCESS_FAILED:{exc}"]
+        return preview
+
+print("V10_33_FORCE_MISSING_SEMANTIC_SHOTS_LOADED")
+
