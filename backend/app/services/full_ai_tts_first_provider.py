@@ -3685,3 +3685,76 @@ try:
 except Exception as _v10_34a_install_exc:
     print("V10_34A_INSTALL_WRAP_FAILED", _v10_34a_install_exc)
 
+
+
+# V10_34A2_PREVIEW_TRANSITION_GUARD
+# Make plan-preview reflect the same no-flash transition policy as paid render.
+try:
+    _V10_34A2_OLD_BUILD_PREVIEW = _v10_27_build_preview
+except Exception:
+    _V10_34A2_OLD_BUILD_PREVIEW = None
+
+def _v10_34a2_safe_text(text):
+    try:
+        return _v10_34a_clean_prompt_text(text)
+    except Exception:
+        return str(text or "")
+
+def _v10_34a2_clean_preview(preview):
+    if not isinstance(preview, dict):
+        return preview
+
+    shots = list(preview.get("shots") or [])
+    safe = "smooth_dissolve_no_flash"
+
+    cleaned = []
+    for sh in shots:
+        if not isinstance(sh, dict):
+            cleaned.append(sh)
+            continue
+        sh = dict(sh)
+        sh["transition"] = safe
+        sh["transition_to_next"] = safe
+        sh["no_flash_transition_lock"] = "v10_34a2_preview"
+        for k in ["visual_prompt", "prompt"]:
+            if sh.get(k):
+                sh[k] = _v10_34a2_safe_text(sh.get(k))
+        neg = str(sh.get("negative_prompt") or "")
+        add = "white flash, black flash, flash transition, hard cut, jump cut, strobe, flicker, wipe, glitch, sudden exposure change"
+        if "flash transition" not in neg:
+            sh["negative_prompt"] = (neg.rstrip(", ") + ", " + add).strip(", ")
+        cleaned.append(sh)
+
+    preview["shots"] = cleaned
+
+    # 同步 semantic_shot_plan 里的 transition
+    plan = []
+    for item in list(preview.get("semantic_shot_plan") or []):
+        if isinstance(item, dict):
+            item = dict(item)
+            item["transition_to_next"] = safe
+            plan.append(item)
+        else:
+            plan.append(item)
+    preview["semantic_shot_plan"] = plan
+
+    preview["transition_policy"] = {
+        "version": "v10_34a2",
+        "allowed": [safe, "cross_dissolve"],
+        "blocked": [
+            "flash", "white flash", "black flash", "hard cut", "jump cut",
+            "smooth_cut", "pull_out", "opening_slow_push_in", "horizontal_pan_match"
+        ],
+        "rule": "preview and render must not contain flash-like or hard-cut transition tokens"
+    }
+
+    return preview
+
+def _v10_27_build_preview(payload):
+    if not _V10_34A2_OLD_BUILD_PREVIEW:
+        return {"ok": False, "error": "V10_34A2_OLD_BUILD_PREVIEW_MISSING"}
+    preview = _V10_34A2_OLD_BUILD_PREVIEW(payload)
+    return _v10_34a2_clean_preview(preview)
+
+print("V10_34A2_PREVIEW_TRANSITION_GUARD_LOADED")
+
