@@ -1065,3 +1065,195 @@
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot); else boot();
 })();
 
+
+
+/* AI VIDEO V10.34A - final save and shot asset panel */
+(function(){
+  if (window.__AI_VIDEO_V10_34A_FINAL_SAVE_PANEL__) return;
+  window.__AI_VIDEO_V10_34A_FINAL_SAVE_PANEL__ = true;
+
+  var STORE_KEYS = [
+    'ai_video_wizard_resume_v10_24',
+    'ai_video_wizard_resume',
+    'ai_video_latest_job'
+  ];
+
+  function readState(){
+    for (var i=0;i<STORE_KEYS.length;i++){
+      try {
+        var raw = localStorage.getItem(STORE_KEYS[i]);
+        if (!raw) continue;
+        var data = JSON.parse(raw);
+        if (data && (data.job_id || data.jobId || data.id)) return data;
+      } catch(e){}
+    }
+    return {};
+  }
+
+  function pick(obj, keys){
+    for (var i=0;i<keys.length;i++){
+      var v = obj && obj[keys[i]];
+      if (v) return v;
+    }
+    return '';
+  }
+
+  async function getJson(url){
+    var r = await fetch(url, {credentials:'include', cache:'no-store'});
+    var t = await r.text();
+    try { return JSON.parse(t); } catch(e) { return {ok:false, status:r.status, text:t}; }
+  }
+
+  async function postJson(url, body){
+    var r = await fetch(url, {
+      method:'POST',
+      credentials:'include',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(body || {})
+    });
+    var t = await r.text();
+    try { return JSON.parse(t); } catch(e) { return {ok:false, status:r.status, text:t}; }
+  }
+
+  function ensurePanel(){
+    var el = document.getElementById('ai-v1034a-final-save-panel');
+    if (el) return el;
+
+    var style = document.createElement('style');
+    style.textContent = `
+      #ai-v1034a-final-save-panel{
+        position:fixed;right:18px;bottom:18px;z-index:999999;
+        width:360px;max-height:68vh;overflow:auto;
+        background:rgba(255,255,255,.96);backdrop-filter:blur(10px);
+        border:1px solid rgba(124,58,237,.22);border-radius:18px;
+        box-shadow:0 18px 48px rgba(15,23,42,.18);
+        font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+        padding:14px;color:#0f172a;
+      }
+      #ai-v1034a-final-save-panel .h{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+      #ai-v1034a-final-save-panel .badge{font-size:12px;background:#ede9fe;color:#6d28d9;border-radius:999px;padding:3px 8px}
+      #ai-v1034a-final-save-panel .small{font-size:12px;color:#64748b;line-height:1.45}
+      #ai-v1034a-final-save-panel button{
+        border:0;border-radius:12px;padding:9px 10px;margin:4px 4px 0 0;
+        font-weight:700;cursor:pointer;background:#e2e8f0;color:#0f172a;
+      }
+      #ai-v1034a-final-save-panel button.primary{background:#2563eb;color:white}
+      #ai-v1034a-final-save-panel button.good{background:#16a34a;color:white}
+      #ai-v1034a-final-save-panel button.bad{background:#ef4444;color:white}
+      #ai-v1034a-final-save-panel pre{
+        white-space:pre-wrap;background:#0f172a;color:#e2e8f0;border-radius:12px;
+        padding:10px;font-size:11px;max-height:180px;overflow:auto;
+      }
+    `;
+    document.head.appendChild(style);
+
+    el = document.createElement('div');
+    el.id = 'ai-v1034a-final-save-panel';
+    el.innerHTML = `
+      <div class="h">
+        <strong>成片保存 / 分段素材</strong>
+        <span class="badge">V10.34A</span>
+      </div>
+      <div class="small" id="v1034a-info">等待生成任务...</div>
+      <div style="margin-top:8px">
+        <button class="good" id="v1034a-save-final">保存最终视频</button>
+        <button class="primary" id="v1034a-save-raw">保存 raw 原片</button>
+        <button id="v1034a-list-shots">查看分段素材</button>
+        <button class="bad" id="v1034a-reject">废弃本次</button>
+      </div>
+      <pre id="v1034a-log">未操作</pre>
+    `;
+    document.body.appendChild(el);
+
+    el.querySelector('#v1034a-save-final').onclick = async function(){
+      var st = readState();
+      var jobId = pick(st, ['job_id','jobId','id']);
+      var videoUrl = pick(st, ['video_url','subtitled_video_url','final_video_url']);
+      var rawUrl = pick(st, ['raw_video_url']);
+      var log = document.getElementById('v1034a-log');
+      if (!jobId || !videoUrl) {
+        log.textContent = '没有拿到 job_id 或 video_url，先等生成完成。';
+        return;
+      }
+      log.textContent = '正在保存最终视频...';
+      var res = await postJson('/api/video/assets/approve-final', {
+        job_id: jobId,
+        video_url: videoUrl,
+        subtitled_video_url: videoUrl,
+        raw_video_url: rawUrl,
+        note: 'V10.34A 前端人工确认保存最终视频'
+      });
+      log.textContent = JSON.stringify(res, null, 2);
+    };
+
+    el.querySelector('#v1034a-save-raw').onclick = async function(){
+      var st = readState();
+      var jobId = pick(st, ['job_id','jobId','id']);
+      var rawUrl = pick(st, ['raw_video_url']);
+      var videoUrl = pick(st, ['video_url','subtitled_video_url','final_video_url']);
+      var log = document.getElementById('v1034a-log');
+      if (!jobId || !rawUrl) {
+        log.textContent = '没有拿到 job_id 或 raw_video_url，不能保存 raw。';
+        return;
+      }
+      log.textContent = '正在保存 raw 原片...';
+      var res = await postJson('/api/video/assets/approve-raw', {
+        job_id: jobId,
+        raw_video_url: rawUrl,
+        subtitled_video_url: videoUrl,
+        note: 'V10.34A 前端人工确认保存 raw 原片'
+      });
+      log.textContent = JSON.stringify(res, null, 2);
+    };
+
+    el.querySelector('#v1034a-list-shots').onclick = async function(){
+      var st = readState();
+      var jobId = pick(st, ['job_id','jobId','id']);
+      var log = document.getElementById('v1034a-log');
+      if (!jobId) {
+        log.textContent = '没有 job_id。';
+        return;
+      }
+      log.textContent = '正在读取分段素材...';
+      var res = await getJson('/api/video/shot-assets/' + encodeURIComponent(jobId));
+      log.textContent = JSON.stringify(res, null, 2);
+    };
+
+    el.querySelector('#v1034a-reject').onclick = async function(){
+      var st = readState();
+      var jobId = pick(st, ['job_id','jobId','id']);
+      var log = document.getElementById('v1034a-log');
+      if (!jobId) {
+        log.textContent = '没有 job_id。';
+        return;
+      }
+      if (!confirm('确认废弃本次生成？废弃后不会保存为可复用素材。')) return;
+      var res = await postJson('/api/video/assets/reject', {
+        job_id: jobId,
+        reason: 'V10.34A 前端人工废弃：画面/字幕/转场不满意'
+      });
+      log.textContent = JSON.stringify(res, null, 2);
+    };
+
+    return el;
+  }
+
+  function refresh(){
+    var el = ensurePanel();
+    var st = readState();
+    var jobId = pick(st, ['job_id','jobId','id']);
+    var videoUrl = pick(st, ['video_url','subtitled_video_url','final_video_url']);
+    var rawUrl = pick(st, ['raw_video_url']);
+    var info = el.querySelector('#v1034a-info');
+    if (!jobId) {
+      info.textContent = '等待生成完成后自动读取 job_id。';
+    } else {
+      info.innerHTML = '当前任务：<b>' + jobId + '</b><br>' +
+        '字幕成片：' + (videoUrl ? '已拿到' : '暂无') + '；raw：' + (rawUrl ? '已拿到' : '暂无');
+    }
+  }
+
+  setInterval(refresh, 2000);
+  setTimeout(refresh, 600);
+})();
+

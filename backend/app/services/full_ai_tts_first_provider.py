@@ -1092,6 +1092,7 @@ def _v10_22_render_semantic_direct(job_id: str, raw: Dict[str, Any], script: str
     # V10_25_VISUAL_LOGIC_APPLIED
 
     shots = _v10_25_apply_visual_logic(shots, raw, script)
+    shots = _v10_34a_prepare_shots_for_render(shots, audio_duration=audio_duration, raw=raw)
 
     # V10_31_SEMANTIC_COMPLETION_GUARD
     if not isinstance(shots, list) or len(shots) < 2:
@@ -1165,6 +1166,20 @@ def _v10_22_render_semantic_direct(job_id: str, raw: Dict[str, Any], script: str
         raw_clip = _v10_22_download(video_url, work / f"shot_{idx:02d}_raw.mp4")
         fixed_clip = _v10_22_fix_clip(raw_clip, work / f"shot_{idx:02d}_fixed.mp4", duration, int(raw.get("fps") or 30))
         fixed_clips.append(fixed_clip)
+        try:
+            _v10_34a_save_shot_asset(
+                job_id=job_id,
+                idx=idx,
+                shot=shot,
+                fal_job_id=fal_job_id,
+                fal_video_url=video_url,
+                raw_clip=raw_clip,
+                fixed_clip=fixed_clip,
+                payload=payload,
+                work=work,
+            )
+        except Exception as _v10_34a_save_exc:
+            print("V10_34A_SAVE_SHOT_ASSET_FAILED=" + str(_v10_34a_save_exc), flush=True)
         _jobs[job_id].update({"stage": f"semantic_direct_render_{idx}_of_{len(shots)}", "progress": 66 + int(18 * idx / max(1, len(shots))), "updated_at": time.time()})
 
     raw_video_path = _v10_22_concat(fixed_clips, work / f"{job_id}_semantic_raw.mp4")
@@ -3340,4 +3355,333 @@ def _v10_27_build_preview(payload):
         return preview
 
 print("V10_33_FORCE_MISSING_SEMANTIC_SHOTS_LOADED")
+
+
+
+# V10_34A_VIDEO_HARD_RULES
+# 1) No flash / no hard cut / no cut-like transition.
+# 2) Video duration must cover audio duration.
+# 3) Every paid FAL segment is stored with prompt metadata for future reuse.
+# 4) Add approve-final and shot-assets APIs.
+
+def _v10_34a_num(x, default=0.0):
+    try:
+        return float(x)
+    except Exception:
+        return float(default)
+
+def _v10_34a_banned_transition_words():
+    return [
+        "flash", "white flash", "black flash", "strobe", "flicker",
+        "hard cut", "jump cut", "cut", "smooth_cut",
+        "pull_out", "opening_slow_push_in", "horizontal_pan_match",
+        "match cut", "smash cut", "wipe"
+    ]
+
+def _v10_34a_safe_transition():
+    return "smooth_dissolve_no_flash"
+
+def _v10_34a_clean_prompt_text(text):
+    import re
+    t = str(text or "")
+    banned = _v10_34a_banned_transition_words()
+    for w in banned:
+        t = re.sub(re.escape(w), _v10_34a_safe_transition(), t, flags=re.I)
+    t = re.sub(r"Transition to next:\s*[^.。]+", "Transition to next: smooth dissolve with no flash and no hard cut", t, flags=re.I)
+    extra = (
+        " Transition rule: use only smooth dissolve or natural continuous camera movement. "
+        "Absolutely no white flash, black flash, strobe, flicker, hard cut, jump cut, wipe, glitch, sudden exposure change."
+    )
+    if "Absolutely no white flash" not in t:
+        t = (t.rstrip() + extra).strip()
+    return t
+
+def _v10_34a_prepare_one_shot(shot):
+    if not isinstance(shot, dict):
+        return shot
+    safe = _v10_34a_safe_transition()
+    shot["transition"] = safe
+    shot["transition_to_next"] = safe
+    shot["no_flash_transition_lock"] = "v10_34a"
+    for k in ["visual_prompt", "prompt"]:
+        if shot.get(k):
+            shot[k] = _v10_34a_clean_prompt_text(shot.get(k))
+    neg = str(shot.get("negative_prompt") or "")
+    add_neg = " white flash, black flash, flash transition, hard cut, jump cut, strobe, flicker, wipe, glitch, sudden exposure change"
+    if "flash transition" not in neg:
+        shot["negative_prompt"] = (neg.rstrip(", ") + ", " + add_neg.strip(", ")).strip(", ")
+    return shot
+
+def _v10_34a_prepare_shots_for_render(shots, audio_duration=None, raw=None):
+    if not isinstance(shots, list) or not shots:
+        raise RuntimeError("V10.34A blocked: no shots to render")
+
+    n = len(shots)
+    fade = 0.28
+    audio = _v10_34a_num(audio_duration, 0.0)
+
+    # xfade 会吃掉每个连接处一点时长，所以先给视频目标时长加回去。
+    target_total = max(audio + fade * max(0, n - 1) + 0.6, sum(_v10_34a_num(s.get("duration_seconds"), 0) for s in shots))
+    max_total = 5.0 * n
+
+    if target_total > max_total + 0.15:
+        raise RuntimeError(
+            f"V10.34A blocked: audio too long for current shot count. audio={audio:.2f}s, "
+            f"shots={n}, max_video={max_total:.2f}s. Need more semantic shots before paid FAL generation."
+        )
+
+    per = max(2.0, min(5.0, target_total / n))
+    t = 0.0
+    prepared = []
+    for i, sh in enumerate(shots, 1):
+        sh = _v10_34a_prepare_one_shot(dict(sh))
+        sh["index"] = i
+        sh["start_seconds"] = round(t, 2)
+        end = t + per
+        sh["end_seconds"] = round(end, 2)
+        sh["duration_seconds"] = round(per, 2)
+        sh["duration_lock"] = "v10_34a_audio_coverage"
+        prepared.append(sh)
+        t = end
+
+    if raw is not None and isinstance(raw, dict):
+        raw["v10_34a_video_target_duration_before_xfade"] = round(t, 2)
+        raw["v10_34a_audio_duration"] = round(audio, 2)
+        raw["v10_34a_transition"] = _v10_34a_safe_transition()
+
+    return prepared
+
+def _v10_34a_probe_duration(path):
+    import subprocess, json
+    try:
+        out = subprocess.check_output([
+            "ffprobe", "-v", "error",
+            "-show_entries", "format=duration",
+            "-of", "json",
+            str(path)
+        ], stderr=subprocess.STDOUT, timeout=20)
+        data = json.loads(out.decode("utf-8", errors="ignore"))
+        return max(0.01, float(data.get("format", {}).get("duration") or 0.01))
+    except Exception:
+        return 0.01
+
+def _v10_34a_save_shot_asset(job_id, idx, shot, fal_job_id, fal_video_url, raw_clip, fixed_clip, payload, work):
+    from pathlib import Path
+    import json, time, shutil
+
+    base = Path("/opt/ai-video/storage/generated_shot_assets") / str(job_id)
+    base.mkdir(parents=True, exist_ok=True)
+
+    raw_dst = base / f"shot_{int(idx):02d}_raw.mp4"
+    fixed_dst = base / f"shot_{int(idx):02d}_fixed.mp4"
+    meta_dst = base / f"shot_{int(idx):02d}_meta.json"
+
+    if raw_clip and Path(raw_clip).exists():
+        shutil.copy2(raw_clip, raw_dst)
+    if fixed_clip and Path(fixed_clip).exists():
+        shutil.copy2(fixed_clip, fixed_dst)
+
+    meta = {
+        "ok": True,
+        "asset_type": "generated_fal_shot",
+        "version": "v10_34a",
+        "job_id": job_id,
+        "shot_index": idx,
+        "fal_job_id": fal_job_id,
+        "fal_video_url": fal_video_url,
+        "raw_clip_path": str(raw_dst) if raw_dst.exists() else "",
+        "fixed_clip_path": str(fixed_dst) if fixed_dst.exists() else "",
+        "saved_at": int(time.time()),
+        "scene_type": shot.get("scene_type") or shot.get("semantic_type"),
+        "semantic_label": shot.get("semantic_label"),
+        "narration_segment": shot.get("narration_segment") or shot.get("clean_subtitle"),
+        "duration_seconds": shot.get("duration_seconds"),
+        "visual_subject": shot.get("visual_subject"),
+        "must_show": shot.get("must_show"),
+        "forbidden_visuals": shot.get("forbidden_visuals"),
+        "transition": shot.get("transition_to_next") or shot.get("transition"),
+        "prompt": shot.get("visual_prompt") or shot.get("prompt") or payload.get("prompt"),
+        "negative_prompt": shot.get("negative_prompt") or payload.get("negative_prompt"),
+        "payload": payload,
+        "reuse_policy": "can_reuse_after_human_approval",
+        "human_approved": False,
+    }
+    meta_dst.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    try:
+        _jobs[job_id].setdefault("generated_shot_assets", [])
+        _jobs[job_id]["generated_shot_assets"].append(meta)
+        _jobs[job_id]["generated_shot_asset_dir"] = str(base)
+    except Exception:
+        pass
+
+    return meta
+
+def _v10_22_concat(fixed_clips, output_path):
+    # Override old concat: use ffmpeg xfade to avoid flash / hard cut between paid clips.
+    from pathlib import Path
+    import subprocess, shutil
+
+    clips = [Path(x) for x in fixed_clips if x and Path(x).exists()]
+    if not clips:
+        raise RuntimeError("V10.34A concat blocked: no clips")
+    output_path = Path(output_path)
+
+    if len(clips) == 1:
+        shutil.copy2(clips[0], output_path)
+        return output_path
+
+    fade = 0.28
+    durations = [_v10_34a_probe_duration(c) for c in clips]
+
+    cmd = ["ffmpeg", "-y"]
+    for c in clips:
+        cmd += ["-i", str(c)]
+
+    filters = []
+    for i in range(len(clips)):
+        filters.append(
+            f"[{i}:v]fps=30,scale=1080:1920:force_original_aspect_ratio=decrease,"
+            f"pad=1080:1920:(ow-iw)/2:(oh-ih)/2,setsar=1,format=yuv420p,settb=AVTB[v{i}]"
+        )
+
+    prev = "v0"
+    acc = durations[0]
+    for i in range(1, len(clips)):
+        out = f"x{i}"
+        offset = max(0.10, acc - fade)
+        filters.append(f"[{prev}][v{i}]xfade=transition=fade:duration={fade}:offset={offset:.3f}[{out}]")
+        prev = out
+        acc = acc + durations[i] - fade
+
+    filter_complex = ";".join(filters)
+    cmd += [
+        "-filter_complex", filter_complex,
+        "-map", f"[{prev}]",
+        "-an",
+        "-c:v", "libx264",
+        "-preset", "veryfast",
+        "-crf", "18",
+        "-pix_fmt", "yuv420p",
+        "-movflags", "+faststart",
+        str(output_path)
+    ]
+
+    proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=600)
+    if proc.returncode != 0 or not output_path.exists() or output_path.stat().st_size < 10000:
+        raise RuntimeError("V10.34A xfade concat failed; refusing hard-cut fallback: " + proc.stderr[-2000:])
+
+    return output_path
+
+async def _v10_34a_approve_final(request):
+    from pathlib import Path
+    import json, time, urllib.request, shutil
+    from fastapi.responses import JSONResponse
+
+    try:
+        data = await request.json()
+    except Exception:
+        data = {}
+
+    job_id = str(data.get("job_id") or data.get("asset_id") or "").strip()
+    if not job_id:
+        return JSONResponse(status_code=400, content={"ok": False, "error": "job_id_required"})
+
+    job = _jobs.get(job_id) or {}
+    final_url = str(data.get("video_url") or data.get("subtitled_video_url") or job.get("video_url") or job.get("subtitled_video_url") or "").strip()
+    raw_url = str(data.get("raw_video_url") or job.get("raw_video_url") or "").strip()
+
+    if not final_url:
+        return JSONResponse(status_code=400, content={"ok": False, "error": "final_video_url_missing", "job_id": job_id})
+
+    base = Path("/opt/ai-video/storage/approved_final_videos") / job_id
+    base.mkdir(parents=True, exist_ok=True)
+
+    final_path = base / "final_subtitled.mp4"
+    raw_path = base / "raw_no_subtitle.mp4"
+
+    def download(url, path):
+        if not url:
+            return False
+        try:
+            with urllib.request.urlopen(url, timeout=120) as r, open(path, "wb") as f:
+                shutil.copyfileobj(r, f)
+            return path.exists() and path.stat().st_size > 10000
+        except Exception:
+            return False
+
+    final_saved = download(final_url, final_path)
+    raw_saved = download(raw_url, raw_path) if raw_url else False
+
+    meta = {
+        "ok": True,
+        "status": "approved_final",
+        "asset_type": "final_video",
+        "version": "v10_34a",
+        "asset_id": job_id,
+        "source_job_id": job_id,
+        "approved_at": int(time.time()),
+        "final_video_url": final_url,
+        "raw_video_url": raw_url,
+        "final_video_path": str(final_path) if final_saved else "",
+        "raw_video_path": str(raw_path) if raw_saved else "",
+        "shot_asset_dir": str(Path("/opt/ai-video/storage/generated_shot_assets") / job_id),
+        "shots": job.get("shots") or job.get("storyboard") or [],
+        "subtitle_cues": job.get("subtitle_cues") or job.get("cues") or [],
+        "generated_shot_assets": job.get("generated_shot_assets") or [],
+        "reuse_policy": "final_can_be_reused_for_delivery; raw_shots_can_be_reused_after_human_approval",
+        "note": data.get("note") or "",
+    }
+    (base / "final_meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    return {
+        "ok": True,
+        "asset": meta,
+        "final_saved": final_saved,
+        "raw_saved": raw_saved,
+    }
+
+async def _v10_34a_list_shot_assets(job_id: str):
+    from pathlib import Path
+    import json
+
+    base = Path("/opt/ai-video/storage/generated_shot_assets") / str(job_id)
+    items = []
+    if base.exists():
+        for p in sorted(base.glob("shot_*_meta.json")):
+            try:
+                items.append(json.loads(p.read_text(encoding="utf-8")))
+            except Exception as exc:
+                items.append({"ok": False, "path": str(p), "error": str(exc)})
+    return {
+        "ok": True,
+        "job_id": job_id,
+        "count": len(items),
+        "asset_dir": str(base),
+        "items": items,
+    }
+
+def _v10_34a_patch_routes(app):
+    try:
+        remove = {
+            "/api/video/assets/approve-final",
+            "/api/video/shot-assets/{job_id}",
+        }
+        app.router.routes[:] = [r for r in app.router.routes if getattr(r, "path", "") not in remove]
+        app.add_api_route("/api/video/assets/approve-final", _v10_34a_approve_final, methods=["POST"])
+        app.add_api_route("/api/video/shot-assets/{job_id}", _v10_34a_list_shot_assets, methods=["GET"])
+        print("V10_34A_VIDEO_ASSET_ROUTES_PATCHED", sorted(list(remove)))
+    except Exception as exc:
+        print("V10_34A_ROUTE_PATCH_FAILED", exc)
+
+try:
+    if "install_full_ai_tts_first" in globals() and not globals().get("_V10_34A_INSTALL_WRAPPED"):
+        _V10_34A_OLD_INSTALL = install_full_ai_tts_first
+        def install_full_ai_tts_first(app):
+            res = _V10_34A_OLD_INSTALL(app)
+            _v10_34a_patch_routes(app)
+            return res
+        globals()["_V10_34A_INSTALL_WRAPPED"] = True
+except Exception as _v10_34a_install_exc:
+    print("V10_34A_INSTALL_WRAP_FAILED", _v10_34a_install_exc)
 
