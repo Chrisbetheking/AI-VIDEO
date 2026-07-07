@@ -825,3 +825,19 @@ mark {
   .vcw-footer nav { width: 100%; }
   .vcw-footer nav button { flex: 1; }
 }
+
+/* V10.34 production usability fixes */
+.aiw-keywordPill.removable{display:inline-flex;align-items:center;gap:6px;padding-right:6px}
+.aiw-keywordPill.removable button{border:0;background:rgba(20,20,40,.12);color:#4b2aa8;border-radius:999px;width:18px;height:18px;line-height:18px;font-weight:900;cursor:pointer}
+.aiw-audioPreview{display:flex;align-items:center;gap:12px;padding:12px 14px;margin:12px 0;border:1px solid #e8ddff;background:#fbf8ff;border-radius:16px}
+.aiw-audioPreview audio{width:min(360px,100%)}
+.aiw-finalActions{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px;padding:12px;background:#fff9fb;border:1px solid #ffd7e2;border-radius:16px}
+.aiw-accountTable{margin-top:18px;border:1px solid #ebe5ff;border-radius:18px;overflow:hidden;background:#fff}
+.aiw-accountHead,.aiw-accountRow{display:grid;grid-template-columns:1.5fr 1.4fr 1fr .7fr;gap:12px;align-items:center;padding:12px 16px;border-bottom:1px solid #f0ecff}
+.aiw-accountHead{background:#f7f2ff;color:#35166f}
+.aiw-accountRow:last-child{border-bottom:0}
+.aiw-accountRow a{color:#6d28d9;font-weight:800;text-decoration:none}
+.aiw-accountRow em{color:#9ca3af;font-style:normal}
+.aiw-accountRow b{color:#dc2626}
+.aiw-accountRow small{color:#059669;font-weight:800}
+@media (max-width:900px){.aiw-accountHead,.aiw-accountRow{grid-template-columns:1fr}.aiw-finalActions{flex-direction:column}.aiw-audioPreview{flex-direction:column;align-items:flex-start}}

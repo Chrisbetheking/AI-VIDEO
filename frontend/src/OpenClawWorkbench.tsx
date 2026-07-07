@@ -319,6 +319,7 @@ export default function OpenClawWorkbench({ project, setProject, goTab }: Props)
     const nextSources: RealSource[] = []
     const found: Lead[] = []
     const endpoints = [
+      '/api/collector/computer-use/status',
       '/api/video/comment-leads/recent',
       '/api/collector/runs/latest',
       '/api/openclaw/export.csv',
@@ -387,20 +388,16 @@ export default function OpenClawWorkbench({ project, setProject, goTab }: Props)
     try {
       let data: any
       try {
-        data = await apiPost('/api/collector/commands', { type: mode === 'accounts' ? 'openclaw_collect_accounts' : 'openclaw_collect_comments', ...payload }, 120000)
-      } catch {
-        try {
-          data = await apiPost('/api/collector/commands/create', payload, 120000)
-        } catch {
-          data = await apiPost('/api/collector/douyin/accounts/bulk-upsert', {
-            accounts: (accounts.length ? accounts : splitLines(collectKeyword)).map((name: string) => ({
-              category: mode === 'accounts' ? 'openclaw_target_account' : 'openclaw_comment_target',
-              account_name: name,
-              niche: collectKeyword,
-              source: 'frontend_openclaw_sales_board',
-            })),
-          }, 120000)
-        }
+        data = await apiPost('/api/collector/computer-use/start', {
+          ...payload,
+          mode: mode === 'accounts' ? 'openclaw_collect_accounts' : 'openclaw_collect_comments',
+          computer_use: true,
+          require_cookie: true,
+        }, 120000)
+      } catch (computerUseErr) {
+        // 不再回退到假成功。只允许把账号先入库，然后明确提示缺什么。
+        await apiPost('/api/video/account-library/import', { raw_text: (accounts.length ? accounts : splitLines(collectKeyword)).join('\n') }, 120000).catch(() => null)
+        throw new Error(`OpenClaw ComputerUse 未启动：${detailToText(computerUseErr)}\n账号已尝试写入账号库；请补 Cookie/token/worker 后重试。`)
       }
       setResult(data)
       setProject({ ...project, last_openclaw_collect_command: data, topic: collectKeyword || project.topic, openclaw_target_accounts: targetAccounts })
@@ -488,7 +485,7 @@ export default function OpenClawWorkbench({ project, setProject, goTab }: Props)
         <div>
           <p className="aiw-eyebrow">OPENCLAW SALES CAPTURE</p>
           <h2>OpenClaw 销售截流台</h2>
-          <p>像销售一样先找人：账号/主页 → 评论采集 → AI 评分 → 首条回复建议 → 人工处理。没有真实采集结果时不展示假线索。</p>
+          <p>像销售一样先找人：账号/主页 → ComputerUse 真打开采集 → 评论采集 → AI 评分 → 首条回复建议 → 人工处理。没有 Cookie/token/worker 时不允许假成功。</p>
         </div>
         <span className={hasRealSource ? 'aiw-badge ok' : 'aiw-badge warn'}>{hasRealSource ? '已读取真实采集' : '等待真实采集'}</span>
       </div>
@@ -530,8 +527,8 @@ export default function OpenClawWorkbench({ project, setProject, goTab }: Props)
 
       <div className="aiw-actions">
         <button className="aiw-primary" onClick={loadRealOpenClawData} disabled={!!busy}>{busy === 'loading-real-openclaw' ? '刷新中...' : '刷新真实采集结果'}</button>
-        <button className="aiw-purple" onClick={() => createCollectTask('accounts')} disabled={!!busy}>{busy === 'collect' ? '下发中...' : '下发账号采集'}</button>
-        <button className="aiw-purple" onClick={() => createCollectTask('comments')} disabled={!!busy}>{busy === 'collect' ? '下发中...' : '下发评论采集'}</button>
+        <button className="aiw-purple" onClick={() => createCollectTask('accounts')} disabled={!!busy}>{busy === 'collect' ? '下发中...' : 'ComputerUse 账号采集'}</button>
+        <button className="aiw-purple" onClick={() => createCollectTask('comments')} disabled={!!busy}>{busy === 'collect' ? '下发中...' : 'ComputerUse 评论采集'}</button>
         <button className="aiw-primary" onClick={analyze} disabled={!!busy}>{busy === 'analyze' ? '分析中...' : 'AI 评分并生成回复'}</button>
         <button className="aiw-muted" onClick={() => goTab('collect')}>去同行采集</button>
           <button className="aiw-muted" onClick={() => goTab('brain')}>去内容大脑审核</button>

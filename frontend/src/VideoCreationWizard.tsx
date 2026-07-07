@@ -723,6 +723,9 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
   const [subtitleStyleId, setSubtitleStyleId] = useState(String(initialDraft.subtitleStyleId || project.subtitle_style_id || 'douyin_pop'))
   const [subtitleStyles, setSubtitleStyles] = useState<SubtitleStyle[]>(SUBTITLE_STYLE_FALLBACK)
   const [generationStartedAt, setGenerationStartedAt] = useState(Number(initialDraft.generationStartedAt || 0))
+  const [voicePreview, setVoicePreview] = useState<any>(null)
+  const [voiceVersionResult, setVoiceVersionResult] = useState<any>(null)
+  const [finalSaveResult, setFinalSaveResult] = useState<any>(null)
 
   const approvedBrainCards = useMemo(() => {
     const merged = [...remoteBrainCards, ...loadApprovedContentBrainCards()]
@@ -1209,11 +1212,7 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
         setStep(1)
         return
       }
-      const nextSegments = attachSegmentKeywords(splitScript(script), keywords)
-      const nextShots = generateShotPlan(nextSegments, targetDuration, city, project)
-      setShotPlan(nextShots)
-      setSelectedShotId(nextShots[0]?.id || 'shot_1')
-      noteButton(`已按真实口播重建 ${nextShots.length} 个镜头：已强制单一全屏镜头、混合室内/阳台/大堂/泳池/社区/带看，并禁用分屏拼贴和文件桌面。`)
+      await rebuildSemanticShotsByDeepSeek()
       setStep(3)
       return
     }
@@ -1225,10 +1224,8 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
         return
       }
       if (!shotPlan.length) {
-        const nextSegments = attachSegmentKeywords(splitScript(script), keywords)
-        const nextShots = generateShotPlan(nextSegments, targetDuration, city, project)
-        setShotPlan(nextShots)
-        noteButton(`没有镜头计划，已先补齐 ${nextShots.length} 个镜头；请确认后再生成视频。`)
+        const nextShots = await rebuildSemanticShotsByDeepSeek()
+        noteButton(`没有镜头计划，已先按口播语义补齐 ${nextShots.length} 个镜头；请确认后再生成视频。`)
         setStep(3)
         return
       }
@@ -1420,6 +1417,139 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
     setDisabledKeywordValues(allKeywords.filter((kw) => !keep.has(kw.value.toLowerCase())).map((kw) => kw.value))
   }
 
+  function removeManualKeyword(value: string) {
+    const clean = usefulKeyword(value)
+    if (!clean) return
+    const nextManual = splitKeywordCandidates(cleanManualKeywords).filter((kw) => kw.toLowerCase() !== clean.toLowerCase()).join('，')
+    setManualKeywords(nextManual)
+    setAiKeywordInsights((current) => current.filter((kw) => kw.value.toLowerCase() !== clean.toLowerCase()))
+    setDisabledKeywordValues((current) => current.filter((kw) => kw.toLowerCase() !== clean.toLowerCase()))
+    setAiStatus(`已删除关键词：${clean}`)
+    syncProject({ manualKeywords: nextManual, ai_keyword_insights: aiKeywordInsights.filter((kw) => kw.value.toLowerCase() !== clean.toLowerCase()) })
+  }
+
+  function backendShotsToPlan(raw: any[], activeSegments: ScriptSegment[]): ShotPlan[] {
+    const list = Array.isArray(raw) ? raw : []
+    return list.map((item: any, idx: number) => {
+      const seg = activeSegments[idx] || activeSegments[activeSegments.length - 1]
+      return {
+        id: String(item.id || item.shot_id || `shot_${idx + 1}`),
+        index: Number(item.index || idx + 1),
+        title: String(item.title || item.scene || item.scene_type || `第 ${idx + 1} 镜头`),
+        scene: String(item.scene || item.title || item.scene_type || ''),
+        narration: String(item.narration || item.narration_segment || seg?.text || ''),
+        duration: Number(item.duration || item.duration_seconds || seg ? Math.max(3, Math.round(targetDuration / Math.max(1, activeSegments.length))) : 4),
+        source: (['r2','real','ai','mixed'].includes(String(item.source)) ? item.source : 'ai') as MaterialSource,
+        camera: String(item.camera || item.motion || '语义跟随运镜'),
+        transition: 'smooth_dissolve_no_flash',
+        prompt: String(item.prompt || item.visual_prompt || ''),
+        avoid: Array.isArray(item.avoid) ? item.avoid : String(item.negative_prompt || 'cut, flash, hard transition, split screen, collage, text, watermark').split(/[,，]/).map((x) => x.trim()).filter(Boolean),
+        assetIds: Array.isArray(item.assetIds) ? item.assetIds : Array.isArray(item.asset_ids) ? item.asset_ids : [],
+      }
+    }).filter((shot) => shot.narration || shot.prompt)
+  }
+
+  async function rebuildSemanticShotsByDeepSeek() {
+    if (!script.trim()) {
+      setError('还没有口播稿，不能生成镜头。')
+      setStep(2)
+      return []
+    }
+    const activeSegments = attachSegmentKeywords(splitScript(script), keywords)
+    setAiBusy('DeepSeek 正在按口播重建镜头')
+    try {
+      const data = await apiPost('/api/video/v10-34/semantic-shots', {
+        topic,
+        city,
+        market,
+        script,
+        segments: activeSegments,
+        keywords,
+        target_duration_seconds: targetDuration,
+        content_type: contentType,
+        source_assets: selectedAssets,
+      }, 180000)
+      const nextShots = backendShotsToPlan(data?.shots || data?.shot_plan || [], activeSegments)
+      if (!nextShots.length) throw new Error('后端没有返回有效镜头计划')
+      setShotPlan(nextShots)
+      setSelectedShotId(nextShots[0]?.id || 'shot_1')
+      syncProject({ manual_shot_plan: nextShots, shot_overrides: nextShots, semantic_shot_provider: data?.provider || data?.version || 'v10.34' })
+      noteButton(`已按口播稿语义重建 ${nextShots.length} 个镜头；生活配套、交通、教育、餐饮、户型等会分别匹配画面。`)
+      return nextShots
+    } catch (err: any) {
+      const nextShots = generateShotPlan(activeSegments, targetDuration, city, project)
+      setShotPlan(nextShots)
+      setSelectedShotId(nextShots[0]?.id || 'shot_1')
+      setError(`DeepSeek/语义镜头失败，已用本地安全规则兜底：${err?.message || String(err)}`)
+      return nextShots
+    } finally {
+      setAiBusy('')
+    }
+  }
+
+  async function generateVoicePreview(mode: 'selected' | 'all') {
+    const activeSegments = attachSegmentKeywords(splitScript(script), keywords)
+    if (!activeSegments.length) {
+      setError('没有可试听的口播句子。')
+      return
+    }
+    const chosen = mode === 'selected'
+      ? activeSegments.filter((seg) => seg.id === selectedSegment?.id).slice(0, 1)
+      : activeSegments
+    const ttsSegments = chosen.map((seg) => {
+      const setting = voiceSettings[seg.id] || inferVoiceSetting(seg, seg.index - 1, activeSegments.length, scriptMode)
+      return {
+        text: seg.text,
+        emotion: setting.emotion,
+        speed_ratio: setting.speed,
+        volume_ratio: setting.volume,
+        pitch_ratio: setting.pitch,
+        pause_before_ms: setting.pauseBefore,
+        pause_after_ms: setting.pauseAfter,
+        emphasis: setting.emphasis,
+        tone: setting.tone,
+      }
+    })
+    const data = await apiPost('/api/video/v10-34/voice-preview', {
+      mode,
+      topic,
+      script,
+      segments: ttsSegments,
+      keywords,
+      voice_settings: voiceSettings,
+    }, 240000)
+    setVoicePreview(data)
+    setAiStatus(mode === 'selected' ? '已生成当前句试听。' : '已生成整段试听。')
+  }
+
+  async function saveVoiceVersion() {
+    if (!script.trim()) {
+      setError('没有口播稿，不能保存配音版本。')
+      return
+    }
+    const data = await apiPost('/api/video/v10-34/voice-version/save', {
+      topic,
+      script,
+      segments,
+      keywords,
+      voice_settings: voiceSettings,
+      preview: voicePreview,
+    }, 120000)
+    setVoiceVersionResult(data)
+    setAiStatus('已保存口播/配音版本。')
+  }
+
+  async function saveFinal(kind: 'final' | 'raw' | 'discarded') {
+    const payload = {
+      video: { ...(job || {}), video_url: videoUrl, topic, script, shots: shotPlan },
+      reason: kind === 'discarded' ? '用户废弃本次结果' : '用户确认保存',
+    }
+    const endpoint = kind === 'raw' ? '/api/video/final/raw-segments/save' : kind === 'discarded' ? '/api/video/final/discard' : '/api/video/final/save'
+    const data = await apiPost(endpoint, payload, 120000)
+    setFinalSaveResult(data)
+    noteButton(kind === 'raw' ? '已保存 raw 分段素材记录。' : kind === 'discarded' ? '已废弃本次结果。' : '已保存最终视频。')
+  }
+
   function updateShot(id: string, patch: Partial<ShotPlan>) {
     const next = shotPlan.map((shot) => {
       if (shot.id !== id) return shot
@@ -1456,14 +1586,22 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
         index: shot.index,
         prompt: shot.prompt,
         visual_prompt: shot.prompt,
+        negative_prompt: shot.avoid.join(', '),
+        scene_type: shot.scene,
         narration_segment: shot.narration,
         duration_seconds: shot.duration,
+        duration: shot.duration,
         source: shot.source,
+        transition: 'smooth_dissolve_no_flash',
         asset_ids: shot.assetIds,
       })),
-      max_shots: 3,
-      fal_fill_shots: 3,
-      dynamic_shot_count: 3,
+      max_shots: Math.max(1, finalShots.length),
+      fal_fill_shots: Math.max(1, finalShots.length),
+      dynamic_shot_count: Math.max(1, finalShots.length),
+      transition_policy: 'smooth_dissolve_no_flash',
+      safe_crossfade: true,
+      save_raw_shots: true,
+      block_completed_on_quality_error: true,
         visual_policy: 'real_condo_tour_no_office_no_papers',
       one_scene_mode: true,
       dynamic_single_scene: true,
@@ -1618,7 +1756,7 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
               <button className="aiw-muted" type="button" onClick={() => { setManualKeywords(''); setManualKeywordDraft(''); setAiKeywordInsights([]); setAiStatus('已清空手动关键词。') }}>清空关键词</button>
               <button className="aiw-danger" type="button" onClick={hardResetWizard}>清空旧草稿/重来</button>
             </div>
-            {manualKeywords && <div className="aiw-chipRow">{splitKeywordCandidates(manualKeywords).map((kw) => <span className="aiw-keywordPill" key={kw}>{kw}</span>)}</div>}
+            {manualKeywords && <div className="aiw-chipRow">{splitKeywordCandidates(manualKeywords).map((kw) => <span className="aiw-keywordPill removable" key={kw}>{kw}<button type="button" onClick={() => removeManualKeyword(kw)} aria-label={`删除关键词 ${kw}`}>×</button></span>)}</div>}
             <p>默认不用手填。主题、关键词和文案都交给 DeepSeek；这里只能补充短业务词，不能再塞模板名和知识库长句。</p>
           </div>
           <div className="aiw-chipRow">
@@ -1682,7 +1820,9 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
         <section className="aiw-stepCard">
           <h3>逐句配音</h3>
           <p>AI 会按句意自动判断语气、情绪、停顿；你也可以点某一句手动微调。</p>
-          <div className="aiw-actions"><button className="aiw-primary" type="button" disabled={!!aiBusy} onClick={autoTuneVoiceAll}>{aiBusy === 'DeepSeek 正在判断语气情绪' ? 'DeepSeek 判断中...' : 'DeepSeek 自动调好全部句子'}</button></div>
+          <div className="aiw-actions"><button className="aiw-primary" type="button" disabled={!!aiBusy} onClick={autoTuneVoiceAll}>{aiBusy === 'DeepSeek 正在判断语气情绪' ? 'DeepSeek 判断中...' : 'DeepSeek 自动调好全部句子'}</button><button className="aiw-purple" type="button" onClick={() => void generateVoicePreview('selected')} disabled={!selectedSegment || !!aiBusy}>试听当前句</button><button className="aiw-purple" type="button" onClick={() => void generateVoicePreview('all')} disabled={!segments.length || !!aiBusy}>生成试听配音</button><button className="aiw-muted" type="button" onClick={() => void saveVoiceVersion()} disabled={!script.trim()}>保存口播版本</button></div>
+          {voicePreview?.file_url && <div className="aiw-audioPreview"><audio controls src={voicePreview.file_url} /><span>{voicePreview.mode === 'selected' ? '当前句试听' : '整段试听'} · {voicePreview.duration_seconds ? `${Number(voicePreview.duration_seconds).toFixed(1)}s` : '已生成'}</span></div>}
+          {voiceVersionResult && <div className="aiw-info">口播版本已保存：{voiceVersionResult.version_id || voiceVersionResult.id || '已保存'}</div>}
           <div className="aiw-segmentPicker">
             {segments.map((segment) => (
               <button key={segment.id} className={selectedSegment?.id === segment.id ? 'active' : ''} onClick={() => setSelectedSegmentId(segment.id)}>
@@ -1756,7 +1896,7 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
           <div className="aiw-actions">
             <button className="aiw-muted" onClick={() => openWorkspaceTab('assets')}>去素材库选择 R2/真实素材</button>
             <button className="aiw-muted" onClick={() => openWorkspaceTab('digital')}>去数字人库选谁出镜</button>
-            <button type="button" className="aiw-primary" onClick={() => void runFlowAction('shots')}>按文案重建镜头</button>
+            <button type="button" className="aiw-primary" onClick={() => void runFlowAction('shots')}>DeepSeek 按口播重建镜头</button>
           </div>
           <div className="aiw-shotPicker">
             {shotPlan.map((shot) => (
@@ -1803,6 +1943,8 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
           <h3>成片预览</h3>
           {videoUrl ? <video className="aiw-previewVideo" src={videoUrl} controls /> : <div className="aiw-videoPlaceholder"><b>🎬</b><span>点击生成后在这里预览</span></div>}
           <div className="aiw-actions"><button type="button" className="aiw-danger" onClick={() => void runFlowAction('video')} disabled={!!busy}>{busy || '生成完整 AI 视频'}</button>{videoUrl && <a className="aiw-linkButton" href={videoUrl} target="_blank" rel="noreferrer">打开成片</a>}<button className="aiw-muted" type="button" onClick={() => void recoverLatestDoneVideo(false)}>找回最新成片</button></div>
+          {videoUrl && <div className="aiw-finalActions"><button className="aiw-primary" type="button" onClick={() => void saveFinal('final')}>保存最终视频</button><button className="aiw-purple" type="button" onClick={() => void saveFinal('raw')}>保存 raw 分段素材</button><button className="aiw-danger" type="button" onClick={() => void saveFinal('discarded')}>废弃本次结果</button></div>}
+          {finalSaveResult && <div className="aiw-info">最终处理结果：{JSON.stringify(finalSaveResult)}</div>}
           {job?.subtitle_error && <div className="aiw-error">字幕烧录失败：{job.subtitle_error}</div>}
           {error && <div className="aiw-error">{error}</div>}
         </section>
