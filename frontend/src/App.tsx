@@ -35,7 +35,23 @@ import {
   getCollectorStatus,
   uploadCollectorCookies,
   uploadAssets,
-  deleteAsset
+  deleteAsset,
+  uploadAssetsWithMetadata,
+  getV1034Status,
+  importDouyinAccounts,
+  classifyDouyinAccounts,
+  getDouyinAccounts,
+  startCollectorRun,
+  getLatestCollectorRun,
+  getRecentCommentLeads,
+  enhanceOpenClawComments,
+  writeObsidianNote,
+  createAiControlTask,
+  saveFinalVideoRecord,
+  saveRawSegmentsRecord,
+  discardVideoRecord,
+  type AssetUploadMetadata,
+  type V1034StatusResponse
 } from './api'
 import FullAIConsole from './FullAIConsole'
 
@@ -287,6 +303,7 @@ function AppInner() {
   const [assetKindFilter, setAssetKindFilter] = useState<'all' | 'image' | 'video'>('all')
   const [assetFolderFilter, setAssetFolderFilter] = useState<AssetFolderKey>('all')
   const [assetUploadFolder, setAssetUploadFolder] = useState<AssetFolderKey>('self')
+  const [assetUploadMeta, setAssetUploadMeta] = useState<AssetUploadMetadata>({ material_type: '', city: '', region: '', source: '', reusable: true, remark: '', folder: 'self' })
   const [assetTimeFilter, setAssetTimeFilter] = useState<'all' | 'today' | '7d' | '30d'>('all')
   const [assetSort, setAssetSort] = useState<'new' | 'old' | 'size_desc' | 'size_asc' | 'name'>('new')
   const [isDraggingAssets, setIsDraggingAssets] = useState(false)
@@ -303,6 +320,22 @@ function AppInner() {
   const [collectorProgress, setCollectorProgress] = useState<CollectorProgressState | null>(null)
   const [collectorAccountLimit, setCollectorAccountLimit] = useState('3')
   const [collectorSingleAccount, setCollectorSingleAccount] = useState('')
+
+
+  const [v1034Status, setV1034Status] = useState<V1034StatusResponse | null>(null)
+  const [accountImportText, setAccountImportText] = useState('')
+  const [accountLibraryResult, setAccountLibraryResult] = useState<any>(null)
+  const [collectorRealResult, setCollectorRealResult] = useState<any>(null)
+  const [obsidianDraft, setObsidianDraft] = useState('')
+  const [obsidianResult, setObsidianResult] = useState<any>(null)
+  const [aiControlQuestion, setAiControlQuestion] = useState('帮我检查视频生成链路、字幕、配音、素材库、OpenClaw、账号库、Obsidian 和 UI，生成待确认修复任务，不要自动改代码。')
+  const [aiControlTask, setAiControlTask] = useState<any>(null)
+  const [finalActionResult, setFinalActionResult] = useState<any>(null)
+  const [voiceForbiddenWords, setVoiceForbiddenWords] = useState('cut,smooth_cut,flash,pull_out,hard transition,闪白,硬切,快切')
+  const [voiceTone, setVoiceTone] = useState('真实顾问式，短视频口语，重点词自然加重')
+  const [voiceGlobalSpeed, setVoiceGlobalSpeed] = useState('1.00')
+  const [voicePause, setVoicePause] = useState('350')
+  const [voiceEmphasisWords, setVoiceEmphasisWords] = useState('第二家园,海外置业,子女教育,资产配置,私信咨询')
 
   const [copy, setCopy] = useState<GeneratedCopy>(emptyCopy)
   const [oneClick, setOneClick] = useState<OneClickGenerateResponse | null>(null)
@@ -687,6 +720,87 @@ function AppInner() {
     setLastHandoff('抖音采集 Cookies 已更新。之后采集器会携带登录态，公开视频采集成功率会更高。')
   }
 
+
+  function validateAssetUploadMeta() {
+    const missing: string[] = []
+    if (!assetUploadMeta.material_type.trim()) missing.push('素材类型')
+    if (!assetUploadMeta.city.trim()) missing.push('城市')
+    if (!assetUploadMeta.region.trim()) missing.push('区域')
+    if (!assetUploadMeta.source.trim()) missing.push('来源')
+    if (!assetUploadMeta.remark.trim()) missing.push('备注')
+    if (missing.length) return `上传前必须补全：${missing.join('、')}`
+    return ''
+  }
+
+  async function refreshV1034Status() {
+    const res = await run('刷新 V10.34 生产状态', () => getV1034Status())
+    setV1034Status(res!)
+  }
+
+  async function importAndClassifyAccounts() {
+    if (!accountImportText.trim()) { setError('请先粘贴账号名称/主页链接/备注，每行一个。'); return }
+    const imported = await run('导入账号库', () => importDouyinAccounts(accountImportText))
+    const classified = await run('DeepSeek/规则分类账号库', () => classifyDouyinAccounts(300))
+    const list = await getDouyinAccounts().catch(() => null)
+    setAccountLibraryResult({ imported, classified, list })
+    setLastHandoff('账号库已导入 SQLite，并完成分类；不能判断的已进入待人工确认。')
+  }
+
+  async function runRealOpenClaw() {
+    const status = await getCollectorStatus().catch(() => null)
+    const missing: string[] = []
+    if (!status?.cookie_exists) missing.push('抖音 Cookies')
+    if (!readyCompetitorCount && !collectorSingleAccount.trim()) missing.push('账号库或单独账号')
+    if (missing.length) { setError(`OpenClaw 真采集缺少：${missing.join('、')}。不会假成功。`); setShowCookiePanel(true); return }
+    const runStart = await run('OpenClaw 真采集启动', () => startCollectorRun({
+      source: 'frontend_v10_34',
+      mode: 'douyin_account_collect',
+      account_url: collectorSingleAccount.trim(),
+      limit: Number(collectorAccountLimit) || 3,
+      metadata: { industry, audience, conversionGoal }
+    }))
+    const latest = await getLatestCollectorRun().catch(() => null)
+    const leads = await getRecentCommentLeads(30).catch(() => null)
+    const enhanced = await enhanceOpenClawComments(Array.isArray(leads?.items) ? leads.items : [], { industry, audience, conversionGoal }).catch((e) => ({ ok: false, error: e.message }))
+    setCollectorRealResult({ runStart, latest, leads, enhanced })
+    setLastHandoff('OpenClaw 已按真实接口启动；如果 worker 或 token 缺失，后端会返回具体缺什么。')
+  }
+
+  async function saveToObsidian(noteType: string, content: string) {
+    if (!content.trim()) { setError('没有可写入 Obsidian 的内容。'); return }
+    const res = await run('写入 Obsidian 生长库', () => writeObsidianNote(noteType, content, { industry, audience, conversionGoal }))
+    setObsidianResult(res)
+    setLastHandoff('已写入 /opt/ai-video/storage/obsidian-vault 对应知识库。')
+  }
+
+  async function createControlTask() {
+    if (!aiControlQuestion.trim()) { setError('请输入要检查的问题。'); return }
+    const res = await run('AI 总控台生成待确认修复任务', () => createAiControlTask(aiControlQuestion, {
+      active, industry, currentScript, hasVideo: Boolean(video?.video_url), v1034Status
+    }))
+    setAiControlTask(res)
+    setLastHandoff('AI 总控台只生成待确认修复任务，不会偷偷改代码。')
+  }
+
+  async function saveFinalVideo() {
+    if (!video?.video_url) { setError('当前没有最终视频可保存。'); return }
+    const res = await run('保存最终视频', () => saveFinalVideoRecord({ ...video, title: copy.title, script: currentScript }))
+    setFinalActionResult(res)
+  }
+
+  async function saveRawSegments() {
+    if (!video?.video_url) { setError('当前没有视频结果。'); return }
+    const res = await run('保存 raw 分段素材', () => saveRawSegmentsRecord({ ...video, title: copy.title, script: currentScript }))
+    setFinalActionResult(res)
+  }
+
+  async function discardCurrentVideo() {
+    if (!video?.video_url) { setError('当前没有视频结果。'); return }
+    const res = await run('废弃本次结果', () => discardVideoRecord({ ...video, title: copy.title }, 'manual_discard_from_frontend'))
+    setFinalActionResult(res)
+    setVideo(null)
+  }
+
   useEffect(() => {
     apiGet('/api/health').then(setHealth).catch((e) => setError(e.message || 'API 未连接'))
     apiGet<ModelStatusResponse>('/api/model/status').then(setModelStatus).catch(() => null)
@@ -696,6 +810,7 @@ function AppInner() {
     reloadAgentStatus().catch(() => null)
     reloadCollectorProgress().catch(() => null)
     reloadMemoryContext(true).catch(() => null)
+    getV1034Status().then(setV1034Status).catch(() => null)
   }, [])
 
   useEffect(() => {
@@ -760,7 +875,10 @@ function AppInner() {
 
   async function handleUpload(files: FileList | null) {
     if (!files?.length) return
-    const res = await run('上传素材', () => uploadAssets(files, assetUploadFolder === 'all' ? 'self' : assetUploadFolder))
+    const missing = validateAssetUploadMeta()
+    if (missing) { setError(missing); return }
+    const uploadMeta = { ...assetUploadMeta, folder: assetUploadFolder === 'all' ? 'self' : assetUploadFolder }
+    const res = await run('上传素材', () => uploadAssetsWithMetadata(files, uploadMeta))
     setAssets(prev => [...(res || []), ...prev])
     const ids = (res || []).filter(a => !a.filename.startsWith('collected_')).map(a => a.id)
     if (ids.length) setSelectedMaterialIds(prev => Array.from(new Set([...ids, ...prev])))
@@ -1142,6 +1260,10 @@ ${manualText || ''}`.trim()
       subtitle_size: subtitleSize,
       subtitle_margin_v: subtitleMarginV,
       subtitle_position: subtitlePosition,
+      transition_policy: 'smooth_dissolve_no_flash',
+      safe_crossfade: true,
+      save_raw_shots: true,
+      block_completed_on_quality_error: true,
       subtitle_segments: safeSubtitleSegments
     }))
     setVideo(res!)
@@ -1396,6 +1518,7 @@ ${manualText || ''}`.trim()
           <div className="monitorCard"><span>数据库记忆</span><strong>{memoryStatus}</strong><p>{memoryContext?.storage || '未连接'} · 账号 {(memoryContext?.competitors || []).length} · 采集 {(memoryContext?.videos || []).length} · 文案 {(memoryContext?.scripts || []).length}</p></div>
           <div className="monitorCard"><span>API 状态</span><strong>{health?.ok ? '在线' : '未连接'}</strong><p>{health?.tts_provider || '-'} · {health?.ark_video_model || '-'}</p></div>
         </div>
+        <div className="v1034Panel productionPanel"><div className="sectionHeader compact"><div><h3>AI 总控台 / V10.34 生产状态</h3><p>只生成待确认修复任务，不会自动改代码。先看缺什么，再人工确认。</p></div><Button busy={busy === '刷新 V10.34 生产状态' ? busy : ''} label="刷新生产状态" onClick={refreshV1034Status} kind="ghost" /></div><div className="grid2"><Field label="总控台问题"><textarea value={aiControlQuestion} onChange={e => setAiControlQuestion(e.target.value)} /></Field><div><Button busy={busy === 'AI 总控台生成待确认修复任务' ? busy : ''} label="生成待确认修复任务" onClick={createControlTask} kind="soft" /><div className="chips">{v1034Status?.missing?.length ? v1034Status.missing.map(x => <Pill key={x} tone="orange">缺：{x}</Pill>) : <Pill tone="green">状态检查通过或待刷新</Pill>}</div>{aiControlTask && <div className="miniResult"><strong>{aiControlTask.title}</strong><p>{aiControlTask.summary}</p>{aiControlTask.checklist?.map((x: string) => <small key={x}>· {x}</small>)}</div>}</div></div></div>
         <div className="pluginGrid">{pluginMatrix.map(p => <div className="pluginCard" key={p.name}><strong>{p.name}</strong><p>{p.desc}</p><em>{p.status}</em></div>)}</div>
         <div className="todoPanel"><h3>下一步待办</h3>{pipelineTodos.map(item => <button key={item.text} className={item.ok ? 'done' : ''} onClick={() => setActive(item.go)}><span>{item.ok ? '✓' : '•'}</span>{item.text}</button>)}</div>
         <div className="memoryBox"><strong>AI 学习摘要</strong><p>{learningSummary}</p></div>
@@ -1459,6 +1582,8 @@ ${manualText || ''}`.trim()
           <div><span>已采集内容</span><strong>{(memoryContext?.videos || []).length}</strong><em>自动归入同行内容库</em></div>
           <div><span>worker 状态</span><strong>{collectorStatusText}</strong><em>{collectorLogLine}</em></div>
         </div>
+        <div className="v1034Panel"><div className="sectionHeader compact"><div><h3>账号库导入 + DeepSeek 分类</h3><p>导入后写入 SQLite，并按房产销售、租房出租、MM2H、教育留学、生活配套、装修交付、区域号、短视频教学/钩子教学分类；不能判断进待人工确认。</p></div><Button busy={busy === '导入账号库' || busy === 'DeepSeek/规则分类账号库' ? busy : ''} label="导入并分类" onClick={importAndClassifyAccounts} kind="soft" /></div><Field label="账号库批量导入，每行一个账号/主页/备注"><textarea value={accountImportText} onChange={e => setAccountImportText(e.target.value)} placeholder="天诺老吴 https://... 吉隆坡房产
+某某租房号 https://... 新山租房" /></Field>{accountLibraryResult && <div className="miniResult"><strong>导入 {accountLibraryResult.imported?.count || 0} 个 / 分类 {accountLibraryResult.classified?.classified_count || 0} 个</strong><pre>{JSON.stringify(accountLibraryResult.classified || accountLibraryResult, null, 2).slice(0, 1200)}</pre></div>}</div>
         <details className="fallbackPanel" open={competitors.length === 0}>
           <summary>手动补充账号（账号库为空或需要加新同行时使用）</summary>
           <div className="grid4"><Field label="账号名称"><input value={competitorDraft.name} onChange={e => setCompetitorDraft({ ...competitorDraft, name: e.target.value })} placeholder="例如：天诺老吴" /></Field><Field label="平台"><select value={competitorDraft.platform} onChange={e => setCompetitorDraft({ ...competitorDraft, platform: e.target.value })}><option value="douyin">抖音</option><option value="shipinhao">视频号</option><option value="kuaishou">快手</option><option value="xiaohongshu">小红书</option></select></Field><Field label="主页/视频链接"><input value={competitorDraft.url} onChange={e => setCompetitorDraft({ ...competitorDraft, url: e.target.value })} placeholder="账号主页或爆款链接" /></Field><Field label="账号定位"><input value={competitorDraft.positioning} onChange={e => setCompetitorDraft({ ...competitorDraft, positioning: e.target.value })} placeholder="同城获客/投流/电商创业" /></Field></div>
@@ -1552,7 +1677,7 @@ ${manualText || ''}`.trim()
       </section>}
 
       {active === 'voice' && <section className="card modulePanel">
-        <div className="sectionHeader"><div><h2>第四步：配音导演</h2><p>情绪改成纯中文选项；语速、音量范围加大。调完以后必须重新生成配音，剪辑会用配音时间轴自动对齐字幕。</p></div></div>
+        <div className="sectionHeader"><div><h2>第二步：口播稿 / 关键词 / 配音导演</h2><p>关键词、禁用词、AI 语气语调、语速、停顿、重读词都在第二步完成；不再使用任何浮层。</p></div></div>
         <div className="grid4"><Field label="音色"><select value={voice} onChange={e => setVoice(e.target.value)}>{voices.map(v => <option key={v.id} value={v.id}>{v.name || v.id}</option>)}</select></Field><Field label="配音风格"><select value={voiceStyle} onChange={e => setVoiceStyle(e.target.value)}>{['老板压迫感','真实聊天感','短视频强钩子','销售转化感','案例讲述感','沉稳信任感'].map(x => <option key={x}>{x}</option>)}</select></Field><Field label="情绪强度"><select value={voiceIntensity} onChange={e => setVoiceIntensity(e.target.value)}>{['轻微','标准','强烈'].map(x => <option key={x}>{x}</option>)}</select></Field><div className="stackButtons"><Button busy={busy === '生成配音导演稿' ? busy : ''} label="生成配音导演稿" onClick={makeVoiceDirector} kind="ghost" disabled={!currentScript} /><Button busy={busy === '生成分段情绪配音' ? busy : ''} label="重新生成配音并校准时间轴" onClick={makeSegmentTTS} disabled={!currentScript} /></div></div>
         {voiceNotes.length > 0 && <div className="tips">{voiceNotes.map(x => <span key={x}>{x}</span>)}</div>}
         <div className="hintBox">说明：豆包音色对不同 voice_type 的“情绪词”支持不完全一致，真正生效的是语速/音量/停顿参数；本版把范围加大，并把字幕对齐改为读取配音实际分段时间。</div>
@@ -1577,6 +1702,7 @@ ${manualText || ''}`.trim()
 
       {active === 'assets' && <section className="card modulePanel">
         <div className="sectionHeader"><div><h2>第一步：素材选择与截取</h2><p>先选素材，再生成文案。图片可设置停留秒数，视频可预览并截取开始/结束时间；素材顺序会直接同步到剪辑。</p></div></div>
+        <div className="v1034Panel"><h3>素材入库信息（不填不准上传）</h3><div className="grid4"><Field label="素材类型"><select value={assetUploadMeta.material_type} onChange={e => setAssetUploadMeta({ ...assetUploadMeta, material_type: e.target.value })}><option value="">请选择</option><option value="楼盘外景">楼盘外景</option><option value="生活配套">生活配套</option><option value="交通出勤">交通出勤</option><option value="教育留学">教育留学</option><option value="人物口播">人物口播</option><option value="客户案例">客户案例</option><option value="其他">其他</option></select></Field><Field label="城市"><input value={assetUploadMeta.city} onChange={e => setAssetUploadMeta({ ...assetUploadMeta, city: e.target.value })} placeholder="吉隆坡 / 新山 / 槟城" /></Field><Field label="区域"><input value={assetUploadMeta.region} onChange={e => setAssetUploadMeta({ ...assetUploadMeta, region: e.target.value })} placeholder="具体区域 / 项目周边" /></Field><Field label="来源"><input value={assetUploadMeta.source} onChange={e => setAssetUploadMeta({ ...assetUploadMeta, source: e.target.value })} placeholder="自拍 / 业主 / 同行授权 / AI" /></Field></div><div className="grid2"><Field label="备注"><input value={assetUploadMeta.remark} onChange={e => setAssetUploadMeta({ ...assetUploadMeta, remark: e.target.value })} placeholder="画面内容、适合哪些口播句" /></Field><label className="checkline"><input type="checkbox" checked={assetUploadMeta.reusable} onChange={e => setAssetUploadMeta({ ...assetUploadMeta, reusable: e.target.checked })} /> 可复用素材</label></div></div>
         <div className={`uploadDrop ${isDraggingAssets ? 'dragging' : ''} ${busy === '上传素材' ? 'uploading' : ''}`} onDragOver={onAssetDragOver} onDragLeave={onAssetDragLeave} onDrop={onAssetDrop} aria-busy={busy === '上传素材'}>
           <div className="uploadIcon">↑</div>
           <div className="uploadCopy">
@@ -1623,9 +1749,9 @@ ${manualText || ''}`.trim()
         <div className="sectionHeader"><div><h2>第六步：剪辑合成 / 字幕烧录</h2><p>这里直接调字幕位置和素材顺序。时长跟配音走，素材按已选顺序自动铺满；字幕优先使用配音分段时间轴，减少音画不同步。</p></div><Button busy={busy === '合成视频并烧字幕' ? busy : ''} label="生成视频并下载 MP4" onClick={composeVideo} disabled={!currentScript} /></div>
         <div className="grid4"><Field label="字幕字号"><input type="number" min="12" max="36" value={subtitleSize} onChange={e => setSubtitleSize(Number(e.target.value || 18))} /></Field><Field label="字幕位置"><select value={subtitlePosition} onChange={e => setSubtitlePosition(e.target.value as any)}><option value="bottom_safe">底部安全区，不挡脸</option><option value="middle_low">中下方，大字口播</option><option value="center">居中强调，慎用</option></select></Field><Field label={`离底部 ${subtitleMarginV}px`}><input type="range" min="20" max="260" step="5" value={subtitleMarginV} onChange={e => setSubtitleMarginV(Number(e.target.value))} /></Field><Field label="字幕颜色"><input type="color" value={subtitleColor} onChange={e => setSubtitleColor(e.target.value)} /></Field></div>
         <div className="hintBox">字幕对齐规则：优先用“重新生成配音并校准时间轴”得到的分段时间；没有时间轴时才按文案长度估算。演示前建议先重新生成配音一次。</div>
-        <div className="timelineEditor"><h3>配音分段 / 转场参考</h3>{voiceSegments.length === 0 && <Empty>先生成配音导演稿，或手动添加分段。</Empty>}{voiceSegments.map((seg, i) => <div className="timelineRow" key={i}><span>第{i + 1}段</span><input type="number" min="1" max="60" step="0.5" value={audio?.segments?.[i]?.duration || segmentSeconds[i] || estimateSeconds(seg.text, seg.speed_ratio)} onChange={e => setSegmentSeconds(prev => ({ ...prev, [i]: Number(e.target.value) }))} /><select value={segmentTransitions[i] || '叠化'} onChange={e => setSegmentTransitions(prev => ({ ...prev, [i]: e.target.value }))}><option>叠化</option><option>虚化</option><option>快切</option><option>推近</option><option>闪白</option></select><em>{seg.text.slice(0, 28)}...</em></div>)}</div>
+        <div className="timelineEditor"><h3>配音分段 / 转场参考</h3>{voiceSegments.length === 0 && <Empty>先生成配音导演稿，或手动添加分段。</Empty>}{voiceSegments.map((seg, i) => <div className="timelineRow" key={i}><span>第{i + 1}段</span><input type="number" min="1" max="60" step="0.5" value={audio?.segments?.[i]?.duration || segmentSeconds[i] || estimateSeconds(seg.text, seg.speed_ratio)} onChange={e => setSegmentSeconds(prev => ({ ...prev, [i]: Number(e.target.value) }))} /><select value={segmentTransitions[i] || '叠化'} onChange={e => setSegmentTransitions(prev => ({ ...prev, [i]: e.target.value }))}><option value="smooth_dissolve_no_flash">安全叠化（无闪屏）</option></select><em>{seg.text.slice(0, 28)}...</em></div>)}</div>
         <div className="selectedTimeline compact"><h3>本次合成素材顺序</h3>{selectedMaterialAssets.length === 0 ? <Empty>未选择素材，会自动使用前几个素材；建议先去素材选择页确认顺序和截取区间。</Empty> : selectedMaterialAssets.map((asset, index) => { const cfg = getClipSetting(asset, index); return <div key={asset.id} className="assetRow"><span>{index + 1}</span><strong>{asset.original_name || asset.filename}</strong><em>{asset.kind === 'image' ? `${cfg.image_seconds.toFixed(1)}秒` : `${cfg.video_start.toFixed(1)}-${cfg.video_end ? cfg.video_end.toFixed(1) : '自动'}秒`}</em><button className="mini" onClick={() => setActive('assets')}>调整</button></div>})}</div>
-        {video && <div className="videoGrid"><video controls src={video.video_url} /><div className="downloadPanel"><a className="download" href={video.video_url} target="_blank">下载视频 MP4</a>{video.subtitle_url && <a href={video.subtitle_url} target="_blank">下载字幕 SRT</a>}{video.audio_url && <a href={video.audio_url} target="_blank">下载音频</a>}{video.warnings?.map(w => <div className="warn" key={w}>{w}</div>)}</div></div>}
+        {video && <div className="videoGrid"><video controls src={video.video_url} /><div className="downloadPanel"><a className="download" href={video.video_url} target="_blank">下载视频 MP4</a><div className="buttonRow"><Button busy={busy === '保存最终视频' ? busy : ''} label="保存最终视频" onClick={saveFinalVideo} kind="primary" /><Button busy={busy === '保存 raw 分段素材' ? busy : ''} label="保存 raw 分段素材" onClick={saveRawSegments} kind="soft" /><Button busy={busy === '废弃本次结果' ? busy : ''} label="废弃本次结果" onClick={discardCurrentVideo} kind="danger" /></div>{finalActionResult && <div className="hintBox">{JSON.stringify(finalActionResult).slice(0, 220)}</div>}{video.subtitle_url && <a href={video.subtitle_url} target="_blank">下载字幕 SRT</a>}{video.audio_url && <a href={video.audio_url} target="_blank">下载音频</a>}{video.warnings?.map(w => <div className="warn" key={w}>{w}</div>)}</div></div>}
         <div className="editChatBox"><Field label="AI + 插件剪辑指令"><textarea value={editInstruction} onChange={e => setEditInstruction(e.target.value)} placeholder="例如：去掉开头2秒、整体加速1.1倍、重新加字幕、转成9:16。" /></Field><Button busy={busy === 'AI + 插件修改视频' ? busy : ''} label="AI + 插件修改视频" onClick={chatEditVideo} kind="ghost" disabled={!currentVideoName} />{editChat.map((msg, i) => <div className="chatMsg" key={i}><strong>AI：</strong>{msg.assistant_message}<p>{msg.summary}</p><div className="chips">{msg.actions?.map(x => <Pill key={x}>{x}</Pill>)}</div>{msg.new_video_url && <a href={msg.new_video_url} target="_blank">打开修改后视频</a>}{msg.warnings?.map(w => <div className="warn" key={w}>{w}</div>)}</div>)}</div>
       </section>}
 

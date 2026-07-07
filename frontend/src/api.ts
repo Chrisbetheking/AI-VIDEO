@@ -424,3 +424,101 @@ export interface ModelStatusResponse {
   image_model: string
   image_edit_model: string
 }
+
+
+// ===== V10.34 A-G production-safe API additions =====
+export interface AssetUploadMetadata {
+  material_type: string
+  city: string
+  region: string
+  source: string
+  reusable: boolean
+  remark: string
+  folder?: string
+}
+
+export interface V1034StatusResponse {
+  ok: boolean
+  version: string
+  checks: Record<string, any>
+  missing: string[]
+  modules: Record<string, string>
+}
+
+export interface PendingRepairTask {
+  ok: boolean
+  task_id: string
+  status: string
+  module: string
+  title: string
+  summary: string
+  checklist: string[]
+  file_url?: string
+}
+
+export async function uploadAssetsWithMetadata(files: FileList, metadata: AssetUploadMetadata): Promise<AssetItem[]> {
+  const form = new FormData()
+  form.append('folder', metadata.folder || 'self')
+  form.append('material_type', metadata.material_type)
+  form.append('city', metadata.city)
+  form.append('region', metadata.region)
+  form.append('source', metadata.source)
+  form.append('reusable', metadata.reusable ? 'true' : 'false')
+  form.append('remark', metadata.remark)
+  Array.from(files).forEach(file => form.append('files', file))
+  const url = `${API_BASE}/api/video/material-library/upload`
+  return safeFetch<AssetItem[]>(url, { method: 'POST', body: form }, 180000)
+}
+
+export async function getV1034Status(): Promise<V1034StatusResponse> {
+  return apiGet<V1034StatusResponse>('/api/video/v10-34/status')
+}
+
+export async function importDouyinAccounts(raw_text: string): Promise<any> {
+  return apiPost<any>('/api/video/account-library/import', { raw_text })
+}
+
+export async function classifyDouyinAccounts(limit = 200): Promise<any> {
+  return apiPost<any>('/api/video/account-library/classify', { limit })
+}
+
+export async function getDouyinAccounts(): Promise<any> {
+  return apiGet<any>('/api/collector/douyin/accounts/list?limit=200')
+}
+
+export async function startCollectorRun(payload: Record<string, any>): Promise<any> {
+  return apiPost<any>('/api/collector/runs/start', payload)
+}
+
+export async function getLatestCollectorRun(): Promise<any> {
+  return apiGet<any>('/api/collector/runs/latest')
+}
+
+export async function getRecentCommentLeads(limit = 30): Promise<any> {
+  return apiGet<any>(`/api/video/comment-leads/recent?limit=${limit}`)
+}
+
+export async function enhanceOpenClawComments(comments: any[], campaign_context: Record<string, any> = {}): Promise<any> {
+  return apiPost<any>('/api/video/openclaw/llm-enhance/comments', { comments, campaign_context, dry_run: false, save_rule_leads: true })
+}
+
+export async function writeObsidianNote(note_type: string, content: string, metadata: Record<string, any> = {}): Promise<any> {
+  return apiPost<any>('/api/video/obsidian/write', { note_type, content, metadata })
+}
+
+export async function createAiControlTask(question: string, context: Record<string, any> = {}): Promise<PendingRepairTask> {
+  return apiPost<PendingRepairTask>('/api/video/ai-control/plan', { question, context })
+}
+
+export async function saveFinalVideoRecord(video: Record<string, any>): Promise<any> {
+  return apiPost<any>('/api/video/final/save', { video })
+}
+
+export async function saveRawSegmentsRecord(video: Record<string, any>): Promise<any> {
+  return apiPost<any>('/api/video/final/raw-segments/save', { video })
+}
+
+export async function discardVideoRecord(video: Record<string, any>, reason = 'manual_discard'): Promise<any> {
+  return apiPost<any>('/api/video/final/discard', { video, reason })
+}
+// ===== /V10.34 A-G production-safe API additions =====

@@ -1667,3 +1667,9 @@ input:focus,textarea:focus,select:focus{
   }
 }
 /* ===== /Douyin Account Library ===== */
+
+
+/* ===== V10.34 production-safe patches ===== */
+.v1034Panel{border:1px solid #dbe4f0;border-radius:18px;background:#f8fbff;padding:16px;margin:14px 0;box-shadow:0 8px 28px rgba(15,23,42,.04)}
+.v1034Panel h3{margin:0 0 8px;font-size:16px;color:#0f172a}.v1034Panel pre{white-space:pre-wrap;max-height:260px;overflow:auto;background:#0f172a;color:#e2e8f0;border-radius:12px;padding:12px}.productionPanel{background:#fffdf7;border-color:#f5d18b}.rawBox{border:1px solid #e5e7eb;border-radius:12px;padding:10px;background:#fff}.buttonRow .danger,.btn.danger{background:#fee2e2!important;color:#991b1b!important;border-color:#fecaca!important}.checkline{display:flex;align-items:center;gap:8px}.miniResult small{display:block;color:#475569;margin-top:4px}
+/* ===== /V10.34 production-safe patches ===== */
