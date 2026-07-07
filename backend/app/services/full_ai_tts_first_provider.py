@@ -1091,8 +1091,29 @@ def _v10_22_render_semantic_direct(job_id: str, raw: Dict[str, Any], script: str
 
     # V10_25_VISUAL_LOGIC_APPLIED
 
-    shots = _v10_25_apply_visual_logic(shots, raw, script_text)
+    shots = _v10_25_apply_visual_logic(shots, raw, script)
 
+    # V10_31_SEMANTIC_COMPLETION_GUARD
+    if not isinstance(shots, list) or len(shots) < 2:
+        raise RuntimeError("V10.31 blocked: semantic shots missing, refusing paid FAL generation")
+    semantic_types = []
+    for _s in shots:
+        if isinstance(_s, dict):
+            semantic_types.append(str(_s.get("semantic_type") or _s.get("scene_type") or _s.get("semantic_label") or "unknown").strip().lower())
+    semantic_types_clean = [x for x in semantic_types if x and x != "unknown"]
+    if not semantic_types_clean:
+        raise RuntimeError("V10.31 blocked: no semantic scene types, refusing paid FAL generation")
+    if set(semantic_types_clean).issubset({"interior", "apartment", "property", "generic", "indoor"}):
+        raise RuntimeError("V10.31 blocked: all shots look like interior/property fallback, refusing paid FAL generation")
+    _jobs[job_id].update({
+        "provider": "full_ai_tts_first_semantic_direct_render_v10_27k",
+        "direct_render_version": "v10_31_semantic_guard",
+        "shots": shots,
+        "storyboard": shots,
+        "semantic_shot_count": len(shots),
+        "semantic_types": semantic_types_clean,
+        "updated_at": time.time(),
+    })
 
     for idx, shot in enumerate(shots, start=1):
         duration = float(shot.get("duration_seconds") or 3.0)
@@ -1168,11 +1189,30 @@ def _v10_22_render_semantic_direct(job_id: str, raw: Dict[str, Any], script: str
         duration=float(audio_duration),
     )
     final_url = str(subtitle_res.get("video_url") or subtitle_res.get("subtitled_video_url") or subtitle_res.get("url") or "") if isinstance(subtitle_res, dict) else ""
+    if not cues:
+        raise RuntimeError("V10.31 blocked: subtitle cues missing, refusing completed status")
     if not final_url:
         raise RuntimeError("local subtitle burn failed; refusing raw fallback: " + str(subtitle_res)[:1200])
+    if final_url == raw_video_url:
+        raise RuntimeError("V10.31 blocked: subtitled url equals raw url, refusing raw-as-subtitled fallback")
+    _jobs[job_id].update({
+        "provider": "full_ai_tts_first_semantic_direct_render_v10_27k",
+        "direct_render_version": "v10_31_semantic_guard",
+        "shots": shots,
+        "storyboard": shots,
+        "subtitle_cues": cues,
+        "cues": cues,
+        "audio_url": audio_url,
+        "subtitled_video_url": final_url,
+        "video_url": final_url,
+        "raw_video_url": raw_video_url,
+        "semantic_clip_count": len(fixed_clips),
+        "subtitle_required": True,
+        "updated_at": time.time(),
+    })
     return {
         "ok": True,
-        "provider": "full_ai_tts_first_semantic_direct_render_v10_25d",
+        "provider": "full_ai_tts_first_semantic_direct_render_v10_27k",
         "video_url": final_url,
         "subtitled_video_url": final_url,
         "raw_video_url": raw_video_url,
@@ -1489,7 +1529,7 @@ def _run_job(job_id: str, raw: Dict[str, Any]) -> None:
                 "status": "completed",
                 "stage": "completed",
                 "progress": 100,
-                "provider": "full_ai_tts_first_semantic_direct_render_v10_25d",
+                "provider": "full_ai_tts_first_semantic_direct_render_v10_27k",
                 "direct_render": True,
                 "no_child_full_ai_start": True,
                 "video_url": render_result.get("video_url"),
@@ -1516,7 +1556,7 @@ def _run_job(job_id: str, raw: Dict[str, Any]) -> None:
 def health() -> Dict[str, Any]:
     return {
         "ok": True,
-        "provider": "full_ai_tts_first_semantic_direct_render_v10_25d",
+        "provider": "full_ai_tts_first_semantic_direct_render_v10_27k",
         "logic": "script -> real TTS duration -> semantic storyboard -> direct per-shot fal render -> concat -> local ffmpeg subtitle burn -> DouyinCleanEmphasisV2 keyword highlight -> semantic transitions",
         "guarantees": [
             "画面片段数按真实配音时长计算",
@@ -1538,7 +1578,7 @@ def plan_preview(req: TTSFirstStartRequest) -> Dict[str, Any]:
     shots = _plan_shots(script, float(duration), city, req.model_dump())
     return {
         "ok": True,
-        "provider": "full_ai_tts_first_semantic_direct_render_v10_25d",
+        "provider": "full_ai_tts_first_semantic_direct_render_v10_27k",
         "city": city,
         "duration_seconds": round(float(duration), 2),
         "shot_count": len(shots),
