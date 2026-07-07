@@ -1517,3 +1517,210 @@
   setTimeout(hideOldKeywordPanels, 300);
 })();
 
+
+
+/* AI VIDEO V10.34B3 - native step2 voice preview buttons */
+(function(){
+  if (window.__AI_VIDEO_V10_34B3_NATIVE_STEP2_VOICE_PREVIEW__) return;
+  window.__AI_VIDEO_V10_34B3_NATIVE_STEP2_VOICE_PREVIEW__ = true;
+
+  function visible(el){
+    try {
+      if (!el) return false;
+      var r = el.getBoundingClientRect();
+      var st = window.getComputedStyle(el);
+      return r.width > 20 && r.height > 10 && st.display !== 'none' && st.visibility !== 'hidden';
+    } catch(e) { return false; }
+  }
+
+  function findScriptText(){
+    var textareas = Array.prototype.slice.call(document.querySelectorAll('textarea'));
+    var best = '';
+    textareas.forEach(function(el){
+      var v = (el.value || '').trim();
+      if (v.length > best.length && /[\u4e00-\u9fa5]/.test(v)) best = v;
+    });
+    if (best) return best;
+
+    var candidates = Array.prototype.slice.call(document.querySelectorAll('div,section,main'));
+    candidates.forEach(function(el){
+      var txt = (el.innerText || '').trim();
+      if (
+        txt.length > best.length &&
+        txt.length < 1000 &&
+        txt.indexOf('第二步') >= 0 &&
+        /[\u4e00-\u9fa5]/.test(txt)
+      ) best = txt;
+    });
+    return best;
+  }
+
+  function findCurrentSentence(){
+    var selected = document.querySelector('[class*="selected"],[class*="active"]');
+    if (selected && visible(selected)) {
+      var t = (selected.innerText || '').trim();
+      if (t && /[\u4e00-\u9fa5]/.test(t) && t.length < 200) return t.replace(/^\d+\s*/, '');
+    }
+
+    var cards = Array.prototype.slice.call(document.querySelectorAll('div,button'));
+    for (var i=0;i<cards.length;i++){
+      var txt = (cards[i].innerText || '').trim();
+      if (/^\d{1,2}\s+/.test(txt) && /[\u4e00-\u9fa5]/.test(txt) && txt.length < 180) {
+        return txt.replace(/^\d+\s*/, '');
+      }
+    }
+    return '';
+  }
+
+  async function postJson(url, body){
+    var r = await fetch(url, {
+      method:'POST',
+      credentials:'include',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(body || {})
+    });
+    var t = await r.text();
+    try { return JSON.parse(t); } catch(e){ return {ok:false,status:r.status,text:t}; }
+  }
+
+  function makePanel(){
+    var old = document.getElementById('ai-v1034b3-native-preview');
+    if (old) return old;
+
+    var box = document.createElement('div');
+    box.id = 'ai-v1034b3-native-preview';
+    box.innerHTML = [
+      '<div class="v1034b3-title">配音试听</div>',
+      '<div class="v1034b3-row">',
+      '<button id="v1034b3-preview-one">试听当前句</button>',
+      '<button id="v1034b3-preview-all">试听整段口播</button>',
+      '</div>',
+      '<div class="v1034b3-audio"></div>',
+      '<pre class="v1034b3-log">未试听</pre>'
+    ].join('');
+
+    return box;
+  }
+
+  function injectStyle(){
+    if (document.getElementById('ai-v1034b3-style')) return;
+    var style = document.createElement('style');
+    style.id = 'ai-v1034b3-style';
+    style.textContent = `
+      #ai-v1034b3-native-preview{
+        margin-top:12px;padding:12px;border-radius:16px;
+        background:#f8fafc;border:1px solid #dbeafe;
+      }
+      #ai-v1034b3-native-preview .v1034b3-title{
+        font-weight:900;color:#1e293b;margin-bottom:8px;
+      }
+      #ai-v1034b3-native-preview .v1034b3-row{
+        display:flex;gap:8px;flex-wrap:wrap;
+      }
+      #ai-v1034b3-native-preview button{
+        border:0;border-radius:12px;padding:10px 12px;
+        background:#2563eb;color:white;font-weight:800;cursor:pointer;
+      }
+      #ai-v1034b3-native-preview button:nth-child(1){
+        background:#7c3aed;
+      }
+      #ai-v1034b3-native-preview audio{
+        width:100%;margin-top:10px;
+      }
+      #ai-v1034b3-native-preview .v1034b3-log{
+        margin-top:8px;max-height:90px;overflow:auto;white-space:pre-wrap;
+        background:#0f172a;color:#e2e8f0;border-radius:10px;padding:8px;font-size:11px;
+      }
+    `;
+    document.head.appendChild(style);
+  }
+
+  function findRightPanel(){
+    var buttons = Array.prototype.slice.call(document.querySelectorAll('button'));
+    var target = null;
+
+    buttons.forEach(function(btn){
+      var t = (btn.innerText || '').trim();
+      if (t === '应用到全部句子' || t === 'AI 重置本句' || t === '保存为专业进度播报模板') {
+        var cur = btn;
+        for (var i=0;i<6 && cur;i++,cur=cur.parentElement){
+          if (cur && visible(cur) && (cur.innerText || '').indexOf('语速') >= 0 && (cur.innerText || '').indexOf('音量') >= 0) {
+            target = cur;
+            return;
+          }
+        }
+      }
+    });
+
+    return target;
+  }
+
+  function bind(panel){
+    if (panel.__v1034b3_bound) return;
+    panel.__v1034b3_bound = true;
+
+    var log = panel.querySelector('.v1034b3-log');
+    var audioWrap = panel.querySelector('.v1034b3-audio');
+
+    async function runPreview(mode){
+      var text = mode === 'one' ? findCurrentSentence() : findScriptText();
+      text = (text || '').trim();
+
+      if (!text || text.length < 2) {
+        log.textContent = '没有读取到口播文本。请先点某一句，或者在左侧口播文案里输入内容。';
+        return;
+      }
+
+      log.textContent = '正在生成配音试听...';
+      audioWrap.innerHTML = '';
+
+      var res = await postJson('/api/video/full-ai/tts-first/voice-preview', {
+        script_text: text,
+        pace: 'normal',
+        source: 'native_step2_v10_34b3'
+      });
+
+      log.textContent = JSON.stringify({
+        ok: res && res.ok,
+        version: res && res.version,
+        provider: res && res.provider,
+        audio_url: res && res.audio_url,
+        audio_duration: res && res.audio_duration,
+        error: res && res.error,
+        message: res && res.message
+      }, null, 2);
+
+      if (res && res.ok && res.audio_url) {
+        var dur = Number(res.audio_duration || 0);
+        audioWrap.innerHTML =
+          '<audio controls src="' + res.audio_url + '"></audio>' +
+          '<div style="font-size:12px;color:#64748b;margin-top:4px">试听时长：' +
+          (dur ? dur.toFixed(2) : '未知') + ' 秒</div>';
+      } else {
+        audioWrap.innerHTML = '<div style="font-size:12px;color:#dc2626;margin-top:8px">试听失败，没有返回可播放 audio_url。</div>';
+      }
+    }
+
+    panel.querySelector('#v1034b3-preview-one').onclick = function(){ runPreview('one'); };
+    panel.querySelector('#v1034b3-preview-all').onclick = function(){ runPreview('all'); };
+  }
+
+  function inject(){
+    injectStyle();
+
+    var right = findRightPanel();
+    if (!right) return;
+
+    var panel = makePanel();
+
+    if (!document.getElementById('ai-v1034b3-native-preview')) {
+      right.appendChild(panel);
+    }
+
+    bind(panel);
+  }
+
+  setInterval(inject, 1200);
+  setTimeout(inject, 500);
+})();
+
