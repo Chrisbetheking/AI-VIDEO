@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Dict, List
+import re
+from typing import Any, Dict, List, Tuple
 
 from fastapi import APIRouter, FastAPI
 from pydantic import BaseModel
@@ -10,49 +11,124 @@ from starlette.requests import Request
 router = APIRouter(prefix="/api/video/malaysia-visual", tags=["malaysia-visual-planner"])
 
 NEGATIVE = (
-    "irrelevant close-up, irrelevant close-up, irrelevant close-up, irrelevant indoor scene, generic office meeting, random business conference, unrelated corporate people, "
+    "irrelevant close-up, irrelevant indoor scene, generic office meeting, random business conference, "
     "plain office room, abstract background, talking head interview, unrelated factory, "
     "text, subtitles, captions, readable words, logo, watermark, signboard, price tag, "
     "fake UI, poster, banner, floorplan text, black bars, letterbox, pillarbox, cartoon, anime, blurry"
 )
 
-KL_ANCHORS = [
-    "KLCC Twin Towers skyline",
-    "Petronas Twin Towers visible in the distance",
-    "TRX financial district",
-    "Mont Kiara luxury condominium area",
-    "premium Kuala Lumpur high-rise condominium exterior",
-    "floor-to-ceiling window apartment interior",
-    "city-view balcony",
-    "modern condo lobby",
-    "infinity pool with Kuala Lumpur skyline",
-    "night skyline of Kuala Lumpur",
+# 这个 middleware 是第二道保险：即使下游 fal 接口只拿 prompt，仍然按口播语义改画面。
+SCENES: Dict[str, Dict[str, Any]] = {
+    "transport": {
+        "label": "交通通勤",
+        "visuals": [
+            "MRT or LRT station entrance in Kuala Lumpur with commuters, no readable signs",
+            "main road traffic beside modern Malaysian residential condominiums",
+            "condo resident walking toward public transport station during morning commute",
+        ],
+        "must": "MRT/LRT station, bus stop, main road, commuters, traffic",
+        "forbid": "living room, bedroom, balcony-only, pool-only",
+    },
+    "amenities": {
+        "label": "生活配套",
+        "visuals": [
+            "neighborhood supermarket, convenience stores and restaurants near Malaysian condo, no readable signs",
+            "shopping mall and food street around residential towers in Malaysia",
+            "daily commercial street with grocery, cafe, pharmacy and residents walking",
+        ],
+        "must": "supermarket, mall, restaurants, convenience stores, pharmacy, daily life",
+        "forbid": "empty indoor apartment, skyline-only, document close-up",
+    },
+    "medical": {
+        "label": "医疗诊所",
+        "visuals": [
+            "neighborhood clinic and pharmacy street scene near Malaysian condo, no readable signs",
+            "resident leaving condo by car for clinic visit, realistic daily inconvenience",
+            "clean urban clinic street near residential towers, Malaysia lifestyle",
+        ],
+        "must": "clinic, pharmacy, car trip, medical access",
+        "forbid": "luxury room, pool, KLCC-only",
+    },
+    "interior_layout": {
+        "label": "户型室内",
+        "visuals": [
+            "modern Malaysian condo living room with natural daylight and floor-to-ceiling windows",
+            "clean apartment kitchen and dining area, practical daily living layout",
+            "bright bedroom and balcony connection in modern high-rise condominium",
+        ],
+        "must": "living room, kitchen, bedroom, balcony, daylight, layout",
+        "forbid": "MRT, supermarket, clinic, unrelated street crowd",
+    },
+    "community": {
+        "label": "小区社区",
+        "visuals": [
+            "condominium garden walkway with residents, premium community atmosphere",
+            "condo lobby entrance with security and residents, property management feel",
+            "children playground and landscaped facilities inside Malaysian condo community",
+        ],
+        "must": "garden, lobby, residents, security, playground, pool or gym",
+        "forbid": "document close-up, skyline-only, traffic-only",
+    },
+    "investment": {
+        "label": "投资出租",
+        "visuals": [
+            "rental viewing scene outside modern condo with agent and potential tenant, no logos",
+            "busy residential district with high-rise condos and office commute crowd",
+            "condo exterior near office district implying rental demand, no readable signs",
+        ],
+        "must": "rental demand, tenant, condo exterior, people flow, office district",
+        "forbid": "calculator, fake ROI chart, document-only",
+    },
+    "risk_regret": {
+        "label": "踩坑后悔",
+        "visuals": [
+            "buyer hesitating outside distant condo area with inconvenient surroundings",
+            "resident waiting for ride-hailing outside condo because access is inconvenient",
+            "long commute scene from residential tower to main road, realistic daily problem",
+        ],
+        "must": "inconvenience, hesitation, distant location, daily-life problem",
+        "forbid": "perfect luxury brochure, happy pool-only, skyline-only",
+    },
+    "second_home_seaside": {
+        "label": "海景第二家园",
+        "visuals": [
+            "Penang ocean-view condominium balcony with tropical daylight",
+            "coastal residential walkway with palm trees and seaside condo lifestyle",
+            "resort-style residential pool near the sea in Malaysia, premium realistic",
+        ],
+        "must": "sea view, tropical residential lifestyle, second-home atmosphere",
+        "forbid": "Kuala Lumpur skyline unless narration mentions KL, inland traffic",
+    },
+    "city_location": {
+        "label": "城市区域",
+        "visuals": [
+            "street-level Malaysian city residential district with modern high-rise condominiums",
+            "premium condominium exterior beside active urban street in Kuala Lumpur",
+            "TRX or Mont Kiara style urban district with residential towers and daily street life",
+        ],
+        "must": "city district, condo exterior, neighborhood context, street life",
+        "forbid": "only indoor room, only documents, only calculator, repeated KLCC-only shot",
+    },
+}
+
+KEYWORDS: List[Tuple[str, List[str]]] = [
+    ("medical", ["看病", "小毛病", "医院", "诊所", "药房", "医疗", "clinic", "hospital", "pharmacy"]),
+    ("transport", ["地铁", "轻轨", "mrt", "lrt", "公交", "主干道", "通勤", "出勤", "上班", "堵车", "开车", "半小时", "交通", "station", "traffic", "road"]),
+    ("amenities", ["生活配套", "配套", "超市", "便利店", "商场", "菜市场", "餐饮", "买菜", "吃饭", "mall", "supermarket", "restaurant", "grocery"]),
+    ("interior_layout", ["户型", "采光", "装修", "客厅", "卧室", "厨房", "阳台", "室内", "空间", "窗", "layout", "interior", "bedroom", "kitchen", "balcony"]),
+    ("community", ["小区", "社区", "园林", "物业", "安保", "泳池", "健身房", "大堂", "设施", "community", "lobby", "pool", "gym"]),
+    ("second_home_seaside", ["第二家园", "养老", "度假", "海景", "海边", "槟城", "兰卡威", "沙巴", "penang", "langkawi", "sabah", "ocean", "seaside", "beach"]),
+    ("investment", ["投资", "出租", "租金", "转手", "流动性", "回报", "租客", "investment", "rental", "tenant", "liquidity"]),
+    ("risk_regret", ["后悔", "踩坑", "风险", "不方便", "麻烦", "太远", "大打折扣", "别只看", "regret", "risk", "inconvenient"]),
+    ("city_location", ["区域", "地段", "位置", "城市", "吉隆坡", "klcc", "trx", "mont kiara", "kuala lumpur", "location", "district"]),
 ]
 
-SEA_ANCHORS = [
-    "Penang seaside condominium",
-    "Gurney Drive coastal skyline",
-    "ocean-view balcony",
-    "modern apartment interior facing the sea",
-    "beachfront lifestyle",
-    "Langkawi tropical beach villa",
-    "Sabah sunset ocean view",
-    "resort-style pool and tropical landscape",
-]
-
-FAMILY_ANCHORS = [
-    "family-friendly condominium community",
-    "modern apartment living room",
-    "condo children playground",
-    "Mont Kiara residential lifestyle",
-    "nearby mall and daily amenities",
-    "safe residential neighborhood amenities",
-]
 
 class MalaysiaVisualPlanRequest(BaseModel):
     topic: str = "马来西亚吉隆坡买房，别只看价格"
     script_text: str = ""
     shots: List[Dict[str, Any]] = []
+
 
 def _txt(v: Any) -> str:
     if v is None:
@@ -61,151 +137,101 @@ def _txt(v: Any) -> str:
         return v
     return json.dumps(v, ensure_ascii=False)
 
-def _scene_type(text: str) -> str:
-    t = text.lower()
-    if any(k in t for k in ["海边", "海景", "第二家园", "养老", "度假", "penang", "槟城", "seaside", "ocean", "beach", "langkawi", "sabah"]):
-        return "second_home_seaside"
-    if any(k in t for k in ["家庭", "孩子", "教育", "学校", "自住", "family", "school", "own stay"]):
-        return "family_own_stay"
-    if any(k in t for k in ["出租", "租金", "回报", "转手", "投资", "rental", "roi", "investment"]):
-        return "investment"
-    return "kuala_lumpur_location"
 
-def _anchors_for(text: str, index: int) -> List[str]:
-    typ = _scene_type(text)
-
-    if typ == "second_home_seaside":
-        base = SEA_ANCHORS
-    elif typ == "family_own_stay":
-        base = FAMILY_ANCHORS + KL_ANCHORS
-    else:
-        base = KL_ANCHORS
-
-    anchors = [
-        base[(index - 1) % len(base)],
-        base[(index + 1) % len(base)],
-        base[(index + 3) % len(base)],
-    ]
-
-    # 兜底永远保留马来西亚房产语义，不让它跑成普通办公室。
-    if not any("KLCC" in x or "Twin Towers" in x or "Petronas" in x for x in anchors):
-        anchors.append("KLCC Twin Towers skyline")
-    if typ == "second_home_seaside":
-        anchors.append("Penang seaside condominium and ocean-view balcony")
-    if typ == "family_own_stay":
-        anchors.append("Mont Kiara family-friendly condominium lifestyle")
-
-    return anchors
+def _semantic(text: str) -> str:
+    raw = (text or "").lower()
+    for typ, keys in KEYWORDS:
+        if any(k.lower() in raw for k in keys):
+            return typ
+    return "city_location"
 
 
-def build_prompt(raw_prompt: str, topic: str = "", index: int = 1) -> str:
-    text = f"{topic}\n{raw_prompt}"
-    typ = _scene_type(text)
-
-    kl_scenes = [
-        "KLCC Twin Towers skyline with luxury high-rise condominium in the foreground",
-        "Kuala Lumpur city-view condo balcony overlooking the Petronas Twin Towers",
-        "modern luxury condo living room with floor-to-ceiling windows and KLCC skyline outside",
-        "premium condominium lobby in Kuala Lumpur, elegant residential atmosphere",
-        "infinity pool on a high-rise condo rooftop with Kuala Lumpur skyline",
-        "TRX financial district and luxury residential towers, cinematic city lifestyle",
-        "Mont Kiara upscale condominium neighborhood, premium family living atmosphere",
-        "night skyline of Kuala Lumpur with high-rise residential towers and city lights",
-    ]
-
-    sea_scenes = [
-        "Penang ocean-view condominium balcony with elegant seaside lifestyle",
-        "Gurney Drive coastal skyline with modern residential tower atmosphere",
-        "Langkawi tropical villa and resort-style residential pool",
-        "Sabah sunset ocean view with premium seaside apartment atmosphere",
-        "modern apartment interior facing the sea, warm tropical daylight",
-        "coastal residential pool with palm trees and premium Malaysia lifestyle",
-    ]
-
-    family_scenes = [
-        "Mont Kiara family-friendly condominium community with premium residential facilities",
-        "modern condo living room for family own-stay lifestyle in Kuala Lumpur",
-        "safe upscale residential neighborhood with condo amenities and greenery",
-        "family-oriented high-rise condominium facilities in Kuala Lumpur",
-    ]
-
-    if typ == "second_home_seaside":
-        scene = sea_scenes[(index - 1) % len(sea_scenes)]
-        extra = "seaside second-home lifestyle, ocean view, tropical Malaysia atmosphere"
-    elif typ == "family_own_stay":
-        scene = family_scenes[(index - 1) % len(family_scenes)]
-        extra = "family own-stay, education planning, comfortable long-term living"
-    else:
-        scene = kl_scenes[(index - 1) % len(kl_scenes)]
-        extra = "Kuala Lumpur property investment, location value, premium condo lifestyle"
-
+def build_prompt(raw_prompt: str, topic: str = "", index: int = 1, narration: str = "") -> str:
+    text = f"{topic}\n{raw_prompt}\n{narration}"
+    typ = _semantic(text)
+    recipe = SCENES[typ]
+    scene = recipe["visuals"][(index - 1) % len(recipe["visuals"])]
     return (
-        "Premium 9:16 cinematic vertical video for Malaysia real-estate content.\n"
-        f"Main scene: {scene}.\n"
-        f"Theme: {extra}.\n"
-        "The frame must be dominated by Malaysia property visuals: skyline, condominium exterior, balcony view, "
-        "apartment interior, lobby, pool, or residential lifestyle.\n"
-        "Ultra realistic, premium real estate commercial style, natural lighting, clean composition, high detail, "
-        "smooth camera movement, mobile-first vertical framing, no black borders.\n"
-        "No readable text, no logo, no watermark, no fake project name, no exact price, no exact ROI, no exact school name.\n"
+        "Premium realistic vertical 9:16 B-roll for Malaysia real-estate short video.\n"
+        f"Semantic category: {recipe['label']}.\n"
+        f"Narration meaning to match: {(narration or raw_prompt)[:120]}.\n"
+        f"Required visual subject: {scene}.\n"
+        f"Must show: {recipe['must']}.\n"
+        f"Do not show: {recipe['forbid']}.\n"
+        "Ultra realistic, mobile-first vertical framing, natural light, smooth camera motion, clean composition.\n"
+        "No readable text, no logo, no watermark, no fake project name, no exact price, no exact ROI, no black borders."
     )
+
 
 def rewrite_fal_payload(data: Dict[str, Any]) -> Dict[str, Any]:
     if not isinstance(data, dict):
         return data
-
     topic = _txt(data.get("title") or data.get("topic") or data.get("script_text") or data.get("prompt"))
-
-    shots = data.get("shots")
+    shots = data.get("shots") or data.get("manual_shot_plan")
     if isinstance(shots, list):
         for i, shot in enumerate(shots, start=1):
-            if isinstance(shot, dict):
-                raw = _txt(shot.get("prompt") or topic)
-                shot["prompt"] = build_prompt(raw, topic, i)
-
+            if not isinstance(shot, dict):
+                continue
+            narration = _txt(shot.get("narration_segment") or shot.get("script") or shot.get("text") or "")
+            # 如果上游已经是 semantic_storyboard_v2，则只补 negative，不再乱改人工 prompt。
+            already_semantic = str(data.get("visual_prompt_version") or "").startswith("tts_first_semantic")
+            if already_semantic and shot.get("visual_prompt"):
+                shot.setdefault("prompt", shot.get("visual_prompt"))
+                shot.setdefault("negative_prompt", NEGATIVE)
+                continue
+            raw = _txt(shot.get("prompt") or shot.get("visual_prompt") or narration or topic)
+            prompt = build_prompt(raw, topic, i, narration=narration)
+            shot["prompt"] = prompt
+            shot["visual_prompt"] = prompt
+            shot["negative_prompt"] = NEGATIVE
     if isinstance(data.get("prompt"), str):
-        data["prompt"] = build_prompt(data["prompt"], topic, 1)
-
+        data["prompt"] = build_prompt(data["prompt"], topic, 1, narration=_txt(data.get("script_text")))
     if "aspect_ratio" in data:
         data["aspect_ratio"] = "9:16"
     if "width" in data:
         data["width"] = 1080
     if "height" in data:
         data["height"] = 1920
-
+    data["negative_prompt"] = data.get("negative_prompt") or NEGATIVE
     return data
 
-def make_plan(req: MalaysiaVisualPlanRequest):
-    shots = req.shots or [
-        {"prompt": "吉隆坡买房，先看地段和出租"},
-        {"prompt": "第二家园和海边生活方式"},
-        {"prompt": "家庭自住和教育配套"},
-    ]
+
+def make_plan(req: MalaysiaVisualPlanRequest) -> Dict[str, Any]:
+    shots = req.shots or [{"narration_segment": x.strip()} for x in re.split(r"[。！？!?；;\n]+", req.script_text) if x.strip()]
+    if not shots:
+        shots = [{"narration_segment": req.topic}]
     planned = []
     for i, shot in enumerate(shots, start=1):
-        raw = _txt(shot.get("prompt") or req.topic)
-        prompt = build_prompt(raw, f"{req.topic}\n{req.script_text}", i)
-        planned.append({"index": i, "prompt": prompt})
-    return {"ok": True, "provider": "malaysia_visual_planner_direct_v1", "shots": planned}
+        raw = _txt(shot.get("prompt") or shot.get("visual_prompt") or shot.get("narration_segment") or req.topic)
+        narration = _txt(shot.get("narration_segment") or raw)
+        prompt = build_prompt(raw, f"{req.topic}\n{req.script_text}", i, narration=narration)
+        planned.append({"index": i, "semantic_type": _semantic(narration or raw), "narration_segment": narration, "prompt": prompt})
+    return {"ok": True, "provider": "malaysia_visual_planner_semantic_v2", "shots": planned}
+
 
 @router.get("/health")
-def health():
+def health() -> Dict[str, Any]:
     return {
         "ok": True,
-        "provider": "malaysia_visual_planner_direct_v1",
-        "anchors": ["KLCC Twin Towers", "TRX", "Mont Kiara", "Penang seaside", "Langkawi", "Sabah"],
+        "provider": "malaysia_visual_planner_semantic_v2",
+        "logic": "rewrite fal prompts by narration semantic category instead of city-anchor loop",
     }
 
+
 @router.get("/self-test")
-def self_test():
-    return make_plan(MalaysiaVisualPlanRequest(
-        topic="马来西亚吉隆坡买房，别只看价格",
-        script_text="KLCC、TRX、Mont Kiara、出租、第二家园、海边、家庭自住。"
-    ))
+def self_test() -> Dict[str, Any]:
+    return make_plan(
+        MalaysiaVisualPlanRequest(
+            topic="马来西亚吉隆坡买房，别只看价格",
+            script_text="生活配套不方便会后悔。离地铁和主干道太远每天通勤很麻烦。看个小毛病都要开车。户型采光也要看。",
+        )
+    )
+
 
 @router.post("/plan")
-def plan(req: MalaysiaVisualPlanRequest):
+def plan(req: MalaysiaVisualPlanRequest) -> Dict[str, Any]:
     return make_plan(req)
+
 
 def install_malaysia_visual_planner(app: FastAPI) -> None:
     app.include_router(router)
@@ -232,7 +258,6 @@ def install_malaysia_visual_planner(app: FastAPI) -> None:
         headers = [(k, v) for k, v in scope.get("headers", []) if k.lower() != b"content-length"]
         headers.append((b"content-length", str(len(new_body)).encode()))
         scope["headers"] = headers
-
         response = await call_next(Request(scope, receive))
-        response.headers["x-ai-video-visual-planner"] = "malaysia-direct-v1"
+        response.headers["x-ai-video-visual-planner"] = "malaysia-semantic-v2"
         return response

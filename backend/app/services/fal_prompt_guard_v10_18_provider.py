@@ -1,3 +1,5 @@
+# V10_27L_FINAL_FAL_PROMPT_PURGE
+# AI_VIDEO_V10_27K_BUILD_PROMPT_KWARGS_FIX
 from __future__ import annotations
 
 import json
@@ -35,7 +37,7 @@ DEFAULT_INTERIOR_PROMPT = (
 def _clean_positive(prompt: str) -> str:
     p = re.sub(r"\s+", " ", str(prompt or "").strip())
     p = re.sub(r"(?i)\b(no|without|avoid)\s+[^,.，。;；]{1,80}[,.，。;；]?", " ", p)
-    return re.sub(r"\s+", " ", p).strip(" ,，.;；")
+    return re.sub(r"\s+", " ", p).strip(",，.;；")
 
 
 def _contaminated(prompt: str) -> bool:
@@ -72,6 +74,29 @@ def _rewrite_args(arguments: Any) -> Any:
                 args[k] = 5.0
     args["prompt_optimizer"] = False
     try:
+
+        # V10_27K_RESTORE_SEMANTIC_PROMPT_BEFORE_FAL
+        try:
+            _v10_27k_src = None
+            for _v10_27k_name, _v10_27k_val in list(locals().items()):
+                if isinstance(_v10_27k_val, dict):
+                    _v10_27k_p = str(_v10_27k_val.get('visual_prompt') or _v10_27k_val.get('prompt') or _v10_27k_val.get('input_prompt') or _v10_27k_val.get('text_prompt') or '')
+                    if _v10_27k_val.get('semantic_direct_render') or _v10_27k_val.get('runtime_semantic_lock') or _v10_27k_val.get('demand_acceptance_lock') or 'Premium realistic vertical 9:16 Malaysia property short-video B-roll' in _v10_27k_p:
+                        _v10_27k_src = _v10_27k_val
+                        break
+            if isinstance(_v10_27k_src, dict) and isinstance(args, dict):
+                _v10_27k_prompt = str(_v10_27k_src.get('visual_prompt') or _v10_27k_src.get('prompt') or _v10_27k_src.get('input_prompt') or _v10_27k_src.get('text_prompt') or '')
+                if _v10_27k_prompt:
+                    for _v10_27k_k in ['prompt','input_prompt','text_prompt','visual_prompt']:
+                        args[_v10_27k_k] = _v10_27k_prompt
+                for _v10_27k_k in ['negative_prompt','aspect_ratio','width','height','fps','frames_per_second','resolution','video_quality','prompt_optimizer']:
+                    if _v10_27k_k in _v10_27k_src:
+                        args[_v10_27k_k] = _v10_27k_src[_v10_27k_k]
+                args['semantic_direct_render'] = True
+                args['runtime_semantic_lock'] = 'v10_27k'
+                print('V10_27K_FAL_SEMANTIC_PROMPT_RESTORED=' + str({'prompt_start': str(args.get('prompt',''))[:140]}), flush=True)
+        except Exception as _v10_27k_restore_exc:
+            print('V10_27K_FAL_SEMANTIC_PROMPT_RESTORE_FAILED', _v10_27k_restore_exc, flush=True)
         print("V10_18_FAL_FINAL_ARGUMENTS=" + json.dumps(args, ensure_ascii=False)[:4000], flush=True)
     except Exception:
         pass
@@ -144,3 +169,106 @@ def health() -> dict[str, Any]:
         "replace_contaminated_prompts": True,
         "wide_condo_interior_only": True,
     }
+
+
+# ================= AI VIDEO V10.27I RUNTIME PROMPT CLEANER =================
+def _v10_27k_clean_prompt_text(_v10_27k_text):
+    try:
+        import re as _v10_27k_re
+        t = str(_v10_27k_text or '')
+        patterns = [
+            r"\s*,\s*,\s*no readable text signs,\s*(?:gentle pull out|slow left to right pan|steady street-level dolly|slow push in),\s*cinematic vertical 9:16,\s*realistic Malaysia property lifestyle,\s*no text,\s*no logos,\s*no subtitles,\s*no readable signs",
+            r"\s*,\s*,\s*no readable text signs",
+            r",\s*no readable text signs,\s*(?:gentle pull out|slow left to right pan|steady street-level dolly|slow push in),\s*cinematic vertical 9:16,\s*realistic Malaysia property lifestyle,\s*no text,\s*no logos,\s*no subtitles,\s*no readable signs",
+            r"",
+        ]
+        old=t
+        for pat in patterns:
+            t=_v10_27k_re.sub(pat, '', t, flags=_v10_27k_re.I)
+        t=_v10_27k_re.sub(r'\s+,', ',', t)
+        t=_v10_27k_re.sub(r'\s{2,}', ' ', t).strip(',')
+        if old != t:
+            print('V10_27K_PURGED_GLOBAL_TRAFFIC_PROMPT_TEXT')
+        return t
+    except Exception:
+        return _v10_27k_text
+
+def _v10_27k_clean_prompt_obj(_v10_27k_obj, _v10_27k_seen=None):
+    try:
+        if _v10_27k_seen is None:
+            _v10_27k_seen=set()
+        oid=id(_v10_27k_obj)
+        if oid in _v10_27k_seen:
+            return _v10_27k_obj
+        _v10_27k_seen.add(oid)
+        if isinstance(_v10_27k_obj, str):
+            return _v10_27k_clean_prompt_text(_v10_27k_obj)
+        if isinstance(_v10_27k_obj, dict):
+            for k in list(_v10_27k_obj.keys()):
+                v=_v10_27k_obj.get(k)
+                kl=str(k).lower()
+                if isinstance(v, str) and any(x in kl for x in ['prompt','visual','image_prompt','text_prompt','description']):
+                    _v10_27k_obj[k]=_v10_27k_clean_prompt_text(v)
+                else:
+                    _v10_27k_obj[k]=_v10_27k_clean_prompt_obj(v, _v10_27k_seen)
+            # keep metadata visible for job JSON / health checks
+            if any(k in _v10_27k_obj for k in ['visual_prompt','prompt','semantic_type','scene_type','shot_id']):
+                _v10_27k_obj['runtime_prompt_cleaner']='v10_27k'
+            return _v10_27k_obj
+        if isinstance(_v10_27k_obj, list):
+            for i,v in enumerate(list(_v10_27k_obj)):
+                _v10_27k_obj[i]=_v10_27k_clean_prompt_obj(v, _v10_27k_seen)
+            return _v10_27k_obj
+        if isinstance(_v10_27k_obj, tuple):
+            for v in _v10_27k_obj:
+                _v10_27k_clean_prompt_obj(v, _v10_27k_seen)
+            return _v10_27k_obj
+    except Exception as _v10_27k_exc:
+        try: print('V10_27K_CLEAN_PROMPT_OBJ_FAILED='+str(_v10_27k_exc))
+        except Exception: pass
+    return _v10_27k_obj
+
+def _v10_27k_wrap_callable(_v10_27k_name, _v10_27k_fn):
+    try:
+        import inspect as _v10_27k_inspect, functools as _v10_27k_functools
+        if getattr(_v10_27k_fn, '_v10_27k_wrapped', False):
+            return _v10_27k_fn
+        if _v10_27k_inspect.iscoroutinefunction(_v10_27k_fn):
+            @_v10_27k_functools.wraps(_v10_27k_fn)
+            async def _v10_27k_async_wrapped(*args, **kwargs):
+                _v10_27k_clean_prompt_obj(args); _v10_27k_clean_prompt_obj(kwargs)
+                res = await _v10_27k_fn(*args, **kwargs)
+                _v10_27k_clean_prompt_obj(args); _v10_27k_clean_prompt_obj(kwargs)
+                return _v10_27k_clean_prompt_obj(res)
+            _v10_27k_async_wrapped._v10_27k_wrapped=True
+            return _v10_27k_async_wrapped
+        @_v10_27k_functools.wraps(_v10_27k_fn)
+        def _v10_27k_sync_wrapped(*args, **kwargs):
+            _v10_27k_clean_prompt_obj(args); _v10_27k_clean_prompt_obj(kwargs)
+            res = _v10_27k_fn(*args, **kwargs)
+            _v10_27k_clean_prompt_obj(args); _v10_27k_clean_prompt_obj(kwargs)
+            return _v10_27k_clean_prompt_obj(res)
+        _v10_27k_sync_wrapped._v10_27k_wrapped=True
+        return _v10_27k_sync_wrapped
+    except Exception:
+        return _v10_27k_fn
+
+def _v10_27k_install_runtime_prompt_cleaner():
+    try:
+        _targets = ('prompt','guard','fal','render','video','shot','semantic','start','generate','compose')
+        _count=0
+        for _name,_fn in list(globals().items()):
+            if _name.startswith('_v10_27k_'):
+                continue
+            if not callable(_fn):
+                continue
+            lname=_name.lower()
+            if any(t in lname for t in _targets):
+                globals()[_name]=_v10_27k_wrap_callable(_name,_fn)
+                _count+=1
+        print('V10_27K_RUNTIME_PROMPT_CLEANER_INSTALLED='+str({'module':__name__,'wrapped':_count}))
+    except Exception as _v10_27k_exc:
+        print('V10_27K_RUNTIME_PROMPT_CLEANER_INSTALL_FAILED='+str(_v10_27k_exc))
+
+_v10_27k_install_runtime_prompt_cleaner()
+# ================= END AI VIDEO V10.27I RUNTIME PROMPT CLEANER =================

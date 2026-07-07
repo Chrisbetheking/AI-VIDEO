@@ -1,3 +1,4 @@
+# V10_27L_FINAL_FAL_PROMPT_PURGE
 from __future__ import annotations
 
 import base64
@@ -281,7 +282,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         start = _ass_time(float(cue.get("start") or 0))
         end = _ass_time(float(cue.get("end") or 0))
         text = ass_prefix + _ass_escape(str(cue.get("text") or ""), max_chars=max_chars, keywords=keywords, style=style)
-        lines.append(f"Dialogue: 0,{start},{end},Default,,0,0,0,,{text}\n")
+        lines.append(f"Dialogue: 0,{start},{end},Default,0,0,0,{text}\n")
     ass_path.write_text("".join(lines), encoding="utf-8")
     return ass_path
 

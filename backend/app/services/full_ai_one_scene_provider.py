@@ -1,3 +1,4 @@
+# V10_27L_FINAL_FAL_PROMPT_PURGE
 from __future__ import annotations
 
 import json
@@ -395,7 +396,7 @@ def _normalize_visual_prompt(prompt: str) -> str:
     p = re.sub(r"\s+", " ", str(prompt or "").strip())
     # Remove accidental negative language from positive prompt. A video model can latch onto the object even after "no".
     p = re.sub(r"(?i)\b(no|without|avoid)\s+[^,.，。;；]{1,80}[,.，。;；]?", " ", p)
-    p = re.sub(r"\s+", " ", p).strip(" ,，.;；")
+    p = re.sub(r"\s+", " ", p).strip(",，.;；")
     return p
 
 
