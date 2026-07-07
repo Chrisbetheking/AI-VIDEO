@@ -1257,3 +1257,233 @@
   setTimeout(refresh, 600);
 })();
 
+
+
+/* AI VIDEO V10.34B - step2 script keywords voice preview */
+(function(){
+  if (window.__AI_VIDEO_V10_34B_STEP2_TTS__) return;
+  window.__AI_VIDEO_V10_34B_STEP2_TTS__ = true;
+
+  var STORE = 'ai_video_v10_34b_step2_script_voice';
+
+  function load(){
+    try { return JSON.parse(localStorage.getItem(STORE) || '{}') || {}; }
+    catch(e){ return {}; }
+  }
+  function save(x){
+    localStorage.setItem(STORE, JSON.stringify(x || {}));
+  }
+
+  function findScriptText(){
+    var selectors = [
+      'textarea[name="script_text"]',
+      'textarea[name="script"]',
+      'textarea',
+      '[contenteditable="true"]'
+    ];
+    for (var i=0;i<selectors.length;i++){
+      var list = document.querySelectorAll(selectors[i]);
+      for (var j=0;j<list.length;j++){
+        var el = list[j];
+        var v = (el.value || el.innerText || '').trim();
+        if (v && /[\u4e00-\u9fa5]/.test(v) && v.length > 10) return v;
+      }
+    }
+    return '';
+  }
+
+  function ensurePanel(){
+    var el = document.getElementById('ai-v1034b-step2-tts-panel');
+    if (el) return el;
+
+    var style = document.createElement('style');
+    style.textContent = `
+      #ai-v1034b-step2-tts-panel{
+        position:fixed;left:18px;bottom:18px;z-index:999998;width:390px;max-height:72vh;overflow:auto;
+        background:rgba(255,255,255,.97);border:1px solid rgba(37,99,235,.22);border-radius:18px;
+        box-shadow:0 18px 48px rgba(15,23,42,.18);padding:14px;color:#0f172a;
+        font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+      }
+      #ai-v1034b-step2-tts-panel .h{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
+      #ai-v1034b-step2-tts-panel .badge{font-size:12px;background:#dbeafe;color:#1d4ed8;border-radius:999px;padding:3px 8px}
+      #ai-v1034b-step2-tts-panel label{display:block;font-size:12px;color:#475569;font-weight:700;margin-top:8px}
+      #ai-v1034b-step2-tts-panel input,#ai-v1034b-step2-tts-panel textarea,#ai-v1034b-step2-tts-panel select{
+        width:100%;box-sizing:border-box;border:1px solid #cbd5e1;border-radius:10px;padding:8px;margin-top:4px;
+        font-size:13px;background:white;color:#0f172a;
+      }
+      #ai-v1034b-step2-tts-panel textarea{min-height:76px;resize:vertical}
+      #ai-v1034b-step2-tts-panel button{
+        border:0;border-radius:12px;padding:9px 10px;margin:8px 4px 0 0;font-weight:800;cursor:pointer;
+        background:#e2e8f0;color:#0f172a;
+      }
+      #ai-v1034b-step2-tts-panel button.primary{background:#2563eb;color:white}
+      #ai-v1034b-step2-tts-panel button.good{background:#16a34a;color:white}
+      #ai-v1034b-step2-tts-panel .small{font-size:12px;color:#64748b;line-height:1.45}
+      #ai-v1034b-step2-tts-panel pre{
+        white-space:pre-wrap;background:#0f172a;color:#e2e8f0;border-radius:12px;padding:10px;
+        font-size:11px;max-height:150px;overflow:auto;
+      }
+    `;
+    document.head.appendChild(style);
+
+    var st = load();
+    el = document.createElement('div');
+    el.id = 'ai-v1034b-step2-tts-panel';
+    el.innerHTML = `
+      <div class="h">
+        <strong>第二步：口播稿 / 关键词 / 配音试听</strong>
+        <span class="badge">V10.34B</span>
+      </div>
+      <div class="small">这里专门管口播稿，不再放到前面的乱七八糟区域。</div>
+
+      <label>口播稿</label>
+      <textarea id="v1034b-script" placeholder="自动读取页面口播稿，也可以直接在这里改">${st.script_text || ''}</textarea>
+      <button id="v1034b-read-page">读取页面口播稿</button>
+
+      <label>关键词，用逗号隔开</label>
+      <input id="v1034b-keywords" placeholder="华人区, 超市, 诊所, 食阁" value="${st.keywords || ''}">
+
+      <label>禁用词 / 不想出现的表达</label>
+      <input id="v1034b-forbidden" placeholder="例如：稳赚, 保证收益, 夸张承诺" value="${st.forbidden_words || ''}">
+
+      <label>语气语调</label>
+      <select id="v1034b-tone">
+        <option value="专业但口语">专业但口语</option>
+        <option value="亲切自然">亲切自然</option>
+        <option value="销售感强">销售感强</option>
+        <option value="沉稳可信">沉稳可信</option>
+        <option value="短视频钩子强">短视频钩子强</option>
+      </select>
+
+      <label>语速</label>
+      <select id="v1034b-pace">
+        <option value="normal">正常</option>
+        <option value="slightly_fast">稍快</option>
+        <option value="slow_clear">慢一点更清楚</option>
+      </select>
+
+      <label>人设 / 说话身份</label>
+      <input id="v1034b-persona" placeholder="例如：马来西亚房产顾问，像朋友一样讲重点" value="${st.persona || ''}">
+
+      <div>
+        <button class="primary" id="v1034b-preview">生成配音试听</button>
+        <button class="good" id="v1034b-save-version">保存口播版本</button>
+      </div>
+
+      <div id="v1034b-audio-wrap" style="margin-top:10px"></div>
+      <pre id="v1034b-log">等待操作</pre>
+    `;
+
+    document.body.appendChild(el);
+
+    if (st.tone) el.querySelector('#v1034b-tone').value = st.tone;
+    if (st.pace) el.querySelector('#v1034b-pace').value = st.pace;
+
+    function collect(){
+      var data = {
+        script_text: el.querySelector('#v1034b-script').value.trim(),
+        keywords: el.querySelector('#v1034b-keywords').value.trim(),
+        forbidden_words: el.querySelector('#v1034b-forbidden').value.trim(),
+        tone: el.querySelector('#v1034b-tone').value,
+        pace: el.querySelector('#v1034b-pace').value,
+        persona: el.querySelector('#v1034b-persona').value.trim()
+      };
+      save(data);
+      return data;
+    }
+
+    async function postJson(url, body){
+      var r = await fetch(url, {
+        method:'POST',
+        credentials:'include',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify(body || {})
+      });
+      var t = await r.text();
+      try { return JSON.parse(t); } catch(e){ return {ok:false,status:r.status,text:t}; }
+    }
+
+    el.querySelector('#v1034b-read-page').onclick = function(){
+      var v = findScriptText();
+      var log = el.querySelector('#v1034b-log');
+      if (!v) {
+        log.textContent = '没有在页面里找到口播稿。你可以直接粘到这个框里。';
+        return;
+      }
+      el.querySelector('#v1034b-script').value = v;
+      collect();
+      log.textContent = '已读取页面口播稿：' + v.slice(0,120);
+    };
+
+    el.querySelector('#v1034b-preview').onclick = async function(){
+      var log = el.querySelector('#v1034b-log');
+      var audioWrap = el.querySelector('#v1034b-audio-wrap');
+      var data = collect();
+      if (!data.script_text) {
+        log.textContent = '口播稿为空，不能试听。';
+        return;
+      }
+
+      var body = {
+        script_text: data.script_text,
+        keywords: data.keywords.split(/[,，\s]+/).filter(Boolean),
+        forbidden_words: data.forbidden_words.split(/[,，\s]+/).filter(Boolean),
+        tone: data.tone,
+        pace: data.pace,
+        persona: data.persona,
+        source: 'step2_v10_34b'
+      };
+
+      log.textContent = '正在生成配音试听...';
+      audioWrap.innerHTML = '';
+
+      var res = await postJson('/api/video/full-ai/tts-first/voice-preview', body);
+      log.textContent = JSON.stringify(res, null, 2);
+
+      if (res && res.ok && res.audio_url) {
+        audioWrap.innerHTML = '<audio controls style="width:100%" src="' + res.audio_url + '"></audio>' +
+          '<div class="small">音频时长：' + (res.audio_duration || 0).toFixed ? Number(res.audio_duration || 0).toFixed(2) : (res.audio_duration || 0) + ' 秒</div>';
+      } else if (res && res.ok && res.audio_path) {
+        audioWrap.innerHTML = '<div class="small">后端已生成音频文件，但没有可直接播放 URL：<br>' + res.audio_path + '</div>';
+      } else {
+        audioWrap.innerHTML = '<div class="small">试听失败：后端没有返回真实 audio_url。不是假成功。</div>';
+      }
+    };
+
+    el.querySelector('#v1034b-save-version').onclick = async function(){
+      var log = el.querySelector('#v1034b-log');
+      var data = collect();
+      if (!data.script_text) {
+        log.textContent = '口播稿为空，不能保存版本。';
+        return;
+      }
+      var res = await postJson('/api/video/full-ai/tts-first/script-version', {
+        script_text: data.script_text,
+        keywords: data.keywords.split(/[,，\s]+/).filter(Boolean),
+        forbidden_words: data.forbidden_words.split(/[,，\s]+/).filter(Boolean),
+        voice: {
+          tone: data.tone,
+          pace: data.pace,
+          persona: data.persona
+        },
+        note: 'V10.34B 第二步口播稿版本'
+      });
+      log.textContent = JSON.stringify(res, null, 2);
+    };
+
+    setTimeout(function(){
+      if (!el.querySelector('#v1034b-script').value.trim()) {
+        var v = findScriptText();
+        if (v) {
+          el.querySelector('#v1034b-script').value = v;
+          collect();
+        }
+      }
+    }, 1200);
+
+    return el;
+  }
+
+  setTimeout(ensurePanel, 800);
+})();
+

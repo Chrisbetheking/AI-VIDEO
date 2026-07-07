@@ -3845,3 +3845,268 @@ def _v10_34a2_clean_preview(preview):
 
 print("V10_34A3_NO_BANNED_WORDS_IN_POSITIVE_PROMPT_LOADED")
 
+
+
+# V10_34B_STEP2_TTS_PREVIEW_BACKEND
+# Real Step-2 voice preview endpoint. It must return an error if no real TTS provider is available.
+async def _v10_34b_voice_preview(request):
+    from fastapi.responses import JSONResponse
+    from pathlib import Path
+    import json, time, uuid, inspect, shutil, subprocess
+
+    try:
+        data = await request.json()
+    except Exception:
+        data = {}
+
+    script = str(
+        data.get("script_text")
+        or data.get("script")
+        or data.get("text")
+        or data.get("content")
+        or ""
+    ).strip()
+
+    if not script:
+        return JSONResponse(status_code=400, content={
+            "ok": False,
+            "error": "script_text_required",
+            "message": "第二步口播稿为空，不能生成配音试听"
+        })
+
+    if len(script) > 1200:
+        return JSONResponse(status_code=400, content={
+            "ok": False,
+            "error": "script_too_long_for_preview",
+            "message": "试听配音只允许 1200 字以内"
+        })
+
+    voice = {
+        "persona": data.get("persona") or data.get("voice_persona") or "",
+        "voice_style": data.get("voice_style") or data.get("voiceStyle") or "",
+        "tone": data.get("tone") or "",
+        "pace": data.get("pace") or "",
+        "intensity": data.get("intensity") or "",
+        "sentence_style": data.get("sentence_style") or data.get("sentenceStyle") or "",
+        "keywords": data.get("keywords") or data.get("manual_keywords") or [],
+        "forbidden_words": data.get("forbidden_words") or data.get("forbiddenWords") or [],
+    }
+
+    preview_id = "voice_preview_" + uuid.uuid4().hex[:16]
+    work = Path("/opt/ai-video/storage/voice_previews") / preview_id
+    work.mkdir(parents=True, exist_ok=True)
+
+    meta_path = work / "voice_preview_meta.json"
+    meta = {
+        "ok": False,
+        "preview_id": preview_id,
+        "created_at": int(time.time()),
+        "script_text": script,
+        "voice": voice,
+        "status": "started",
+        "version": "v10_34b",
+    }
+
+    def write_meta():
+        meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    write_meta()
+
+    # Try to locate a real existing TTS callable. Different historical versions used different names.
+    candidates = []
+    for name, obj in list(globals().items()):
+        lname = str(name).lower()
+        if callable(obj) and any(k in lname for k in ["tts", "speech", "voice", "audio"]):
+            candidates.append((name, obj))
+
+    # Prefer explicit generation names, avoid route/install/helper/list/read functions.
+    preferred = []
+    for name, obj in candidates:
+        lname = name.lower()
+        if any(bad in lname for bad in ["install", "route", "health", "preview", "list", "read", "patch"]):
+            continue
+        score = 0
+        if "generate" in lname: score += 5
+        if "tts" in lname: score += 4
+        if "speech" in lname: score += 3
+        if "audio" in lname: score += 2
+        if "volc" in lname or "doubao" in lname: score += 2
+        preferred.append((score, name, obj))
+    preferred.sort(reverse=True, key=lambda x: x[0])
+
+    errors = []
+
+    async def maybe_call(fn, kwargs):
+        if inspect.iscoroutinefunction(fn):
+            return await fn(**kwargs)
+        return fn(**kwargs)
+
+    # Call with common signatures. This is guarded: success requires a real output file or URL.
+    for score, name, fn in preferred[:12]:
+        sig = None
+        try:
+            sig = inspect.signature(fn)
+        except Exception:
+            sig = None
+
+        attempts = []
+        if sig:
+            params = set(sig.parameters.keys())
+            kw = {}
+            for k in params:
+                lk = k.lower()
+                if lk in ["text", "script", "script_text", "content"]:
+                    kw[k] = script
+                elif lk in ["out", "output", "output_path", "path", "audio_path", "save_path"]:
+                    kw[k] = str(work / "preview.mp3")
+                elif lk in ["voice", "voice_config", "voice_params", "settings"]:
+                    kw[k] = voice
+                elif lk in ["job_id", "preview_id"]:
+                    kw[k] = preview_id
+                elif lk in ["speed", "pace"]:
+                    kw[k] = voice.get("pace") or "normal"
+                elif lk in ["tone", "style"]:
+                    kw[k] = voice.get("tone") or voice.get("voice_style") or ""
+            attempts.append(kw)
+
+        attempts += [
+            {"text": script, "output_path": str(work / "preview.mp3"), "voice": voice},
+            {"script_text": script, "output_path": str(work / "preview.mp3"), "voice": voice},
+            {"text": script, "voice": voice},
+        ]
+
+        for kw in attempts:
+            try:
+                res = await maybe_call(fn, kw)
+                audio_url = ""
+                audio_path = ""
+
+                if isinstance(res, dict):
+                    audio_url = str(res.get("audio_url") or res.get("url") or "")
+                    audio_path = str(res.get("audio_path") or res.get("path") or res.get("file") or "")
+                elif isinstance(res, (str, Path)):
+                    val = str(res)
+                    if val.startswith("http"):
+                        audio_url = val
+                    else:
+                        audio_path = val
+
+                local_preview = work / "preview.mp3"
+                if audio_path and Path(audio_path).exists():
+                    if Path(audio_path) != local_preview:
+                        shutil.copy2(audio_path, local_preview)
+                    audio_path = str(local_preview)
+
+                if local_preview.exists() and local_preview.stat().st_size > 1000:
+                    duration = 0.0
+                    try:
+                        out = subprocess.check_output([
+                            "ffprobe", "-v", "error",
+                            "-show_entries", "format=duration",
+                            "-of", "default=noprint_wrappers=1:nokey=1",
+                            str(local_preview)
+                        ], timeout=15).decode().strip()
+                        duration = float(out or 0)
+                    except Exception:
+                        duration = 0.0
+
+                    # Serve local file through existing static storage path if mounted by app/nginx.
+                    # Return both path and URL. Frontend can still display path in debug if direct URL unavailable.
+                    meta.update({
+                        "ok": True,
+                        "status": "completed",
+                        "provider_callable": name,
+                        "audio_path": str(local_preview),
+                        "audio_url": audio_url,
+                        "audio_duration": duration,
+                    })
+                    write_meta()
+                    return meta
+
+                if audio_url:
+                    meta.update({
+                        "ok": True,
+                        "status": "completed",
+                        "provider_callable": name,
+                        "audio_url": audio_url,
+                        "audio_path": audio_path,
+                        "audio_duration": 0.0,
+                    })
+                    write_meta()
+                    return meta
+
+                errors.append({"callable": name, "error": "no_audio_output", "result_type": type(res).__name__})
+            except Exception as exc:
+                errors.append({"callable": name, "error": repr(exc)[:500]})
+
+    meta.update({
+        "ok": False,
+        "status": "failed",
+        "error": "tts_provider_not_available",
+        "message": "后端没有找到可调用的真实 TTS 生成函数，第二步试听不会假成功",
+        "tried": [x[1] for x in preferred[:12]],
+        "errors": errors[-12:],
+    })
+    write_meta()
+    return JSONResponse(status_code=501, content=meta)
+
+
+async def _v10_34b_save_script_version(request):
+    from pathlib import Path
+    import json, time, uuid
+    from fastapi.responses import JSONResponse
+
+    try:
+        data = await request.json()
+    except Exception:
+        data = {}
+
+    script = str(data.get("script_text") or data.get("script") or "").strip()
+    if not script:
+        return JSONResponse(status_code=400, content={"ok": False, "error": "script_text_required"})
+
+    version_id = "script_v_" + uuid.uuid4().hex[:16]
+    base = Path("/opt/ai-video/storage/script_versions")
+    base.mkdir(parents=True, exist_ok=True)
+    path = base / f"{version_id}.json"
+
+    item = {
+        "ok": True,
+        "version": "v10_34b",
+        "version_id": version_id,
+        "created_at": int(time.time()),
+        "script_text": script,
+        "keywords": data.get("keywords") or [],
+        "forbidden_words": data.get("forbidden_words") or [],
+        "voice": data.get("voice") or {},
+        "note": data.get("note") or "",
+    }
+    path.write_text(json.dumps(item, ensure_ascii=False, indent=2), encoding="utf-8")
+    return item
+
+
+def _v10_34b_patch_routes(app):
+    try:
+        remove = {
+            "/api/video/full-ai/tts-first/voice-preview",
+            "/api/video/full-ai/tts-first/script-version",
+        }
+        app.router.routes[:] = [r for r in app.router.routes if getattr(r, "path", "") not in remove]
+        app.add_api_route("/api/video/full-ai/tts-first/voice-preview", _v10_34b_voice_preview, methods=["POST"])
+        app.add_api_route("/api/video/full-ai/tts-first/script-version", _v10_34b_save_script_version, methods=["POST"])
+        print("V10_34B_STEP2_TTS_ROUTES_PATCHED", sorted(list(remove)))
+    except Exception as exc:
+        print("V10_34B_ROUTE_PATCH_FAILED", exc)
+
+
+try:
+    if "install_full_ai_tts_first" in globals() and not globals().get("_V10_34B_INSTALL_WRAPPED"):
+        _V10_34B_OLD_INSTALL = install_full_ai_tts_first
+        def install_full_ai_tts_first(app):
+            res = _V10_34B_OLD_INSTALL(app)
+            _v10_34b_patch_routes(app)
+            return res
+        globals()["_V10_34B_INSTALL_WRAPPED"] = True
+except Exception as _v10_34b_install_exc:
+    print("V10_34B_INSTALL_WRAP_FAILED", _v10_34b_install_exc)
+
