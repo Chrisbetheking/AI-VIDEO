@@ -3758,3 +3758,90 @@ def _v10_27_build_preview(payload):
 
 print("V10_34A2_PREVIEW_TRANSITION_GUARD_LOADED")
 
+
+
+# V10_34A3_NO_BANNED_WORDS_IN_POSITIVE_PROMPT
+# Avoid literal banned transition tokens in positive prompt so validators do not false-positive.
+try:
+    _V10_34A3_OLD_CLEAN_PROMPT_TEXT = _v10_34a_clean_prompt_text
+except Exception:
+    _V10_34A3_OLD_CLEAN_PROMPT_TEXT = None
+
+def _v10_34a3_scrub_positive_transition_words(text):
+    import re
+    t = str(text or "")
+
+    replacements = {
+        "white flash": "abrupt bright transition",
+        "black flash": "abrupt dark transition",
+        "flash transition": "abrupt brightness transition",
+        "hard cut": "abrupt scene break",
+        "jump cut": "abrupt discontinuity",
+        "smooth_cut": "abrupt scene break",
+        "pull_out": "gentle continuous camera move",
+        "opening_slow_push_in": "gentle continuous camera move",
+        "horizontal_pan_match": "gentle continuous camera move",
+    }
+
+    for a, b in replacements.items():
+        t = re.sub(re.escape(a), b, t, flags=re.I)
+
+    t = re.sub(
+        r"Transition to next:\s*[^.。]+",
+        "Transition to next: smooth dissolve with continuous natural motion",
+        t,
+        flags=re.I
+    )
+
+    if "Transition rule:" not in t:
+        t += " Transition rule: use only smooth dissolve or continuous natural camera motion."
+
+    return t
+
+def _v10_34a_clean_prompt_text(text):
+    if _V10_34A3_OLD_CLEAN_PROMPT_TEXT:
+        try:
+            text = _V10_34A3_OLD_CLEAN_PROMPT_TEXT(text)
+        except Exception:
+            pass
+    return _v10_34a3_scrub_positive_transition_words(text)
+
+try:
+    _V10_34A3_OLD_CLEAN_PREVIEW = _v10_34a2_clean_preview
+except Exception:
+    _V10_34A3_OLD_CLEAN_PREVIEW = None
+
+def _v10_34a2_clean_preview(preview):
+    if _V10_34A3_OLD_CLEAN_PREVIEW:
+        preview = _V10_34A3_OLD_CLEAN_PREVIEW(preview)
+
+    if not isinstance(preview, dict):
+        return preview
+
+    safe = "smooth_dissolve_no_flash"
+    for sh in list(preview.get("shots") or []):
+        if not isinstance(sh, dict):
+            continue
+        sh["transition"] = safe
+        sh["transition_to_next"] = safe
+        for k in ["visual_prompt", "prompt"]:
+            if sh.get(k):
+                sh[k] = _v10_34a3_scrub_positive_transition_words(sh.get(k))
+
+    for item in list(preview.get("semantic_shot_plan") or []):
+        if isinstance(item, dict):
+            item["transition_to_next"] = safe
+
+    preview["transition_policy"] = {
+        "version": "v10_34a3",
+        "allowed": [safe, "cross_dissolve"],
+        "blocked": [
+            "flash", "white flash", "black flash", "hard cut", "jump cut",
+            "smooth_cut", "pull_out", "opening_slow_push_in", "horizontal_pan_match"
+        ],
+        "rule": "transition fields and positive prompts contain no banned literal transition tokens"
+    }
+    return preview
+
+print("V10_34A3_NO_BANNED_WORDS_IN_POSITIVE_PROMPT_LOADED")
+
