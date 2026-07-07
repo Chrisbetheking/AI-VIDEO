@@ -1,4 +1,4 @@
-const BACKEND = "http://8.210.177.205";
+const BACKEND = "https://ai-video.47-76-143-158.sslip.io";
 
 export async function onRequest(context) {
   const { request, params } = context;
