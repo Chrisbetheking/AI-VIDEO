@@ -676,6 +676,8 @@ function highlightText(text: string, keywords: KeywordInsight[]) {
 function extractVideoUrl(job: JobPayload | null): string {
   if (!job) return ''
   const direct =
+    job.subtitled_video_url || job.result?.subtitled_video_url ||
+    job.child_job?.subtitled_video_url || job.child_job?.result?.subtitled_video_url ||
     job.video_url || job.output_url || job.result_url || job.url ||
     job.result?.video_url || job.result?.output_url || job.result?.result_url ||
     job.child_job?.video_url || job.child_job?.output_url || job.child_job?.result_url || job.child_job?.url ||
