@@ -4110,3 +4110,214 @@ try:
 except Exception as _v10_34b_install_exc:
     print("V10_34B_INSTALL_WRAP_FAILED", _v10_34b_install_exc)
 
+
+
+# V10_34B2_FIX_STEP2_TTS_ROUTES
+# Fix FastAPI request annotation and call the existing real /api/tts endpoint.
+from fastapi import Request as _V10_34B2Request
+from fastapi.responses import JSONResponse as _V10_34B2JSONResponse
+
+async def _v10_34b_voice_preview(request: _V10_34B2Request):
+    from pathlib import Path
+    import json, time, uuid, urllib.request, asyncio
+
+    try:
+        data = await request.json()
+    except Exception:
+        data = {}
+
+    script = str(
+        data.get("script_text")
+        or data.get("script")
+        or data.get("text")
+        or data.get("content")
+        or ""
+    ).strip()
+
+    if not script:
+        return _V10_34B2JSONResponse(status_code=400, content={
+            "ok": False,
+            "error": "script_text_required",
+            "message": "第二步口播稿为空，不能生成配音试听"
+        })
+
+    if len(script) > 1200:
+        return _V10_34B2JSONResponse(status_code=400, content={
+            "ok": False,
+            "error": "script_too_long_for_preview",
+            "message": "试听配音只允许 1200 字以内"
+        })
+
+    preview_id = "voice_preview_" + uuid.uuid4().hex[:16]
+    work = Path("/opt/ai-video/storage/voice_previews") / preview_id
+    work.mkdir(parents=True, exist_ok=True)
+
+    pace = str(data.get("pace") or "normal")
+    rate_map = {
+        "normal": "+0%",
+        "slightly_fast": "+8%",
+        "slow_clear": "-8%",
+        "fast": "+12%",
+        "slow": "-12%",
+    }
+
+    tts_payload = {
+        "text": script,
+        "rate": rate_map.get(pace, "+0%"),
+    }
+
+    voice = str(data.get("voice") or data.get("voice_id") or "").strip()
+    if voice:
+        tts_payload["voice"] = voice
+
+    meta = {
+        "ok": False,
+        "preview_id": preview_id,
+        "created_at": int(time.time()),
+        "script_text": script,
+        "voice_settings": {
+            "voice": voice,
+            "tone": data.get("tone") or "",
+            "pace": pace,
+            "persona": data.get("persona") or "",
+            "keywords": data.get("keywords") or [],
+            "forbidden_words": data.get("forbidden_words") or [],
+        },
+        "tts_payload": tts_payload,
+        "version": "v10_34b2",
+        "status": "started",
+    }
+
+    meta_path = work / "voice_preview_meta.json"
+
+    def write_meta():
+        meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    def post_local_tts():
+        body = json.dumps(tts_payload, ensure_ascii=False).encode("utf-8")
+        req = urllib.request.Request(
+            "http://127.0.0.1:8000/api/tts",
+            data=body,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=180) as resp:
+            raw = resp.read().decode("utf-8", errors="ignore")
+            return json.loads(raw)
+
+    write_meta()
+
+    try:
+        # 必须丢到线程里，避免同一个 uvicorn event loop 内部请求卡死。
+        tts_res = await asyncio.to_thread(post_local_tts)
+
+        audio_url = str(
+            tts_res.get("file_url")
+            or tts_res.get("audio_url")
+            or tts_res.get("url")
+            or ""
+        )
+        duration = float(
+            tts_res.get("duration_seconds")
+            or tts_res.get("audio_duration")
+            or tts_res.get("duration")
+            or 0
+        )
+
+        if not audio_url:
+            meta.update({
+                "ok": False,
+                "status": "failed",
+                "error": "tts_generated_but_no_audio_url",
+                "tts_result": tts_res,
+                "message": "真实 /api/tts 返回了结果，但没有 file_url/audio_url"
+            })
+            write_meta()
+            return _V10_34B2JSONResponse(status_code=502, content=meta)
+
+        meta.update({
+            "ok": True,
+            "status": "completed",
+            "provider": "local_api_tts",
+            "audio_url": audio_url,
+            "audio_duration": duration,
+            "tts_result": tts_res,
+        })
+        write_meta()
+        return meta
+
+    except Exception as exc:
+        meta.update({
+            "ok": False,
+            "status": "failed",
+            "error": "local_api_tts_failed",
+            "message": "调用真实 /api/tts 失败，第二步试听没有假成功",
+            "detail": repr(exc)[:1200],
+        })
+        write_meta()
+        return _V10_34B2JSONResponse(status_code=502, content=meta)
+
+
+async def _v10_34b_save_script_version(request: _V10_34B2Request):
+    from pathlib import Path
+    import json, time, uuid
+
+    try:
+        data = await request.json()
+    except Exception:
+        data = {}
+
+    script = str(data.get("script_text") or data.get("script") or "").strip()
+    if not script:
+        return _V10_34B2JSONResponse(status_code=400, content={
+            "ok": False,
+            "error": "script_text_required",
+            "message": "口播稿为空，不能保存版本"
+        })
+
+    version_id = "script_v_" + uuid.uuid4().hex[:16]
+    base = Path("/opt/ai-video/storage/script_versions")
+    base.mkdir(parents=True, exist_ok=True)
+    path = base / f"{version_id}.json"
+
+    item = {
+        "ok": True,
+        "version": "v10_34b2",
+        "version_id": version_id,
+        "created_at": int(time.time()),
+        "script_text": script,
+        "keywords": data.get("keywords") or [],
+        "forbidden_words": data.get("forbidden_words") or [],
+        "voice": data.get("voice") or {},
+        "note": data.get("note") or "",
+        "path": str(path),
+    }
+    path.write_text(json.dumps(item, ensure_ascii=False, indent=2), encoding="utf-8")
+    return item
+
+
+def _v10_34b_patch_routes(app):
+    try:
+        remove = {
+            "/api/video/full-ai/tts-first/voice-preview",
+            "/api/video/full-ai/tts-first/script-version",
+        }
+        app.router.routes[:] = [r for r in app.router.routes if getattr(r, "path", "") not in remove]
+        app.add_api_route("/api/video/full-ai/tts-first/voice-preview", _v10_34b_voice_preview, methods=["POST"])
+        app.add_api_route("/api/video/full-ai/tts-first/script-version", _v10_34b_save_script_version, methods=["POST"])
+        print("V10_34B2_STEP2_TTS_ROUTES_PATCHED", sorted(list(remove)))
+    except Exception as exc:
+        print("V10_34B2_ROUTE_PATCH_FAILED", exc)
+
+
+try:
+    if "install_full_ai_tts_first" in globals() and not globals().get("_V10_34B2_INSTALL_WRAPPED"):
+        _V10_34B2_OLD_INSTALL = install_full_ai_tts_first
+        def install_full_ai_tts_first(app):
+            res = _V10_34B2_OLD_INSTALL(app)
+            _v10_34b_patch_routes(app)
+            return res
+        globals()["_V10_34B2_INSTALL_WRAPPED"] = True
+except Exception as _v10_34b2_install_exc:
+    print("V10_34B2_INSTALL_WRAP_FAILED", _v10_34b2_install_exc)
+

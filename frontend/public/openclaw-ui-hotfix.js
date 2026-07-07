@@ -1487,3 +1487,33 @@
   setTimeout(ensurePanel, 800);
 })();
 
+
+
+/* AI VIDEO V10.34B2 - hide old keyword panels and fix audio duration */
+(function(){
+  if (window.__AI_VIDEO_V10_34B2_STEP2_FIX__) return;
+  window.__AI_VIDEO_V10_34B2_STEP2_FIX__ = true;
+
+  function hideOldKeywordPanels(){
+    try {
+      var old1 = document.getElementById('ai-v10-25-keyword-panel');
+      if (old1) old1.style.display = 'none';
+
+      Array.prototype.slice.call(document.querySelectorAll('div')).forEach(function(el){
+        var txt = (el.innerText || '').trim();
+        if (!txt) return;
+        if (el.id === 'ai-v1034b-step2-tts-panel') return;
+        if (txt.indexOf('关键词 / AI语气语调') >= 0 || txt.indexOf('关键词 / 语气') >= 0 || txt.indexOf('字幕重点词') >= 0) {
+          var st = window.getComputedStyle(el);
+          if (st.position === 'fixed' || st.position === 'sticky') {
+            el.style.display = 'none';
+          }
+        }
+      });
+    } catch(e) {}
+  }
+
+  setInterval(hideOldKeywordPanels, 1200);
+  setTimeout(hideOldKeywordPanels, 300);
+})();
+
