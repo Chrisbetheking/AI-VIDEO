@@ -1,5 +1,5 @@
 const envApiBase = (import.meta.env.VITE_API_BASE || '').replace(/\/$/, '')
-const defaultRenderApi = 'https://ai-video.47-76-143-158.sslip.io'
+const defaultRenderApi = 'https://ai-video-u8jd.onrender.com'
 const isLocal = typeof window !== 'undefined' && /^(localhost|127\.0\.0\.1)$/i.test(window.location.hostname)
 
 // Cloudflare Pages 如果忘记配置 VITE_API_BASE，默认会请求当前 pages.dev 的 /api，
@@ -47,7 +47,7 @@ async function parseResponse<T>(res: Response, url: string): Promise<T> {
   }
   if (contentType.includes('application/json')) return res.json() as Promise<T>
   const text = await res.text()
-  throw new Error(`后端没有返回 JSON，请检查 Cloudflare 的 VITE_API_BASE 是否指向 ECS 后端。\n请求地址：${url}\n返回：${text.slice(0, 220)}`)
+  throw new Error(`后端没有返回 JSON，请检查 Cloudflare 的 VITE_API_BASE 是否指向 Render 后端。\n请求地址：${url}\n返回：${text.slice(0, 220)}`)
 }
 
 async function safeFetch<T>(url: string, init?: RequestInit, timeoutMs = 240000): Promise<T> {
@@ -57,11 +57,11 @@ async function safeFetch<T>(url: string, init?: RequestInit, timeoutMs = 240000)
     return parseResponse<T>(res, url)
   } catch (err: any) {
     if (err?.name === 'AbortError') {
-      throw new Error(`请求超时：${url}\nECS 后端接口耗时过长，可能是视频合成、采集或 AI 接口正在执行。`)
+      throw new Error(`请求超时：${url}\nRender 免费实例可能冷启动、内存爆掉或接口耗时过长。`)
     }
     const msg = err?.message || String(err)
     if (msg === 'Failed to fetch') {
-      throw new Error(`无法连接后端：${url}\n请先打开 ${defaultRenderApi}/api/health，确认返回 ok；如果仍失败，请检查 ECS 后端服务和 Nginx。`)
+      throw new Error(`无法连接后端：${url}\n大概率是 Render 免费实例冷启动、网络采集被平台阻断或接口耗时过长。请等 30-60 秒后先打开 ${defaultRenderApi}/api/health，显示 ok 后再试；若仍失败，请发 Render 最新 Logs。`)
     }
     throw err
   } finally {
@@ -76,7 +76,7 @@ export async function apiGet<T>(path: string): Promise<T> {
 
 export async function apiPost<T>(path: string, body: unknown): Promise<T> {
   const url = `${API_BASE}${path}`
-  const timeoutMs = path.includes('compose-video') ? 360000 : 240000
+  const timeoutMs = path.includes('compose-video') ? 360000 : path.includes('heat-radar/run-public-crawl') ? 70000 : 240000
   return safeFetch<T>(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -84,9 +84,19 @@ export async function apiPost<T>(path: string, body: unknown): Promise<T> {
   }, timeoutMs)
 }
 
-export async function uploadAssets(files: FileList, folder = 'self'): Promise<AssetItem[]> {
+export async function apiDelete<T>(path: string): Promise<T> {
+  const url = `${API_BASE}${path}`
+  return safeFetch<T>(url, { method: 'DELETE' })
+}
+
+export async function uploadAssets(
+  files: FileList,
+  folder = 'self',
+  usageRole: 'avatar' | 'content' = 'content'
+): Promise<AssetItem[]> {
   const form = new FormData()
   form.append('folder', folder)
+  form.append('usage_role', usageRole)
   Array.from(files).forEach(file => form.append('files', file))
   const url = `${API_BASE}/api/assets`
   return safeFetch<AssetItem[]>(url, { method: 'POST', body: form }, 180000)
@@ -110,7 +120,7 @@ export interface GeneratedCopy {
 export interface TTSVoice { id: string; name: string; provider: string; language: string; note?: string }
 export interface AudioSegmentTiming { index: number; text: string; start: number; end: number; duration: number }
 export interface TTSResponse { file_url: string; file_name: string; duration_seconds: number; warning?: string; segments?: AudioSegmentTiming[] }
-export interface AssetItem { id: string; filename: string; original_name: string; kind: 'image' | 'video'; url: string; size_bytes: number; created_at: string; folder?: string; source_type?: string }
+export interface AssetItem { id: string; filename: string; original_name: string; kind: 'image' | 'video'; url: string; size_bytes: number; created_at: string; folder?: string; source_type?: string; usage_role?: 'avatar' | 'content' }
 
 
 export interface CollectorCookieStatus {
@@ -310,8 +320,33 @@ export interface CustomerProfileSave {
   lead_region: string
   conversion_goal: string
   trend_keywords: string
+  business_positioning?: string
+  listening_keywords?: string
+  customer_segments?: string
+  private_domain_assets?: string
+  content_pillars?: string
+  shooting_brief?: string
+  report_delivery?: string
 }
 
+
+
+export interface LeadDataSource {
+  name: string
+  status: string
+  purpose: string
+  required_fields: string[]
+  next_step: string
+}
+
+export interface LeadInterceptionOpportunity {
+  score: number
+  source: string
+  keyword: string
+  intent: string
+  action: string
+  asset: string
+}
 
 export interface LeadChannelPlaybook {
   channel: string
@@ -332,6 +367,14 @@ export interface LeadAcquisitionPlanResponse {
   private_domain_sop: string[]
   daily_automation_tasks: string[]
   next_actions: string[]
+  content_matrix?: string[]
+  lead_magnets?: string[]
+  shooting_prompts?: string[]
+  required_integrations?: string[]
+  data_sources?: LeadDataSource[]
+  interception_opportunities?: LeadInterceptionOpportunity[]
+  monitoring_sop?: string[]
+  compliance_notes?: string[]
 }
 
 export interface DigitalHumanCreateRequest {
@@ -380,6 +423,116 @@ export interface AutoCollectorRunResponse {
   warnings: string[]
 }
 
+
+export interface HeatRadarAccountApi {
+  id?: string
+  name: string
+  platform: string
+  url: string
+  tags: string
+  notes: string
+  pinned?: boolean
+  created_at?: string
+}
+
+export interface HeatRadarRunResponse {
+  ok: boolean
+  source_mode: string
+  top_mode?: string
+  fallback_used?: boolean
+  accounts_count: number
+  collected_count: number
+  saved_count: number
+  top_items: any[]
+  analysis: Record<string, any>
+  warnings: string[]
+  next_actions: string[]
+}
+
+
+
+export interface HeatRadarAccountDecision {
+  account_name: string
+  platform: string
+  account_url: string
+  decision: 'accept' | 'watch' | 'reject' | 'archive' | string
+  score: number
+  freshness_score: number
+  relevance_score: number
+  heat_score: number
+  latest_post_at: string
+  days_since_latest: number
+  recent_items_count: number
+  reason: string
+  next_action: string
+  account_type?: string
+  target_value?: string
+  customer_intents?: string[]
+  content_opportunities?: string[]
+  risk_notes?: string[]
+}
+
+export interface HeatRadarOpenClawIngestResponse {
+  ok: boolean
+  source_name: string
+  run_id: string
+  received_accounts: number
+  received_items: number
+  saved_accounts: number
+  saved_items: number
+  accepted_accounts: HeatRadarAccountDecision[]
+  watch_accounts: HeatRadarAccountDecision[]
+  rejected_accounts: HeatRadarAccountDecision[]
+  archived_accounts: HeatRadarAccountDecision[]
+  top_items: any[]
+  warnings: string[]
+  next_actions: string[]
+}
+
+export interface HeatRadarAccountAuditResponse {
+  ok: boolean
+  reviewed_count: number
+  keep: HeatRadarAccountDecision[]
+  watch: HeatRadarAccountDecision[]
+  archive: HeatRadarAccountDecision[]
+  warnings: string[]
+  next_actions: string[]
+}
+
+export interface HeatRadarRewriteVariant {
+  source_topic: string
+  target_audience: string
+  customer_intent: string
+  content_goal: string
+  conversion_goal: string
+  lead_magnet: string
+  title: string
+  hook: string
+  script: string
+  caption: string
+  tags: string[]
+  shots: string[]
+  imitation_notes: string[]
+  differentiation: string[]
+  risk_notes: string[]
+  source_evidence?: string[]
+  adaptation_map?: string[]
+}
+
+export interface HeatRadarRewriteResponse {
+  overview: string
+  chosen_target: string
+  target_reason: string
+  content_objective: string
+  primary_intent: string
+  lead_magnet: string
+  rewrite_strategy: string[]
+  source_evidence?: string[]
+  variants: HeatRadarRewriteVariant[]
+  publish_checklist: string[]
+  warnings: string[]
+}
+
 export interface OneClickGenerateRequest {
   industry: string
   audience: string
@@ -423,4 +576,33 @@ export interface ModelStatusResponse {
   image_provider: string
   image_model: string
   image_edit_model: string
+}
+
+export interface EnterpriseHealth {
+  ok: boolean
+  memory_enabled: boolean
+  core_storage_strict?: boolean
+  r2_enabled: boolean
+  require_r2_assets?: boolean
+  workspace_id: string
+  memory_status?: { ok?: boolean; storage?: string; message?: string; core_storage_strict?: boolean }
+}
+
+export interface JobItem {
+  id: string
+  type: string
+  title?: string
+  status: 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled' | string
+  progress: number
+  input?: Record<string, unknown>
+  output?: Record<string, unknown>
+  error?: string
+  created_at?: string
+  updated_at?: string
+  started_at?: string | null
+  finished_at?: string | null
+}
+
+export function listJobs(limit = 50): Promise<JobItem[]> {
+  return apiGet<JobItem[]>(`/api/jobs?limit=${limit}`)
 }
