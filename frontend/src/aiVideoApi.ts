@@ -1,14 +1,21 @@
-const envApiBase = (import.meta.env.VITE_API_BASE || '').replace(/\/$/, '')
-const defaultApiBase = 'https://ai-video.47-76-143-158.sslip.io'
+const rawEnvApiBase = (import.meta.env.VITE_API_BASE || '').trim()
 const isLocal =
   typeof window !== 'undefined' && /^(localhost|127\.0\.0\.1)$/i.test(window.location.hostname)
 
-export const API_BASE = (envApiBase || (isLocal ? 'http://localhost:8000' : defaultApiBase)).replace(/\/+$/, '')
+function normalizeBase(value: string): string {
+  const clean = String(value || '').trim()
+  if (!clean || clean === '/' || clean.toLowerCase() === 'same-origin') return ''
+  return clean.replace(/\/+$/, '')
+}
+
+// 生产环境必须优先走同源 /api，让 Cloudflare Pages functions 代理到阿里云，避免浏览器直连 ECS 触发 CORS。
+export const API_BASE = normalizeBase(rawEnvApiBase || (isLocal ? 'http://localhost:8000' : ''))
 
 export function buildApiUrl(path: string): string {
   const raw = String(path || '').trim()
   if (/^https?:\/\//i.test(raw)) return raw
   const normalized = raw.startsWith('/') ? raw : `/${raw}`
+  if (!API_BASE) return normalized
   return `${API_BASE}${normalized}`
 }
 
