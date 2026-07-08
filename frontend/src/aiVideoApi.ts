@@ -8,8 +8,10 @@ function normalizeBase(value: string): string {
   return clean.replace(/\/+$/, '')
 }
 
-// 生产环境必须优先走同源 /api，让 Cloudflare Pages functions 代理到阿里云，避免浏览器直连 ECS 触发 CORS。
-export const API_BASE = normalizeBase(rawEnvApiBase || (isLocal ? 'http://localhost:8000' : ''))
+// 线上必须强制走同源 /api，不能读取 Cloudflare 的 VITE_API_BASE。
+// 之前 Cloudflare 环境变量里有 https://ai-video.47-76-143-158.sslip.io，导致浏览器直连 ECS，触发 CORS。
+// 本地开发才允许使用 VITE_API_BASE 或 localhost:8000。
+export const API_BASE = isLocal ? normalizeBase(rawEnvApiBase || 'http://localhost:8000') : ''
 
 export function buildApiUrl(path: string): string {
   const raw = String(path || '').trim()
