@@ -1,0 +1,4 @@
+/graphic-window /graphic-window/index.html 200
+/graphic-window/ /graphic-window/index.html 200
+/graphic-window/* /graphic-window/index.html 200
+/* /index.html 200
