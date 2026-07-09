@@ -32,14 +32,14 @@ pre{white-space:pre-wrap;background:#0f172a;color:#dbeafe;border-radius:16px;pad
 <main>
   <section class="hero">
     <b>AI-VIDEO GRAPHIC WINDOW</b>
-    <h2>视频封面 / 小红书图文</h2>
-    <p>不调用 FAL，不重新生成视频。只读取当前成片、口播稿和关键词，生成封面图与小红书引流套图。</p>
+    <h2>9:16视频封面 / 小红书爆款图文包</h2>
+    <p>不调用 FAL，不重新生成视频。视频封面只出 9:16；小红书生成 7 页图文包，包含钩子、区域逻辑、对比表、预算分层、避坑和引流。</p>
   </section>
 
   <section class="grid">
     <div class="card">
       <h2>控制台</h2>
-      <div class="hint">先点「读取最新成片」，再生成封面或小红书图文。</div>
+      <div class="hint">先点「读取最新成片」，再生成9:16封面或小红书7页图文包。</div>
 
       <label>视频 Job ID
         <input id="jobId" placeholder="留空时可读取最新成片"/>
@@ -81,8 +81,8 @@ pre{white-space:pre-wrap;background:#0f172a;color:#dbeafe;border-radius:16px;pad
 
       <div class="row">
         <button onclick="loadLatest()">读取最新成片</button>
-        <button class="primary" onclick="makeCover()">生成视频封面</button>
-        <button class="green" onclick="makeXhs()">生成小红书图文</button>
+        <button class="primary" onclick="makeCover()">生成9:16视频封面</button>
+        <button class="green" onclick="makeXhs()">生成小红书爆款图文包</button>
       </div>
 
       <h3>日志</h3>
@@ -146,7 +146,7 @@ function render(data){
   }
   html += `<div class="images">`
   for(const img of imgs){
-    html += `<a class="thumb" href="${img.url}" target="_blank"><img src="${img.url}"/><span>${img.role || '图片'} · ${img.width}×${img.height}</span></a>`
+    html += `<a class="thumb" href="${img.url}" target="_blank"><img src="${img.url}"/><span>${img.role || '图片'}</span></a>`
   }
   html += `</div>`
   $('output').className = ''
@@ -168,7 +168,7 @@ async function loadLatest(){
 async function makeCover(){
   try{
     setBusy(true)
-    log('生成视频封面中...')
+    log('生成9:16视频封面中...')
     const data = await api('/api/graphic-window/video-cover/generate', payload())
     render(data)
   }catch(e){ log('失败：' + e.message) }
@@ -178,7 +178,7 @@ async function makeCover(){
 async function makeXhs(){
   try{
     setBusy(true)
-    log('生成小红书图文中...')
+    log('生成小红书爆款图文包中...')
     const data = await api('/api/graphic-window/xiaohongshu/generate', payload())
     render(data)
   }catch(e){ log('失败：' + e.message) }
