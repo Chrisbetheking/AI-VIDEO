@@ -16,7 +16,9 @@ export async function onRequest(context) {
   const targetUrl =
     `${backend}/api/${path}${sourceUrl.search}`;
 
-  if (request.method === "OPTIONS") {
+  const method = request.method.toUpperCase();
+
+  if (method === "OPTIONS") {
     return new Response(null, {
       status: 204,
       headers: corsHeaders(),
@@ -32,24 +34,32 @@ export async function onRequest(context) {
     "x-ai-video-token",
   ]) {
     const value = request.headers.get(name);
+
     if (value) {
       proxyHeaders.set(name, value);
     }
   }
 
+  let requestBody;
+
+  if (method !== "GET" && method !== "HEAD") {
+    const buffer = await request.arrayBuffer();
+
+    if (buffer.byteLength > 0) {
+      requestBody = buffer;
+    }
+  }
+
   try {
-    const response = await fetch(targetUrl, {
-      method: request.method,
+    const upstream = await fetch(targetUrl, {
+      method,
       headers: proxyHeaders,
-      body:
-        request.method === "GET" ||
-        request.method === "HEAD"
-          ? undefined
-          : request.body,
+      body: requestBody,
       redirect: "follow",
     });
 
-    const responseHeaders = new Headers(response.headers);
+    const responseBody = await upstream.arrayBuffer();
+    const responseHeaders = new Headers(upstream.headers);
 
     for (const [key, value] of Object.entries(corsHeaders())) {
       responseHeaders.set(key, value);
@@ -60,9 +70,14 @@ export async function onRequest(context) {
       "production-sslip"
     );
 
-    return new Response(response.body, {
-      status: response.status,
-      statusText: response.statusText,
+    responseHeaders.set(
+      "Cache-Control",
+      "no-store"
+    );
+
+    return new Response(responseBody, {
+      status: upstream.status,
+      statusText: upstream.statusText,
       headers: responseHeaders,
     });
   } catch (error) {
