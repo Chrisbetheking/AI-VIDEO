@@ -406,7 +406,7 @@ async function makeXhs(){
           <h2>视频审查闸门</h2>
           <span id="reviewGateBadge" class="reviewGateBadge">尚未审查</span>
         </div>
-        <p class="reviewGateHint">视频生成完成 → 机械质检 → 豆包审片 → 人工确认 → 自动生成9:16封面。未通过时封面和图文按钮保持锁定。</p>
+        <p class="reviewGateHint">视频生成完成 → 机械质检 → 豆包审片 → 人工确认一次 → 自动生成3套9:16封面和事实校验小红书图文包。下方两个单独生成按钮仅用于失败重试。</p>
         <div class="reviewGateGrid">
           <div class="reviewGateBox">
             <b>审查结论</b>
@@ -420,7 +420,7 @@ async function makeXhs(){
         </div>
         <div class="reviewGateActions">
           <button class="reviewRun" onclick="runVideoReview()">自动审查视频</button>
-          <button id="reviewApproveBtn" class="reviewApprove" onclick="approveVideoAndMakeCover()" disabled>通过并生成3套9:16封面</button>
+          <button id="reviewApproveBtn" class="reviewApprove" onclick="approveVideoAndMakeCover()" disabled>通过并自动生成封面+图文包</button>
 <button
   id="reviewOverrideBtn"
   class="reviewRun"
@@ -476,34 +476,129 @@ async function makeXhs(){
   }
 
   window.approveVideoAndMakeCover = async function(){
-    const jobId = reviewJobId()
-    if(!jobId) return
-    const titleEl = document.getElementById('title')
-    const keywordsEl = document.getElementById('keywords')
-    const styleEl = document.getElementById('style')
-    const ctaEl = document.getElementById('cta')
-    try{
-      const data = await reviewFetch(
-        `/api/video/review/${encodeURIComponent(jobId)}/approve`,
-        {
-          reviewer:'human',
-          generate_cover:true,
-          title:titleEl?.value || '',
-          keywords:(keywordsEl?.value || '').split(/[,，\s]+/).filter(Boolean),
-          style:styleEl?.value || '专业顾问',
-          cta:ctaEl?.value || ''
-        }
-      )
-      renderReview(data.review || data)
-      if(data.cover_result && typeof render === 'function'){
-        render(data.cover_result)
+  const jobId = reviewJobId()
+  if(!jobId) return
+
+  const titleEl = document.getElementById('title')
+  const keywordsEl = document.getElementById('keywords')
+  const styleEl = document.getElementById('style')
+  const ctaEl = document.getElementById('cta')
+  const approveBtn = document.getElementById('reviewApproveBtn')
+  const originalText =
+    approveBtn?.textContent || '通过并自动生成封面+图文包'
+
+  if(approveBtn){
+    approveBtn.disabled = true
+    approveBtn.textContent = '审批中，正在生成封面和图文包…'
+  }
+
+  try{
+    const data = await reviewFetch(
+      `/api/video/review/${encodeURIComponent(jobId)}/approve`,
+      {
+        reviewer:'human',
+        generate_cover:false,
+        generate_xhs:false,
+        auto_package:true,
+        title:titleEl?.value || '',
+        keywords:(keywordsEl?.value || '')
+          .split(/[,，\s]+/)
+          .filter(Boolean),
+        style:styleEl?.value || '专业顾问',
+        platform:'小红书',
+        slide_count:7,
+        cta:ctaEl?.value || ''
       }
-      if(typeof log === 'function') log(data)
-    }catch(e){
-      alert('无法通过审查：' + e.message)
-      if(typeof log === 'function') log('无法通过审查：' + e.message)
+    )
+
+    renderReview(data.review || data)
+
+    const automation = data.automation || {}
+    const cover =
+      data.cover_result || automation.cover_result || {}
+    const xhs =
+      data.xhs_result || automation.xhs_result || {}
+
+    const coverImages = Array.isArray(cover.images)
+      ? cover.images
+      : []
+
+    const xhsImages = Array.isArray(xhs.images)
+      ? xhs.images
+      : []
+
+    const images = [...coverImages, ...xhsImages]
+
+    if(images.length && typeof render === 'function'){
+      render({
+        ok: automation.status === 'completed',
+        mode:'review_approved_auto_packaging',
+        style:'v10_39_cover_and_xhs_bundle',
+        job_id:jobId,
+        title:titleEl?.value || '',
+        images,
+        cover_count:coverImages.length,
+        page_count:xhsImages.length,
+        publish_title:
+          xhs.publish_title || cover.publish_title || '',
+        publish_description:
+          xhs.publish_description ||
+          cover.publish_description ||
+          '',
+        hashtags:xhs.hashtags || cover.hashtags || [],
+        download_zip_url:
+          xhs.download_zip_url ||
+          cover.download_zip_url ||
+          '',
+        cover_result:cover,
+        xhs_result:xhs,
+        automation
+      })
+    }
+
+    const summary =
+      document.getElementById('reviewGateSummary')
+
+    if(summary){
+      if(automation.status === 'completed'){
+        summary.textContent =
+          '审查已通过，3套封面和事实校验小红书图文包已自动生成。'
+      }else if(automation.status === 'partial_failed'){
+        summary.textContent =
+          '审查已通过，但自动包装只完成了一部分；可用下方单独按钮重试失败项。'
+      }else{
+        summary.textContent =
+          '审查已通过，但自动包装失败；请查看日志后使用单独按钮重试。'
+      }
+    }
+
+    window.__lastAutoPackaging = data
+
+    if(typeof log === 'function'){
+      log(data)
+    }
+  }catch(e){
+    alert('无法通过审查或自动包装：' + e.message)
+
+    if(typeof log === 'function'){
+      log('无法通过审查或自动包装：' + e.message)
+    }
+
+    if(approveBtn){
+      approveBtn.disabled = false
+      approveBtn.textContent = originalText
+    }
+  }finally{
+    if(
+      approveBtn &&
+      window.__lastAutoPackaging?.automation?.status === 'completed'
+    ){
+      approveBtn.disabled = true
+      approveBtn.textContent =
+        '已通过｜封面+图文包已自动生成'
     }
   }
+}
 
   window.rejectVideoReview = async function(){
     const jobId = reviewJobId()
@@ -960,6 +1055,46 @@ async function makeXhs(){
     )
   }else{
     addHotfixNote()
+  }
+})()
+</script>
+<!-- AI_VIDEO_V10_39_REVIEW_AUTO_PACKAGING_UI -->
+<script>
+(function(){
+  function markRetryButtons(){
+    const cover = Array.from(
+      document.querySelectorAll('button')
+    ).find(
+      el => (el.textContent || '').includes('3套9:16')
+    )
+
+    const xhs = Array.from(
+      document.querySelectorAll('button')
+    ).find(
+      el => (el.textContent || '')
+        .includes('事实校验小红书')
+    )
+
+    if(cover && !cover.dataset.retryLabelled){
+      cover.dataset.retryLabelled = '1'
+      cover.title =
+        '正常审批流程会自动生成；此按钮仅用于单独重试封面'
+    }
+
+    if(xhs && !xhs.dataset.retryLabelled){
+      xhs.dataset.retryLabelled = '1'
+      xhs.title =
+        '正常审批流程会自动生成；此按钮仅用于单独重试图文包'
+    }
+  }
+
+  if(document.readyState === 'loading'){
+    document.addEventListener(
+      'DOMContentLoaded',
+      markRetryButtons
+    )
+  }else{
+    markRetryButtons()
   }
 })()
 </script>
