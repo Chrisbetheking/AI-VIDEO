@@ -396,8 +396,6 @@ const malaysiaProfilePreset = {
   reportDelivery: '报告放微信：评论区留关键词或私信“报告/预算/身份/学校”，自动回复筛选问题后引导加微信领取。'
 }
 const DIGITAL_HUMAN_TASK_KEY = 'ai_video_current_digital_human_task_v1'
-const WORKFLOW_JOB_KEY = 'ai_video_workflow_active_job_v10_40'
-// AI_VIDEO_V10_40_1_REAL_MAIN_ADAPTER
 const emotionOptions = ['自然可信', '提醒警示', '紧张急迫', '坚定有力', '朋友聊天', '专业冷静', '惊讶反问', '收尾号召']
 
 function getDigitalHumanTaskModel(task: DigitalHumanCreateResponse | null, fallback: string) {
@@ -448,7 +446,7 @@ const modules: { key: ModuleKey; icon: string; title: string; desc: string; tag:
   { key: 'digitalHuman', icon: '人', title: '可选数字人', desc: '需要真人感片头时再生成；纯素材混剪可直接跳过', tag: '可选' },
   { key: 'voice', icon: '声', title: '配音导演', desc: '克隆音色、分段情绪、语速停顿', tag: '配音' },
   { key: 'video', icon: '剪', title: '素材混剪 / 成片', desc: '数字人片头、楼盘、风光、配套素材按顺序合成', tag: '成片' },
-  { key: 'subtitleCover', icon: '审', title: '审片 / 封面 / 图文', desc: '成片审查、人工确认、三套封面、七页图文和总交付包', tag: '发布' },
+  { key: 'subtitleCover', icon: '图', title: '图文窗口', desc: '图文引流包、封面、字幕重点单独处理', tag: '图文' },
   { key: 'growth', icon: '投', title: '流量监控', desc: '手动录入数据，AI 判断投多少、投多久、是否继续投', tag: '投流' },
   { key: 'collector', icon: '采', title: '实时日志', desc: '查看 ECS 采集、AI 判断、入库和报错日志', tag: '日志' },
   { key: 'strategy', icon: '档', title: '获客档案', desc: '业务定位、关键词、客群、资料包和承接钩子', tag: '档案' },
@@ -464,9 +462,8 @@ const workflowSteps: { key: ModuleKey; step: string; title: string; desc: string
   { key: 'digitalHuman', step: '03', title: '可选出镜', desc: '需要真人感开场才用 fal；纯素材混剪直接跳过。', action: '可选' },
   { key: 'assets', step: '04', title: '素材/B-roll', desc: '选择楼盘、马来西亚风光、配套和教育医疗素材，调整顺序和时长。', action: '选素材' },
   { key: 'copy', step: '05', title: '按素材补全旁白', desc: '读取已选素材总时长，再生成完整旁白稿和字幕逻辑。', action: '补全脚本' },
-  { key: 'video', step: '06', title: '成片与自动审片', desc: '导出 9:16 MP4 后自动登记统一任务，并启动机械质检和豆包审片。', action: '成片' },
-  { key: 'subtitleCover', step: '07', title: '人工确认与发布包装', desc: '人工确认一次后自动生成三套封面、七页图文并选择主封面。', action: '审片包装' },
-  { key: 'growth', step: '08', title: '发布与流量监控', desc: '下载最终总包，发布后录入数据并复盘投流。', action: '发布复盘' }
+  { key: 'video', step: '06', title: '合成成片', desc: '按已选素材和配音字幕导出 9:16 MP4；有数字人则自动作为片头。', action: '合成' },
+  { key: 'growth', step: '07', title: '流量监控', desc: '录入发布数据，AI 判断投多少、投多久、是否继续投。', action: '投流' }
 ]
 
 const badWords = ['最', '第一', '保证', '包赚', '稳赚', '绝对', '唯一', '国家级', '100%', '躺赚', '无风险']
@@ -2598,78 +2595,6 @@ ${selectedAssetScriptContext || '暂无素材，请按马来西亚楼盘、风�
     }
   }
 
-  async function registerComposedVideoForWorkflow(
-    result: ComposeResponse,
-    source = 'compose',
-  ) {
-    if (!result?.video_url || !result?.video_name) {
-      return ''
-    }
-
-    const registered = await apiPost<any>(
-      '/api/video/workflow/register-compose',
-      {
-        video_url: result.video_url,
-        video_name: result.video_name,
-        duration_seconds: result.duration_seconds || 0,
-        title: copy.title || industry || 'AI 视频',
-        script_text: currentScript,
-        description: copy.description || '',
-        keywords: subtitleHighlight,
-        style,
-        cta: conversionGoal,
-        platform: '小红书',
-        source,
-      },
-    )
-
-    const workflowJobId = String(
-      registered?.job_id || ''
-    ).trim()
-
-    if (!workflowJobId) {
-      throw new Error(
-        '后端没有返回统一任务 ID'
-      )
-    }
-
-    if (
-      registered?.next_action === 'run_review' &&
-      registered?.auto_review_scheduled !== true
-    ) {
-      throw new Error(
-        '统一任务已创建，但自动审片未成功排队'
-      )
-    }
-
-    window.localStorage.setItem(
-      WORKFLOW_JOB_KEY,
-      workflowJobId,
-    )
-
-    window.dispatchEvent(
-      new CustomEvent(
-        'ai-video-workflow-job',
-        {
-          detail: {
-            job_id: workflowJobId,
-          },
-        },
-      ),
-    )
-
-    if (registered?.workflow) {
-      window.localStorage.setItem(
-        `ai_video_workflow_v10_40_1_${workflowJobId}`,
-        JSON.stringify(
-          registered.workflow
-        ),
-      )
-    }
-
-    return workflowJobId
-  }
-
   async function composeVideo() {
     if (!currentScript.trim()) {
       setError('请先生成或填写文案，再合成视频。')
@@ -2746,28 +2671,7 @@ ${selectedAssetScriptContext || '暂无素材，请按马来西亚楼盘、风�
       subtitle_segments: safeSubtitleSegments
     }))
     setVideo(res!)
-
-    let workflowJobId = ''
-    try {
-      workflowJobId =
-        await registerComposedVideoForWorkflow(
-          res!,
-          'compose',
-        )
-    } catch (workflowError: any) {
-      setError(
-        `视频已生成，但统一任务登记失败：${
-          workflowError?.message ||
-          String(workflowError)
-        }。视频本身仍可下载。`,
-      )
-    }
-
-    setLastHandoff(
-      workflowJobId
-        ? `视频已出片并登记为任务 ${workflowJobId}。机械质检和豆包审片已自动启动；完成后在右下角工作流人工确认一次。`
-        : hasDigitalIntro ? '视频已出片：数字人片头和后续素材已分离，真人模板已去重，配音/字幕按本次最终脚本重新生成。' : '视频已出片。已把配音和字幕压到画面上，先预览一遍再决定是否调字幕位置。'
-    )
+    setLastHandoff(hasDigitalIntro ? '视频已出片：数字人片头和后续素材已分离，真人模板已去重，配音/字幕按本次最终脚本重新生成。' : '视频已出片。已把配音和字幕压到画面上，先预览一遍再决定是否调字幕位置。')
   }
 
   async function chatEditVideo() {
@@ -2781,35 +2685,7 @@ ${selectedAssetScriptContext || '暂无素材，请按马来西亚楼盘、风�
     }))
     setEditChat(prev => [res!, ...prev])
     if (res?.new_video_url && res?.new_video_name) {
-      const updatedVideo: ComposeResponse = video
-        ? {
-            ...video,
-            video_url: res.new_video_url,
-            video_name: res.new_video_name,
-            warnings: res.warnings || video.warnings || [],
-          }
-        : {
-            video_url: res.new_video_url,
-            video_name: res.new_video_name,
-            duration_seconds: autoProjectSeconds,
-            warnings: res.warnings || [],
-          }
-
-      setVideo(updatedVideo)
-
-      try {
-        await registerComposedVideoForWorkflow(
-          updatedVideo,
-          'ai_plugin_edit',
-        )
-      } catch (workflowError: any) {
-        setError(
-          `修改后视频已生成，但审片任务登记失败：${
-            workflowError?.message ||
-            String(workflowError)
-          }`,
-        )
-      }
+      setVideo(prev => prev ? { ...prev, video_url: res.new_video_url!, video_name: res.new_video_name! } : { video_url: res.new_video_url!, video_name: res.new_video_name!, duration_seconds: autoProjectSeconds, warnings: res.warnings || [] })
     }
     setActive('video')
   }
@@ -2902,9 +2778,8 @@ ${selectedAssetScriptContext || '暂无素材，请按马来西亚楼盘、风�
     { key: isDigitalHumanRoute ? 'digitalHuman' : 'assets', label: '3 可选出镜', done: !isDigitalHumanRoute || Boolean(digitalHuman?.video_url), value: isDigitalHumanRoute ? (digitalHuman?.video_url ? '数字人片头已生成' : (digitalHumanAvatarId ? '已选真人模板' : '待选真人模板')) : '已跳过数字人' },
     { key: 'voice', label: '4 配音/旁白', done: Boolean(audio), value: voiceSegments.length ? `${voiceSegments.length} 段 · ${selectedVoiceName}` : '待配音' },
     { key: 'assets', label: '5 素材顺序', done: selectedMaterialIds.length > 0, value: selectedMaterialIds.length ? `已选 ${selectedMaterialIds.length} 个素材` : '待选素材' },
-    { key: 'video', label: '6 成片/审片', done: Boolean(video?.video_url), value: window.localStorage.getItem(WORKFLOW_JOB_KEY) ? '已登记审片任务' : (video?.video_name || '待合成') },
-    { key: 'subtitleCover', label: '7 发布包装', done: Boolean(window.localStorage.getItem(WORKFLOW_JOB_KEY)), value: window.localStorage.getItem(WORKFLOW_JOB_KEY) ? '审片/封面/图文已关联' : '待成片登记' },
-    { key: 'growth', label: '8 流量监控', done: Boolean(growthDecision), value: growthDecision?.decision || '待复盘' }
+    { key: 'video', label: '6 成片合成', done: Boolean(video?.video_url), value: video?.video_name || '待合成' },
+    { key: 'growth', label: '7 流量监控', done: Boolean(growthDecision), value: growthDecision?.decision || '待复盘' }
   ]
 
   const digitalHumanStatus = String(digitalHuman?.status || '').toLowerCase()
@@ -3544,8 +3419,7 @@ https://www.douyin.com/user/..." /></Field>
       </section>}
 
       {moduleVisible('video') && active === 'video' && <section className="card modulePanel">
-        <div className="sectionHeader"><div><h2>第六步：成片合成 / 自动审片</h2><p>成片完成后自动登记统一任务，立即启动机械质检和豆包审片；人工只需确认一次，后续封面和图文自动生成。</p></div><div className="headerActions"><Button busy={busy === '按素材时长生成旁白稿' ? busy : ''} label="按素材时长补全旁白" onClick={generateScriptFromSelectedAssets} kind="soft" /><Button busy={busy === '合成视频并烧字幕' ? busy : ''} label="生成视频并下载 MP4" onClick={composeVideo} disabled={!currentScript} /></div></div>
-        <div className="workflowBridgeHint"><div><strong>成片后的正式链路</strong><span>自动审片 → 人工确认 → 3套封面 → 7页图文 → 最终总包</span><small>{window.localStorage.getItem(WORKFLOW_JOB_KEY) ? `当前任务：${window.localStorage.getItem(WORKFLOW_JOB_KEY)}` : '生成成片后自动创建统一任务 ID'}</small></div><button className="btn soft" onClick={() => window.dispatchEvent(new Event('ai-video-workflow-open'))}>打开审片与发布工作流</button></div>
+        <div className="sectionHeader"><div><h2>第六步：素材混剪 / 成片合成</h2><p>按素材顺序生成画面底片，再叠加最终配音和字幕。有数字人片头就排在最前；没有也能直接合成。</p></div><div className="headerActions"><Button busy={busy === '按素材时长生成旁白稿' ? busy : ''} label="按素材时长补全旁白" onClick={generateScriptFromSelectedAssets} kind="soft" /><Button busy={busy === '合成视频并烧字幕' ? busy : ''} label="生成视频并下载 MP4" onClick={composeVideo} disabled={!currentScript} /></div></div>
         <div className="subtitlePresetGrid">
           {[
             ['douyin_boss','老板口播大字','白字黑描边 + 痛点词亮黄/红，适合强转化口播'],
@@ -3563,7 +3437,7 @@ https://www.douyin.com/user/..." /></Field>
       </section>}
 
       {moduleVisible('subtitleCover') && active === 'subtitleCover' && <section className="card modulePanel visualPanel">
-        <div className="sectionHeader"><div><h2>第七步：审片 / 封面 / 图文发布包装</h2><p>正常流程由右下角工作流统一处理：人工确认后自动生成三套封面和七页事实校验图文。这里原有按钮保留，作为单项重试和手动精修。</p></div><div className="stackButtons"><Button busy={busy === '智能字幕重点' ? busy : ''} label="智能识别重点字幕" onClick={makeSubtitleAI} disabled={!currentScript} kind="ghost" /><Button busy={busy === '生成图文引流包' ? busy : ''} label="生成图文引流包" onClick={makeGraphicPost} /></div></div>
+        <div className="sectionHeader"><div><h2>第六步：字幕 / 封面 / 图文引流</h2><p>封面负责点击，图文负责收藏和私信。文字由系统叠加，图片只做背景，避免 AI 把提示词画进图里。</p></div><div className="stackButtons"><Button busy={busy === '智能字幕重点' ? busy : ''} label="智能识别重点字幕" onClick={makeSubtitleAI} disabled={!currentScript} kind="ghost" /><Button busy={busy === '生成图文引流包' ? busy : ''} label="生成图文引流包" onClick={makeGraphicPost} /></div></div>
         <div className="visualTabs"><span>字幕</span><span>封面</span><span>图文素材</span></div>
         <div className="grid4"><Field label="字幕模板"><select value={subtitlePreset} onChange={e => setSubtitlePreset(e.target.value as any)}><option value="douyin_boss">老板口播大字</option><option value="knowledge_highlight">知识科普高亮</option><option value="clean_trust">干净可信</option><option value="cta_pop">结尾强 CTA</option></select></Field><Field label="字幕字号"><input type="number" min="48" max="120" value={subtitleSize} onChange={e => setSubtitleSize(Number(e.target.value || 20))} /></Field><Field label={`离底部 ${subtitleMarginV}px`} hint="数值越小越靠下；数字人口播建议 48-60，避免挡嘴。"><input type="range" min="36" max="180" step="4" value={subtitleMarginV} onChange={e => setSubtitleMarginV(Number(e.target.value))} /></Field><Field label="重点词"><input value={subtitleHighlight} onChange={e => setSubtitleHighlight(e.target.value)} placeholder="AI 可自动识别，也可补充关键词" /></Field><Field label="封面大标题"><input value={copy.title || coverStyle} onChange={e => setCopy({ ...copy, title: e.target.value })} placeholder="例如：海外买房避坑指南" /></Field></div>
         <div className="coverBuilder">
