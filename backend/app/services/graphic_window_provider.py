@@ -607,7 +607,7 @@ def install_graphic_window_provider(app):
     def health():
         return {
             "ok": True,
-            "mode": "graphic_window_v7_1_real_main_workflow",
+            "mode": "graphic_window_v7_2_old_ui_baseline",
             "rule": "cover_only_9_16_xhs_uses_info_cards_maps_tables_budget_checklist_cta",
             "storage": str(GRAPHIC_ROOT),
             "pillow": True,

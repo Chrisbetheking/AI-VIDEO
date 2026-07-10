@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import {
   apiGet,
   apiPost,
@@ -676,8 +676,6 @@ function highlightText(text: string, keywords: KeywordInsight[]) {
 function extractVideoUrl(job: JobPayload | null): string {
   if (!job) return ''
   const direct =
-    job.subtitled_video_url || job.result?.subtitled_video_url ||
-    job.child_job?.subtitled_video_url || job.child_job?.result?.subtitled_video_url ||
     job.video_url || job.output_url || job.result_url || job.url ||
     job.result?.video_url || job.result?.output_url || job.result?.result_url ||
     job.child_job?.video_url || job.child_job?.output_url || job.child_job?.result_url || job.child_job?.url ||
@@ -688,6 +686,42 @@ function extractVideoUrl(job: JobPayload | null): string {
 function finalStatus(job: JobPayload | null) {
   const text = `${job?.status || ''} ${job?.stage || ''} ${job?.child_job?.status || ''} ${job?.child_job?.stage || ''}`.toLowerCase()
   return ['completed', 'succeeded', 'success', 'done', 'finished', 'failed', 'error'].some((x) => text.includes(x))
+}
+
+
+function workflowActionText(action?: string) {
+  const map: Record<string, string> = {
+    wait_for_video: '等待成片',
+    fix_video_job: '成片任务异常',
+    run_review: '等待自动审片',
+    wait_for_review: '机械质检 / 豆包审片中',
+    human_review: '等待人工确认',
+    return_to_edit: '审片未通过，返回修改',
+    backfill_packaging: '等待生成封面和图文',
+    select_cover: '请选择主封面',
+    build_final_delivery: '等待生成最终总包',
+    ready_to_publish: '发布素材已齐全',
+  }
+  return map[String(action || '')] || String(action || '成片后自动启动')
+}
+
+function workflowResultParts(workflow: Record<string, any> | null) {
+  const packaging = workflow?.packaging && typeof workflow.packaging === 'object' ? workflow.packaging : {}
+  const review = workflow?.review && typeof workflow.review === 'object' ? workflow.review : {}
+  const automation = packaging?.automation && typeof packaging.automation === 'object' ? packaging.automation : {}
+  const cover = packaging?.cover_result && typeof packaging.cover_result === 'object'
+    ? packaging.cover_result
+    : automation?.cover_result && typeof automation.cover_result === 'object'
+      ? automation.cover_result
+      : review?.cover_result && typeof review.cover_result === 'object'
+        ? review.cover_result
+        : {}
+  const xhs = packaging?.xhs_result && typeof packaging.xhs_result === 'object'
+    ? packaging.xhs_result
+    : automation?.xhs_result && typeof automation.xhs_result === 'object'
+      ? automation.xhs_result
+      : {}
+  return { packaging, review, cover, xhs }
 }
 
 export default function VideoCreationWizard({ project, setProject, goTab }: Props) {
@@ -725,9 +759,10 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
   const [subtitleStyleId, setSubtitleStyleId] = useState(String(initialDraft.subtitleStyleId || project.subtitle_style_id || 'douyin_pop'))
   const [subtitleStyles, setSubtitleStyles] = useState<SubtitleStyle[]>(SUBTITLE_STYLE_FALLBACK)
   const [generationStartedAt, setGenerationStartedAt] = useState(Number(initialDraft.generationStartedAt || 0))
-  const [voicePreview, setVoicePreview] = useState<any>(null)
-  const [voiceVersionResult, setVoiceVersionResult] = useState<any>(null)
-  const [finalSaveResult, setFinalSaveResult] = useState<any>(null)
+  const [workflow, setWorkflow] = useState<Record<string, any> | null>((initialDraft.workflow || null) as Record<string, any> | null)
+  const [workflowBusy, setWorkflowBusy] = useState('')
+  const [workflowError, setWorkflowError] = useState('')
+  const reviewLaunchRef = useRef('')
 
   const approvedBrainCards = useMemo(() => {
     const merged = [...remoteBrainCards, ...loadApprovedContentBrainCards()]
@@ -764,6 +799,16 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
   const selectedAssets = asArray(project.asset_context || project.selected_assets || project.r2_material_context)
   const avatarConfig = project.avatar_config || null
   const leadCount = asArray(project.leads).length
+  const workflowAction = String(workflow?.next_action || '')
+  const workflowParts = workflowResultParts(workflow)
+  const workflowReview = workflowParts.review
+  const workflowPackaging = workflowParts.packaging
+  const workflowCover = workflowParts.cover
+  const workflowXhs = workflowParts.xhs
+  const workflowCoverImages = asArray(workflowCover?.images)
+  const workflowXhsImages = asArray(workflowXhs?.images)
+  const workflowSelection = workflow?.selection && typeof workflow.selection === 'object' ? workflow.selection : {}
+  const workflowDelivery = workflow?.delivery && typeof workflow.delivery === 'object' ? workflow.delivery : {}
 
   useEffect(() => {
     let alive = true
@@ -868,18 +913,22 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
       try {
         const data = await apiGet(`/api/video/full-ai/one-scene/job/${jobId}`, 180000)
         if (!alive) return
+        if (String(data?.job_id || jobId) !== jobId) {
+          throw new Error('后端返回了不同任务 ID，已阻止串任务。')
+        }
         setJob(data)
         const hasVideo = Boolean(extractVideoUrl(data))
         if (hasVideo && finalStatus(data)) {
           setBusy('')
           setError('')
-        } else if (!hasVideo) {
-          await recoverLatestDoneVideo(true)
+        } else if (!hasVideo && finalStatus(data)) {
+          setBusy('')
+          setError(`任务 ${jobId} 已结束，但没有返回当前任务的成片地址。`)
         }
       } catch (err: any) {
         if (!alive) return
-        const recovered = await recoverLatestDoneVideo(true)
-        if (!recovered) setError(`任务还在恢复中：${err?.message || String(err)}`)
+        setBusy('')
+        setError(`任务 ${jobId} 查询失败：${err?.message || String(err)}。系统不会使用其他任务替代。`)
       }
     }, 4000)
     return () => {
@@ -887,6 +936,55 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
       window.clearInterval(timer)
     }
   }, [jobId, busy])
+
+
+  useEffect(() => {
+    if (!jobId || !videoUrl || !finalStatus(job)) return
+    let alive = true
+
+    const loadWorkflow = async () => {
+      try {
+        let data = await apiGet(`/api/video/workflow/${encodeURIComponent(jobId)}`, 90000)
+        if (!alive) return
+        if (String(data?.job_id || '') !== jobId) {
+          throw new Error('工作流返回了不同任务 ID，已阻止串任务。')
+        }
+        setWorkflow(data)
+        setWorkflowError('')
+
+        if (data?.next_action === 'run_review' && reviewLaunchRef.current !== jobId) {
+          reviewLaunchRef.current = jobId
+          setWorkflowBusy('自动审片')
+          try {
+            data = await apiPost(
+              `/api/video/workflow/${encodeURIComponent(jobId)}/run-review`,
+              { source: 'old_ui_v10_40_2_auto_review' },
+              360000,
+            )
+            if (!alive) return
+            setWorkflow(data)
+          } finally {
+            if (alive) setWorkflowBusy('')
+          }
+        }
+      } catch (err: any) {
+        if (!alive) return
+        reviewLaunchRef.current = ''
+        setWorkflowError(err?.message || String(err))
+      }
+    }
+
+    void loadWorkflow()
+    const timer = window.setInterval(
+      () => void loadWorkflow(),
+      workflow?.next_action === 'ready_to_publish' ? 20000 : 6000,
+    )
+
+    return () => {
+      alive = false
+      window.clearInterval(timer)
+    }
+  }, [jobId, videoUrl, job?.status, job?.stage, workflow?.next_action])
 
 
   useEffect(() => {
@@ -916,9 +1014,10 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
       subtitleEnabled,
       subtitleStyleId,
       generationStartedAt,
+      workflow,
       savedAt: new Date().toISOString(),
     })
-  }, [step, sourceMode, topic, market, city, contentType, scriptMode, targetDuration, competitorSource, manualKeywords, script, selectedSegmentId, voiceSettings, shotPlan, selectedShotId, jobId, job, sourceResult, disabledKeywordValues, aiKeywordInsights, aiStatus, buttonStatus, subtitleEnabled, subtitleStyleId, generationStartedAt])
+  }, [step, sourceMode, topic, market, city, contentType, scriptMode, targetDuration, competitorSource, manualKeywords, script, selectedSegmentId, voiceSettings, shotPlan, selectedShotId, jobId, job, sourceResult, disabledKeywordValues, aiKeywordInsights, aiStatus, buttonStatus, subtitleEnabled, subtitleStyleId, generationStartedAt, workflow])
 
 
 
@@ -1049,6 +1148,8 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
       manual_shot_plan: shotPlan,
       shot_overrides: shotPlan,
       transition_plan: shotPlan.map((shot) => ({ index: shot.index, transition: shot.transition, camera: shot.camera })),
+      workflow_job_id: jobId,
+      workflow,
       ...extra,
     }
     setProject(next)
@@ -1057,6 +1158,29 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
 
   function noteButton(message: string) {
     setButtonStatus(`${new Date().toLocaleTimeString()} · ${message}`)
+  }
+
+  async function runWorkflowAction(
+    name: string,
+    path: string,
+    payload: Record<string, any> = {},
+    timeoutMs = 420000,
+  ) {
+    if (!jobId || workflowBusy) return
+    setWorkflowBusy(name)
+    setWorkflowError('')
+    try {
+      const data = await apiPost(path, payload, timeoutMs)
+      if (String(data?.job_id || jobId) !== jobId) {
+        throw new Error('工作流操作返回了不同任务 ID，已阻止串任务。')
+      }
+      setWorkflow(data)
+      syncProject({ workflow_job_id: jobId, workflow: data })
+    } catch (err: any) {
+      setWorkflowError(err?.message || String(err))
+    } finally {
+      setWorkflowBusy('')
+    }
   }
 
   async function recoverLatestDoneVideo(silent = false) {
@@ -1118,6 +1242,10 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
     setShotPlan([])
     setJobId('')
     setJob(null)
+    setWorkflow(null)
+    setWorkflowBusy('')
+    setWorkflowError('')
+    reviewLaunchRef.current = ''
     setSourceResult(null)
     setDisabledKeywordValues([])
     setAiKeywordInsights([])
@@ -1214,7 +1342,11 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
         setStep(1)
         return
       }
-      await rebuildSemanticShotsByDeepSeek()
+      const nextSegments = attachSegmentKeywords(splitScript(script), keywords)
+      const nextShots = generateShotPlan(nextSegments, targetDuration, city, project)
+      setShotPlan(nextShots)
+      setSelectedShotId(nextShots[0]?.id || 'shot_1')
+      noteButton(`已按真实口播重建 ${nextShots.length} 个镜头：已强制单一全屏镜头、混合室内/阳台/大堂/泳池/社区/带看，并禁用分屏拼贴和文件桌面。`)
       setStep(3)
       return
     }
@@ -1226,8 +1358,10 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
         return
       }
       if (!shotPlan.length) {
-        const nextShots = await rebuildSemanticShotsByDeepSeek()
-        noteButton(`没有镜头计划，已先按口播语义补齐 ${nextShots.length} 个镜头；请确认后再生成视频。`)
+        const nextSegments = attachSegmentKeywords(splitScript(script), keywords)
+        const nextShots = generateShotPlan(nextSegments, targetDuration, city, project)
+        setShotPlan(nextShots)
+        noteButton(`没有镜头计划，已先补齐 ${nextShots.length} 个镜头；请确认后再生成视频。`)
         setStep(3)
         return
       }
@@ -1419,139 +1553,6 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
     setDisabledKeywordValues(allKeywords.filter((kw) => !keep.has(kw.value.toLowerCase())).map((kw) => kw.value))
   }
 
-  function removeManualKeyword(value: string) {
-    const clean = usefulKeyword(value)
-    if (!clean) return
-    const nextManual = splitKeywordCandidates(cleanManualKeywords).filter((kw) => kw.toLowerCase() !== clean.toLowerCase()).join('，')
-    setManualKeywords(nextManual)
-    setAiKeywordInsights((current) => current.filter((kw) => kw.value.toLowerCase() !== clean.toLowerCase()))
-    setDisabledKeywordValues((current) => current.filter((kw) => kw.toLowerCase() !== clean.toLowerCase()))
-    setAiStatus(`已删除关键词：${clean}`)
-    syncProject({ manualKeywords: nextManual, ai_keyword_insights: aiKeywordInsights.filter((kw) => kw.value.toLowerCase() !== clean.toLowerCase()) })
-  }
-
-  function backendShotsToPlan(raw: any[], activeSegments: ScriptSegment[]): ShotPlan[] {
-    const list = Array.isArray(raw) ? raw : []
-    return list.map((item: any, idx: number) => {
-      const seg = activeSegments[idx] || activeSegments[activeSegments.length - 1]
-      return {
-        id: String(item.id || item.shot_id || `shot_${idx + 1}`),
-        index: Number(item.index || idx + 1),
-        title: String(item.title || item.scene || item.scene_type || `第 ${idx + 1} 镜头`),
-        scene: String(item.scene || item.title || item.scene_type || ''),
-        narration: String(item.narration || item.narration_segment || seg?.text || ''),
-        duration: Number(item.duration || item.duration_seconds || seg ? Math.max(3, Math.round(targetDuration / Math.max(1, activeSegments.length))) : 4),
-        source: (['r2','real','ai','mixed'].includes(String(item.source)) ? item.source : 'ai') as MaterialSource,
-        camera: String(item.camera || item.motion || '语义跟随运镜'),
-        transition: 'smooth_dissolve_no_flash',
-        prompt: String(item.prompt || item.visual_prompt || ''),
-        avoid: Array.isArray(item.avoid) ? item.avoid : String(item.negative_prompt || 'cut, flash, hard transition, split screen, collage, text, watermark').split(/[,，]/).map((x) => x.trim()).filter(Boolean),
-        assetIds: Array.isArray(item.assetIds) ? item.assetIds : Array.isArray(item.asset_ids) ? item.asset_ids : [],
-      }
-    }).filter((shot) => shot.narration || shot.prompt)
-  }
-
-  async function rebuildSemanticShotsByDeepSeek() {
-    if (!script.trim()) {
-      setError('还没有口播稿，不能生成镜头。')
-      setStep(2)
-      return []
-    }
-    const activeSegments = attachSegmentKeywords(splitScript(script), keywords)
-    setAiBusy('DeepSeek 正在按口播重建镜头')
-    try {
-      const data = await apiPost('/api/video/v10-34/semantic-shots', {
-        topic,
-        city,
-        market,
-        script,
-        segments: activeSegments,
-        keywords,
-        target_duration_seconds: targetDuration,
-        content_type: contentType,
-        source_assets: selectedAssets,
-      }, 180000)
-      const nextShots = backendShotsToPlan(data?.shots || data?.shot_plan || [], activeSegments)
-      if (!nextShots.length) throw new Error('后端没有返回有效镜头计划')
-      setShotPlan(nextShots)
-      setSelectedShotId(nextShots[0]?.id || 'shot_1')
-      syncProject({ manual_shot_plan: nextShots, shot_overrides: nextShots, semantic_shot_provider: data?.provider || data?.version || 'v10.34' })
-      noteButton(`已按口播稿语义重建 ${nextShots.length} 个镜头；生活配套、交通、教育、餐饮、户型等会分别匹配画面。`)
-      return nextShots
-    } catch (err: any) {
-      const nextShots = generateShotPlan(activeSegments, targetDuration, city, project)
-      setShotPlan(nextShots)
-      setSelectedShotId(nextShots[0]?.id || 'shot_1')
-      setError(`DeepSeek/语义镜头失败，已用本地安全规则兜底：${err?.message || String(err)}`)
-      return nextShots
-    } finally {
-      setAiBusy('')
-    }
-  }
-
-  async function generateVoicePreview(mode: 'selected' | 'all') {
-    const activeSegments = attachSegmentKeywords(splitScript(script), keywords)
-    if (!activeSegments.length) {
-      setError('没有可试听的口播句子。')
-      return
-    }
-    const chosen = mode === 'selected'
-      ? activeSegments.filter((seg) => seg.id === selectedSegment?.id).slice(0, 1)
-      : activeSegments
-    const ttsSegments = chosen.map((seg) => {
-      const setting = voiceSettings[seg.id] || inferVoiceSetting(seg, seg.index - 1, activeSegments.length, scriptMode)
-      return {
-        text: seg.text,
-        emotion: setting.emotion,
-        speed_ratio: setting.speed,
-        volume_ratio: setting.volume,
-        pitch_ratio: setting.pitch,
-        pause_before_ms: setting.pauseBefore,
-        pause_after_ms: setting.pauseAfter,
-        emphasis: setting.emphasis,
-        tone: setting.tone,
-      }
-    })
-    const data = await apiPost('/api/video/v10-34/voice-preview', {
-      mode,
-      topic,
-      script,
-      segments: ttsSegments,
-      keywords,
-      voice_settings: voiceSettings,
-    }, 240000)
-    setVoicePreview(data)
-    setAiStatus(mode === 'selected' ? '已生成当前句试听。' : '已生成整段试听。')
-  }
-
-  async function saveVoiceVersion() {
-    if (!script.trim()) {
-      setError('没有口播稿，不能保存配音版本。')
-      return
-    }
-    const data = await apiPost('/api/video/v10-34/voice-version/save', {
-      topic,
-      script,
-      segments,
-      keywords,
-      voice_settings: voiceSettings,
-      preview: voicePreview,
-    }, 120000)
-    setVoiceVersionResult(data)
-    setAiStatus('已保存口播/配音版本。')
-  }
-
-  async function saveFinal(kind: 'final' | 'raw' | 'discarded') {
-    const payload = {
-      video: { ...(job || {}), video_url: videoUrl, topic, script, shots: shotPlan },
-      reason: kind === 'discarded' ? '用户废弃本次结果' : '用户确认保存',
-    }
-    const endpoint = kind === 'raw' ? '/api/video/final/raw-segments/save' : kind === 'discarded' ? '/api/video/final/discard' : '/api/video/final/save'
-    const data = await apiPost(endpoint, payload, 120000)
-    setFinalSaveResult(data)
-    noteButton(kind === 'raw' ? '已保存 raw 分段素材记录。' : kind === 'discarded' ? '已废弃本次结果。' : '已保存最终视频。')
-  }
-
   function updateShot(id: string, patch: Partial<ShotPlan>) {
     const next = shotPlan.map((shot) => {
       if (shot.id !== id) return shot
@@ -1567,6 +1568,10 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
     setError('')
     setBusy('启动生成')
     setGenerationStartedAt(Date.now())
+    setWorkflow(null)
+    setWorkflowError('')
+    setWorkflowBusy('')
+    reviewLaunchRef.current = ''
     setStep(4)
     const finalProject = syncProject()
     const finalShots = shotPlan.length ? shotPlan : generateShotPlan(segments, targetDuration, city, finalProject)
@@ -1588,22 +1593,14 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
         index: shot.index,
         prompt: shot.prompt,
         visual_prompt: shot.prompt,
-        negative_prompt: shot.avoid.join(', '),
-        scene_type: shot.scene,
         narration_segment: shot.narration,
         duration_seconds: shot.duration,
-        duration: shot.duration,
         source: shot.source,
-        transition: 'smooth_dissolve_no_flash',
         asset_ids: shot.assetIds,
       })),
-      max_shots: Math.max(1, finalShots.length),
-      fal_fill_shots: Math.max(1, finalShots.length),
-      dynamic_shot_count: Math.max(1, finalShots.length),
-      transition_policy: 'smooth_dissolve_no_flash',
-      safe_crossfade: true,
-      save_raw_shots: true,
-      block_completed_on_quality_error: true,
+      max_shots: 3,
+      fal_fill_shots: 3,
+      dynamic_shot_count: 3,
         visual_policy: 'real_condo_tour_no_office_no_papers',
       one_scene_mode: true,
       dynamic_single_scene: true,
@@ -1758,7 +1755,7 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
               <button className="aiw-muted" type="button" onClick={() => { setManualKeywords(''); setManualKeywordDraft(''); setAiKeywordInsights([]); setAiStatus('已清空手动关键词。') }}>清空关键词</button>
               <button className="aiw-danger" type="button" onClick={hardResetWizard}>清空旧草稿/重来</button>
             </div>
-            {manualKeywords && <div className="aiw-chipRow">{splitKeywordCandidates(manualKeywords).map((kw) => <span className="aiw-keywordPill removable" key={kw}>{kw}<button type="button" onClick={() => removeManualKeyword(kw)} aria-label={`删除关键词 ${kw}`}>×</button></span>)}</div>}
+            {manualKeywords && <div className="aiw-chipRow">{splitKeywordCandidates(manualKeywords).map((kw) => <span className="aiw-keywordPill" key={kw}>{kw}</span>)}</div>}
             <p>默认不用手填。主题、关键词和文案都交给 DeepSeek；这里只能补充短业务词，不能再塞模板名和知识库长句。</p>
           </div>
           <div className="aiw-chipRow">
@@ -1822,9 +1819,7 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
         <section className="aiw-stepCard">
           <h3>逐句配音</h3>
           <p>AI 会按句意自动判断语气、情绪、停顿；你也可以点某一句手动微调。</p>
-          <div className="aiw-actions"><button className="aiw-primary" type="button" disabled={!!aiBusy} onClick={autoTuneVoiceAll}>{aiBusy === 'DeepSeek 正在判断语气情绪' ? 'DeepSeek 判断中...' : 'DeepSeek 自动调好全部句子'}</button><button className="aiw-purple" type="button" onClick={() => void generateVoicePreview('selected')} disabled={!selectedSegment || !!aiBusy}>试听当前句</button><button className="aiw-purple" type="button" onClick={() => void generateVoicePreview('all')} disabled={!segments.length || !!aiBusy}>生成试听配音</button><button className="aiw-muted" type="button" onClick={() => void saveVoiceVersion()} disabled={!script.trim()}>保存口播版本</button></div>
-          {voicePreview?.file_url && <div className="aiw-audioPreview"><audio controls src={voicePreview.file_url} /><span>{voicePreview.mode === 'selected' ? '当前句试听' : '整段试听'} · {voicePreview.duration_seconds ? `${Number(voicePreview.duration_seconds).toFixed(1)}s` : '已生成'}</span></div>}
-          {voiceVersionResult && <div className="aiw-info">口播版本已保存：{voiceVersionResult.version_id || voiceVersionResult.id || '已保存'}</div>}
+          <div className="aiw-actions"><button className="aiw-primary" type="button" disabled={!!aiBusy} onClick={autoTuneVoiceAll}>{aiBusy === 'DeepSeek 正在判断语气情绪' ? 'DeepSeek 判断中...' : 'DeepSeek 自动调好全部句子'}</button></div>
           <div className="aiw-segmentPicker">
             {segments.map((segment) => (
               <button key={segment.id} className={selectedSegment?.id === segment.id ? 'active' : ''} onClick={() => setSelectedSegmentId(segment.id)}>
@@ -1898,7 +1893,7 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
           <div className="aiw-actions">
             <button className="aiw-muted" onClick={() => openWorkspaceTab('assets')}>去素材库选择 R2/真实素材</button>
             <button className="aiw-muted" onClick={() => openWorkspaceTab('digital')}>去数字人库选谁出镜</button>
-            <button type="button" className="aiw-primary" onClick={() => void runFlowAction('shots')}>DeepSeek 按口播重建镜头</button>
+            <button type="button" className="aiw-primary" onClick={() => void runFlowAction('shots')}>按文案重建镜头</button>
           </div>
           <div className="aiw-shotPicker">
             {shotPlan.map((shot) => (
@@ -1939,25 +1934,81 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
   }
 
   function renderStepFour() {
+    const reviewScore = Number(workflowReview?.overall_score || 0)
+    const mechanicalScore = Number(workflowReview?.mechanical?.score || 0)
+    const aiReviewScore = Number(workflowReview?.ai_review?.score || workflowReview?.doubao?.score || 0)
+    const coverCount = Number(workflowPackaging?.cover_count || workflowCover?.cover_count || workflowCoverImages.length || 0)
+    const pageCount = Number(workflowPackaging?.page_count || workflowXhs?.page_count || workflowXhsImages.length || 0)
+
     return (
       <div className="aiw-stepGrid three">
         <section className="aiw-stepCard">
           <h3>成片预览</h3>
           {videoUrl ? <video className="aiw-previewVideo" src={videoUrl} controls /> : <div className="aiw-videoPlaceholder"><b>🎬</b><span>点击生成后在这里预览</span></div>}
           <div className="aiw-actions"><button type="button" className="aiw-danger" onClick={() => void runFlowAction('video')} disabled={!!busy}>{busy || '生成完整 AI 视频'}</button>{videoUrl && <a className="aiw-linkButton" href={videoUrl} target="_blank" rel="noreferrer">打开成片</a>}<button className="aiw-muted" type="button" onClick={() => void recoverLatestDoneVideo(false)}>找回最新成片</button></div>
-          {videoUrl && <div className="aiw-finalActions"><button className="aiw-primary" type="button" onClick={() => void saveFinal('final')}>保存最终视频</button><button className="aiw-purple" type="button" onClick={() => void saveFinal('raw')}>保存 raw 分段素材</button><button className="aiw-danger" type="button" onClick={() => void saveFinal('discarded')}>废弃本次结果</button></div>}
-          {finalSaveResult && <div className="aiw-info">最终处理结果：{JSON.stringify(finalSaveResult)}</div>}
           {job?.subtitle_error && <div className="aiw-error">字幕烧录失败：{job.subtitle_error}</div>}
           {error && <div className="aiw-error">{error}</div>}
         </section>
         <section className="aiw-stepCard">
           <h3>生成状态</h3>
-          <div className="aiw-statusRows"><div><span>任务</span><b>{jobId || '-'}</b></div><div><span>阶段</span><b>{job?.stage || job?.status || 'ready'}</b></div><div><span>配音实际</span><b>{job?.audio_duration_seconds ? `${Number(job.audio_duration_seconds).toFixed(1)}s` : '生成后读取'}</b></div><div><span>动态角度</span><b>{job?.shot_count || 1}</b></div><div><span>R2 素材</span><b>{selectedAssets.length}</b></div><div><span>OpenClaw 线索</span><b>{leadCount}</b></div><div><span>字幕</span><b>{subtitleEnabled ? (job?.subtitled_video_url ? '已烧录' : job?.stage === 'subtitle_burn' ? '烧录中' : selectedSubtitleStyle?.name) : '未启用'}</b></div></div>
+          <div className="aiw-statusRows"><div><span>任务</span><b>{jobId || '-'}</b></div><div><span>阶段</span><b>{job?.stage || job?.status || 'ready'}</b></div><div><span>配音实际</span><b>{job?.audio_duration_seconds ? `${Number(job.audio_duration_seconds).toFixed(1)}s` : '生成后读取'}</b></div><div><span>动态角度</span><b>{job?.shot_count || 1}</b></div><div><span>R2 素材</span><b>{selectedAssets.length}</b></div><div><span>OpenClaw 线索</span><b>{leadCount}</b></div><div><span>字幕</span><b>{subtitleEnabled ? (job?.subtitled_video_url ? '已烧录' : job?.stage === 'subtitle_burn' ? '烧录中' : selectedSubtitleStyle?.name) : '未启用'}</b></div><div><span>审片</span><b>{workflowBusy || workflowActionText(workflowAction)}</b></div><div><span>发布包装</span><b>{coverCount || pageCount ? `${coverCount} 套封面 / ${pageCount} 页图文` : '审片通过后自动生成'}</b></div></div>
           <div className="aiw-miniProgress"><span style={{ width: `${Math.min(100, Number(job?.progress || (busy ? 65 : 0)))}%` }} /></div>
         </section>
         <aside className="aiw-stepCard">
           <h3>发布 / 获客承接</h3>
           <p>成片后不要自动私信。OpenClaw 负责评论区找目标客户、AI 评分、生成第一条初步消息，收集到人工待处理。</p>
+
+          {jobId && videoUrl && (
+            <>
+              <div className="aiw-statusRows">
+                <div><span>工作流</span><b>{workflowBusy || workflowActionText(workflowAction)}</b></div>
+                <div><span>机械质检</span><b>{mechanicalScore ? `${mechanicalScore} 分` : '等待结果'}</b></div>
+                <div><span>豆包审片</span><b>{aiReviewScore ? `${aiReviewScore} 分` : '等待结果'}</b></div>
+                <div><span>综合评分</span><b>{reviewScore ? `${reviewScore} 分` : '等待结果'}</b></div>
+              </div>
+
+              {workflowError && <div className="aiw-error">{workflowError}</div>}
+              {workflowReview?.summary && <div className="aiw-info">{workflowReview.summary}</div>}
+
+              <div className="aiw-actions vertical">
+                {workflowAction === 'run_review' && <button className="aiw-primary" type="button" disabled={!!workflowBusy} onClick={() => void runWorkflowAction('启动自动审片', `/api/video/workflow/${encodeURIComponent(jobId)}/run-review`, { source: 'old_ui_v10_40_2_manual_review' }, 360000)}>{workflowBusy || '启动机械质检 + 豆包审片'}</button>}
+
+                {workflowAction === 'human_review' && <>
+                  <button className="aiw-primary" type="button" disabled={!!workflowBusy} onClick={() => void runWorkflowAction('通过并生成发布素材', `/api/video/workflow/${encodeURIComponent(jobId)}/approve`, { reviewer: 'human_old_ui', title: topic, script_text: script }, 420000)}>{workflowBusy || '人工通过并自动生成封面 + 图文'}</button>
+                  <button className="aiw-muted" type="button" disabled={!!workflowBusy} onClick={() => void runWorkflowAction('覆盖审片误报', `/api/video/workflow/${encodeURIComponent(jobId)}/human-override`, { reviewer: 'human_old_ui', decision: 'approved', status: 'approved', note: '人工完整观看后确认自动审片提示为误报', reason: '人工完整观看后确认自动审片提示为误报' }, 420000)}>确认误报并通过</button>
+                  <button className="aiw-danger" type="button" disabled={!!workflowBusy} onClick={() => void runWorkflowAction('人工驳回', `/api/video/workflow/${encodeURIComponent(jobId)}/reject`, { reviewer: 'human_old_ui', reason: '人工驳回，返回文案或镜头修改' }, 180000)}>驳回并返回修改</button>
+                </>}
+
+                {workflowAction === 'return_to_edit' && <>
+                  <button className="aiw-muted" type="button" onClick={() => setStep(2)}>返回文案 / 配音修改</button>
+                  <button className="aiw-muted" type="button" onClick={() => setStep(3)}>返回镜头 / 素材修改</button>
+                  <button className="aiw-primary" type="button" disabled={!!workflowBusy} onClick={() => void runWorkflowAction('重新审片', `/api/video/workflow/${encodeURIComponent(jobId)}/run-review`, { force: true, source: 'old_ui_retry_after_fix' }, 360000)}>{workflowBusy || '修复后重新审片'}</button>
+                </>}
+
+                {workflowAction === 'backfill_packaging' && <button className="aiw-primary" type="button" disabled={!!workflowBusy} onClick={() => void runWorkflowAction('补齐发布包装', `/api/video/workflow/${encodeURIComponent(jobId)}/backfill-packaging`, { title: topic, script_text: script }, 420000)}>{workflowBusy || '生成 3 套封面 + 7 页图文'}</button>}
+
+                {workflowAction === 'build_final_delivery' && <button className="aiw-primary" type="button" disabled={!!workflowBusy} onClick={() => void runWorkflowAction('生成最终总包', `/api/video/workflow/${encodeURIComponent(jobId)}/finalize`, {}, 420000)}>{workflowBusy || '生成最终发布总包'}</button>}
+
+                {workflowDelivery?.download_zip_url && <a className="aiw-linkButton" href={workflowDelivery.download_zip_url} target="_blank" rel="noreferrer">下载最终发布总包</a>}
+                {workflowCover?.download_zip_url && <a className="aiw-linkButton" href={workflowCover.download_zip_url} target="_blank" rel="noreferrer">下载 3 套封面</a>}
+                {workflowXhs?.download_zip_url && <a className="aiw-linkButton" href={workflowXhs.download_zip_url} target="_blank" rel="noreferrer">下载 7 页图文</a>}
+              </div>
+
+              {workflowAction === 'select_cover' && workflowCoverImages.length > 0 && (
+                <div className="aiw-miniList">
+                  {workflowCoverImages.slice(0, 3).map((item: any, index: number) => (
+                    <div key={item?.url || index}>
+                      {item?.url && <img src={item.url} alt={`封面 ${index + 1}`} style={{ width: 58, height: 86, objectFit: 'cover', borderRadius: 8, marginRight: 8, verticalAlign: 'middle' }} />}
+                      <button className="aiw-muted" type="button" disabled={!!workflowBusy} onClick={() => void runWorkflowAction('选择主封面', `/api/video/workflow/${encodeURIComponent(jobId)}/select-cover`, { index, url: item?.url, selected_by: 'human_old_ui' }, 180000)}>{Number(workflowSelection?.index) === index ? `已选封面 ${index + 1}` : `选择封面 ${index + 1}`}</button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {(coverCount > 0 || pageCount > 0) && <div className="aiw-info">当前任务已关联：{coverCount} 套封面、{pageCount} 页小红书图文。所有产物继续绑定任务 {jobId}。</div>}
+            </>
+          )}
+
           <div className="aiw-actions vertical"><button className="aiw-muted" onClick={() => openWorkspaceTab('leads')}>去 OpenClaw 人工处理</button><button className="aiw-muted" onClick={() => openWorkspaceTab('collect')}>继续采集同行</button><button className="aiw-muted" onClick={() => openWorkspaceTab('assets')}>补充 R2 素材</button></div>
         </aside>
       </div>

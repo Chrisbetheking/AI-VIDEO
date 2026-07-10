@@ -1,26 +1,9 @@
-const rawEnvApiBase = (import.meta.env.VITE_API_BASE || '').trim()
+const envApiBase = (import.meta.env.VITE_API_BASE || '').replace(/\/$/, '')
+const defaultApiBase = 'https://ai-video.47-76-143-158.sslip.io'
 const isLocal =
   typeof window !== 'undefined' && /^(localhost|127\.0\.0\.1)$/i.test(window.location.hostname)
 
-function normalizeBase(value: string): string {
-  const clean = String(value || '').trim()
-  if (!clean || clean === '/' || clean.toLowerCase() === 'same-origin') return ''
-  return clean.replace(/\/+$/, '')
-}
-
-// 线上必须强制走同源 /api，不能读取 Cloudflare 的 VITE_API_BASE。
-// 之前 Cloudflare 环境变量里有 https://ai-video.47-76-143-158.sslip.io，导致浏览器直连 ECS，触发 CORS。
-// 本地开发才允许使用 VITE_API_BASE 或 localhost:8000。
-export const API_BASE = isLocal ? normalizeBase(rawEnvApiBase || 'http://localhost:8000') : ''
-
-export function buildApiUrl(path: string): string {
-  const raw = String(path || '').trim()
-  if (/^https?:\/\//i.test(raw)) return raw
-  const normalized = raw.startsWith('/') ? raw : `/${raw}`
-  if (!API_BASE) return normalized
-  return `${API_BASE}${normalized}`
-}
-
+export const API_BASE = envApiBase || (isLocal ? 'http://localhost:8000' : defaultApiBase)
 export const TOKEN_KEY = 'ai_video_api_token'
 export const BACKEND_MAX_FULL_AI_SHOTS = 50
 
@@ -164,7 +147,7 @@ function authHeaders(extra?: HeadersInit): HeadersInit {
 }
 
 export async function apiGet(path: string, timeoutMs = 120000): Promise<any> {
-  const url = buildApiUrl(path)
+  const url = `${API_BASE}${path}`
   const controller = new AbortController()
   const timer = window.setTimeout(() => controller.abort(), timeoutMs)
   try {
@@ -182,7 +165,7 @@ export async function apiGet(path: string, timeoutMs = 120000): Promise<any> {
 }
 
 export async function apiPost(path: string, body: unknown, timeoutMs = 240000): Promise<any> {
-  const url = buildApiUrl(path)
+  const url = `${API_BASE}${path}`
   const controller = new AbortController()
   const timer = window.setTimeout(() => controller.abort(), timeoutMs)
   try {
