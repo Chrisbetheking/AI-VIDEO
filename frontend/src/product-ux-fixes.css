@@ -1543,3 +1543,632 @@
 @media (max-width: 1100px) {
   .aiw-contentBrain .aiw-brainLoop, .aiw-brainGrid { grid-template-columns: 1fr; }
 }
+
+/* ===== V10.40.4 content layout + cover final video ===== */
+.aiw-consoleRoot {
+  grid-template-columns: 248px minmax(0, 1fr);
+}
+
+.aiw-sideNav {
+  padding: 28px 18px;
+}
+
+.aiw-brand {
+  margin-bottom: 38px;
+}
+
+.aiw-sideNav nav {
+  gap: 7px;
+}
+
+.aiw-sideNav nav button {
+  padding: 14px 15px;
+  border-radius: 16px;
+}
+
+.aiw-sideCard {
+  margin-top: 38px;
+  padding: 16px;
+}
+
+.aiw-consoleMain {
+  width: 100%;
+  max-width: 1820px;
+  margin: 0 auto;
+  padding: 28px 30px 52px;
+}
+
+.aiw-consoleHeader {
+  margin-bottom: 18px;
+}
+
+.aiw-consoleHeader h1 {
+  font-size: clamp(30px, 3vw, 38px);
+}
+
+.aiw-card,
+.aiw-panel {
+  padding: 20px;
+  border-radius: 22px;
+}
+
+.aiw-hero {
+  padding: 20px 22px;
+  margin-bottom: 16px;
+}
+
+.aiw-hero h2 {
+  font-size: clamp(26px, 2.6vw, 30px);
+}
+
+.aiw-form {
+  gap: 12px;
+  margin: 14px 0;
+}
+
+.aiw-twoCol {
+  grid-template-columns:
+    minmax(0, 1fr)
+    minmax(360px, 0.92fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.aiw-metrics {
+  gap: 12px;
+  margin: 14px 0;
+}
+
+.aiw-metrics div {
+  padding: 16px;
+  border-radius: 17px;
+}
+
+.aiw-metrics b {
+  font-size: 28px;
+}
+
+.aiw-heatGrid {
+  grid-template-columns:
+    repeat(4, minmax(230px, 1fr));
+  gap: 14px;
+  max-height: none;
+  overflow: visible;
+}
+
+.aiw-heatCard {
+  min-height: 350px;
+  grid-template-rows:
+    auto
+    auto
+    minmax(0, 1fr)
+    auto;
+  align-content: start;
+  padding: 16px;
+}
+
+.aiw-heatCard strong {
+  white-space: normal;
+  min-height: 46px;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  line-height: 1.45;
+}
+
+.aiw-heatSummary {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 9;
+  overflow: hidden;
+  margin: 0;
+  color: #596579;
+  line-height: 1.7;
+}
+
+.aiw-heatCard .aiw-actions.vertical {
+  margin-top: auto;
+}
+
+.aiw-stepWizard {
+  padding: 20px;
+  padding-bottom: 84px;
+  min-height: calc(100vh - 150px);
+}
+
+.aiw-stepHero {
+  padding: 20px 22px;
+}
+
+.aiw-stepHero .aiw-eyebrow {
+  letter-spacing: 0.13em;
+}
+
+.aiw-stepNav {
+  gap: 10px;
+  margin: 15px 0 18px;
+}
+
+.aiw-stepNav button {
+  min-height: 88px;
+  padding: 14px;
+  border-radius: 18px;
+}
+
+.aiw-stepNav button em {
+  line-height: 1.35;
+}
+
+.aiw-stepBody {
+  min-height: auto;
+}
+
+.aiw-stepCard {
+  padding: 20px;
+  border-radius: 22px;
+}
+
+.aiw-stepFourGrid {
+  grid-template-columns:
+    minmax(300px, 0.86fr)
+    minmax(300px, 0.8fr)
+    minmax(430px, 1.24fr);
+  align-items: start;
+}
+
+.aiw-stepFourPreviewCard,
+.aiw-stepFourStatusCard,
+.aiw-stepFourPublishCard {
+  min-height: 0;
+}
+
+.aiw-sectionTitleRow {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 14px;
+}
+
+.aiw-sectionTitleRow h3 {
+  margin: 0 0 5px;
+}
+
+.aiw-sectionTitleRow > div > span {
+  display: block;
+  color: #8b95a7;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.aiw-statusBadge {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 32px;
+  max-width: 160px;
+  padding: 7px 11px;
+  border-radius: 999px;
+  background: #f3e8ff;
+  color: #6d28d9;
+  font-size: 12px;
+  font-weight: 950;
+  text-align: center;
+  line-height: 1.25;
+}
+
+.aiw-statusBadge.success {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.aiw-stepFourPreviewCard .aiw-previewVideo {
+  width: min(100%, 310px);
+  max-height: 550px;
+  margin: 0 auto;
+}
+
+.aiw-stepFourPreviewCard .aiw-videoPlaceholder {
+  min-height: 410px;
+}
+
+.aiw-previewMeta {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.aiw-previewMeta div {
+  padding: 11px 12px;
+  border: 1px solid #ede9fe;
+  border-radius: 14px;
+  background: #fbfaff;
+}
+
+.aiw-previewMeta span,
+.aiw-previewMeta b {
+  display: block;
+}
+
+.aiw-previewMeta span {
+  margin-bottom: 4px;
+  color: #8b95a7;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.aiw-previewMeta b {
+  color: #374151;
+  font-size: 13px;
+}
+
+.aiw-actionGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 9px;
+  margin-top: 14px;
+}
+
+.aiw-actionGrid .aiw-danger {
+  grid-column: 1 / -1;
+}
+
+.aiw-actionGrid > * {
+  width: 100%;
+  min-width: 0;
+}
+
+.aiw-workflowMetrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 9px;
+  margin: 14px 0;
+}
+
+.aiw-workflowMetrics div {
+  padding: 13px 9px;
+  border: 1px solid #e9d5ff;
+  border-radius: 15px;
+  background: linear-gradient(180deg, #fff, #fbfaff);
+  text-align: center;
+}
+
+.aiw-workflowMetrics b,
+.aiw-workflowMetrics span {
+  display: block;
+}
+
+.aiw-workflowMetrics b {
+  color: #6d28d9;
+  font-size: 24px;
+}
+
+.aiw-workflowMetrics span {
+  margin-top: 4px;
+  color: #8b95a7;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.aiw-statusRowsCompact {
+  gap: 0;
+}
+
+.aiw-statusRowsCompact div {
+  padding: 10px 0;
+}
+
+.aiw-statusRowsCompact b {
+  max-width: 62%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-align: right;
+  line-height: 1.45;
+}
+
+.aiw-pipelineHint {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin: 12px 0 18px;
+}
+
+.aiw-pipelineHint div {
+  display: grid;
+  gap: 6px;
+  place-items: center;
+  min-height: 86px;
+  padding: 10px 6px;
+  border: 1px dashed #c4b5fd;
+  border-radius: 15px;
+  background: #fbfaff;
+  text-align: center;
+}
+
+.aiw-pipelineHint b {
+  display: grid;
+  place-items: center;
+  width: 27px;
+  height: 27px;
+  border-radius: 999px;
+  background: #7c3aed;
+  color: #fff;
+  font-size: 12px;
+}
+
+.aiw-pipelineHint span {
+  color: #6b7280;
+  font-size: 11px;
+  font-weight: 900;
+  line-height: 1.35;
+}
+
+.aiw-workflowActions {
+  margin: 12px 0;
+}
+
+.aiw-subsectionTitle {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.aiw-subsectionTitle b {
+  color: #111827;
+}
+
+.aiw-subsectionTitle span {
+  color: #8b95a7;
+  font-size: 11px;
+}
+
+.aiw-coverSection {
+  margin: 16px 0;
+}
+
+.aiw-coverChoiceGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.aiw-coverChoice {
+  display: grid;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid #e9d5ff;
+  border-radius: 16px;
+  background: #fff;
+  cursor: pointer;
+}
+
+.aiw-coverChoice:hover,
+.aiw-coverChoice.selected {
+  border-color: #7c3aed;
+  box-shadow: 0 10px 24px rgba(124, 58, 237, 0.14);
+}
+
+.aiw-coverChoice img {
+  width: 100%;
+  aspect-ratio: 9 / 16;
+  object-fit: cover;
+  border-radius: 11px;
+  background: #f3e8ff;
+}
+
+.aiw-coverChoice span {
+  color: #6d28d9;
+  font-size: 12px;
+  font-weight: 950;
+}
+
+.aiw-coverComposeCard {
+  display: grid;
+  grid-template-columns: 112px minmax(0, 1fr);
+  gap: 14px;
+  align-items: center;
+  margin: 16px 0;
+  padding: 14px;
+  border: 1px solid #c4b5fd;
+  border-radius: 18px;
+  background: linear-gradient(135deg, #faf5ff, #fff);
+}
+
+.aiw-coverComposeCard img {
+  width: 112px;
+  aspect-ratio: 9 / 16;
+  object-fit: cover;
+  border-radius: 13px;
+}
+
+.aiw-coverComposeCard b {
+  display: block;
+  margin-bottom: 6px;
+  color: #5b21b6;
+}
+
+.aiw-coverComposeCard p {
+  margin-bottom: 12px;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.aiw-successPanel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 14px 0;
+  padding: 14px;
+  border: 1px solid #bbf7d0;
+  border-radius: 17px;
+  background: #f0fdf4;
+}
+
+.aiw-successPanel b,
+.aiw-successPanel span {
+  display: block;
+}
+
+.aiw-successPanel b {
+  color: #166534;
+}
+
+.aiw-successPanel span {
+  margin-top: 4px;
+  color: #4b7d5c;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.aiw-fullButton {
+  width: 100%;
+  margin: 10px 0;
+}
+
+.aiw-deliveryLinkGrid,
+.aiw-quickLinks {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 9px;
+  margin-top: 12px;
+}
+
+.aiw-deliveryLinkGrid > *,
+.aiw-quickLinks > * {
+  width: 100%;
+  min-width: 0;
+}
+
+.aiw-packageSummary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.aiw-packageSummary span {
+  padding: 10px 8px;
+  border-radius: 13px;
+  background: #f8fafc;
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 900;
+  text-align: center;
+}
+
+.aiw-packageSummary b {
+  color: #6d28d9;
+  font-size: 16px;
+}
+
+@media (max-width: 1500px) {
+  .aiw-heatGrid {
+    grid-template-columns:
+      repeat(3, minmax(230px, 1fr));
+  }
+
+  .aiw-stepFourGrid {
+    grid-template-columns:
+      minmax(300px, 0.9fr)
+      minmax(360px, 1.1fr);
+  }
+
+  .aiw-stepFourPublishCard {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 1180px) {
+  .aiw-consoleRoot {
+    grid-template-columns: 220px minmax(0, 1fr);
+  }
+
+  .aiw-consoleMain {
+    padding: 24px 20px 44px;
+  }
+
+  .aiw-heatGrid {
+    grid-template-columns:
+      repeat(2, minmax(240px, 1fr));
+  }
+
+  .aiw-stepNav {
+    grid-template-columns:
+      repeat(2, minmax(0, 1fr));
+  }
+
+  .aiw-stepFourGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .aiw-stepFourPublishCard {
+    grid-column: auto;
+  }
+}
+
+@media (max-width: 760px) {
+  .aiw-consoleRoot {
+    grid-template-columns: 1fr;
+  }
+
+  .aiw-sideNav {
+    position: static;
+    min-height: auto;
+  }
+
+  .aiw-sideNav nav {
+    grid-template-columns:
+      repeat(2, minmax(0, 1fr));
+  }
+
+  .aiw-consoleMain {
+    padding: 16px 10px 38px;
+  }
+
+  .aiw-stepWizard {
+    padding: 12px;
+    padding-bottom: 78px;
+  }
+
+  .aiw-stepNav,
+  .aiw-heatGrid,
+  .aiw-twoCol,
+  .aiw-deliveryLinkGrid,
+  .aiw-quickLinks {
+    grid-template-columns: 1fr;
+  }
+
+  .aiw-previewMeta,
+  .aiw-actionGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .aiw-actionGrid .aiw-danger {
+    grid-column: auto;
+  }
+
+  .aiw-pipelineHint {
+    grid-template-columns:
+      repeat(2, minmax(0, 1fr));
+  }
+
+  .aiw-coverComposeCard {
+    grid-template-columns: 86px minmax(0, 1fr);
+  }
+
+  .aiw-coverComposeCard img {
+    width: 86px;
+  }
+
+  .aiw-successPanel {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}
+/* ===== /V10.40.4 content layout + cover final video ===== */

@@ -699,6 +699,7 @@ function workflowActionText(action?: string) {
     return_to_edit: '审片未通过，返回修改',
     backfill_packaging: '等待生成封面和图文',
     select_cover: '请选择主封面',
+    compose_cover_video: '等待封面合成最终视频',
     build_final_delivery: '等待生成最终总包',
     ready_to_publish: '发布素材已齐全',
   }
@@ -811,7 +812,19 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
   const workflowCoverImages = asArray(workflowCover?.images)
   const workflowXhsImages = asArray(workflowXhs?.images)
   const workflowSelection = workflow?.selection && typeof workflow.selection === 'object' ? workflow.selection : {}
+  const workflowCoverVideo =
+    workflow?.cover_video && typeof workflow.cover_video === 'object'
+      ? workflow.cover_video
+      : workflowSelection?.cover_video && typeof workflowSelection.cover_video === 'object'
+        ? workflowSelection.cover_video
+        : {}
   const workflowDelivery = workflow?.delivery && typeof workflow.delivery === 'object' ? workflow.delivery : {}
+  const finalPreviewUrl = String(
+    workflowDelivery?.final_video_url ||
+    workflowCoverVideo?.url ||
+    videoUrl ||
+    '',
+  )
 
   useEffect(() => {
     let alive = true
@@ -1987,87 +2000,725 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
   }
 
   function renderStepFour() {
-    const reviewScore = Number(workflowReview?.overall_score || 0)
-    const mechanicalScore = Number(workflowReview?.mechanical?.score || 0)
-    const aiReviewScore = Number(workflowReview?.ai_review?.score || workflowReview?.doubao?.score || 0)
-    const coverCount = Number(workflowPackaging?.cover_count || workflowCover?.cover_count || workflowCoverImages.length || 0)
-    const pageCount = Number(workflowPackaging?.page_count || workflowXhs?.page_count || workflowXhsImages.length || 0)
+    const reviewScore = Number(
+      workflowReview?.overall_score || 0,
+    )
+    const mechanicalScore = Number(
+      workflowReview?.mechanical?.score || 0,
+    )
+    const aiReviewScore = Number(
+      workflowReview?.ai_review?.score ||
+      workflowReview?.doubao?.score ||
+      0,
+    )
+    const coverCount = Number(
+      workflowPackaging?.cover_count ||
+      workflowCover?.cover_count ||
+      workflowCoverImages.length ||
+      0,
+    )
+    const pageCount = Number(
+      workflowPackaging?.page_count ||
+      workflowXhs?.page_count ||
+      workflowXhsImages.length ||
+      0,
+    )
+    const selectedCoverIndex =
+      workflowSelection?.index !== undefined
+        ? Number(workflowSelection.index)
+        : -1
+    const selectedCover =
+      workflowCoverImages[selectedCoverIndex] ||
+      workflowCoverImages[0] ||
+      null
+    const coverVideoReady = Boolean(
+      workflowCoverVideo?.url,
+    )
+    const workflowProgress = Math.min(
+      100,
+      Number(
+        job?.progress ||
+        (workflowAction === 'ready_to_publish'
+          ? 100
+          : coverVideoReady
+            ? 94
+            : coverCount && pageCount
+              ? 84
+              : reviewScore
+                ? 72
+                : busy
+                  ? 55
+                  : 0),
+      ),
+    )
 
     return (
-      <div className="aiw-stepGrid three">
-        <section className="aiw-stepCard">
-          <h3>成片预览</h3>
-          {videoUrl ? <video className="aiw-previewVideo" src={videoUrl} controls /> : <div className="aiw-videoPlaceholder"><b>🎬</b><span>点击生成后在这里预览</span></div>}
-          <div className="aiw-actions"><button type="button" className="aiw-danger" onClick={() => void runFlowAction('video')} disabled={!!busy}>{busy || '生成完整 AI 视频'}</button>{videoUrl && <a className="aiw-linkButton" href={videoUrl} target="_blank" rel="noreferrer">打开成片</a>}<button className="aiw-muted" type="button" onClick={() => void recoverLatestDoneVideo(false)}>找回最新成片</button></div>
-          {job?.subtitle_error && <div className="aiw-error">字幕烧录失败：{job.subtitle_error}</div>}
-          {error && <div className="aiw-error">{error}</div>}
+      <div className="aiw-stepGrid aiw-stepFourGrid">
+        <section className="aiw-stepCard aiw-stepFourPreviewCard">
+          <div className="aiw-sectionTitleRow">
+            <div>
+              <h3>成片预览</h3>
+              <span>
+                {coverVideoReady
+                  ? '最终版已加入 1 秒主封面'
+                  : '先生成成片，再完成审片与封面'}
+              </span>
+            </div>
+            {coverVideoReady && (
+              <span className="aiw-statusBadge success">
+                已含封面
+              </span>
+            )}
+          </div>
+
+          {finalPreviewUrl ? (
+            <video
+              className="aiw-previewVideo"
+              src={finalPreviewUrl}
+              controls
+              playsInline
+            />
+          ) : (
+            <div className="aiw-videoPlaceholder">
+              <b>🎬</b>
+              <span>生成后在这里预览 9:16 成片</span>
+            </div>
+          )}
+
+          <div className="aiw-previewMeta">
+            <div>
+              <span>当前版本</span>
+              <b>
+                {coverVideoReady
+                  ? '封面合成最终版'
+                  : videoUrl
+                    ? '审片原始成片'
+                    : '尚未生成'}
+              </b>
+            </div>
+            <div>
+              <span>发布尺寸</span>
+              <b>9:16 竖屏</b>
+            </div>
+          </div>
+
+          <div className="aiw-actionGrid">
+            <button
+              type="button"
+              className="aiw-danger"
+              onClick={() => void runFlowAction('video')}
+              disabled={Boolean(busy)}
+            >
+              {busy || (videoUrl ? '重新生成 AI 视频' : '生成完整 AI 视频')}
+            </button>
+
+            {finalPreviewUrl && (
+              <a
+                className="aiw-linkButton"
+                href={finalPreviewUrl}
+                target="_blank"
+                rel="noreferrer"
+              >
+                打开当前成片
+              </a>
+            )}
+
+            <button
+              className="aiw-muted"
+              type="button"
+              onClick={() =>
+                void recoverLatestDoneVideo(false)
+              }
+            >
+              找回最新成片
+            </button>
+          </div>
+
+          {job?.subtitle_error && (
+            <div className="aiw-error">
+              字幕烧录失败：{job.subtitle_error}
+            </div>
+          )}
+          {error && (
+            <div className="aiw-error">{error}</div>
+          )}
         </section>
-        <section className="aiw-stepCard">
-          <h3>生成状态</h3>
-          <div className="aiw-statusRows"><div><span>任务</span><b>{jobId || '-'}</b></div><div><span>阶段</span><b>{job?.stage || job?.status || 'ready'}</b></div><div><span>配音实际</span><b>{job?.audio_duration_seconds ? `${Number(job.audio_duration_seconds).toFixed(1)}s` : '生成后读取'}</b></div><div><span>动态角度</span><b>{job?.shot_count || 1}</b></div><div><span>R2 素材</span><b>{selectedAssets.length}</b></div><div><span>OpenClaw 线索</span><b>{leadCount}</b></div><div><span>字幕</span><b>{subtitleEnabled ? (job?.subtitled_video_url ? '已烧录' : job?.stage === 'subtitle_burn' ? '烧录中' : selectedSubtitleStyle?.name) : '未启用'}</b></div><div><span>审片</span><b>{workflowBusy || workflowActionText(workflowAction)}</b></div><div><span>发布包装</span><b>{coverCount || pageCount ? `${coverCount} 套封面 / ${pageCount} 页图文` : '审片通过后自动生成'}</b></div></div>
-          <div className="aiw-miniProgress"><span style={{ width: `${Math.min(100, Number(job?.progress || (busy ? 65 : 0)))}%` }} /></div>
+
+        <section className="aiw-stepCard aiw-stepFourStatusCard">
+          <div className="aiw-sectionTitleRow">
+            <div>
+              <h3>任务与质量状态</h3>
+              <span>
+                视频、审片、包装和交付统一绑定当前任务
+              </span>
+            </div>
+            <span className="aiw-statusBadge">
+              {workflowProgress}%
+            </span>
+          </div>
+
+          <div className="aiw-miniProgress">
+            <span
+              style={{
+                width: `${workflowProgress}%`,
+              }}
+            />
+          </div>
+
+          <div className="aiw-workflowMetrics">
+            <div>
+              <b>{mechanicalScore || '-'}</b>
+              <span>机械质检</span>
+            </div>
+            <div>
+              <b>{aiReviewScore || '-'}</b>
+              <span>豆包审片</span>
+            </div>
+            <div>
+              <b>{reviewScore || '-'}</b>
+              <span>综合评分</span>
+            </div>
+          </div>
+
+          <div className="aiw-statusRows aiw-statusRowsCompact">
+            <div>
+              <span>任务 ID</span>
+              <b title={jobId || ''}>{jobId || '-'}</b>
+            </div>
+            <div>
+              <span>当前阶段</span>
+              <b>
+                {job?.stage ||
+                job?.status ||
+                'ready'}
+              </b>
+            </div>
+            <div>
+              <span>配音时长</span>
+              <b>
+                {job?.audio_duration_seconds
+                  ? `${Number(
+                      job.audio_duration_seconds,
+                    ).toFixed(1)}s`
+                  : '生成后读取'}
+              </b>
+            </div>
+            <div>
+              <span>镜头 / R2</span>
+              <b>
+                {job?.shot_count || 1} 个镜头 /{' '}
+                {selectedAssets.length} 个素材
+              </b>
+            </div>
+            <div>
+              <span>字幕</span>
+              <b>
+                {subtitleEnabled
+                  ? job?.subtitled_video_url
+                    ? '已烧录'
+                    : job?.stage === 'subtitle_burn'
+                      ? '烧录中'
+                      : selectedSubtitleStyle?.name
+                  : '未启用'}
+              </b>
+            </div>
+            <div>
+              <span>发布包装</span>
+              <b>
+                {coverCount || pageCount
+                  ? `${coverCount} 套封面 / ${pageCount} 页图文`
+                  : '审片通过后自动生成'}
+              </b>
+            </div>
+            <div>
+              <span>封面入片</span>
+              <b>
+                {coverVideoReady
+                  ? '已合成到最终视频'
+                  : '选择主封面后执行'}
+              </b>
+            </div>
+            <div>
+              <span>OpenClaw</span>
+              <b>{leadCount} 条待处理线索</b>
+            </div>
+          </div>
         </section>
-        <aside className="aiw-stepCard">
-          <h3>发布 / 获客承接</h3>
-          <p>成片后不要自动私信。OpenClaw 负责评论区找目标客户、AI 评分、生成第一条初步消息，收集到人工待处理。</p>
-          {!jobId && <div className="aiw-info">生成成片后会自动启动机械质检和豆包审片；人工确认通过后自动生成 3 套封面、7 页小红书图文和最终总包。</div>}
+
+        <aside className="aiw-stepCard aiw-stepFourPublishCard">
+          <div className="aiw-sectionTitleRow">
+            <div>
+              <h3>审片与发布交付</h3>
+              <span>
+                审片通过后完成封面、图文、封面入片和总包
+              </span>
+            </div>
+            <span
+              className={
+                workflowAction === 'ready_to_publish'
+                  ? 'aiw-statusBadge success'
+                  : 'aiw-statusBadge'
+              }
+            >
+              {workflowActionText(workflowAction)}
+            </span>
+          </div>
+
+          {!jobId && (
+            <div className="aiw-pipelineHint">
+              <div>
+                <b>1</b>
+                <span>生成成片</span>
+              </div>
+              <div>
+                <b>2</b>
+                <span>自动审片</span>
+              </div>
+              <div>
+                <b>3</b>
+                <span>封面与图文</span>
+              </div>
+              <div>
+                <b>4</b>
+                <span>封面入片与总包</span>
+              </div>
+            </div>
+          )}
 
           {jobId && videoUrl && (
             <>
-              <div className="aiw-statusRows">
-                <div><span>工作流</span><b>{workflowBusy || workflowActionText(workflowAction)}</b></div>
-                <div><span>机械质检</span><b>{mechanicalScore ? `${mechanicalScore} 分` : '等待结果'}</b></div>
-                <div><span>豆包审片</span><b>{aiReviewScore ? `${aiReviewScore} 分` : '等待结果'}</b></div>
-                <div><span>综合评分</span><b>{reviewScore ? `${reviewScore} 分` : '等待结果'}</b></div>
-              </div>
-
-              {workflowError && <div className="aiw-error">{workflowError}</div>}
-              {workflowReview?.summary && <div className="aiw-info">{workflowReview.summary}</div>}
-
-              <div className="aiw-actions vertical">
-                {workflowAction === 'run_review' && <button className="aiw-primary" type="button" disabled={!!workflowBusy} onClick={() => void runWorkflowAction('启动自动审片', `/api/video/workflow/${encodeURIComponent(jobId)}/run-review`, { source: 'old_ui_v10_40_2_manual_review' }, 360000)}>{workflowBusy || '启动机械质检 + 豆包审片'}</button>}
-
-                {workflowAction === 'human_review' && <>
-                  <button className="aiw-primary" type="button" disabled={!!workflowBusy} onClick={() => void runWorkflowAction('通过并生成发布素材', `/api/video/workflow/${encodeURIComponent(jobId)}/approve`, { reviewer: 'human_old_ui', title: topic, script_text: script }, 420000)}>{workflowBusy || '人工通过并自动生成封面 + 图文'}</button>
-                  <button className="aiw-muted" type="button" disabled={!!workflowBusy} onClick={() => void runWorkflowAction('覆盖审片误报', `/api/video/workflow/${encodeURIComponent(jobId)}/human-override`, { reviewer: 'human_old_ui', decision: 'approved', status: 'approved', note: '人工完整观看后确认自动审片提示为误报', reason: '人工完整观看后确认自动审片提示为误报' }, 420000)}>确认误报并通过</button>
-                  <button className="aiw-danger" type="button" disabled={!!workflowBusy} onClick={() => void runWorkflowAction('人工驳回', `/api/video/workflow/${encodeURIComponent(jobId)}/reject`, { reviewer: 'human_old_ui', reason: '人工驳回，返回文案或镜头修改' }, 180000)}>驳回并返回修改</button>
-                </>}
-
-                {workflowAction === 'return_to_edit' && <>
-                  <button className="aiw-muted" type="button" onClick={() => setStep(2)}>返回文案 / 配音修改</button>
-                  <button className="aiw-muted" type="button" onClick={() => setStep(3)}>返回镜头 / 素材修改</button>
-                  <button className="aiw-primary" type="button" disabled={!!workflowBusy} onClick={() => void runWorkflowAction('重新审片', `/api/video/workflow/${encodeURIComponent(jobId)}/run-review`, { force: true, source: 'old_ui_retry_after_fix' }, 360000)}>{workflowBusy || '修复后重新审片'}</button>
-                </>}
-
-                {workflowAction === 'backfill_packaging' && <button className="aiw-primary" type="button" disabled={!!workflowBusy} onClick={() => void runWorkflowAction('补齐发布包装', `/api/video/workflow/${encodeURIComponent(jobId)}/backfill-packaging`, { title: topic, script_text: script }, 420000)}>{workflowBusy || '生成 3 套封面 + 7 页图文'}</button>}
-
-                {workflowAction === 'build_final_delivery' && <button className="aiw-primary" type="button" disabled={!!workflowBusy} onClick={() => void runWorkflowAction('生成最终总包', `/api/video/workflow/${encodeURIComponent(jobId)}/finalize`, {}, 420000)}>{workflowBusy || '生成最终发布总包'}</button>}
-
-                {workflowDelivery?.download_zip_url && <a className="aiw-linkButton" href={workflowDelivery.download_zip_url} target="_blank" rel="noreferrer">下载最终发布总包</a>}
-                {workflowCover?.download_zip_url && <a className="aiw-linkButton" href={workflowCover.download_zip_url} target="_blank" rel="noreferrer">下载 3 套封面</a>}
-                {workflowXhs?.download_zip_url && <a className="aiw-linkButton" href={workflowXhs.download_zip_url} target="_blank" rel="noreferrer">下载 7 页图文</a>}
-              </div>
-
-              {workflowAction === 'select_cover' && workflowCoverImages.length > 0 && (
-                <div className="aiw-miniList">
-                  {workflowCoverImages.slice(0, 3).map((item: any, index: number) => (
-                    <div key={item?.url || index}>
-                      {item?.url && <img src={item.url} alt={`封面 ${index + 1}`} style={{ width: 58, height: 86, objectFit: 'cover', borderRadius: 8, marginRight: 8, verticalAlign: 'middle' }} />}
-                      <button className="aiw-muted" type="button" disabled={!!workflowBusy} onClick={() => void runWorkflowAction('选择主封面', `/api/video/workflow/${encodeURIComponent(jobId)}/select-cover`, { index, url: item?.url, selected_by: 'human_old_ui' }, 180000)}>{Number(workflowSelection?.index) === index ? `已选封面 ${index + 1}` : `选择封面 ${index + 1}`}</button>
-                    </div>
-                  ))}
+              {workflowError && (
+                <div className="aiw-error">
+                  {workflowError}
+                </div>
+              )}
+              {workflowReview?.summary && (
+                <div className="aiw-info">
+                  {workflowReview.summary}
                 </div>
               )}
 
-              {(coverCount > 0 || pageCount > 0) && <div className="aiw-info">当前任务已关联：{coverCount} 套封面、{pageCount} 页小红书图文。所有产物继续绑定任务 {jobId}。</div>}
+              <div className="aiw-actions vertical aiw-workflowActions">
+                {workflowAction === 'run_review' && (
+                  <button
+                    className="aiw-primary"
+                    type="button"
+                    disabled={Boolean(workflowBusy)}
+                    onClick={() =>
+                      void runWorkflowAction(
+                        '启动自动审片',
+                        `/api/video/workflow/${encodeURIComponent(
+                          jobId,
+                        )}/run-review`,
+                        {
+                          source:
+                            'old_ui_v10_40_4_manual_review',
+                        },
+                        360000,
+                      )
+                    }
+                  >
+                    {workflowBusy ||
+                      '启动机械质检 + 豆包审片'}
+                  </button>
+                )}
+
+                {workflowAction === 'human_review' && (
+                  <>
+                    <button
+                      className="aiw-primary"
+                      type="button"
+                      disabled={Boolean(workflowBusy)}
+                      onClick={() =>
+                        void runWorkflowAction(
+                          '通过并生成发布素材',
+                          `/api/video/workflow/${encodeURIComponent(
+                            jobId,
+                          )}/approve`,
+                          {
+                            reviewer: 'human_old_ui',
+                            title: topic,
+                            script_text: script,
+                          },
+                          420000,
+                        )
+                      }
+                    >
+                      {workflowBusy ||
+                        '人工通过并生成封面 + 图文'}
+                    </button>
+                    <button
+                      className="aiw-muted"
+                      type="button"
+                      disabled={Boolean(workflowBusy)}
+                      onClick={() =>
+                        void runWorkflowAction(
+                          '覆盖审片误报',
+                          `/api/video/workflow/${encodeURIComponent(
+                            jobId,
+                          )}/human-override`,
+                          {
+                            reviewer: 'human_old_ui',
+                            decision: 'approved',
+                            status: 'approved',
+                            note:
+                              '人工完整观看后确认自动审片提示为误报',
+                            reason:
+                              '人工完整观看后确认自动审片提示为误报',
+                          },
+                          420000,
+                        )
+                      }
+                    >
+                      确认误报并通过
+                    </button>
+                    <button
+                      className="aiw-danger"
+                      type="button"
+                      disabled={Boolean(workflowBusy)}
+                      onClick={() =>
+                        void runWorkflowAction(
+                          '人工驳回',
+                          `/api/video/workflow/${encodeURIComponent(
+                            jobId,
+                          )}/reject`,
+                          {
+                            reviewer: 'human_old_ui',
+                            reason:
+                              '人工驳回，返回文案或镜头修改',
+                          },
+                          180000,
+                        )
+                      }
+                    >
+                      驳回并返回修改
+                    </button>
+                  </>
+                )}
+
+                {workflowAction === 'return_to_edit' && (
+                  <>
+                    <button
+                      className="aiw-muted"
+                      type="button"
+                      onClick={() => setStep(2)}
+                    >
+                      返回文案 / 配音修改
+                    </button>
+                    <button
+                      className="aiw-muted"
+                      type="button"
+                      onClick={() => setStep(3)}
+                    >
+                      返回镜头 / 素材修改
+                    </button>
+                    <button
+                      className="aiw-primary"
+                      type="button"
+                      disabled={Boolean(workflowBusy)}
+                      onClick={() =>
+                        void runWorkflowAction(
+                          '重新审片',
+                          `/api/video/workflow/${encodeURIComponent(
+                            jobId,
+                          )}/run-review`,
+                          {
+                            force: true,
+                            source:
+                              'old_ui_retry_after_fix',
+                          },
+                          360000,
+                        )
+                      }
+                    >
+                      {workflowBusy || '修复后重新审片'}
+                    </button>
+                  </>
+                )}
+
+                {workflowAction === 'backfill_packaging' && (
+                  <button
+                    className="aiw-primary"
+                    type="button"
+                    disabled={Boolean(workflowBusy)}
+                    onClick={() =>
+                      void runWorkflowAction(
+                        '补齐发布包装',
+                        `/api/video/workflow/${encodeURIComponent(
+                          jobId,
+                        )}/backfill-packaging`,
+                        {
+                          title: topic,
+                          script_text: script,
+                        },
+                        420000,
+                      )
+                    }
+                  >
+                    {workflowBusy ||
+                      '生成 3 套封面 + 7 页图文'}
+                  </button>
+                )}
+              </div>
+
+              {workflowAction === 'select_cover' &&
+                workflowCoverImages.length > 0 && (
+                  <div className="aiw-coverSection">
+                    <div className="aiw-subsectionTitle">
+                      <b>选择主封面</b>
+                      <span>
+                        选中的封面将作为最终视频开场
+                      </span>
+                    </div>
+                    <div className="aiw-coverChoiceGrid">
+                      {workflowCoverImages
+                        .slice(0, 3)
+                        .map(
+                          (
+                            item: any,
+                            index: number,
+                          ) => (
+                            <button
+                              className={
+                                selectedCoverIndex === index
+                                  ? 'aiw-coverChoice selected'
+                                  : 'aiw-coverChoice'
+                              }
+                              type="button"
+                              key={item?.url || index}
+                              disabled={Boolean(
+                                workflowBusy,
+                              )}
+                              onClick={() =>
+                                void runWorkflowAction(
+                                  '选择主封面',
+                                  `/api/video/workflow/${encodeURIComponent(
+                                    jobId,
+                                  )}/select-cover`,
+                                  {
+                                    index,
+                                    url: item?.url,
+                                    selected_by:
+                                      'human_old_ui',
+                                  },
+                                  180000,
+                                )
+                              }
+                            >
+                              {item?.url && (
+                                <img
+                                  src={item.url}
+                                  alt={`封面 ${index + 1}`}
+                                />
+                              )}
+                              <span>
+                                {selectedCoverIndex === index
+                                  ? '已选'
+                                  : `方案 ${index + 1}`}
+                              </span>
+                            </button>
+                          ),
+                        )}
+                    </div>
+                  </div>
+                )}
+
+              {workflowAction ===
+                'compose_cover_video' && (
+                <div className="aiw-coverComposeCard">
+                  {selectedCover?.url && (
+                    <img
+                      src={selectedCover.url}
+                      alt="已选择的主封面"
+                    />
+                  )}
+                  <div>
+                    <b>封面合成最终视频</b>
+                    <p>
+                      将主封面作为 1 秒开场，随后无缝接入当前成片；
+                      最终总包同时保留原始视频。
+                    </p>
+                    <button
+                      className="aiw-primary"
+                      type="button"
+                      disabled={Boolean(workflowBusy)}
+                      onClick={() =>
+                        void runWorkflowAction(
+                          '封面合成最终视频',
+                          `/api/video/workflow/${encodeURIComponent(
+                            jobId,
+                          )}/compose-cover-video`,
+                          {
+                            duration_seconds: 1.0,
+                          },
+                          900000,
+                        )
+                      }
+                    >
+                      {workflowBusy ||
+                        '封面合成最终视频'}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {coverVideoReady && (
+                <div className="aiw-successPanel">
+                  <div>
+                    <b>封面最终视频已生成</b>
+                    <span>
+                      主封面停留{' '}
+                      {Number(
+                        workflowCoverVideo?.cover_duration_seconds ||
+                        1,
+                      ).toFixed(1)}
+                      秒，原视频同步保留。
+                    </span>
+                  </div>
+                  <a
+                    className="aiw-linkButton"
+                    href={workflowCoverVideo.url}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    预览封面最终视频
+                  </a>
+                </div>
+              )}
+
+              {workflowAction ===
+                'build_final_delivery' && (
+                <button
+                  className="aiw-primary aiw-fullButton"
+                  type="button"
+                  disabled={Boolean(workflowBusy)}
+                  onClick={() =>
+                    void runWorkflowAction(
+                      '生成最终总包',
+                      `/api/video/workflow/${encodeURIComponent(
+                        jobId,
+                      )}/finalize`,
+                      {},
+                      420000,
+                    )
+                  }
+                >
+                  {workflowBusy || '生成最终发布总包'}
+                </button>
+              )}
+
+              {workflowAction ===
+                'ready_to_publish' && (
+                <div className="aiw-successPanel">
+                  <div>
+                    <b>发布素材已经齐全</b>
+                    <span>
+                      最终视频已含封面，可直接下载总包发布。
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              <div className="aiw-deliveryLinkGrid">
+                {workflowDelivery?.final_video_url && (
+                  <a
+                    className="aiw-linkButton"
+                    href={
+                      workflowDelivery.final_video_url
+                    }
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    下载封面最终视频
+                  </a>
+                )}
+                {workflowDelivery?.download_zip_url && (
+                  <a
+                    className="aiw-linkButton"
+                    href={
+                      workflowDelivery.download_zip_url
+                    }
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    下载最终发布总包
+                  </a>
+                )}
+                {workflowCover?.download_zip_url && (
+                  <a
+                    className="aiw-linkButton"
+                    href={
+                      workflowCover.download_zip_url
+                    }
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    下载 3 套封面
+                  </a>
+                )}
+                {workflowXhs?.download_zip_url && (
+                  <a
+                    className="aiw-linkButton"
+                    href={
+                      workflowXhs.download_zip_url
+                    }
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    下载 7 页图文
+                  </a>
+                )}
+              </div>
+
+              {(coverCount > 0 || pageCount > 0) && (
+                <div className="aiw-packageSummary">
+                  <span>
+                    <b>{coverCount}</b> 套封面
+                  </span>
+                  <span>
+                    <b>{pageCount}</b> 页图文
+                  </span>
+                  <span>
+                    <b>{coverVideoReady ? 1 : 0}</b>{' '}
+                    个封面最终视频
+                  </span>
+                </div>
+              )}
             </>
           )}
 
-          <div className="aiw-actions vertical">
-            <button className="aiw-purple" type="button" onClick={openGraphicWindow}>打开图文窗口</button>
-            <button className="aiw-muted" onClick={() => openWorkspaceTab('leads')}>去 OpenClaw 人工处理</button>
-            <button className="aiw-muted" onClick={() => openWorkspaceTab('collect')}>继续采集同行</button>
-            <button className="aiw-muted" onClick={() => openWorkspaceTab('assets')}>补充 R2 素材</button>
+          <div className="aiw-quickLinks">
+            <button
+              className="aiw-purple"
+              type="button"
+              onClick={openGraphicWindow}
+            >
+              打开图文窗口
+            </button>
+            <button
+              className="aiw-muted"
+              onClick={() =>
+                openWorkspaceTab('leads')
+              }
+            >
+              OpenClaw 人工处理
+            </button>
+            <button
+              className="aiw-muted"
+              onClick={() =>
+                openWorkspaceTab('collect')
+              }
+            >
+              继续采集同行
+            </button>
+            <button
+              className="aiw-muted"
+              onClick={() =>
+                openWorkspaceTab('assets')
+              }
+            >
+              补充 R2 素材
+            </button>
           </div>
         </aside>
       </div>

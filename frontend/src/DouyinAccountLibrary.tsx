@@ -588,7 +588,7 @@ export default function DouyinAccountLibrary({
 
       <div className="aiw-panel">
         <h3>今日高价值内容</h3>
-        <div className="aiw-assetGrid compact">
+        <div className="aiw-assetGrid aiw-heatGrid">
           {topItems.length === 0 && (
             <div className="aiw-info">
               还没有真实热度内容。先保存账号并采集，
@@ -612,8 +612,8 @@ export default function DouyinAccountLibrary({
               <div
                 className={
                   selectedItem === item
-                    ? 'aiw-assetCard selected'
-                    : 'aiw-assetCard'
+                    ? 'aiw-assetCard aiw-heatCard selected'
+                    : 'aiw-assetCard aiw-heatCard'
                 }
                 key={
                   item?.id ||
@@ -625,7 +625,7 @@ export default function DouyinAccountLibrary({
                   业务评分 {score || '-'} ·{' '}
                   {text(item?.intent) || '待判断意图'}
                 </span>
-                <p>
+                <p className="aiw-heatSummary">
                   {text(
                     item?.signal ||
                       item?.summary ||

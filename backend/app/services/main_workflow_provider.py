@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import os
 import re
 import shutil
+import subprocess
 import time
 import zipfile
 from pathlib import Path
@@ -16,8 +18,8 @@ from fastapi import BackgroundTasks, Body, FastAPI, HTTPException
 from fastapi.encoders import jsonable_encoder
 
 
-VERSION = "10.40.3"
-MODE = "function_merge_old_ui_hub"
+VERSION = "10.40.4"
+MODE = "layout_cover_video_hub"
 
 BASE = Path(os.getenv("AI_VIDEO_BASE", "/opt/ai-video"))
 STORAGE = BASE / "storage"
@@ -500,7 +502,7 @@ def _register_compose_job(
         )
 
     job_id = (
-        "mainui_v10401_"
+        "mainui_v10404_"
         + fingerprint[:20]
     )
     job_dir = _job_dir(job_id)
@@ -1073,6 +1075,16 @@ def _next_action(
     if not selection:
         return "select_cover"
 
+    cover_video = _dict(
+        selection.get("cover_video")
+    )
+    cover_video_path = _allowed_local_path(
+        cover_video.get("path")
+    )
+
+    if not cover_video_path:
+        return "compose_cover_video"
+
     if not delivery:
         return "build_final_delivery"
 
@@ -1091,6 +1103,7 @@ def _stage_payload(
         "return_to_edit": 4,
         "backfill_packaging": 5,
         "select_cover": 5,
+        "compose_cover_video": 6,
         "build_final_delivery": 6,
         "ready_to_publish": 6,
     }
@@ -1233,6 +1246,9 @@ async def _workflow_snapshot(
         "gate": gate,
         "packaging": packaging,
         "selection": selection,
+        "cover_video": _dict(
+            selection.get("cover_video")
+        ),
         "delivery": delivery,
         "next_action": next_action,
         "stage_index": stage_index,
@@ -1614,6 +1630,438 @@ def _selected_cover(
     return images[0], 0
 
 
+
+def _probe_media(path: Path) -> Dict[str, Any]:
+    ffprobe = shutil.which("ffprobe") or "ffprobe"
+    command = [
+        ffprobe,
+        "-v",
+        "error",
+        "-show_entries",
+        (
+            "stream=index,codec_type,width,height,"
+            "avg_frame_rate:format=duration"
+        ),
+        "-of",
+        "json",
+        str(path),
+    ]
+
+    try:
+        completed = subprocess.run(
+            command,
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=45,
+        )
+        data = json.loads(
+            completed.stdout or "{}"
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                "无法读取视频参数，"
+                f"封面合成已停止：{exc}"
+            ),
+        ) from exc
+
+    streams = _list(data.get("streams"))
+    video_stream = next(
+        (
+            item
+            for item in streams
+            if _status(
+                _dict(item).get("codec_type")
+            ) == "video"
+        ),
+        {},
+    )
+    has_audio = any(
+        _status(_dict(item).get("codec_type"))
+        == "audio"
+        for item in streams
+    )
+
+    width = int(
+        _dict(video_stream).get("width")
+        or 0
+    )
+    height = int(
+        _dict(video_stream).get("height")
+        or 0
+    )
+
+    try:
+        duration = float(
+            _dict(data.get("format")).get(
+                "duration"
+            )
+            or 0
+        )
+    except Exception:
+        duration = 0.0
+
+    if (
+        width < 2
+        or height < 2
+        or width >= height
+        or abs(
+            (width / max(height, 1))
+            - (9 / 16)
+        ) > 0.08
+    ):
+        width, height = 1080, 1920
+
+    width -= width % 2
+    height -= height % 2
+
+    return {
+        "width": width or 1080,
+        "height": height or 1920,
+        "duration": max(duration, 0.1),
+        "has_audio": has_audio,
+    }
+
+
+def _cover_video_cached(
+    selection: Dict[str, Any],
+    video_path: Path,
+    cover_path: Path,
+    duration_seconds: float,
+) -> Optional[Dict[str, Any]]:
+    cached = _dict(
+        selection.get("cover_video")
+    )
+    cached_path = _allowed_local_path(
+        cached.get("path")
+    )
+
+    if not cached_path:
+        return None
+
+    try:
+        matches = (
+            int(cached.get("source_video_size") or -1)
+            == video_path.stat().st_size
+            and int(cached.get("source_video_mtime_ns") or -1)
+            == video_path.stat().st_mtime_ns
+            and int(cached.get("cover_size") or -1)
+            == cover_path.stat().st_size
+            and int(cached.get("cover_mtime_ns") or -1)
+            == cover_path.stat().st_mtime_ns
+            and abs(
+                float(
+                    cached.get(
+                        "cover_duration_seconds"
+                    )
+                    or 0
+                )
+                - duration_seconds
+            ) < 0.01
+        )
+    except Exception:
+        return None
+
+    return cached if matches else None
+
+
+def _compose_cover_video_sync(
+    job_id: str,
+    job: Dict[str, Any],
+    review: Dict[str, Any],
+    cover_result: Dict[str, Any],
+    selection: Dict[str, Any],
+    duration_seconds: float,
+) -> Dict[str, Any]:
+    duration_seconds = max(
+        0.5,
+        min(3.0, float(duration_seconds or 1.0)),
+    )
+
+    video_path = (
+        _allowed_local_path(
+            _dict(
+                review.get("mechanical")
+            ).get("local_path")
+        )
+        or _recursive_find_path(
+            job,
+            {
+                "final_video_path",
+                "subtitled_video_path",
+                "output_path",
+                "local_path",
+                "video_path",
+            },
+        )
+    )
+
+    selected, selected_index = _selected_cover(
+        cover_result,
+        selection,
+    )
+    cover_path = (
+        _allowed_local_path(
+            _dict(selected).get("path")
+        )
+        if selected
+        else None
+    )
+
+    if not video_path:
+        raise HTTPException(
+            status_code=409,
+            detail="找不到当前任务的最终视频文件。",
+        )
+
+    if not cover_path:
+        raise HTTPException(
+            status_code=409,
+            detail="找不到已选择的主封面文件。",
+        )
+
+    cached = _cover_video_cached(
+        selection,
+        video_path,
+        cover_path,
+        duration_seconds,
+    )
+    if cached:
+        return cached
+
+    media = _probe_media(video_path)
+    width = int(media["width"])
+    height = int(media["height"])
+    main_duration = float(media["duration"])
+    has_audio = bool(media["has_audio"])
+
+    output_dir = (
+        _workflow_dir(job_id)
+        / "cover_video"
+    )
+    output_dir.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+    output_path = (
+        output_dir
+        / "final_video_with_cover.mp4"
+    )
+    temp_path = output_path.with_suffix(
+        ".tmp.mp4"
+    )
+
+    ffmpeg = shutil.which("ffmpeg") or "ffmpeg"
+    scale = (
+        f"scale={width}:{height}:"
+        "force_original_aspect_ratio=decrease,"
+        f"pad={width}:{height}:"
+        "(ow-iw)/2:(oh-ih)/2:"
+        "color=black,"
+        "setsar=1,"
+        "fps=30,"
+        "format=yuv420p"
+    )
+
+    command = [
+        ffmpeg,
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-y",
+        "-loop",
+        "1",
+        "-framerate",
+        "30",
+        "-t",
+        f"{duration_seconds:.3f}",
+        "-i",
+        str(cover_path),
+        "-i",
+        str(video_path),
+        "-f",
+        "lavfi",
+        "-t",
+        f"{duration_seconds:.3f}",
+        "-i",
+        "anullsrc=r=48000:cl=stereo",
+    ]
+
+    if not has_audio:
+        command.extend([
+            "-f",
+            "lavfi",
+            "-t",
+            f"{main_duration:.3f}",
+            "-i",
+            "anullsrc=r=48000:cl=stereo",
+        ])
+
+    audio_source = "[1:a]" if has_audio else "[3:a]"
+    filter_complex = (
+        f"[0:v]{scale},"
+        "setpts=PTS-STARTPTS[coverv];"
+        f"[1:v]{scale},"
+        "setpts=PTS-STARTPTS[mainv];"
+        "[coverv][mainv]"
+        "concat=n=2:v=1:a=0[outv];"
+        "[2:a]"
+        "aformat=sample_rates=48000:"
+        "channel_layouts=stereo,"
+        "asetpts=PTS-STARTPTS[covera];"
+        f"{audio_source}"
+        "aresample=48000,"
+        "aformat=sample_rates=48000:"
+        "channel_layouts=stereo,"
+        "asetpts=PTS-STARTPTS[maina];"
+        "[covera][maina]"
+        "concat=n=2:v=0:a=1[outa]"
+    )
+
+    command.extend([
+        "-filter_complex",
+        filter_complex,
+        "-map",
+        "[outv]",
+        "-map",
+        "[outa]",
+        "-c:v",
+        "libx264",
+        "-preset",
+        "medium",
+        "-crf",
+        "18",
+        "-c:a",
+        "aac",
+        "-b:a",
+        "192k",
+        "-movflags",
+        "+faststart",
+        "-shortest",
+        str(temp_path),
+    ])
+
+    try:
+        completed = subprocess.run(
+            command,
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=900,
+        )
+    except subprocess.CalledProcessError as exc:
+        temp_path.unlink(
+            missing_ok=True
+        )
+        stderr = (
+            exc.stderr
+            or exc.stdout
+            or str(exc)
+        )
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                "封面合成最终视频失败："
+                + stderr[-1800:]
+            ),
+        ) from exc
+    except Exception as exc:
+        temp_path.unlink(
+            missing_ok=True
+        )
+        raise HTTPException(
+            status_code=500,
+            detail=f"封面合成最终视频失败：{exc}",
+        ) from exc
+
+    if (
+        not temp_path.exists()
+        or temp_path.stat().st_size < 1024
+    ):
+        raise HTTPException(
+            status_code=500,
+            detail="封面合成没有生成有效视频。",
+        )
+
+    temp_path.replace(output_path)
+
+    public_base = _public_base(
+        [cover_result]
+    )
+    result = {
+        "ok": True,
+        "version": VERSION,
+        "job_id": job_id,
+        "path": str(output_path),
+        "url": _storage_url(
+            output_path,
+            public_base,
+        ),
+        "filename": output_path.name,
+        "selected_cover_index": (
+            int(selection.get("index"))
+            if selection.get("index") is not None
+            else selected_index
+        ),
+        "selected_cover_path": str(
+            cover_path
+        ),
+        "source_video_path": str(
+            video_path
+        ),
+        "cover_duration_seconds": (
+            duration_seconds
+        ),
+        "source_video_size": (
+            video_path.stat().st_size
+        ),
+        "source_video_mtime_ns": (
+            video_path.stat().st_mtime_ns
+        ),
+        "cover_size": (
+            cover_path.stat().st_size
+        ),
+        "cover_mtime_ns": (
+            cover_path.stat().st_mtime_ns
+        ),
+        "width": width,
+        "height": height,
+        "created_at": _now(),
+    }
+
+    updated_selection = {
+        **selection,
+        "cover_video": result,
+        "cover_video_updated_at": _now(),
+    }
+    _delivery_meta_path(job_id).unlink(
+        missing_ok=True
+    )
+    _atomic_json(
+        _selection_path(job_id),
+        updated_selection,
+    )
+
+    job_json = _job_json_path(job_id)
+    if job_json.exists():
+        current = _json_read(job_json)
+        current["selected_cover"] = (
+            updated_selection
+        )
+        current.pop("final_delivery", None)
+        current[
+            "cover_composited_video"
+        ] = result
+        _atomic_json(
+            job_json,
+            current,
+        )
+
+    return result
+
+
 def _publish_copy(
     cover_result: Dict[str, Any],
     xhs_result: Dict[str, Any],
@@ -1719,8 +2167,12 @@ async def _build_delivery(
             selection,
         )
 
+    cover_video = _dict(
+        selection.get("cover_video")
+    )
+
     package_id = (
-        f"final_delivery_v1040_"
+        f"final_delivery_v10404_"
         f"{_safe_job_id(job_id)}_"
         f"{_now()}"
     )
@@ -1749,6 +2201,7 @@ async def _build_delivery(
         "job_id": job_id,
         "package_id": package_id,
         "selected_cover": selection,
+        "cover_video": cover_video,
         "video_status": job.get("status"),
         "review_status": review.get("status"),
         "review_score": review.get(
@@ -1800,6 +2253,12 @@ async def _build_delivery(
     selected_path = _allowed_local_path(
         selected.get("path")
     )
+    cover_video = _dict(
+        selection.get("cover_video")
+    )
+    cover_video_path = _allowed_local_path(
+        cover_video.get("path")
+    )
 
     cover_local_paths = [
         path
@@ -1841,6 +2300,15 @@ async def _build_delivery(
             detail=(
                 "主封面本地文件不存在，"
                 "停止生成不完整交付包。"
+            ),
+        )
+
+    if not cover_video_path:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "还没有把主封面合成到最终视频，"
+                "请先执行“封面合成最终视频”。"
             ),
         )
 
@@ -1905,11 +2373,20 @@ async def _build_delivery(
     ) as archive:
         if _zip_add(
             archive,
-            video_path,
+            cover_video_path,
             "final_video.mp4",
         ):
             included.append(
                 "final_video.mp4"
+            )
+
+        if _zip_add(
+            archive,
+            video_path,
+            "original_video.mp4",
+        ):
+            included.append(
+                "original_video.mp4"
             )
 
         selected_suffix = (
@@ -2021,6 +2498,17 @@ async def _build_delivery(
         "job_id": job_id,
         "package_id": package_id,
         "selected_cover": selection,
+        "cover_video": cover_video,
+        "final_video_path": str(
+            cover_video_path
+        ),
+        "final_video_url": _storage_url(
+            cover_video_path,
+            public_base,
+        ),
+        "original_video_path": str(
+            video_path
+        ),
         "included_files": included,
         "zip_path": str(zip_path),
         "download_zip_url": _storage_url(
@@ -2124,6 +2612,8 @@ def install_main_workflow_provider(
             "strict_job_binding": True,
             "historical_packaging_backfill": True,
             "final_delivery_bundle": True,
+            "cover_video_composition": True,
+            "cover_intro_duration_seconds": 1.0,
             "main_ui_compose_bridge": True,
             "auto_review_after_compose": True,
             "stages": 6,
@@ -2544,10 +3034,16 @@ def install_main_workflow_provider(
             selection,
         )
 
+        _delivery_meta_path(job_id).unlink(
+            missing_ok=True
+        )
+
         job_json = _job_json_path(job_id)
         if job_json.exists():
             job = _json_read(job_json)
             job["selected_cover"] = selection
+            job.pop("final_delivery", None)
+            job.pop("cover_composited_video", None)
             _atomic_json(
                 job_json,
                 job,
@@ -2557,6 +3053,78 @@ def install_main_workflow_provider(
             app,
             job_id,
         )
+
+    @app.post(
+        "/api/video/workflow/{job_id}/compose-cover-video"
+    )
+    async def compose_cover_video(
+        job_id: str,
+        payload: Dict[str, Any] = Body(
+            default_factory=dict
+        ),
+    ):
+        snapshot = await _workflow_snapshot(
+            app,
+            job_id,
+        )
+        job = _dict(
+            snapshot.get("job")
+        )
+        review = _dict(
+            snapshot.get("review")
+        )
+        packaging = _dict(
+            snapshot.get("packaging")
+        )
+        selection = _dict(
+            snapshot.get("selection")
+        )
+
+        if not selection:
+            raise HTTPException(
+                status_code=409,
+                detail="请先选择主封面。",
+            )
+
+        cover_result = _package_cover_result(
+            packaging,
+            review,
+        )
+
+        if not cover_result:
+            raise HTTPException(
+                status_code=409,
+                detail="当前任务还没有封面结果。",
+            )
+
+        try:
+            duration_seconds = float(
+                payload.get(
+                    "duration_seconds"
+                )
+                or 1.0
+            )
+        except Exception:
+            duration_seconds = 1.0
+
+        result = await asyncio.to_thread(
+            _compose_cover_video_sync,
+            job_id,
+            job,
+            review,
+            cover_result,
+            selection,
+            duration_seconds,
+        )
+
+        snapshot = await _workflow_snapshot(
+            app,
+            job_id,
+        )
+        snapshot[
+            "compose_cover_video_result"
+        ] = result
+        return snapshot
 
     @app.post(
         "/api/video/workflow/{job_id}/finalize"
