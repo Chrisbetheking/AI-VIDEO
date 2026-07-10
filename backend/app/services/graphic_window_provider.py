@@ -599,7 +599,7 @@ def install_graphic_window_provider(app):
     def health():
         return {
             "ok": True,
-            "mode": "graphic_window_v5_three_cover_variants_xhs_fact_guard_pack",
+            "mode": "graphic_window_v5_1_three_cover_variants_xhs_fact_guard_pack",
             "rule": "cover_only_9_16_xhs_uses_info_cards_maps_tables_budget_checklist_cta",
             "storage": str(GRAPHIC_ROOT),
             "pillow": True,

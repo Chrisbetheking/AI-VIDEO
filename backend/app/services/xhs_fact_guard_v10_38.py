@@ -15,8 +15,8 @@ from PIL import Image, ImageDraw
 from app.services import xhs_visual_story_v10_37 as v37
 
 
-VERSION = "10.38"
-STYLE = "v5_xhs_fact_checked_visual_story"
+VERSION = "10.38.1"
+STYLE = "v5_1_xhs_fact_checked_visual_story"
 JOB_ROOT = Path(
     os.getenv(
         "AI_VIDEO_JOB_ROOT",
@@ -67,7 +67,7 @@ BUDGET_PATTERNS = [
     r"(?<!\d)(RM\s*\d[\d,]*(?:\.\d+)?)",
     r"(?<!\d)(MYR\s*\d[\d,]*(?:\.\d+)?)",
     r"(?<!\d)(\d[\d,]*(?:\.\d+)?\s*马币)",
-    r"(低预算|中预算|高预算|预算有限|预算充足|预算不高|预算较高)",
+    r"(低预算|中预算|中等预算|高预算|预算有限|预算充足|预算不高|预算较高)",
 ]
 
 RELATION_WORDS = [
@@ -98,18 +98,32 @@ def _clean_text(value: Any) -> str:
     return text.strip()
 
 
+
+def _semantic_key(value: Any) -> str:
+    text = _clean_text(value).lower()
+    text = text.replace("，", ",").replace("。", ".")
+    text = text.replace("！", "!").replace("？", "?")
+    text = text.replace("；", ";").replace("：", ":")
+    text = re.sub(r"[\s\u00a0]+", "", text)
+    text = re.sub(r"[，,。.!！？?；;：:、…·]+$", "", text)
+    return text
+
+
 def _dedupe(values: Iterable[str]) -> List[str]:
     result: List[str] = []
     seen = set()
+
     for raw in values:
         value = _clean_text(raw)
-        key = value.lower()
-        if not value or key in seen:
+        key = _semantic_key(value)
+
+        if not value or not key or key in seen:
             continue
+
         seen.add(key)
         result.append(value)
-    return result
 
+    return result
 
 def _collect_script_values(
     value: Any,
@@ -322,6 +336,19 @@ def _sentences(text: str) -> List[str]:
     )
 
 
+
+def _normalize_budget_label(value: str) -> str:
+    compact = re.sub(r"\s+", "", str(value or ""))
+    aliases = {
+        "中等预算": "中预算",
+        "预算较高": "高预算",
+        "预算充足": "高预算",
+        "预算不高": "低预算",
+        "预算有限": "低预算",
+    }
+    return aliases.get(compact, compact)
+
+
 def _budget_tokens(sentence: str) -> List[str]:
     result: List[str] = []
 
@@ -337,12 +364,12 @@ def _budget_tokens(sentence: str) -> List[str]:
                     "",
                 )
 
-            value = re.sub(r"\s+", "", str(match))
+            value = _normalize_budget_label(str(match))
+
             if value and value not in result:
                 result.append(value)
 
     return result
-
 
 def _region_tokens(sentence: str) -> List[str]:
     low = sentence.lower()
@@ -360,6 +387,77 @@ def _purpose_flags(text: str) -> Dict[str, bool]:
     }
 
 
+
+PURPOSE_PHRASE_CANDIDATES = {
+    "investment": [
+        "出租回报",
+        "租金回报",
+        "核心商圈配套",
+        "租金需求",
+        "租客需求",
+        "升值空间",
+        "空置率",
+        "资产流动性",
+        "转手流动性",
+    ],
+    "self_use": [
+        "日常通勤",
+        "生活便利度",
+        "成熟社区",
+        "生活配套",
+        "学校资源",
+        "医疗配套",
+        "居住舒适度",
+        "社区环境",
+    ],
+}
+
+
+def _purpose_points(text: str) -> Dict[str, Any]:
+    source = _clean_text(text)
+    points: Dict[str, List[str]] = {
+        "investment": [],
+        "self_use": [],
+    }
+    evidence: Dict[str, List[str]] = {
+        "investment": [],
+        "self_use": [],
+    }
+
+    for sentence in _sentences(source):
+        for purpose, candidates in PURPOSE_PHRASE_CANDIDATES.items():
+            matched = [phrase for phrase in candidates if phrase in sentence]
+            if not matched:
+                continue
+
+            points[purpose].extend(matched)
+            evidence[purpose].append(sentence)
+
+    points = {
+        key: _dedupe(value)[:3]
+        for key, value in points.items()
+    }
+    evidence = {
+        key: _dedupe(value)
+        for key, value in evidence.items()
+    }
+
+    return {
+        "investment": points["investment"],
+        "self_use": points["self_use"],
+        "evidence": evidence,
+    }
+
+
+def _budget_headline(budgets: List[str]) -> str:
+    values = _dedupe(budgets)
+    tier_set = set(values)
+
+    if {"高预算", "中预算", "低预算"}.issubset(tier_set):
+        return "高 / 中 / 低预算"
+
+    return " / ".join(values[:3]) if values else "预算不同"
+
 def _quote_score(sentence: str) -> int:
     score = 0
     if _budget_tokens(sentence):
@@ -373,6 +471,7 @@ def _quote_score(sentence: str) -> int:
     if 12 <= len(sentence) <= 70:
         score += 2
     return score
+
 
 
 def _analyse(source: Dict[str, Any]) -> Dict[str, Any]:
@@ -443,13 +542,19 @@ def _analyse(source: Dict[str, Any]) -> Dict[str, Any]:
 
     budget_evidence = list(
         {
-            (item["value"], item["quote"]): item
+            (
+                item["value"],
+                _semantic_key(item["quote"]),
+            ): item
             for item in budget_evidence
         }.values()
     )
     region_evidence = list(
         {
-            (item["value"], item["quote"]): item
+            (
+                item["value"],
+                _semantic_key(item["quote"]),
+            ): item
             for item in region_evidence
         }.values()
     )
@@ -458,25 +563,25 @@ def _analyse(source: Dict[str, Any]) -> Dict[str, Any]:
             (
                 item["budget"],
                 item["region"],
-                item["quote"],
+                _semantic_key(item["quote"]),
             ): item
             for item in pairs
         }.values()
     )
 
     ranked = sorted(
-        sentences,
+        _dedupe(sentences),
         key=lambda item: (
             _quote_score(item),
             -len(item),
         ),
         reverse=True,
     )
-    key_quotes = [
-        quote
-        for quote in _dedupe(ranked)
-        if _quote_score(quote) > 0
-    ][:5]
+
+    key_quotes = _dedupe(
+        [quote for quote in ranked if _quote_score(quote) > 0]
+        + ranked
+    )[:5]
 
     budgets = _dedupe(
         item["value"]
@@ -507,12 +612,12 @@ def _analyse(source: Dict[str, Any]) -> Dict[str, Any]:
         "region_evidence": region_evidence,
         "explicit_budget_region_pairs": pairs,
         "purposes": _purpose_flags(source["text"]),
+        "purpose_points": _purpose_points(source["text"]),
         "key_quotes": key_quotes,
         "mapping_mode": mapping_mode,
         "blocked_claims": _dedupe(blocked),
         "sentence_count": len(sentences),
     }
-
 
 def _wrap(
     draw: ImageDraw.ImageDraw,
@@ -559,6 +664,7 @@ def _draw_lines(
     return y
 
 
+
 def _page_hook(
     path: Path,
     frame: Path | None,
@@ -582,7 +688,7 @@ def _page_hook(
     draw = ImageDraw.Draw(image)
 
     draw.rounded_rectangle(
-        (76, 86, 470, 156),
+        (76, 86, 500, 156),
         radius=24,
         fill=v37.ACCENT + (250,),
     )
@@ -593,12 +699,12 @@ def _page_hook(
         fill=(24, 29, 39, 255),
     )
 
-    if budgets:
-        headline = " / ".join(budgets[:3])
-        second = f"在{location}怎么选？"
-    else:
-        headline = "预算不同"
-        second = "选区逻辑不同"
+    headline = _budget_headline(budgets)
+    second = (
+        f"在{location}怎么选？"
+        if budgets
+        else "选区逻辑不同"
+    )
 
     y = 1070
 
@@ -615,7 +721,6 @@ def _page_hook(
     )
 
     image.convert("RGB").save(path, quality=95)
-
 
 def _page_quote(
     path: Path,
@@ -803,6 +908,101 @@ def _page_regions(
     image.save(path, quality=95)
 
 
+
+def _page_purpose_compare(
+    path: Path,
+    frame: Path | None,
+    purpose_points: Dict[str, Any],
+):
+    image = v37._base()
+    draw = ImageDraw.Draw(image)
+    v37._label(draw, 4, "用途")
+    v37._paste_round(
+        image,
+        frame,
+        (76, 175, 1166, 590),
+        38,
+    )
+
+    draw.text(
+        (78, 650),
+        "投资 ≠ 自住",
+        font=v37._font(82, True),
+        fill=v37.DARK,
+    )
+    draw.text(
+        (82, 758),
+        "以下词组全部来自本条口播",
+        font=v37._font(38, False),
+        fill=v37.MUTED,
+    )
+
+    left = (76, 860, 600, 1490)
+    right = (642, 860, 1166, 1490)
+
+    draw.rounded_rectangle(
+        left,
+        radius=38,
+        fill=(248, 242, 226),
+        outline=(226, 198, 132),
+        width=3,
+    )
+    draw.rounded_rectangle(
+        right,
+        radius=38,
+        fill=(238, 245, 252),
+        outline=(188, 208, 230),
+        width=3,
+    )
+
+    draw.text(
+        (130, 920),
+        "投资",
+        font=v37._font(62, True),
+        fill=(149, 101, 22),
+    )
+    draw.text(
+        (696, 920),
+        "自住",
+        font=v37._font(62, True),
+        fill=(42, 93, 150),
+    )
+
+    left_items = purpose_points.get("investment") or []
+    right_items = purpose_points.get("self_use") or []
+
+    for index, item in enumerate(left_items[:3], 1):
+        y = 1045 + (index - 1) * 125
+        draw.text(
+            (132, y),
+            f"0{index}",
+            font=v37._font(32, True),
+            fill=(181, 129, 36),
+        )
+        draw.text(
+            (210, y - 8),
+            item,
+            font=v37._font(42, True),
+            fill=v37.DARK,
+        )
+
+    for index, item in enumerate(right_items[:3], 1):
+        y = 1045 + (index - 1) * 125
+        draw.text(
+            (698, y),
+            f"0{index}",
+            font=v37._font(32, True),
+            fill=(60, 113, 172),
+        )
+        draw.text(
+            (776, y - 8),
+            item,
+            font=v37._font(42, True),
+            fill=v37.DARK,
+        )
+
+    image.save(path, quality=95)
+
 def _page_mapping_guard(
     path: Path,
     frames: List[Path | None],
@@ -932,6 +1132,7 @@ def _page_mapping_guard(
     image.save(path, quality=95)
 
 
+
 def _page_key_quotes(
     path: Path,
     frame: Path | None,
@@ -957,25 +1158,27 @@ def _page_key_quotes(
         font=v37._font(31, True),
         fill=(25, 31, 42, 255),
     )
+
+    safe_quotes = _dedupe(quotes)[:3]
+    count = max(1, len(safe_quotes))
+
     draw.text(
         (76, 230),
-        "最值得记住的 3 句话",
+        f"最值得记住的 {count} 句话",
         font=v37._font(72, True),
         fill=(255, 255, 255, 255),
     )
 
-    safe_quotes = list(quotes[:3])
+    if not safe_quotes:
+        safe_quotes = ["本条口播未提取到可展示的独立重点句"]
 
-    while len(safe_quotes) < 3:
-        safe_quotes.append(
-            "先把预算、用途和通勤条件说清楚"
-        )
-
+    card_height = 300 if len(safe_quotes) >= 3 else 360
+    gap = 40
     y = 480
 
     for index, quote in enumerate(safe_quotes, 1):
         draw.rounded_rectangle(
-            (76, y, 1166, y + 300),
+            (76, y, 1166, y + card_height),
             radius=38,
             fill=(13, 20, 31, 205),
             outline=(255, 255, 255, 70),
@@ -996,7 +1199,7 @@ def _page_key_quotes(
                 quote,
                 font,
                 820,
-                4,
+                5,
             ),
             250,
             y + 42,
@@ -1004,10 +1207,9 @@ def _page_key_quotes(
             (255, 255, 255, 255),
             14,
         )
-        y += 340
+        y += card_height + gap
 
     image.convert("RGB").save(path, quality=95)
-
 
 def _write_trace(
     package_dir: Path,
@@ -1108,7 +1310,7 @@ def generate_fact_checked_story(
     )
 
     package_id = (
-        f"xhs_fact_v5_{int(time.time())}_"
+        f"xhs_fact_v5_1_{int(time.time())}_"
         f"{random.randint(1000, 9999)}"
     )
     package_dir = graphic_root / package_id
@@ -1120,8 +1322,8 @@ def generate_fact_checked_story(
     second_quote = quotes[1] if len(quotes) > 1 else primary_quote
 
     compare_allowed = (
-        facts["purposes"]["investment"]
-        and facts["purposes"]["self_use"]
+        len(facts["purpose_points"]["investment"]) >= 2
+        and len(facts["purpose_points"]["self_use"]) >= 2
     )
 
     page_plan = [
@@ -1152,7 +1354,7 @@ def generate_fact_checked_story(
                 else "source_quote"
             ),
             "evidence": (
-                facts["purposes"]
+                facts["purpose_points"]
                 if compare_allowed
                 else second_quote
             ),
@@ -1224,9 +1426,10 @@ def generate_fact_checked_story(
                 else "实景 + 原句证据卡"
             ),
             (
-                lambda path: v37._page_compare(
+                lambda path: _page_purpose_compare(
                     path,
                     frames[3],
+                    facts["purpose_points"],
                 )
                 if compare_allowed
                 else _page_quote(
@@ -1332,6 +1535,7 @@ def generate_fact_checked_story(
             "budgets": facts["budgets"],
             "regions": facts["regions"],
             "purposes": facts["purposes"],
+            "purpose_points": facts["purpose_points"],
             "mapping_mode": facts["mapping_mode"],
             "explicit_pair_count": len(
                 facts["explicit_budget_region_pairs"]
@@ -1344,10 +1548,7 @@ def generate_fact_checked_story(
             "content_trace.json"
         ),
         "publish_title": (
-            (
-                " / ".join(facts["budgets"][:3])
-                + f"，在{location}怎么选？"
-            )
+            f"{_budget_headline(facts['budgets'])}，在{location}怎么选？"
             if facts["budgets"]
             else f"{location}买房：预算不同，选区逻辑不同"
         ),

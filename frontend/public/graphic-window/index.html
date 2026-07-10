@@ -923,11 +923,12 @@ async function makeXhs(){
 </script>
 
 
-<!-- AI_VIDEO_V10_38_XHS_FACT_GUARD_UI -->
+
+<!-- AI_VIDEO_V10_38_1_XHS_FACT_GUARD_UI -->
 <script>
 (function(){
-  function addFactGuardNote(){
-    if(document.getElementById('xhsFactGuardRule')) return
+  function addHotfixNote(){
+    if(document.getElementById('xhsFactGuardHotfixRule')) return
 
     const button = Array.from(
       document.querySelectorAll('button')
@@ -939,15 +940,15 @@ async function makeXhs(){
     if(!button || !button.parentElement) return
 
     const note = document.createElement('div')
-    note.id = 'xhsFactGuardRule'
+    note.id = 'xhsFactGuardHotfixRule'
     note.style.cssText =
       'margin-top:10px;padding:10px 12px;' +
       'border-radius:12px;background:#eef8f1;' +
       'color:#17653a;font-size:13px;line-height:1.55'
 
     note.textContent =
-      'V10.38：先读取完整口播，再提取真实金额、区域、用途和原句证据。' +
-      '证据不足时自动取消预算→区域硬配，并生成 content_trace.json。'
+      'V10.38.1：已补充“中等预算”识别，统一标点后去重；' +
+      '投资/自住对比只使用本条口播原词，重点句不再重复。'
 
     button.parentElement.appendChild(note)
   }
@@ -955,10 +956,10 @@ async function makeXhs(){
   if(document.readyState === 'loading'){
     document.addEventListener(
       'DOMContentLoaded',
-      addFactGuardNote
+      addHotfixNote
     )
   }else{
-    addFactGuardNote()
+    addHotfixNote()
   }
 })()
 </script>
