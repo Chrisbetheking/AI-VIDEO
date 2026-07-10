@@ -1,10 +1,12 @@
 const envApiBase = (import.meta.env.VITE_API_BASE || '').replace(/\/$/, '')
-const defaultRenderApi = 'https://ai-video.47-76-143-158.sslip.io'
-const isLocal = typeof window !== 'undefined' && /^(localhost|127\.0\.0\.1)$/i.test(window.location.hostname)
+const isLocal =
+  typeof window !== 'undefined' && /^(localhost|127\.0\.0\.1)$/i.test(window.location.hostname)
 
-// Cloudflare Pages 如果忘记配置 VITE_API_BASE，默认会请求当前 pages.dev 的 /api，
-// 这就是素材库/配音常见 Failed to fetch 的来源。这里加一个生产兜底。
-export const API_BASE = envApiBase || (isLocal ? 'http://localhost:8000' : defaultRenderApi)
+// 生产环境统一使用当前页面的 /api 同源代理。
+// 本地开发仍允许使用 VITE_API_BASE 或 localhost:8000。
+export const API_BASE = isLocal
+  ? (envApiBase || 'http://localhost:8000')
+  : ''
 
 function withTimeout(ms = 90000) {
   const controller = new AbortController()
@@ -61,7 +63,7 @@ async function safeFetch<T>(url: string, init?: RequestInit, timeoutMs = 240000)
     }
     const msg = err?.message || String(err)
     if (msg === 'Failed to fetch') {
-      throw new Error(`无法连接后端：${url}\n请先打开 ${defaultRenderApi}/api/health，确认返回 ok；如果仍失败，请检查 ECS 后端服务和 Nginx。`)
+      throw new Error(`无法连接后端：${url}\n请先打开 ${window.location.origin}/api/health，确认返回 ok；如果仍失败，请检查 ECS 后端服务和 Nginx。`)
     }
     throw err
   } finally {

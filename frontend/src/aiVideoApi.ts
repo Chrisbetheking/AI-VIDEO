@@ -1,9 +1,12 @@
 const envApiBase = (import.meta.env.VITE_API_BASE || '').replace(/\/$/, '')
-const defaultApiBase = 'https://ai-video.47-76-143-158.sslip.io'
 const isLocal =
   typeof window !== 'undefined' && /^(localhost|127\.0\.0\.1)$/i.test(window.location.hostname)
 
-export const API_BASE = envApiBase || (isLocal ? 'http://localhost:8000' : defaultApiBase)
+// 生产环境统一使用当前页面的 /api 同源代理。
+// 本地开发仍允许使用 VITE_API_BASE 或 localhost:8000。
+export const API_BASE = isLocal
+  ? (envApiBase || 'http://localhost:8000')
+  : ''
 export const TOKEN_KEY = 'ai_video_api_token'
 export const BACKEND_MAX_FULL_AI_SHOTS = 50
 

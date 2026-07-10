@@ -1,6 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 
-const API_BASE = (((import.meta as any).env?.VITE_API_BASE as string | undefined) || 'https://ai-video.47-76-143-158.sslip.io').replace(/\/$/, '')
+const fullAiEnvApiBase = String(
+  (import.meta as any).env?.VITE_API_BASE || '',
+).replace(/\/$/, '')
+const fullAiIsLocal =
+  typeof window !== 'undefined' &&
+  /^(localhost|127\.0\.0\.1)$/i.test(window.location.hostname)
+
+const API_BASE = fullAiIsLocal
+  ? (fullAiEnvApiBase || 'http://localhost:8000')
+  : ''
 
 const AI_VIDEO_API_TOKEN_STORAGE_KEY = 'ai_video_api_token'
 
