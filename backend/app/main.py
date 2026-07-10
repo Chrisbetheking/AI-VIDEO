@@ -6147,3 +6147,20 @@ try:
     _install_v10_34_complete(app)
 except Exception as _v10_34_complete_exc:
     print('V10_34_A_TO_G_ORIGINAL_UI_INSTALL_FAILED', _v10_34_complete_exc, flush=True)
+
+# ===== AI_VIDEO_GRAPHIC_WINDOW_REPO_SYNC_V1_START =====
+try:
+    from app.services.graphic_window_provider import install_graphic_window_provider
+    install_graphic_window_provider(app)
+except Exception as exc:
+    print("AI_VIDEO_GRAPHIC_WINDOW_INSTALL_FAILED", repr(exc), flush=True)
+# ===== AI_VIDEO_GRAPHIC_WINDOW_REPO_SYNC_V1_END =====
+
+# ===== AI_VIDEO_REVIEW_GATE_V1_START =====
+try:
+    from app.services.video_review_gate_provider import install_video_review_gate_provider
+    install_video_review_gate_provider(app)
+except Exception as exc:
+    print("AI_VIDEO_REVIEW_GATE_INSTALL_FAILED", repr(exc), flush=True)
+# ===== AI_VIDEO_REVIEW_GATE_V1_END =====
+

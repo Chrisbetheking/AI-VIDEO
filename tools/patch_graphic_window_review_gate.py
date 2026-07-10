@@ -1,191 +1,14 @@
-<!doctype html>
-<html lang="zh-CN">
-<head>
-<meta charset="utf-8"/>
-<meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>图文窗口 - AI VIDEO</title>
-<style>
-:root{--bg:#f6f4ff;--card:#fff;--ink:#111827;--muted:#64748b;--line:#e5e7eb;--brand:#7c3aed;--blue:#2563eb;--green:#16a34a}
-*{box-sizing:border-box}body{margin:0;background:linear-gradient(135deg,#faf7ff,#f8fbff);color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",Arial,sans-serif}
-header{height:68px;background:#111827;color:#fff;display:flex;align-items:center;justify-content:space-between;padding:0 24px;box-shadow:0 8px 24px rgba(15,23,42,.18)}
-header h1{margin:0;font-size:22px}.back{color:#dbeafe;text-decoration:none;font-weight:900}
-main{max-width:1380px;margin:0 auto;padding:24px}.hero{background:#fff;border:1px solid #eadcff;border-radius:26px;padding:22px 24px;margin-bottom:20px;box-shadow:0 14px 36px rgba(124,58,237,.08)}
-.hero b{color:var(--brand);letter-spacing:.16em}.hero h2{margin:8px 0 6px;font-size:28px}.hero p{margin:0;color:var(--muted);font-weight:700}
-.grid{display:grid;grid-template-columns:430px 1fr;gap:20px}.card{background:var(--card);border:1px solid #eadcff;border-radius:24px;padding:20px;box-shadow:0 16px 42px rgba(15,23,42,.07)}
-label{display:block;margin:13px 0;font-weight:900;color:#334155}input,select,textarea{width:100%;border:1px solid #cbd5e1;border-radius:15px;padding:12px 14px;font-size:15px;background:#f8fafc;outline:none}
-input:focus,select:focus,textarea:focus{border-color:#8b5cf6;box-shadow:0 0 0 3px rgba(139,92,246,.15)}textarea{min-height:108px;resize:vertical}
-.row{display:flex;flex-wrap:wrap;gap:10px;margin-top:12px}button,.downloadBtn{border:0;border-radius:15px;padding:12px 16px;font-weight:950;cursor:pointer;background:#111827;color:white;text-decoration:none;display:inline-flex;align-items:center;justify-content:center}
-button.primary{background:var(--blue)}button.green{background:var(--green)}button:disabled{opacity:.55;cursor:not-allowed}.downloadBtn{background:#7c3aed}
-pre{white-space:pre-wrap;background:#0f172a;color:#dbeafe;border-radius:16px;padding:14px;max-height:300px;overflow:auto;font-size:13px}.hint{background:#eff6ff;border:1px dashed #93c5fd;border-radius:15px;padding:12px;color:#1d4ed8;font-weight:800;margin:12px 0}
-.resultTitle{font-size:22px;font-weight:950;margin:4px 0 10px}.images{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;margin-top:16px}.thumb{display:block;text-decoration:none;color:#111827;background:#f8fafc;border:1px solid #e5e7eb;border-radius:18px;padding:10px;box-shadow:0 10px 26px rgba(15,23,42,.08)}
-.thumb img{width:100%;height:310px;object-fit:cover;border-radius:14px;background:#111827}.thumb span{display:block;margin-top:8px;font-size:13px;font-weight:900;color:#475569}
-.badge{display:inline-block;background:#dcfce7;color:#166534;padding:7px 11px;border-radius:999px;font-weight:950;font-size:13px}.empty{min-height:420px;display:flex;align-items:center;justify-content:center;color:#94a3b8;font-weight:900;border:2px dashed #e5e7eb;border-radius:20px;background:#fafafa}
-@media(max-width:960px){.grid{grid-template-columns:1fr}.images{grid-template-columns:1fr}.thumb img{height:auto}}
-</style>
-</head>
-<body>
-<header>
-  <h1>图文窗口</h1>
-  <a class="back" href="/">返回主控制台</a>
-</header>
+#!/usr/bin/env python3
+from __future__ import annotations
 
-<main>
-  <section class="hero">
-    <b>AI-VIDEO GRAPHIC WINDOW</b>
-    <h2>9:16视频封面 / 小红书爆款图文包</h2>
-    <p>不调用 FAL，不重新生成视频。视频封面只出 9:16；小红书生成 7 页图文包，包含钩子、区域逻辑、对比表、预算分层、避坑和引流。</p>
-  </section>
+import re
+import sys
+from pathlib import Path
 
-  <section class="grid">
-    <div class="card">
-      <h2>控制台</h2>
-      <div class="hint">先点「读取最新成片」，再生成9:16封面或小红书7页图文包。</div>
+START = "<!-- AI_VIDEO_REVIEW_GATE_UI_START -->"
+END = "<!-- AI_VIDEO_REVIEW_GATE_UI_END -->"
 
-      <label>视频 Job ID
-        <input id="jobId" placeholder="留空时可读取最新成片"/>
-      </label>
-
-      <label>标题
-        <input id="title" value="吉隆坡买房预算不同区域不同"/>
-      </label>
-
-      <label>关键词
-        <input id="keywords" value="吉隆坡,买房,预算,投资,自住,出租回报,生活配套"/>
-      </label>
-
-      <label>目标平台
-        <select id="platform">
-          <option value="xiaohongshu">小红书</option>
-          <option value="douyin">抖音</option>
-          <option value="tiktok">TikTok</option>
-          <option value="wechat">朋友圈/视频号</option>
-        </select>
-      </label>
-
-      <label>风格
-        <select id="style">
-          <option>专业顾问</option>
-          <option>小红书种草</option>
-          <option>犀利避坑</option>
-          <option>投资分析</option>
-        </select>
-      </label>
-
-      <label>图片数量
-        <input id="slideCount" type="number" min="3" max="9" value="7"/>
-      </label>
-
-      <label>引流 CTA
-        <textarea id="cta">评论区告诉我预算和用途，我按你的需求拆解区域</textarea>
-      </label>
-
-      <div class="row">
-        <button onclick="loadLatest()">读取最新成片</button>
-        <button class="primary" onclick="makeCover()">生成9:16视频封面</button>
-        <button class="green" onclick="makeXhs()">生成小红书爆款图文包</button>
-      </div>
-
-      <h3>日志</h3>
-      <pre id="log">准备就绪</pre>
-    </div>
-
-    <div class="card">
-      <h2>输出结果 <span class="badge">无 iframe 版</span></h2>
-      <div id="output" class="empty">还没有生成图片</div>
-    </div>
-  </section>
-</main>
-
-<script>
-const API_BASE = 'https://ai-video.47-76-143-158.sslip.io'
-const $ = id => document.getElementById(id)
-
-function log(x){
-  $('log').textContent = typeof x === 'string' ? x : JSON.stringify(x,null,2)
-}
-
-function setBusy(on){
-  document.querySelectorAll('button').forEach(b => b.disabled = !!on)
-}
-
-function payload(){
-  return {
-    job_id: $('jobId').value.trim(),
-    title: $('title').value.trim(),
-    script_text: "",
-    keywords: $('keywords').value.split(/[,，\s]+/).map(x=>x.trim()).filter(Boolean),
-    platform: $('platform').value,
-    style: $('style').value,
-    slide_count: Number($('slideCount').value || 7),
-    cta: $('cta').value.trim(),
-    use_video_frame: true
-  }
-}
-
-async function api(path, body, method='POST'){
-  const res = await fetch(API_BASE + path, {
-    method,
-    headers: body ? {'Content-Type':'application/json'} : undefined,
-    body: body ? JSON.stringify(body) : undefined
-  })
-  const text = await res.text()
-  let data
-  try{ data = text ? JSON.parse(text) : {} }catch{ data = {raw:text} }
-  if(!res.ok) throw new Error(data.detail || data.message || JSON.stringify(data).slice(0,500))
-  return data
-}
-
-function render(data){
-  log(data)
-  const imgs = data.images || []
-  let html = `<div class="resultTitle">${data.mode === 'video_cover' ? '视频封面结果' : '小红书图文结果'}</div>`
-  html += `<p><b>标题：</b>${data.publish_title || data.title || ''}</p>`
-  html += `<textarea readonly style="min-height:170px">${data.publish_description || ''}</textarea>`
-  if(data.download_zip_url){
-    html += `<p><a class="downloadBtn" href="${data.download_zip_url}" target="_blank">下载全部图片</a></p>`
-  }
-  html += `<div class="images">`
-  for(const img of imgs){
-    html += `<a class="thumb" href="${img.url}" target="_blank"><img src="${img.url}"/><span>${img.role || '图片'}</span></a>`
-  }
-  html += `</div>`
-  $('output').className = ''
-  $('output').innerHTML = html
-}
-
-async function loadLatest(){
-  try{
-    setBusy(true)
-    log('读取最新成片中...')
-    const data = await api('/api/graphic-window/latest-video-job', null, 'GET')
-    $('jobId').value = data.job_id || ''
-    if(data.title) $('title').value = data.title
-    render(data)
-  }catch(e){ log('失败：' + e.message) }
-  finally{ setBusy(false) }
-}
-
-async function makeCover(){
-  try{
-    setBusy(true)
-    log('生成9:16视频封面中...')
-    const data = await api('/api/graphic-window/video-cover/generate', payload())
-    render(data)
-  }catch(e){ log('失败：' + e.message) }
-  finally{ setBusy(false) }
-}
-
-async function makeXhs(){
-  try{
-    setBusy(true)
-    log('生成小红书爆款图文包中...')
-    const data = await api('/api/graphic-window/xiaohongshu/generate', payload())
-    render(data)
-  }catch(e){ log('失败：' + e.message) }
-  finally{ setBusy(false) }
-}
-</script>
-
+BLOCK = r'''
 <!-- AI_VIDEO_REVIEW_GATE_UI_START -->
 <style>
 .reviewGatePanel{
@@ -539,7 +362,35 @@ async function makeXhs(){
 })()
 </script>
 <!-- AI_VIDEO_REVIEW_GATE_UI_END -->
+'''
 
-<!-- AI_VIDEO_GRAPHIC_WINDOW_STANDALONE_V2_NO_IFRAME -->
-</body>
-</html>
+
+def patch(path: Path) -> None:
+    if not path.exists():
+        raise SystemExit(f"target not found: {path}")
+
+    text = path.read_text(encoding="utf-8")
+    text = re.sub(
+        re.escape(START) + r".*?" + re.escape(END),
+        "",
+        text,
+        flags=re.S,
+    )
+
+    marker = "<!-- AI_VIDEO_GRAPHIC_WINDOW_STANDALONE_V2_NO_IFRAME -->"
+    if marker in text:
+        text = text.replace(marker, BLOCK + "\n" + marker, 1)
+    elif "</body>" in text:
+        text = text.replace("</body>", BLOCK + "\n</body>", 1)
+    else:
+        text += "\n" + BLOCK
+
+    path.write_text(text, encoding="utf-8")
+    print(f"patched review gate UI: {path}")
+
+
+if __name__ == "__main__":
+    if len(sys.argv) < 2:
+        raise SystemExit("usage: patch_graphic_window_review_gate.py <index.html> [...]")
+    for raw in sys.argv[1:]:
+        patch(Path(raw))
