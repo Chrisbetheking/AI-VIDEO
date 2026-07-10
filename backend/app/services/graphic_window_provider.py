@@ -607,7 +607,7 @@ def install_graphic_window_provider(app):
     def health():
         return {
             "ok": True,
-            "mode": "graphic_window_v7_4_layout_cover_video",
+            "mode": "graphic_window_v7_5_clean_subtitle_sentence_keyword",
             "rule": "cover_only_9_16_xhs_uses_info_cards_maps_tables_budget_checklist_cta",
             "storage": str(GRAPHIC_ROOT),
             "pillow": True,

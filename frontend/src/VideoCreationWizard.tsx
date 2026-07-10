@@ -369,6 +369,29 @@ function uid(prefix: string, index: number) {
   return `${prefix}_${index}_${Math.random().toString(16).slice(2, 8)}`
 }
 
+function assetHasEmbeddedText(asset: any) {
+  const flags = [
+    asset?.has_text,
+    asset?.has_subtitle,
+    asset?.embedded_subtitle,
+    asset?.watermark_detected,
+    asset?.ocr_detected,
+  ]
+  if (flags.some(Boolean)) return true
+
+  const haystack = [
+    asset?.name,
+    asset?.filename,
+    asset?.original_name,
+    asset?.tags,
+    asset?.labels,
+    asset?.notes,
+    asset?.ocr_text,
+  ].flat().filter(Boolean).join(' ')
+
+  return /(字幕|文案|贴字|水印|口播字|烧录字|caption|subtitle|watermark|ocr)/i.test(haystack)
+}
+
 function inferCity(text: string): string {
   const raw = String(text || '').toLowerCase()
   if (raw.includes('槟城') || raw.includes('penang')) return 'penang'
@@ -465,18 +488,47 @@ function generateScript(topic: string, city: string, duration: number, contentTy
   return normalizeScriptLength([hook, body, logic, keyLine, cta].filter(Boolean).join(' '), duration, city)
 }
 
-function splitScript(script: string): ScriptSegment[] {
-  const parts = String(script || '')
-    .split(/[。！？!?；;\n]+/)
-    .map((item) => item.trim())
-    .filter(Boolean)
+function cleanSpeechArtifacts(value: string) {
+  return String(value || '')
+    .replace(/\\[nr]/g, ' ')
+    .replace(/\r\n?/g, '\n')
+    .replace(/[／/|｜]+/g, '，')
+    .replace(/\\+/g, ' ')
+    .replace(/[ \t]*\n+[ \t]*/g, '。')
+    .replace(/\s+/g, ' ')
+    .replace(/\s*([，。！？；：])\s*/g, '$1')
+    .replace(/([，。！？；：])\1+/g, '$1')
+    .replace(/^[，。；：\s]+|[，；：\s]+$/g, '')
+    .trim()
+}
 
-  return parts.map((text, index) => ({
-    id: `seg_${index + 1}`,
-    index: index + 1,
-    text,
-    keywords: [],
-  }))
+function cleanSegmentText(value: string) {
+  return cleanSpeechArtifacts(value)
+    .replace(/^[。！？!?；;]+/g, '')
+    .trim()
+}
+
+function joinSegmentTexts(values: string[]) {
+  return values
+    .map(cleanSegmentText)
+    .filter(Boolean)
+    .map((item) => /[。！？!?；;]$/.test(item) ? item : `${item}。`)
+    .join('')
+}
+
+function splitScript(script: string): ScriptSegment[] {
+  const normalized = cleanSpeechArtifacts(script)
+  const parts = normalized.match(/[^。！？!?；;]+[。！？!?；;]?/g) || []
+
+  return parts
+    .map(cleanSegmentText)
+    .filter(Boolean)
+    .map((text, index) => ({
+      id: `seg_${index + 1}`,
+      index: index + 1,
+      text,
+      keywords: [],
+    }))
 }
 
 function extractKeywords(text: string, manual = ''): KeywordInsight[] {
@@ -614,12 +666,12 @@ function cityScenes(city: string) {
   return ['现代吉隆坡公寓入口和落客区：经纪人走向大堂，单一全屏镜头', '现代公寓客厅：落地窗、沙发、自然光，单一全屏镜头', '公寓阳台：普通吉隆坡住宅天际线和绿化，禁止双子塔主体', '公寓大堂：保安入口、会客区、品质感，单一全屏镜头', '公寓泳池和景观平台：社区设施和生活方式', '公寓健身房和公共设施：干净、高端、真实居住感', 'Mont Kiara 高端公寓社区：街区、咖啡和家庭生活', 'TRX / Bukit Bintang 街区生活半径：通勤、咖啡、城市街景，不拍地标天际线', '经纪人带看公寓：开门、看客厅、看阳台', '厨房、餐厅与卧室细节：体现自住舒适度']
 }
 
-function buildPrompt(city: string, scene: string, narration: string, index = 1) {
+function buildPrompt(city: string, scene: string, _narration: string, index = 1) {
   const klRule = city === 'kuala_lumpur'
-    ? `Kuala Lumpur only. Shot ${index} must be ONE continuous full-screen video shot. Do NOT center KLCC or Petronas Twin Towers. Do NOT repeat the same skyline. No collage, no split screen, no multi-panel, no storyboard grid, no contact sheet, no picture-in-picture, no borders. Do not show documents, paper sheets, charts, calculators, reports, maps, screenshots or readable words. Prefer condo interior, balcony generic city view, lobby, pool, gym, agent showing apartment, TRX/Bukit Bintang street-level context, Mont Kiara community, kitchen, bedroom or real residential details. Do not show beach, island, seaside, Langkawi, Sabah or Penang seaside.`
-    : 'Use city-matched Malaysia real estate visuals. Avoid fake project names, exact prices, exact ROI and unreadable text.'
+    ? `Kuala Lumpur only. Shot ${index} must be ONE continuous full-screen video shot. Do NOT center KLCC or Petronas Twin Towers. Do NOT repeat the same skyline. Prefer condo interior, balcony generic city view, lobby, pool, gym, agent showing apartment, TRX or Bukit Bintang street-level context, Mont Kiara community, kitchen, bedroom or real residential details. Do not show beach, island, seaside, Langkawi, Sabah or Penang seaside.`
+    : 'Use city-matched Malaysia real-estate visuals. Avoid fake project names, exact prices and exact ROI.'
 
-  return `Premium 9:16 cinematic vertical video for Malaysia real-estate content.\nShot ${index} main scene: ${scene}.\nNarration meaning: ${narration.slice(0, 80)}.\n${klRule}\nSingle-scene rule: this is one full-screen continuous camera shot only, not a montage and not a panel layout. Ultra realistic, premium real estate commercial style, natural lighting, clean composition, high detail, smooth camera movement. No readable text, no logo, no watermark, no fake project name, no exact price, no black borders, no papers, no charts, no repeated KLCC Twin Towers.`
+  return `Premium 9:16 cinematic vertical video for Malaysia real-estate content.\nShot ${index} main scene: ${scene}.\n${klRule}\nVisual-only rule: never render narration, subtitles, captions, headlines, stickers, labels, UI, logos, watermarks, signs, letters, numbers or pseudo-text inside the generated image. The picture must contain zero readable or unreadable text. Single-scene rule: one full-screen continuous camera shot only, not a montage, not split screen and not a panel layout. Ultra realistic, natural lighting, clean composition, high detail, smooth camera movement, no black borders, no documents, no papers, no charts, no screenshots.`
 }
 
 function generateShotPlan(segments: ScriptSegment[], duration: number, city: string, project: ProjectDraft): ShotPlan[] {
@@ -643,8 +695,8 @@ function generateShotPlan(segments: ScriptSegment[], duration: number, city: str
       transition: index === 0 ? '开场建立' : '自然衔接',
       prompt: buildPrompt(city, scene, segment?.text || '', index + 1),
       avoid: city === 'kuala_lumpur'
-        ? ['海边', '沙滩', '海岛', '分屏', '拼贴', '多宫格', '文件桌面', '纸张', '图表', '计算器', '乱码文字', '假价格']
-        : ['分屏', '拼贴', '多宫格', '文件桌面', '纸张', '图表', '计算器', '乱码文字', '假价格', '假项目名'],
+        ? ['海边', '沙滩', '海岛', '分屏', '拼贴', '多宫格', '文件桌面', '纸张', '图表', '计算器', '乱码文字', '字幕', '标题', '水印', 'Logo', '贴纸', 'UI', '数字', '字母', '假价格']
+        : ['分屏', '拼贴', '多宫格', '文件桌面', '纸张', '图表', '计算器', '乱码文字', '字幕', '标题', '水印', 'Logo', '贴纸', 'UI', '数字', '字母', '假价格', '假项目名'],
       assetIds,
     }
   })
@@ -766,6 +818,8 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
   const [voicePreviewBusy, setVoicePreviewBusy] = useState('')
   const [voicePreviewUrl, setVoicePreviewUrl] = useState('')
   const [voicePreviewError, setVoicePreviewError] = useState('')
+  const [segmentEditDraft, setSegmentEditDraft] = useState('')
+  const segmentEditorRef = useRef<HTMLTextAreaElement | null>(null)
   const reviewLaunchRef = useRef('')
 
   const approvedBrainCards = useMemo(() => {
@@ -825,6 +879,10 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
     videoUrl ||
     '',
   )
+
+  useEffect(() => {
+    setSegmentEditDraft(selectedSegment?.text || '')
+  }, [selectedSegmentId, selectedSegment?.text])
 
   useEffect(() => {
     let alive = true
@@ -1538,6 +1596,82 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
     setProject({ ...project, segment_voice_settings: next })
   }
 
+  function applyEditedSegments(nextTexts: string[], focusIndex: number) {
+    const nextScript = joinSegmentTexts(nextTexts)
+    const nextSegments = attachSegmentKeywords(splitScript(nextScript), keywords)
+    const nextId = nextSegments[Math.max(0, Math.min(focusIndex, nextSegments.length - 1))]?.id || 'seg_1'
+    const nextShots = shotPlan.map((shot, shotIndex) => {
+      const segment = nextSegments[shotIndex % Math.max(nextSegments.length, 1)]
+      if (!segment) return shot
+      return {
+        ...shot,
+        narration: segment.text,
+        prompt: buildPrompt(city, shot.scene, segment.text, shot.index),
+      }
+    })
+
+    setScript(nextScript)
+    setSelectedSegmentId(nextId)
+    setSegmentEditDraft(nextSegments.find((item) => item.id === nextId)?.text || '')
+    if (nextShots.length) setShotPlan(nextShots)
+    setProject({
+      ...project,
+      script: nextScript,
+      script_segments: nextSegments,
+      segment_voice_settings: voiceSettings,
+      manual_shot_plan: nextShots.length ? nextShots : shotPlan,
+      shot_overrides: nextShots.length ? nextShots : shotPlan,
+    })
+    noteButton(`已保存第 ${focusIndex + 1} 句，并同步到口播、配音、镜头和字幕。`)
+  }
+
+  function saveSelectedSegment() {
+    if (!selectedSegment) return
+    const cleaned = cleanSegmentText(segmentEditDraft)
+    if (!cleaned) {
+      setVoicePreviewError('本句不能为空。')
+      return
+    }
+    const nextTexts = segments.map((segment) =>
+      segment.id === selectedSegment.id ? cleaned : segment.text,
+    )
+    applyEditedSegments(nextTexts, Math.max(0, selectedSegment.index - 1))
+    setVoicePreviewError('')
+  }
+
+  function sanitizeWholeScript() {
+    const cleaned = joinSegmentTexts(segments.map((segment) => segment.text))
+    const nextSegments = splitScript(cleaned)
+    applyEditedSegments(nextSegments.map((segment) => segment.text), Math.max(0, (selectedSegment?.index || 1) - 1))
+    setAiStatus('已清理文案中的 /、\、|、\n 和多余换行；这些符号不会再进入配音或字幕。')
+  }
+
+  function markSelectedTextAsKeyword() {
+    const editor = segmentEditorRef.current
+    if (!editor) return
+    const start = editor.selectionStart || 0
+    const end = editor.selectionEnd || 0
+    const selected = cleanSegmentText(segmentEditDraft.slice(start, end))
+    const keyword = usefulKeyword(selected)
+
+    if (!keyword) {
+      setVoicePreviewError('请先在本句编辑框里划选 2–12 个字，再点“标为关键词”。')
+      editor.focus()
+      return
+    }
+
+    const merged = cleanManualKeywordText(
+      [cleanManualKeywords, keyword].filter(Boolean).join('，'),
+    )
+    setManualKeywords(merged)
+    setDisabledKeywordValues((current) =>
+      current.filter((item) => item.toLowerCase() !== keyword.toLowerCase()),
+    )
+    setVoicePreviewError('')
+    setAiStatus(`已将“${keyword}”标为关键词；会同步进入重音、字幕高亮和镜头语义。`)
+    noteButton(`第 ${selectedSegment?.index || 1} 句已划词：${keyword}`)
+  }
+
   function autoTuneVoiceAll() {
     void aiTuneVoiceAll()
   }
@@ -1589,8 +1723,45 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
     setWorkflowBusy('')
     reviewLaunchRef.current = ''
     setStep(4)
-    const finalProject = syncProject()
-    const finalShots = shotPlan.length ? shotPlan : generateShotPlan(segments, targetDuration, city, finalProject)
+
+    const cleanSegments = attachSegmentKeywords(
+      splitScript(joinSegmentTexts(segments.map((segment) => segment.text))),
+      keywords,
+    )
+    const cleanScript = joinSegmentTexts(cleanSegments.map((segment) => segment.text))
+    const cleanAssets = selectedAssets.filter((asset: any) => !assetHasEmbeddedText(asset))
+    const finalProject = syncProject({
+      script: cleanScript,
+      segments: cleanSegments,
+      script_segments: cleanSegments,
+      asset_context: cleanAssets,
+      selected_assets: cleanAssets,
+      r2_material_context: cleanAssets,
+    })
+    const finalShots = shotPlan.length
+      ? shotPlan.map((shot, index) => {
+          const segment = cleanSegments[index % Math.max(cleanSegments.length, 1)]
+          return {
+            ...shot,
+            narration: cleanSegmentText(segment?.text || shot.narration),
+            prompt: buildPrompt(city, shot.scene, '', shot.index),
+            avoid: Array.from(new Set([
+              ...shot.avoid,
+              '字幕', '标题', '水印', '贴纸', 'Logo', 'UI', '字母', '数字', '乱码文字',
+            ])),
+          }
+        })
+      : generateShotPlan(cleanSegments, targetDuration, city, finalProject)
+
+    const renderShotCount = Math.max(
+      4,
+      Math.min(10, finalShots.length || Math.ceil(targetDuration / 4.5)),
+    )
+
+    setScript(cleanScript)
+    if (cleanAssets.length !== selectedAssets.length) {
+      noteButton(`已自动排除 ${selectedAssets.length - cleanAssets.length} 个疑似带字幕/水印素材。`)
+    }
 
     const payload = {
       title: topic,
@@ -1599,29 +1770,37 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
       city,
       content_type: contentType,
       script_mode: scriptMode,
-      script_text: script,
+      script_text: cleanScript,
       target_duration_seconds: targetDuration,
       duration_seconds: targetDuration,
       width: 1080,
       height: 1920,
       fps: 30,
-      shots: finalShots.map((shot) => ({
+      shots: finalShots.slice(0, renderShotCount).map((shot) => ({
         index: shot.index,
-        prompt: shot.prompt,
-        visual_prompt: shot.prompt,
-        narration_segment: shot.narration,
+        prompt: buildPrompt(city, shot.scene, '', shot.index),
+        visual_prompt: buildPrompt(city, shot.scene, '', shot.index),
+        negative_prompt: 'text, subtitles, captions, title, headline, sticker, label, logo, watermark, sign, letters, numbers, pseudo text, gibberish text, UI, split screen, collage, black border',
+        narration_segment: cleanSegmentText(shot.narration),
         duration_seconds: shot.duration,
         source: shot.source,
         asset_ids: shot.assetIds,
+        reject_embedded_text: true,
       })),
-      max_shots: 3,
-      fal_fill_shots: 3,
-      dynamic_shot_count: 3,
-        visual_policy: 'real_condo_tour_no_office_no_papers',
+      max_shots: renderShotCount,
+      fal_fill_shots: renderShotCount,
+      dynamic_shot_count: renderShotCount,
+      min_unique_shots: Math.max(4, Math.min(renderShotCount, 8)),
+      no_repeat_visuals: true,
+      shot_duration_policy: 'follow_audio_duration_no_repeat',
+      visual_policy: 'real_condo_tour_no_office_no_papers_no_text',
+      visual_text_policy: 'zero_text_zero_caption_zero_watermark',
+      reject_embedded_text_assets: true,
+      source_caption_policy: 'reject_captioned_source',
       one_scene_mode: true,
       dynamic_single_scene: true,
       visual_mode: 'single_scene_dynamic',
-      script_segments: segments,
+      script_segments: cleanSegments,
       segment_voice_settings: voiceSettings,
       keyword_insights: keywords,
       ai_keyword_insights: aiKeywordInsights,
@@ -1629,26 +1808,35 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
       subtitle_required: subtitleEnabled,
       subtitle_style_id: subtitleStyleId || 'douyin_pop',
       subtitle_style: selectedSubtitleStyle,
+      subtitle_text_policy: 'clean_script_only_no_slash_no_literal_newline',
+      subtitle_source: 'sanitized_script_segments',
       ai_status: aiStatus,
       content_brain_context: compactBrainForWizard(videoBrainCards),
-      manual_shot_plan: finalShots,
-      shot_overrides: finalShots,
-      transition_plan: finalShots.map((shot) => ({ index: shot.index, camera: shot.camera, transition: shot.transition })),
-      asset_context: finalProject.asset_context || selectedAssets,
-      selected_assets: finalProject.selected_assets || selectedAssets,
-      r2_material_context: finalProject.r2_material_context || selectedAssets,
+      manual_shot_plan: finalShots.slice(0, renderShotCount),
+      shot_overrides: finalShots.slice(0, renderShotCount),
+      transition_plan: finalShots.slice(0, renderShotCount).map((shot) => ({
+        index: shot.index,
+        camera: shot.camera,
+        transition: shot.transition,
+      })),
+      asset_context: cleanAssets,
+      selected_assets: cleanAssets,
+      r2_material_context: cleanAssets,
       avatar_config: finalProject.avatar_config || avatarConfig,
       openclaw_lead_context: finalProject.leads || [],
       extra: {
-        source: 'one_scene_condo_tour_douyin_subtitle_v10_16',
+        source: 'one_scene_condo_tour_douyin_subtitle_v10_17_clean_text',
         source_mode: sourceMode,
         competitor_source: competitorSource,
         content_type: contentType,
         script_mode: scriptMode,
-        selected_assets: selectedAssets,
+        selected_assets: cleanAssets,
+        excluded_captioned_asset_count: selectedAssets.length - cleanAssets.length,
         avatar_config: avatarConfig,
         lead_count: leadCount,
         content_brain_count: videoBrainCards.length,
+        strict_visual_no_text: true,
+        sanitized_script: true,
       },
     }
 
@@ -1827,7 +2015,7 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
       const ratePercent = Math.round((Number(selectedSetting.speed || 1) - 1) * 100)
       const rate = `${ratePercent >= 0 ? '+' : ''}${ratePercent}%`
       const response = await apiPost('/api/tts', {
-        text: selectedSegment.text,
+        text: cleanSegmentText(selectedSegment.text),
         voice:
           project.voice ||
           project.voice_id ||
@@ -1867,35 +2055,159 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
 
   function renderStepTwo() {
     const { min, max } = targetChars(targetDuration)
+    const artifactFound = /\\[nr]|[／/|｜\\]|\r|\n/.test(script)
+    const sentenceKeywords = selectedSegment?.keywords || []
+
     return (
-      <div className="aiw-stepGrid three">
-        <section className="aiw-stepCard">
-          <h3>第二步：口播文案</h3>
-          <p>建议 {min}-{max} 字，当前 {script.length} 字。可以手动改文案。</p>
-          <div className="aiw-chipRow">{keywords.slice(0, 10).map((kw) => <span className="aiw-keywordPill" key={kw.id}>{kw.value}</span>)}</div>
-          <div className="aiw-actions">
-            <button className="aiw-primary" type="button" disabled={!!aiBusy} onClick={() => void aiGenerateScriptAndVoice()}>{aiBusy || 'DeepSeek 重写文案并重调配音'}</button>
-            <button className="aiw-muted" type="button" onClick={() => setStep(1)}>回第一步选关键词</button>
+      <div className="aiw-stepGrid three aiw-stepTwoGrid">
+        <section className="aiw-stepCard aiw-scriptEditorCard">
+          <div className="aiw-sectionTitleRow">
+            <div>
+              <h3>第二步：口播文案</h3>
+              <span>建议 {min}-{max} 字，当前 {script.length} 字</span>
+            </div>
+            <span className={artifactFound ? 'aiw-statusBadge warning' : 'aiw-statusBadge success'}>
+              {artifactFound ? '发现换行符号' : '文案干净'}
+            </span>
           </div>
-          <textarea className="aiw-scriptTextarea" value={script} onChange={(e) => setScript(e.target.value)} />
+
+          <p>整段文案可以改；保存单句后会同步更新配音、镜头和字幕。</p>
+
+          <div className="aiw-chipRow aiw-keywordToolbar">
+            {keywords.slice(0, 12).map((kw) => (
+              <button
+                type="button"
+                className="aiw-keywordPill"
+                key={kw.id}
+                title={`点击关闭：${kw.reason}`}
+                onClick={() => toggleKeyword(kw.value)}
+              >
+                {kw.value}
+              </button>
+            ))}
+          </div>
+
+          <div className="aiw-actions">
+            <button className="aiw-primary" type="button" disabled={!!aiBusy} onClick={() => void aiGenerateScriptAndVoice()}>
+              {aiBusy || 'DeepSeek 重写文案并重调配音'}
+            </button>
+            <button className="aiw-muted" type="button" onClick={sanitizeWholeScript}>
+              清理 / 和换行符
+            </button>
+            <button className="aiw-muted" type="button" onClick={() => setStep(1)}>
+              回第一步选关键词
+            </button>
+          </div>
+
+          <textarea
+            className="aiw-scriptTextarea"
+            value={script}
+            onChange={(e) => setScript(e.target.value)}
+            onBlur={() => {
+              const cleaned = joinSegmentTexts(splitScript(script).map((item) => item.text))
+              if (cleaned && cleaned !== script) setScript(cleaned)
+            }}
+          />
+
+          <div className="aiw-editorFootnote">
+            <span>自动拦截：/、\\、|、\\n、多余换行</span>
+            <span>字幕只使用这份清理后的口播文案</span>
+          </div>
         </section>
-        <section className="aiw-stepCard">
-          <h3>逐句配音</h3>
-          <p>AI 会按句意自动判断语气、情绪、停顿；你也可以点某一句手动微调。</p>
-          <div className="aiw-actions"><button className="aiw-primary" type="button" disabled={!!aiBusy} onClick={autoTuneVoiceAll}>{aiBusy === 'DeepSeek 正在判断语气情绪' ? 'DeepSeek 判断中...' : 'DeepSeek 自动调好全部句子'}</button></div>
-          <div className="aiw-segmentPicker">
+
+        <section className="aiw-stepCard aiw-segmentListCard">
+          <div className="aiw-sectionTitleRow">
+            <div>
+              <h3>逐句配音与单句编辑</h3>
+              <span>点击任意一句，右侧可直接改文字并划关键词</span>
+            </div>
+            <span className="aiw-statusBadge">{segments.length} 句</span>
+          </div>
+
+          <div className="aiw-actions">
+            <button className="aiw-primary" type="button" disabled={!!aiBusy} onClick={autoTuneVoiceAll}>
+              {aiBusy === 'DeepSeek 正在判断语气情绪' ? 'DeepSeek 判断中...' : 'DeepSeek 自动调好全部句子'}
+            </button>
+          </div>
+
+          <div className="aiw-segmentPicker aiw-editableSegmentPicker">
             {segments.map((segment) => (
-              <button key={segment.id} className={selectedSegment?.id === segment.id ? 'active' : ''} onClick={() => setSelectedSegmentId(segment.id)}>
+              <button
+                key={segment.id}
+                type="button"
+                className={selectedSegment?.id === segment.id ? 'active' : ''}
+                onClick={() => setSelectedSegmentId(segment.id)}
+              >
                 <span>{String(segment.index).padStart(2, '0')}</span>
                 <b>{highlightText(segment.text, segment.keywords)}</b>
+                <em>{segment.text.length} 字 · 点击编辑</em>
               </button>
             ))}
           </div>
         </section>
-        <aside className="aiw-stepCard">
-          <h3>{selectedSegment ? `第 ${selectedSegment.index} 句表达` : '选择一句'}</h3>
-          {!selectedSegment || !selectedSetting ? <div className="aiw-info">点击中间某一句后，才显示该句设置。</div> : (
+
+        <aside className="aiw-stepCard aiw-segmentEditorCard">
+          <div className="aiw-sectionTitleRow">
+            <div>
+              <h3>{selectedSegment ? `第 ${selectedSegment.index} 句表达` : '选择一句'}</h3>
+              <span>先改句子，再调语气；划选文字可直接标为关键词</span>
+            </div>
+          </div>
+
+          {!selectedSegment || !selectedSetting ? (
+            <div className="aiw-info">点击中间某一句后，才显示该句编辑和配音设置。</div>
+          ) : (
             <div className="aiw-form one">
+              <label className="aiw-sentenceEditorLabel">
+                本句文字
+                <textarea
+                  ref={segmentEditorRef}
+                  className="aiw-sentenceEditor"
+                  value={segmentEditDraft}
+                  onChange={(e) => setSegmentEditDraft(e.target.value)}
+                  onKeyDown={(e) => {
+                    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+                      e.preventDefault()
+                      saveSelectedSegment()
+                    }
+                  }}
+                />
+              </label>
+
+              <div className="aiw-actions aiw-sentenceActions">
+                <button className="aiw-primary" type="button" onClick={saveSelectedSegment}>
+                  保存本句
+                </button>
+                <button className="aiw-purple" type="button" onClick={markSelectedTextAsKeyword}>
+                  将选中文字标为关键词
+                </button>
+                <button className="aiw-muted" type="button" onClick={() => setSegmentEditDraft(cleanSegmentText(segmentEditDraft))}>
+                  清理本句符号
+                </button>
+              </div>
+
+              <div className="aiw-editorFootnote">
+                <span>{segmentEditDraft.length} 字</span>
+                <span>快捷保存：⌘/Ctrl + Enter</span>
+              </div>
+
+              <div className="aiw-sentenceKeywordBox">
+                <b>本句关键词</b>
+                <div className="aiw-chipRow">
+                  {sentenceKeywords.length ? sentenceKeywords.map((kw) => (
+                    <button
+                      type="button"
+                      className="aiw-keywordPill active"
+                      key={kw.id}
+                      title="点击关闭这个关键词"
+                      onClick={() => toggleKeyword(kw.value)}
+                    >
+                      {kw.value}
+                    </button>
+                  )) : <span className="aiw-emptyHint">划选本句中的词，再点“标为关键词”</span>}
+                </div>
+              </div>
+
               <label>语气<select value={selectedSetting.tone} onChange={(e) => updateSetting({ tone: e.target.value })}><option>专业可信</option><option>自然平稳</option><option>轻快种草</option><option>成交引导</option><option>风险提醒</option></select></label>
               <label>情绪<select value={selectedSetting.emotion} onChange={(e) => updateSetting({ emotion: e.target.value })}><option>重点强调</option><option>自然平稳</option><option>解释说明</option><option>提醒避坑</option><option>温和引导</option></select></label>
               <label>语速 {selectedSetting.speed.toFixed(2)}<input type="range" min="0.75" max="1.25" step="0.05" value={selectedSetting.speed} onChange={(e) => updateSetting({ speed: Number(e.target.value) })} /></label>
@@ -1904,6 +2216,7 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
               <label>句前停顿 ms<input type="number" value={selectedSetting.pauseBefore} onChange={(e) => updateSetting({ pauseBefore: Number(e.target.value) })} /></label>
               <label>句后停顿 ms<input type="number" value={selectedSetting.pauseAfter} onChange={(e) => updateSetting({ pauseAfter: Number(e.target.value) })} /></label>
               <label>备注<textarea value={selectedSetting.note} onChange={(e) => updateSetting({ note: e.target.value })} /></label>
+
               <div className="aiw-actions vertical">
                 <button className="aiw-muted" type="button" onClick={() => {
                   const next: Record<string, SegmentVoiceSetting> = {}
@@ -1915,6 +2228,7 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
                 <button className="aiw-muted" type="button" onClick={() => updateSetting(inferVoiceSetting(selectedSegment, Math.max(0, selectedSegment.index - 1), segments.length, scriptMode))}>AI 重置本句</button>
                 <button className="aiw-primary" type="button" disabled={!!voicePreviewBusy} onClick={() => void previewSelectedVoice()}>{voicePreviewBusy || '试听本句配音'}</button>
               </div>
+
               {voicePreviewError && <div className="aiw-error">{voicePreviewError}</div>}
               {voicePreviewUrl && <audio src={voicePreviewUrl} controls style={{ width: '100%' }} />}
             </div>

@@ -18,8 +18,8 @@ from fastapi import BackgroundTasks, Body, FastAPI, HTTPException
 from fastapi.encoders import jsonable_encoder
 
 
-VERSION = "10.40.4"
-MODE = "layout_cover_video_hub"
+VERSION = "10.40.5"
+MODE = "clean_subtitle_sentence_keyword_hub"
 
 BASE = Path(os.getenv("AI_VIDEO_BASE", "/opt/ai-video"))
 STORAGE = BASE / "storage"
@@ -73,6 +73,178 @@ REJECTED_STATUS = {
 
 def _now() -> int:
     return int(time.time())
+
+
+def _clean_generation_speech_text(value: Any) -> str:
+    text = str(value or "")
+    text = re.sub(r"\\[nr]", " ", text)
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    text = re.sub(r"[／/|｜]+", "，", text)
+    text = re.sub(r"\\+", " ", text)
+    text = re.sub(r"[ \t]*\n+[ \t]*", "。", text)
+    text = re.sub(r"\s+", " ", text)
+    text = re.sub(r"\s*([，。！？；：])\s*", r"\1", text)
+    text = re.sub(r"([，。！？；：])\1+", r"\1", text)
+    return text.strip(" ，。；：")
+
+
+def _clean_visual_prompt(value: Any) -> str:
+    text = str(value or "")
+    text = re.sub(
+        r"(?im)^\s*Narration meaning\s*:.*$",
+        "",
+        text,
+    )
+    text = re.sub(
+        r"(?im)^\s*口播(?:含义|文案|内容)\s*[：:].*$",
+        "",
+        text,
+    )
+    strict = (
+        "Visual-only hard rule: zero text, zero subtitles, zero captions, "
+        "zero headlines, zero stickers, zero labels, zero UI, zero logos, "
+        "zero watermarks, zero signs, zero letters, zero numbers and zero "
+        "pseudo-text or gibberish text inside the picture."
+    )
+    if strict not in text:
+        text = text.rstrip() + "\n" + strict
+    return text.strip()
+
+
+def _sanitize_video_generation_payload(
+    payload: Dict[str, Any],
+) -> Dict[str, Any]:
+    clean = dict(payload)
+
+    if "script_text" in clean:
+        clean["script_text"] = _clean_generation_speech_text(
+            clean.get("script_text")
+        )
+
+    segments = clean.get("script_segments")
+    if isinstance(segments, list):
+        next_segments = []
+        for item in segments:
+            if not isinstance(item, dict):
+                continue
+            next_item = dict(item)
+            next_item["text"] = _clean_generation_speech_text(
+                item.get("text")
+            )
+            if next_item["text"]:
+                next_segments.append(next_item)
+        clean["script_segments"] = next_segments
+
+    shots = clean.get("shots")
+    if isinstance(shots, list):
+        next_shots = []
+        for item in shots:
+            if not isinstance(item, dict):
+                continue
+            next_item = dict(item)
+            if "narration_segment" in next_item:
+                next_item["narration_segment"] = (
+                    _clean_generation_speech_text(
+                        next_item.get("narration_segment")
+                    )
+                )
+            for key in ("prompt", "visual_prompt"):
+                if key in next_item:
+                    next_item[key] = _clean_visual_prompt(
+                        next_item.get(key)
+                    )
+            next_item["reject_embedded_text"] = True
+            next_shots.append(next_item)
+        clean["shots"] = next_shots
+
+    for key in ("manual_shot_plan", "shot_overrides"):
+        plans = clean.get(key)
+        if not isinstance(plans, list):
+            continue
+        next_plans = []
+        for item in plans:
+            if not isinstance(item, dict):
+                continue
+            next_item = dict(item)
+            if "narration" in next_item:
+                next_item["narration"] = _clean_generation_speech_text(
+                    next_item.get("narration")
+                )
+            if "prompt" in next_item:
+                next_item["prompt"] = _clean_visual_prompt(
+                    next_item.get("prompt")
+                )
+            next_plans.append(next_item)
+        clean[key] = next_plans
+
+    clean["visual_text_policy"] = (
+        "zero_text_zero_caption_zero_watermark"
+    )
+    clean["reject_embedded_text_assets"] = True
+    clean["source_caption_policy"] = "reject_captioned_source"
+    clean["subtitle_text_policy"] = (
+        "clean_script_only_no_slash_no_literal_newline"
+    )
+    clean["subtitle_source"] = "sanitized_script_segments"
+    clean["no_repeat_visuals"] = True
+    return clean
+
+
+class _SanitizeGenerationMiddleware:
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if (
+            scope.get("type") != "http"
+            or str(scope.get("method") or "").upper() != "POST"
+            or scope.get("path")
+            != "/api/video/full-ai/one-scene/start"
+        ):
+            await self.app(scope, receive, send)
+            return
+
+        chunks: List[bytes] = []
+        more_body = True
+        while more_body:
+            message = await receive()
+            if message.get("type") != "http.request":
+                await self.app(scope, receive, send)
+                return
+            chunks.append(message.get("body", b""))
+            more_body = bool(message.get("more_body", False))
+
+        raw = b"".join(chunks)
+        try:
+            payload = json.loads(raw.decode("utf-8")) if raw else None
+        except Exception:
+            payload = None
+
+        body = raw
+        if isinstance(payload, dict):
+            body = json.dumps(
+                _sanitize_video_generation_payload(payload),
+                ensure_ascii=False,
+            ).encode("utf-8")
+
+        sent = False
+
+        async def clean_receive():
+            nonlocal sent
+            if sent:
+                return {
+                    "type": "http.request",
+                    "body": b"",
+                    "more_body": False,
+                }
+            sent = True
+            return {
+                "type": "http.request",
+                "body": body,
+                "more_body": False,
+            }
+
+        await self.app(scope, clean_receive, send)
 
 
 def _safe_job_id(value: str) -> str:
@@ -2591,6 +2763,8 @@ def install_main_workflow_provider(
 
     app.state.main_workflow_provider_installed = True
 
+    app.add_middleware(_SanitizeGenerationMiddleware)
+
     for directory in (
         WORKFLOW_ROOT,
         DELIVERY_ROOT,
@@ -2613,6 +2787,9 @@ def install_main_workflow_provider(
             "historical_packaging_backfill": True,
             "final_delivery_bundle": True,
             "cover_video_composition": True,
+            "script_artifact_sanitizer": True,
+            "visual_embedded_text_block": True,
+            "sentence_keyword_editor": True,
             "cover_intro_duration_seconds": 1.0,
             "main_ui_compose_bridge": True,
             "auto_review_after_compose": True,

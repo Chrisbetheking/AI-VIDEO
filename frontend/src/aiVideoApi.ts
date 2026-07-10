@@ -2,8 +2,7 @@ const envApiBase = (import.meta.env.VITE_API_BASE || '').replace(/\/$/, '')
 const isLocal =
   typeof window !== 'undefined' && /^(localhost|127\.0\.0\.1)$/i.test(window.location.hostname)
 
-// 生产环境统一使用当前页面的 /api 同源代理。
-// 本地开发仍允许使用 VITE_API_BASE 或 localhost:8000。
+// 生产环境统一使用当前页面的 /api 同源代理；本地开发仍允许直连 localhost。
 export const API_BASE = isLocal
   ? (envApiBase || 'http://localhost:8000')
   : ''
