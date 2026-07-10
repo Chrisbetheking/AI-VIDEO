@@ -16,8 +16,8 @@ from fastapi import BackgroundTasks, Body, FastAPI, HTTPException
 from fastapi.encoders import jsonable_encoder
 
 
-VERSION = "10.40.2"
-MODE = "old_ui_baseline_workflow_hub"
+VERSION = "10.40.3"
+MODE = "function_merge_old_ui_hub"
 
 BASE = Path(os.getenv("AI_VIDEO_BASE", "/opt/ai-video"))
 STORAGE = BASE / "storage"

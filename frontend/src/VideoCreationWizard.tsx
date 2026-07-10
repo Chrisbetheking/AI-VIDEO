@@ -762,6 +762,9 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
   const [workflow, setWorkflow] = useState<Record<string, any> | null>((initialDraft.workflow || null) as Record<string, any> | null)
   const [workflowBusy, setWorkflowBusy] = useState('')
   const [workflowError, setWorkflowError] = useState('')
+  const [voicePreviewBusy, setVoicePreviewBusy] = useState('')
+  const [voicePreviewUrl, setVoicePreviewUrl] = useState('')
+  const [voicePreviewError, setVoicePreviewError] = useState('')
   const reviewLaunchRef = useRef('')
 
   const approvedBrainCards = useMemo(() => {
@@ -1802,6 +1805,53 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
     )
   }
 
+  async function previewSelectedVoice() {
+    if (!selectedSegment || !selectedSetting || voicePreviewBusy) return
+    setVoicePreviewBusy('正在生成本句试听')
+    setVoicePreviewError('')
+    setVoicePreviewUrl('')
+    try {
+      const ratePercent = Math.round((Number(selectedSetting.speed || 1) - 1) * 100)
+      const rate = `${ratePercent >= 0 ? '+' : ''}${ratePercent}%`
+      const response = await apiPost('/api/tts', {
+        text: selectedSegment.text,
+        voice:
+          project.voice ||
+          project.voice_id ||
+          project.tts_voice ||
+          '',
+        rate,
+        pitch: selectedSetting.pitch,
+        volume: selectedSetting.volume,
+        emotion: selectedSetting.emotion,
+        tone: selectedSetting.tone,
+        pause_before_ms: selectedSetting.pauseBefore,
+        pause_after_ms: selectedSetting.pauseAfter,
+        preview: true,
+      }, 180000)
+      const url = String(
+        response?.file_url ||
+        response?.audio_url ||
+        response?.url ||
+        '',
+      )
+      if (!url) throw new Error('试听接口没有返回音频地址。')
+      setVoicePreviewUrl(url)
+      noteButton(`已生成第 ${selectedSegment.index} 句原生配音试听。`)
+    } catch (err: any) {
+      setVoicePreviewError(err?.message || String(err))
+    } finally {
+      setVoicePreviewBusy('')
+    }
+  }
+
+  function openGraphicWindow() {
+    const target = new URL('/graphic-window/', window.location.origin)
+    if (jobId) target.searchParams.set('job_id', jobId)
+    target.searchParams.set('source', 'video_creation_wizard')
+    window.open(target.toString(), '_blank', 'noopener,noreferrer')
+  }
+
   function renderStepTwo() {
     const { min, max } = targetChars(targetDuration)
     return (
@@ -1850,7 +1900,10 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
                 }}>应用到全部句子</button>
                 <button className="aiw-muted" type="button" onClick={() => window.localStorage.setItem('ai_video_voice_template_professional_v9', JSON.stringify(selectedSetting))}>保存为专业讲房模板</button>
                 <button className="aiw-muted" type="button" onClick={() => updateSetting(inferVoiceSetting(selectedSegment, Math.max(0, selectedSegment.index - 1), segments.length, scriptMode))}>AI 重置本句</button>
+                <button className="aiw-primary" type="button" disabled={!!voicePreviewBusy} onClick={() => void previewSelectedVoice()}>{voicePreviewBusy || '试听本句配音'}</button>
               </div>
+              {voicePreviewError && <div className="aiw-error">{voicePreviewError}</div>}
+              {voicePreviewUrl && <audio src={voicePreviewUrl} controls style={{ width: '100%' }} />}
             </div>
           )}
         </aside>
@@ -1957,6 +2010,7 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
         <aside className="aiw-stepCard">
           <h3>发布 / 获客承接</h3>
           <p>成片后不要自动私信。OpenClaw 负责评论区找目标客户、AI 评分、生成第一条初步消息，收集到人工待处理。</p>
+          {!jobId && <div className="aiw-info">生成成片后会自动启动机械质检和豆包审片；人工确认通过后自动生成 3 套封面、7 页小红书图文和最终总包。</div>}
 
           {jobId && videoUrl && (
             <>
@@ -2009,7 +2063,12 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
             </>
           )}
 
-          <div className="aiw-actions vertical"><button className="aiw-muted" onClick={() => openWorkspaceTab('leads')}>去 OpenClaw 人工处理</button><button className="aiw-muted" onClick={() => openWorkspaceTab('collect')}>继续采集同行</button><button className="aiw-muted" onClick={() => openWorkspaceTab('assets')}>补充 R2 素材</button></div>
+          <div className="aiw-actions vertical">
+            <button className="aiw-purple" type="button" onClick={openGraphicWindow}>打开图文窗口</button>
+            <button className="aiw-muted" onClick={() => openWorkspaceTab('leads')}>去 OpenClaw 人工处理</button>
+            <button className="aiw-muted" onClick={() => openWorkspaceTab('collect')}>继续采集同行</button>
+            <button className="aiw-muted" onClick={() => openWorkspaceTab('assets')}>补充 R2 素材</button>
+          </div>
         </aside>
       </div>
     )

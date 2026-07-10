@@ -194,7 +194,7 @@ function useAssets() {
     setBusy('加载素材')
     setError('')
     try {
-      const data = await apiGet<AssetItem[]>('/api/assets')
+      const data = await apiGet<AssetItem[]>('/api/assets?limit=160&include_r2=true')
       setAssets(Array.isArray(data) ? data : [])
     } catch (err: any) {
       setError(err?.message || String(err))
@@ -387,6 +387,10 @@ function DigitalHumanLibraryPanel({ project, setProject, goTab }: { project: Pro
   const [avatarId, setAvatarId] = useState(() => localStorage.getItem(SELECTED_AVATAR_KEY) || String(project.digitalHumanAvatarId || ''))
   const [drivingId, setDrivingId] = useState(String(project.digitalHumanDrivingVideoId || ''))
   const [role, setRole] = useState(String(project.digitalHumanRole || '地产顾问'))
+  const [providers, setProviders] = useState<any[]>([])
+  const [providerStatus, setProviderStatus] = useState<any>(null)
+  const [providerBusy, setProviderBusy] = useState('')
+  const [providerError, setProviderError] = useState('')
   const selectedAvatar = assets.find((asset) => asset.id === avatarId)
   const selectedDriving = assets.find((asset) => asset.id === drivingId)
 
@@ -412,10 +416,41 @@ function DigitalHumanLibraryPanel({ project, setProject, goTab }: { project: Pro
     })
   }
 
+  async function refreshProviders() {
+    setProviderBusy('检查数字人引擎')
+    setProviderError('')
+    try {
+      const [providerData, statusData] = await Promise.all([
+        apiGet<any>('/api/digital-human/providers').catch(() => []),
+        project.digitalHumanJobId
+          ? apiGet<any>(`/api/digital-human/status/${encodeURIComponent(String(project.digitalHumanJobId))}`).catch(() => null)
+          : Promise.resolve(null),
+      ])
+      const list = Array.isArray(providerData)
+        ? providerData
+        : Array.isArray(providerData?.providers)
+          ? providerData.providers
+          : Array.isArray(providerData?.items)
+            ? providerData.items
+            : []
+      setProviders(list)
+      setProviderStatus(statusData)
+    } catch (err: any) {
+      setProviderError(err?.message || String(err))
+    } finally {
+      setProviderBusy('')
+    }
+  }
+
   useEffect(() => {
     if (assets.length) applyAvatar(avatarId, drivingId)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [assets.length])
+
+  useEffect(() => {
+    void refreshProviders()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [project.digitalHumanJobId])
 
   return (
     <section className="aiw-card aiw-native-panel">
@@ -425,7 +460,7 @@ function DigitalHumanLibraryPanel({ project, setProject, goTab }: { project: Pro
           <h2>数字人库</h2>
           <p>数字人不再是假卡片。这里直接从 R2 素材库里选已上传的照片/视频，决定谁出镜，并绑定到当前视频。</p>
         </div>
-        <span className="aiw-badge ok">已接原素材库</span>
+        <span className="aiw-badge ok">已接原素材库 + 引擎状态</span>
       </div>
 
       <div className="aiw-form four">
@@ -454,13 +489,40 @@ function DigitalHumanLibraryPanel({ project, setProject, goTab }: { project: Pro
         </label>
       </div>
 
+      <div className="aiw-form two">
+        <label>
+          可用数字人引擎
+          <input
+            value={
+              providers.length
+                ? providers.map((item: any) => String(item?.name || item?.label || item?.id || item?.provider || '')).filter(Boolean).join(' / ')
+                : providerBusy || '等待后端返回'
+            }
+            readOnly
+          />
+        </label>
+        <label>
+          当前数字人任务
+          <input
+            value={
+              providerStatus?.status ||
+              providerStatus?.stage ||
+              (project.digitalHumanJobId ? `任务 ${project.digitalHumanJobId}` : '尚未生成')
+            }
+            readOnly
+          />
+        </label>
+      </div>
+
       <div className="aiw-actions">
         <button className="aiw-muted" onClick={refresh}>刷新素材库</button>
+        <button className="aiw-muted" onClick={() => void refreshProviders()} disabled={!!providerBusy}>{providerBusy || '刷新引擎状态'}</button>
         <button className="aiw-purple" onClick={() => { applyAvatar(); goTab('pureai') }} disabled={!selectedAvatar}>用于当前视频</button>
         <button className="aiw-muted" onClick={() => goTab('assets')}>先去上传照片/视频</button>
       </div>
 
       {error && <div className="aiw-error">{error}</div>}
+      {providerError && <div className="aiw-error">{providerError}</div>}
 
       <div className="aiw-twoCol">
         <div className="aiw-panel">

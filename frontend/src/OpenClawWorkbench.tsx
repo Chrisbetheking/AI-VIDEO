@@ -437,7 +437,7 @@ export default function OpenClawWorkbench({ project, setProject, goTab }: Props)
         video_title: lead.videoTitle || lead.raw?.video_title || lead.raw?.title || '',
         source_url: lead.videoUrl || lead.raw?.source_url || lead.raw?.url || '',
       }))
-      const data = await apiPost('/api/video/openclaw/llm-enhance/comments', {
+      const payload = {
         dry_run: false,
         max_llm_items: Math.min(30, comments.length),
         min_score: 40,
@@ -450,7 +450,13 @@ export default function OpenClawWorkbench({ project, setProject, goTab }: Props)
           sales_mode: 'human_review_first',
         },
         comments,
-      }, 180000)
+      }
+      let data: any
+      try {
+        data = await apiPost('/api/leads/analyze', payload, 180000)
+      } catch {
+        data = await apiPost('/api/video/openclaw/llm-enhance/comments', payload, 180000)
+      }
       setResult(data)
       const backendCandidates = recursiveExtractRows(data, 'llm_enhance_result')
       const merged = uniqueByIdentity([
