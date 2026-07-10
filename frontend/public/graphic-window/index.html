@@ -422,6 +422,14 @@ async function makeXhs(){
         <div class="reviewGateActions">
           <button class="reviewRun" onclick="runVideoReview()">自动审查视频</button>
           <button id="reviewApproveBtn" class="reviewApprove" onclick="approveVideoAndMakeCover()" disabled>通过并生成9:16封面</button>
+<button
+  id="reviewOverrideBtn"
+  class="reviewRun"
+  type="button"
+  disabled
+>
+  确认是误报并生成9:16封面
+</button>
           <button class="reviewReject" onclick="rejectVideoReview()">退回修改</button>
         </div>
       </div>`
@@ -541,5 +549,359 @@ async function makeXhs(){
 <!-- AI_VIDEO_REVIEW_GATE_UI_END -->
 
 <!-- AI_VIDEO_GRAPHIC_WINDOW_STANDALONE_V2_NO_IFRAME -->
+<script id="aiVideoHumanOverridePatchV10351">
+/* AI_VIDEO_HUMAN_OVERRIDE_UI_PATCH_V10_35_1 */
+(function(){
+  'use strict'
+
+  const state = {
+    report: null,
+    originalApprove: null,
+    renderHooked: false,
+    lastJobId: '',
+    lastFetchAt: 0,
+    busy: false
+  }
+
+  function byId(id){
+    return document.getElementById(id)
+  }
+
+  function getJobId(){
+    try{
+      if(typeof window.reviewJobId === 'function'){
+        const value = String(window.reviewJobId() || '').trim()
+        if(value) return value
+      }
+    }catch(_){}
+
+    const ids = [
+      'jobId',
+      'videoJobId',
+      'reviewJobId',
+      'graphicJobId',
+      'currentJobId'
+    ]
+
+    for(const id of ids){
+      const el = byId(id)
+      const value = String(el?.value || el?.textContent || '').trim()
+      if(value) return value
+    }
+
+    return ''
+  }
+
+  function normalizeReport(data){
+    if(data && typeof data === 'object' && data.review){
+      return data.review
+    }
+    return data && typeof data === 'object' ? data : {}
+  }
+
+  function aiIssues(report){
+    const value = report?.ai_review?.issues
+    return Array.isArray(value)
+      ? value.filter(item => item && typeof item === 'object')
+      : []
+  }
+
+  function eligibleForOverride(report){
+    const mechanicalPassed = report?.mechanical?.passed === true
+    const hasAiIssues = aiIssues(report).length > 0
+    const status = String(report?.status || '')
+    return mechanicalPassed &&
+      hasAiIssues &&
+      ['review_pending_human', 'review_failed', 'rejected'].includes(status)
+  }
+
+  function updateButtons(report){
+    if(report && typeof report === 'object'){
+      state.report = report
+    }
+
+    const current = state.report || {}
+    const hasAiIssues = aiIssues(current).length > 0
+    const status = String(current.status || '')
+    const mechanicalPassed = current?.mechanical?.passed === true
+
+    const approveBtn = byId('reviewApproveBtn')
+    if(approveBtn){
+      approveBtn.disabled =
+        status !== 'review_pending_human' || hasAiIssues || !mechanicalPassed
+      approveBtn.title = hasAiIssues
+        ? '豆包存在提示。人工确认画面实际正常时，请使用“确认是误报并生成9:16封面”。'
+        : ''
+    }
+
+    const overrideBtn = byId('reviewOverrideBtn')
+    if(overrideBtn){
+      overrideBtn.disabled = !eligibleForOverride(current) || state.busy
+      overrideBtn.title = overrideBtn.disabled
+        ? '仅在机械检查通过且豆包存在问题提示时可使用'
+        : '请完整观看对应时间段，确认属于误报后再点击'
+    }
+  }
+
+  async function api(path, options){
+    const response = await fetch(path, {
+      credentials: 'same-origin',
+      ...(options || {})
+    })
+
+    let data = {}
+    try{
+      data = await response.json()
+    }catch(_){
+      data = {raw: await response.text()}
+    }
+
+    if(!response.ok){
+      const detail =
+        data?.detail ||
+        data?.message ||
+        data?.error ||
+        data?.raw ||
+        `HTTP ${response.status}`
+      throw new Error(
+        typeof detail === 'string'
+          ? detail
+          : JSON.stringify(detail)
+      )
+    }
+
+    return data
+  }
+
+  async function fetchReview(force){
+    const jobId = getJobId()
+    if(!jobId){
+      updateButtons({})
+      return null
+    }
+
+    const now = Date.now()
+    if(
+      !force &&
+      state.lastJobId === jobId &&
+      now - state.lastFetchAt < 1200
+    ){
+      return state.report
+    }
+
+    const data = await api(
+      `/api/video/review/${encodeURIComponent(jobId)}`
+    )
+    state.lastJobId = jobId
+    state.lastFetchAt = now
+    const report = normalizeReport(data)
+    updateButtons(report)
+    return report
+  }
+
+  function hookRenderReview(){
+    if(state.renderHooked) return
+
+    const original = window.renderReview
+    if(typeof original !== 'function') return
+    if(original.__aiHumanOverrideWrapped){
+      state.renderHooked = true
+      return
+    }
+
+    const wrapped = function(report){
+      const result = original.apply(this, arguments)
+      try{
+        updateButtons(normalizeReport(report))
+      }catch(_){}
+      return result
+    }
+
+    wrapped.__aiHumanOverrideWrapped = true
+    window.renderReview = wrapped
+    state.renderHooked = true
+  }
+
+  async function safeNormalApprove(){
+    try{
+      const report = await fetchReview(true)
+      if(aiIssues(report || {}).length > 0){
+        alert(
+          '豆包仍有问题提示。若你已完整观看并确认画面实际正常，' +
+          '请点击“确认是误报并生成9:16封面”。'
+        )
+        return
+      }
+    }catch(error){
+      alert('读取审查状态失败：' + error.message)
+      return
+    }
+
+    if(typeof state.originalApprove === 'function'){
+      return state.originalApprove()
+    }
+
+    alert('没有找到原审批函数，请刷新页面后重试。')
+  }
+
+  async function overrideAndMakeCover(){
+    if(state.busy) return
+
+    const jobId = getJobId()
+    if(!jobId){
+      alert('请先读取最新成片或填写 Job ID')
+      return
+    }
+
+    let report
+    try{
+      report = await fetchReview(true)
+    }catch(error){
+      alert('读取审查状态失败：' + error.message)
+      return
+    }
+
+    if(!report?.mechanical?.passed){
+      alert(
+        '机械检查未通过，不能按豆包误报处理。' +
+        '请先修复音视频、尺寸、黑帧或文件问题。'
+      )
+      return
+    }
+
+    if(aiIssues(report).length === 0){
+      alert('当前没有豆包问题提示，请使用普通“通过并生成9:16封面”。')
+      return
+    }
+
+    const confirmed = confirm(
+      '请确认你已经完整观看豆包提示对应的时间段，' +
+      '并确认画面与口播实际匹配。\n\n' +
+      '确认后会保留豆包原始意见、记录人工原因，' +
+      '通过审查并生成9:16封面。'
+    )
+    if(!confirmed) return
+
+    const note = prompt(
+      '填写人工确认说明（至少4个字）',
+      '已人工完整观看，画面与口播实际匹配，豆包提示属于误报'
+    )
+    if(note === null) return
+    if(note.trim().length < 4){
+      alert('人工确认说明至少填写4个字')
+      return
+    }
+
+    const titleEl = byId('title')
+    const keywordsEl = byId('keywords')
+    const styleEl = byId('style')
+    const ctaEl = byId('cta')
+
+    state.busy = true
+    updateButtons(report)
+
+    try{
+      const data = await api(
+        `/api/video/review/${encodeURIComponent(jobId)}/human-override`,
+        {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({
+            reviewer: 'human',
+            note: note.trim(),
+            generate_cover: true,
+            title: titleEl?.value || '',
+            keywords: String(keywordsEl?.value || '')
+              .split(/[,，\s]+/)
+              .filter(Boolean),
+            style: styleEl?.value || '专业顾问',
+            cta: ctaEl?.value || ''
+          })
+        }
+      )
+
+      const updatedReport = normalizeReport(data)
+      state.report = updatedReport
+      updateButtons(updatedReport)
+
+      try{
+        if(typeof window.renderReview === 'function'){
+          window.renderReview(updatedReport)
+        }
+      }catch(_){}
+
+      try{
+        if(data.cover_result && typeof window.render === 'function'){
+          window.render(data.cover_result)
+        }
+      }catch(_){}
+
+      try{
+        if(typeof window.log === 'function'){
+          window.log(data)
+        }
+      }catch(_){}
+
+      alert(
+        data.cover_result
+          ? '已确认豆包误报，并生成9:16封面'
+          : '已确认豆包误报并解锁包装；封面未完成，请查看页面日志'
+      )
+    }catch(error){
+      alert('人工误报确认失败：' + error.message)
+      try{
+        if(typeof window.log === 'function'){
+          window.log('人工误报确认失败：' + error.message)
+        }
+      }catch(_){}
+    }finally{
+      state.busy = false
+      try{
+        await fetchReview(true)
+      }catch(_){
+        updateButtons(state.report || {})
+      }
+    }
+  }
+
+  function bindButtons(){
+    const approveBtn = byId('reviewApproveBtn')
+    if(approveBtn){
+      if(!state.originalApprove){
+        state.originalApprove = window.approveVideoAndMakeCover
+      }
+      approveBtn.onclick = safeNormalApprove
+      approveBtn.removeAttribute('onclick')
+    }
+
+    const overrideBtn = byId('reviewOverrideBtn')
+    if(overrideBtn){
+      overrideBtn.onclick = overrideAndMakeCover
+      overrideBtn.removeAttribute('onclick')
+    }
+  }
+
+  function boot(){
+    hookRenderReview()
+    bindButtons()
+    updateButtons(state.report || {})
+
+    setInterval(function(){
+      hookRenderReview()
+      bindButtons()
+      fetchReview(false).catch(function(){})
+    }, 1500)
+  }
+
+  if(document.readyState === 'loading'){
+    document.addEventListener('DOMContentLoaded', boot, {once:true})
+  }else{
+    boot()
+  }
+
+  window.overrideVideoReviewAndMakeCover = overrideAndMakeCover
+  window.safeApproveVideoAndMakeCover = safeNormalApprove
+})()
+</script>
 </body>
 </html>

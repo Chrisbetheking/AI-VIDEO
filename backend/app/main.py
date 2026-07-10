@@ -6164,3 +6164,13 @@ except Exception as exc:
     print("AI_VIDEO_REVIEW_GATE_INSTALL_FAILED", repr(exc), flush=True)
 # ===== AI_VIDEO_REVIEW_GATE_V1_END =====
 
+# AI_VIDEO_HUMAN_OVERRIDE_PROVIDER_START
+try:
+    from app.services.video_review_human_override_provider import (
+        install_video_review_human_override_provider,
+    )
+
+    install_video_review_human_override_provider(app)
+except Exception as exc:
+    print("VIDEO_REVIEW_HUMAN_OVERRIDE_INSTALL_ERROR", repr(exc), flush=True)
+# AI_VIDEO_HUMAN_OVERRIDE_PROVIDER_END
