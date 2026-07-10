@@ -23,6 +23,9 @@ import {
   DigitalHumanCreateResponse,
   AutoCollectorStatusResponse,
   AutoCollectorRunResponse,
+  HeatRadarRunResponse,
+  HeatRadarRewriteResponse,
+  HeatRadarAccountAuditResponse,
   OneClickGenerateResponse,
   ModelStatusResponse,
   TTSResponse,
@@ -30,37 +33,102 @@ import {
   VideoEditChatResponse,
   VoiceDirectorResponse,
   VoiceSegment,
+  API_BASE,
   apiGet,
   apiPost,
+  apiDelete,
   getCollectorStatus,
   uploadCollectorCookies,
   uploadAssets,
   deleteAsset,
-  uploadAssetsWithMetadata,
-  getV1034Status,
-  importDouyinAccounts,
-  classifyDouyinAccounts,
-  getDouyinAccounts,
-  startCollectorRun,
-  getLatestCollectorRun,
-  getRecentCommentLeads,
-  enhanceOpenClawComments,
-  writeObsidianNote,
-  createAiControlTask,
-  saveFinalVideoRecord,
-  saveRawSegmentsRecord,
-  discardVideoRecord,
-  type AssetUploadMetadata,
-  type V1034StatusResponse
+  listJobs,
+  JobItem
 } from './api'
-import FullAIConsole from './FullAIConsole'
 
-type ModuleKey = 'dashboard' | 'monitor' | 'lead' | 'fullAi'
-  | 'oneClick' | 'collector' | 'copy' | 'voice' | 'digitalHuman' | 'assets' | 'video' | 'subtitleCover' | 'publish' | 'strategy' | 'competitor' | 'trend' | 'shooting' | 'growth'
-type CollectorProgressEvent = { id?: string; level?: string; stage?: string; message?: string; video_url?: string; account_url?: string; created_at?: string; [key: string]: any }
-type CollectorProgressState = { run?: any; events?: CollectorProgressEvent[]; [key: string]: any }
+type ModuleKey = 'dashboard' | 'monitor' | 'lead' | 'oneClick' | 'collector' | 'copy' | 'voice' | 'digitalHuman' | 'assets' | 'video' | 'subtitleCover' | 'publish' | 'strategy' | 'competitor' | 'trend' | 'shooting' | 'growth'
 type AssetClipSetting = { order: number; image_seconds: number; video_start: number; video_end: number }
-type AssetFolderKey = 'all' | 'self' | 'provided' | 'image' | 'collected' | 'ai'
+type AssetFolderKey = 'all' | 'self' | 'digital_human' | 'provided' | 'image' | 'collected' | 'ai'
+
+type LeadMagnetReport = {
+  id: string
+  title: string
+  keyword: string
+  subtitle: string
+  audience: string
+  promise: string
+  outline: string[]
+  landingTitle: string
+  landingSubtitle: string
+  cta: string
+  replyScript: string
+  shootingIdea: string
+}
+
+
+type HeatRadarAccount = {
+  id: string
+  name: string
+  platform: string
+  url: string
+  tags: string
+  notes: string
+  pinned: boolean
+  created_at: string
+}
+
+type HeatRadarSnapshot = {
+  id: string
+  date: string
+  account_id: string
+  account_name: string
+  platform: string
+  topic: string
+  signal: string
+  score: number
+  intent: string
+  source_url: string
+  recommended_action: string
+  lead_magnet: string
+  buyer_dimensions?: string[]
+  reason?: string
+  decision?: string
+}
+
+
+type CollectorProgressEvent = {
+  id?: string
+  run_id?: string
+  stage?: string
+  level?: string
+  message?: string
+  account_name?: string
+  account_url?: string
+  video_title?: string
+  video_url?: string
+  error_detail?: string
+  created_at?: string
+  progress?: Record<string, any>
+  raw?: Record<string, any>
+}
+
+type CollectorProgressState = {
+  ok: boolean
+  run: Record<string, any>
+  events: CollectorProgressEvent[]
+  commands: Record<string, any>[]
+}
+
+type DigitalHumanProviderOption = {
+  id: string
+  name: string
+  priority: number
+  stage: string
+  cost_note: string
+  best_for: string
+  integration: string
+  risk: string
+  enabled: boolean
+}
 
 function Field({ label, children, hint }: { label: string; children: ReactNode; hint?: string }) {
   return <label className="field"><span>{label}</span>{children}{hint && <em>{hint}</em>}</label>
@@ -75,6 +143,54 @@ function Pill({ children, tone = 'blue' }: { children: ReactNode; tone?: 'blue' 
 }
 
 function Empty({ children }: { children: ReactNode }) { return <div className="empty">{children}</div> }
+
+
+function ReportPreview({ reports, activeIndex, onSelect, onCopy, onUse, copyStatus, radarGroups, shootingTasks }: {
+  reports: LeadMagnetReport[]
+  activeIndex: number
+  onSelect: (index: number) => void
+  onCopy: () => void
+  onUse: (report?: LeadMagnetReport) => void
+  copyStatus: string
+  radarGroups: { highIntent: string[]; contentHooks: string[]; broadTraffic: string[] }
+  shootingTasks: { title: string; hook: string; shots: string[]; cta: string }[]
+}) {
+  const report = reports[Math.min(activeIndex, Math.max(0, reports.length - 1))]
+  if (!report) return <div className="reportWorkbench"><Empty>先在行业档案里配置私域资料包，比如《避坑报告》《预算测算表》《择校清单》。</Empty></div>
+  return <div className="reportWorkbench">
+    <div className="reportHead">
+      <div>
+        <span>网页资料包 / 获客报告</span>
+        <h3>微信未接入也能先演示承接链路</h3>
+        <p>把报告做成网页预览页，视频/图文结尾引导私信关键词；后续接微信时直接把这里的报告换成自动发送。</p>
+      </div>
+      <div className="reportActions">
+        <button className="btn ghost" onClick={onCopy}>{copyStatus || '复制报告页文案'}</button>
+        <button className="btn primary" onClick={() => onUse(report)}>用这个报告生成内容</button>
+      </div>
+    </div>
+    <div className="reportGrid">
+      <div className="reportList">
+        {reports.map((item, index) => <button key={item.id} className={index === activeIndex ? 'active' : ''} onClick={() => onSelect(index)}>
+          <b>{item.title}</b>
+          <span>私信关键词：{item.keyword}</span>
+        </button>)}
+      </div>
+      <div className="reportLandingMock">
+        <div className="mockTop"><span>网页报告预览</span><em>未接微信时临时承接</em></div>
+        <h2>{report.landingTitle}</h2>
+        <p>{report.landingSubtitle}</p>
+        <div className="reportOutline">{report.outline.map((x, i) => <div key={x}><strong>{i + 1}</strong><span>{x}</span></div>)}</div>
+        <div className="reportCta"><b>{report.cta}</b><small>{report.replyScript}</small></div>
+      </div>
+      <div className="advisorCards">
+        <div><h4>关键词雷达</h4><p><b>高意向：</b>{radarGroups.highIntent.join(' / ') || '暂无'}</p><p><b>内容钩子：</b>{radarGroups.contentHooks.join(' / ') || '暂无'}</p><p><b>泛流量：</b>{radarGroups.broadTraffic.join(' / ') || '暂无'}</p></div>
+        <div><h4>今天拍什么</h4>{shootingTasks.slice(0, 3).map(task => <p key={task.title}>· {task.title}<br /><small>{task.hook}</small></p>)}</div>
+        <div><h4>拍摄提示</h4><p>{report.shootingIdea}</p></div>
+      </div>
+    </div>
+  </div>
+}
 
 
 class AppErrorBoundary extends Component<{ children: ReactNode }, { error: string }> {
@@ -105,9 +221,53 @@ function safeText(value: unknown, fallback = '') {
   return text || fallback
 }
 
+function videoPreviewUrl(url: string, seconds = 0.35) {
+  const clean = safeText(url)
+  if (!clean) return ''
+  if (clean.includes('#t=')) return clean
+  return `${clean}#t=${seconds}`
+}
+
+function safeCompactText(value: unknown, limit = 180) {
+  let text = safeText(value)
+  try {
+    if (/%[0-9A-Fa-f]{2}/.test(text)) text = decodeURIComponent(text)
+  } catch {}
+  text = text
+    .replace(/[\u{1F000}-\u{1FAFF}]/gu, '')
+    .replace(/[\r\n\t]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+  return text.length > limit ? `${text.slice(0, limit - 1)}…` : text
+}
+
 function safeNumber(value: unknown, fallback = 0) {
   const n = Number(value)
   return Number.isFinite(n) ? n : fallback
+}
+
+function formatCollectorEventLine(ev: CollectorProgressEvent, index = 0) {
+  const stage = safeText(ev.stage, 'event').toUpperCase()
+  const title = safeCompactText(ev.video_title || ev.message || ev.account_name, 96) || '-'
+  const account = safeCompactText(ev.account_name, 60)
+  const detail = safeCompactText(ev.error_detail || ev.message || ev.video_url || ev.created_at, 180)
+  const response = (ev.raw as any)?.response || {}
+  const review = response?.review || (ev.raw as any)?.review || {}
+  const decision = safeText(review?.decision || response?.decision, '')
+  const score = review?.score ?? response?.score
+  const reason = safeCompactText(review?.reason || response?.reason || response?.summary, 140)
+  const warnings = Array.isArray(response?.warnings) ? response.warnings.filter(Boolean).slice(0, 2).join('；') : ''
+  const prefix = `${index + 1}. ${stage}`
+  if (ev.level === 'error') return `${prefix}｜失败：${title}｜${detail}`
+  if (stage.includes('VIDEO_ANALYZED') || stage.includes('VIDEO_SELECTED') || stage.includes('VIDEO_ARCHIVED')) {
+    const verdict = decision ? `${decision}${score !== undefined && score !== null ? ` / ${score}分` : ''}` : '已返回分析'
+    return `${prefix}｜${account ? account + '｜' : ''}${title}｜${verdict}${reason ? `｜原因：${reason}` : ''}${warnings ? `｜提醒：${warnings}` : ''}`
+  }
+  if (stage.includes('VIDEOS_FOUND')) return `${prefix}｜${detail || title}`
+  if (stage.includes('ACCOUNT')) return `${prefix}｜${account || title}｜${detail}`
+  if (stage.includes('DELAY')) return `${prefix}｜${detail || title}`
+  if (stage.includes('RUN_FINISHED')) return `${prefix}｜本轮完成｜${detail || title}`
+  return `${prefix}｜${account ? account + '｜' : ''}${title}${detail && detail !== title ? `｜${detail}` : ''}`
 }
 
 function safeProjectDuration(...values: unknown[]) {
@@ -119,9 +279,35 @@ function safeProjectDuration(...values: unknown[]) {
 }
 
 
+function loadLocalJson<T>(key: string, fallback: T): T {
+  try {
+    const raw = window.localStorage.getItem(key)
+    if (!raw) return fallback
+    const parsed = JSON.parse(raw)
+    return parsed ?? fallback
+  } catch {
+    return fallback
+  }
+}
+
+function makeId(prefix = 'id') {
+  return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
+}
+
+function todayKey() {
+  return new Date().toISOString().slice(0, 10)
+}
+
+function limitText(value: string, limit = 980) {
+  const clean = safeText(value).replace(/\s+/g, ' ').trim()
+  return clean.length > limit ? clean.slice(0, limit - 1) + '…' : clean
+}
+
+
 function normalizeAssetFolder(raw: any, kind?: string, filename?: string): AssetFolderKey {
   const value = safeText(raw).toLowerCase().replace(/[-\s]/g, '_')
   const name = safeText(filename).toLowerCase()
+  if (['digital_human', 'digitalhuman', '数字人', '数字人片段'].includes(value) || name.startsWith('digital_human_') || name.startsWith('digital-human') || name.includes('数字人开场')) return 'digital_human'
   if (['self', 'own', 'shot', 'my', 'mine', '自己拍的素材'].includes(value)) return 'self'
   if (['provided', 'client', 'other', 'others', '别人提供的素材', '客户提供'].includes(value)) return 'provided'
   if (['image', 'images', '图片', '图片素材'].includes(value)) return 'image'
@@ -133,8 +319,22 @@ function normalizeAssetFolder(raw: any, kind?: string, filename?: string): Asset
 
 function assetFolderLabel(folder: string | undefined, kind?: string) {
   const f = normalizeAssetFolder(folder, kind)
-  return f === 'self' ? '自己拍的素材' : f === 'provided' ? '别人提供的素材' : f === 'image' ? '图片素材' : f === 'collected' ? '采集视频' : f === 'ai' ? 'AI生成图' : '素材'
+  return f === 'digital_human' ? '数字人片段' : f === 'self' ? '自己拍的素材' : f === 'provided' ? '别人提供的素材' : f === 'image' ? '图片素材' : f === 'collected' ? '采集视频' : f === 'ai' ? 'AI生成图' : '素材'
 }
+function normalizeAssetUsageRole(raw: any, kind?: string, filename?: string, folder?: string): 'avatar' | 'content' {
+  const value = safeText(raw).toLowerCase().replace(/[-\s]/g, '_')
+  const name = safeText(filename).toLowerCase()
+  const f = normalizeAssetFolder(folder, kind, filename)
+  if (['avatar', 'person', 'human', 'portrait', '人物', '人物素材', '数字人', '口播'].includes(value)) return 'avatar'
+  if (f === 'digital_human') return 'avatar'
+  if (name.includes('avatar') || name.includes('portrait') || name.includes('person') || name.includes('human') || name.includes('口播') || name.includes('真人') || name.includes('数字人')) return 'avatar'
+  return 'content'
+}
+
+function assetRoleLabel(role?: string) {
+  return role === 'avatar' ? '人物素材' : '内容/B-roll'
+}
+
 
 function imagePromptForVisualOnly(prompt: string) {
   return safeText(prompt)
@@ -149,6 +349,8 @@ function normalizeAsset(raw: any, index = 0): AssetItem {
   const url = safeText(raw?.url, safeText(raw?.file_url, safeText(raw?.public_url, '')))
   const lower = `${filename} ${url}`.toLowerCase()
   const kind = raw?.kind === 'video' || /\.(mp4|mov|webm|m4v)(\?|$)/i.test(lower) ? 'video' : 'image'
+  const folder = normalizeAssetFolder(raw?.folder, kind, filename)
+  const usageRole = normalizeAssetUsageRole(raw?.usage_role, kind, filename, folder)
   return {
     id: safeText(raw?.id, filename || `asset_${index}`),
     filename,
@@ -157,19 +359,73 @@ function normalizeAsset(raw: any, index = 0): AssetItem {
     url,
     size_bytes: Number(raw?.size_bytes || raw?.size || 0) || 0,
     created_at: safeText(raw?.created_at, new Date().toISOString()),
-    folder: normalizeAssetFolder(raw?.folder, kind, filename),
-    source_type: safeText(raw?.source_type, '')
+    folder,
+    source_type: safeText(raw?.source_type, ''),
+    usage_role: usageRole
   }
 }
 
 const emptyCopy: GeneratedCopy = { title: '', hook: '', script: '', description: '', tags: [], shots: [], kb_refs: [] }
+
+const malaysiaProfilePreset = {
+  industry: '马来西亚房产置业 · 第二家园 · 国际学校',
+  businessPositioning: '中国人在马来西亚房产置业，重点围绕第二家园身份、海外资产配置、国际学校和长期生活规划。',
+  audience: '有海外置业、第二家园身份、子女教育、养老度假和资产配置需求的华人家庭与企业主',
+  leadRegion: '中国各城市华人高净值家庭、企业主、留学家庭、养老度假人群、海外生活规划人群',
+  conversionGoal: '评论关键词 / 私信咨询 / 加微信领取报告 / 需求筛选 / 预约顾问沟通',
+  sellingPoints: '马来西亚第二家园规划、国家/城市筛选、项目匹配、置业流程、国际学校选择、生活配套、长期服务和顾问式咨询',
+  style: '专业可信、顾问式成交、真实案例、强钩子、适合抖音/小红书图文引流',
+  trendKeywords: '马来西亚海外置业,马来西亚房产,马来西亚第二家园,马来西亚国际学校,马来西亚 A-Level,马来西亚 IB,海外房产置业,海外资产配置,马来西亚线下说明会,置业推荐会',
+  customerSegments: `1. 有海外资产配置需求的高净值家庭
+2. 想给孩子规划国际学校/A-Level/IB 的家庭
+3. 想办理马来西亚第二家园身份的人群
+4. 想养老、度假或长期居住的家庭
+5. 对国内资产压力、教育焦虑、身份规划敏感的人群`,
+  privateDomainAssets: `《马来西亚第二家园避坑报告》
+《马来西亚国际学校择校清单》
+《海外置业预算测算表》
+《马来西亚买房完整流程图》
+《线下说明会/置业推荐会名额》`,
+  contentPillars: `避坑类：海外买房最容易踩的 3 个坑
+教育类：马来西亚国际学校到底适合什么家庭
+身份类：第二家园身份适合哪些人
+预算类：几百万预算怎么配置马来西亚房产
+流程类：中国人买马来西亚房产完整流程
+信任类：线下说明会、客户案例、顾问答疑`,
+  shootingBrief: '提供拍摄方案和提示词：顾问正面口播、项目/泳池/社区 B-roll、国际学校画面、地图/预算表/报告截图、结尾引导私信领取资料。封面大字优先突出“避坑、预算、第二家园、国际学校”。',
+  reportDelivery: '报告放微信：评论区留关键词或私信“报告/预算/身份/学校”，自动回复筛选问题后引导加微信领取。'
+}
 const DIGITAL_HUMAN_TASK_KEY = 'ai_video_current_digital_human_task_v1'
+const WORKFLOW_JOB_KEY = 'ai_video_workflow_active_job_v10_40'
+// AI_VIDEO_V10_40_1_REAL_MAIN_ADAPTER
 const emotionOptions = ['自然可信', '提醒警示', '紧张急迫', '坚定有力', '朋友聊天', '专业冷静', '惊讶反问', '收尾号召']
 
 function getDigitalHumanTaskModel(task: DigitalHumanCreateResponse | null, fallback: string) {
   const engine = String(task?.engine || '')
-  const match = engine.match(/^jimeng:([a-zA-Z0-9_-]+)/)
-  return match?.[1] || fallback || 'omnihuman15'
+  const jobId = String(task?.job_id || '')
+  const rawModel = String((task?.raw as any)?.model || (task?.raw as any)?.endpoint || '')
+
+  // fal 任务的 job_id 会是 fal:<request_id>，engine 通常是 fal:fal-ai/sync-lipsync。
+  // 之前这里只解析 jimeng，导致 fal 异步任务展示时误用 fallback=omnihuman15。
+  if (jobId.startsWith('fal:') || engine.startsWith('fal:') || engine.includes('sync-lipsync') || rawModel.includes('sync-lipsync')) {
+    return engine.startsWith('fal:') ? engine.replace(/^fal:/, '') : (rawModel || 'fal-ai/sync-lipsync')
+  }
+
+  const jimengMatch = engine.match(/^jimeng:([a-zA-Z0-9_-]+)/)
+  if (jimengMatch?.[1]) return jimengMatch[1]
+
+  return fallback || 'omnihuman15'
+}
+
+function getDigitalHumanTaskProvider(task: DigitalHumanCreateResponse | null, fallback: string) {
+  const model = getDigitalHumanTaskModel(task, fallback)
+  if (model.includes('sync-lipsync') || String(task?.job_id || '').startsWith('fal:') || String(task?.engine || '').startsWith('fal:')) {
+    return `fal.ai / ${model}`
+  }
+  if (String(task?.engine || '').startsWith('jimeng:') || ['omnihuman15', 'quick', 'video30'].includes(model)) {
+    return `火山即梦 / ${model}`
+  }
+  return model
 }
 
 
@@ -183,41 +439,34 @@ const defaultSegment: VoiceSegment = {
 }
 
 const modules: { key: ModuleKey; icon: string; title: string; desc: string; tag: string }[] = [
-  { key: 'dashboard', icon: '总', title: '流程总览', desc: '一条视频从采集到发布的主流程', tag: '总览' },
-  { key: 'monitor', icon: '控', title: '运营中控台', desc: '总览进度、数据库、插件和待办', tag: '监控' },
-  { key: 'lead', icon: '获', title: '获客自动化', desc: '截留、联动、监听、回复、私域承接', tag: '获客' },
-  {
-    key: 'fullAi',
-    icon: 'AI',
-    title: 'AI 视频生产中心',
-    desc: '全 AI、实拍处理、混合成片',
-    tag: 'AI视频',
-  },
-  { key: 'oneClick', icon: '生', title: '一键生成中心', desc: '在一个窗口完成文案、配音分段、字幕、图文和发布草稿', tag: '一键' },
-  { key: 'assets', icon: '素', title: '1. 素材选择', desc: '先选/上传素材，确定图片停留和视频截取区间', tag: '素材' },
-  { key: 'copy', icon: '文', title: '2. 文案生产', desc: '根据素材和客户目标生成口播文案', tag: '文案' },
-  { key: 'voice', icon: '声', title: '3. 配音导演', desc: '克隆音色、分段情绪、语速停顿', tag: '配音' },
-  { key: 'digitalHuman', icon: '人', title: '4. 数字人', desc: '上传本人形象，生成老板口播片段', tag: '数字人' },
-  { key: 'video', icon: '剪', title: '5. 剪辑合成', desc: '素材顺序、截取区间、字幕烧录和导出', tag: '剪辑' },
-  { key: 'collector', icon: '采', title: '同行采集', desc: '可选：采集同行视频、口令和钩子结构', tag: '采集' },
-  { key: 'subtitleCover', icon: '视', title: '6. 字幕 / 封面 / 图文', desc: '抖音风字幕、素材截图封面、AI 图文素材', tag: '视觉' },
-  { key: 'publish', icon: '发', title: '7. 平台发布', desc: '发布草稿、平台适配、开放接口预留', tag: '发布' },
-  { key: 'strategy', icon: '客', title: '客户定位', desc: '行业、目标客户、成交路径、老板人设', tag: '定位' },
-  { key: 'competitor', icon: '竞', title: '竞品账号库', desc: '长期沉淀同行账号和爆款特征', tag: '账号' },
-  { key: 'trend', icon: '雷', title: '行业爆点', desc: '选题雷达、热点关键词、拍摄方向', tag: '雷达' },
-  { key: 'shooting', icon: '拍', title: '运营拍摄', desc: '拍摄任务单、提词器、B-roll 清单', tag: '拍摄' },
-  { key: 'growth', icon: '投', title: '增长投流细节', desc: '流量数据、机器学习投流、优化动作', tag: '增长' }
+  { key: 'dashboard', icon: '总', title: '工作台总览', desc: '看今天采集、待产出和投流复盘', tag: '总览' },
+  { key: 'lead', icon: '雷', title: '热度雷达', desc: '今日 Top5、视频分析、导入入口和 AI 改写', tag: '雷达' },
+  { key: 'competitor', icon: '账', title: '账号库', desc: '固定监控博主；点开账号再看对应热点', tag: '账号' },
+  { key: 'copy', icon: '文', title: '文案 / 旁白', desc: '按路线生成开场、完整旁白或图文脚本，不强制数字人', tag: '文案' },
+  { key: 'shooting', icon: '拍', title: '脚本 / 拍摄', desc: '上传资料或脚本，生成拍摄任务、提词器和 B-roll 清单', tag: '脚本' },
+  { key: 'assets', icon: '素', title: '素材选择', desc: '选择数字人、自拍素材、采集视频或图文素材', tag: '素材' },
+  { key: 'digitalHuman', icon: '人', title: '可选数字人', desc: '需要真人感片头时再生成；纯素材混剪可直接跳过', tag: '可选' },
+  { key: 'voice', icon: '声', title: '配音导演', desc: '克隆音色、分段情绪、语速停顿', tag: '配音' },
+  { key: 'video', icon: '剪', title: '素材混剪 / 成片', desc: '数字人片头、楼盘、风光、配套素材按顺序合成', tag: '成片' },
+  { key: 'subtitleCover', icon: '审', title: '审片 / 封面 / 图文', desc: '成片审查、人工确认、三套封面、七页图文和总交付包', tag: '发布' },
+  { key: 'growth', icon: '投', title: '流量监控', desc: '手动录入数据，AI 判断投多少、投多久、是否继续投', tag: '投流' },
+  { key: 'collector', icon: '采', title: '实时日志', desc: '查看 ECS 采集、AI 判断、入库和报错日志', tag: '日志' },
+  { key: 'strategy', icon: '档', title: '获客档案', desc: '业务定位、关键词、客群、资料包和承接钩子', tag: '档案' },
+  { key: 'monitor', icon: '控', title: '系统状态', desc: 'API、Supabase、R2、任务队列和诊断', tag: '状态' },
+  { key: 'oneClick', icon: '旧', title: '旧版一键生成', desc: '保留旧接口，默认不在主流程展示', tag: '隐藏' },
+  { key: 'publish', icon: '发', title: '平台发布', desc: '发布草稿、平台适配、开放接口预留', tag: '发布' },
+  { key: 'trend', icon: '爆', title: '行业爆点', desc: '旧版行业爆点页，主流程已并入热度雷达', tag: '隐藏' }
 ]
 
 const workflowSteps: { key: ModuleKey; step: string; title: string; desc: string; action: string }[] = [
-  { key: 'oneClick', step: '00', title: '一键生成中心', desc: '一个窗口统筹，但第一步仍然先确认素材，避免后面只有文字稿。', action: '开始' },
-  { key: 'assets', step: '01', title: '选择素材', desc: '先上传/选择视频和图片，排好出现顺序，图片停留和视频截取都在这里调。', action: '选素材' },
-  { key: 'copy', step: '02', title: '文案生产', desc: '根据已选素材、行业、客户和转化目标生成短视频口播稿。', action: '写文案' },
-  { key: 'voice', step: '03', title: '配音分段', desc: '分段控制情绪、语速、音量和停顿，并生成真实时间轴。', action: '去配音' },
-  { key: 'digitalHuman', step: '04', title: '数字人片段', desc: '可选：用配音生成老板数字人口播素材，或者跳过直接素材混剪。', action: '做数字人' },
-  { key: 'video', step: '05', title: '剪辑合成', desc: '按素材顺序和配音时长自动铺满，字幕直接在剪辑页调整。', action: '去剪辑' },
-  { key: 'subtitleCover', step: '06', title: '字幕/封面/图文', desc: '生成视频封面和图文引流包，字幕也可在剪辑页直接处理。', action: '做包装' },
-  { key: 'publish', step: '07', title: '平台发布', desc: '自动继承视频、封面、标题、简介和话题，生成发布草稿。', action: '去发布' }
+  { key: 'copy', step: '01', title: '文案路线', desc: '先选纯素材、数字人开场、真人拍摄或图文路线。', action: '定路线' },
+  { key: 'voice', step: '02', title: '配音/旁白', desc: '按当前路线生成开场配音或整条旁白。', action: '配音' },
+  { key: 'digitalHuman', step: '03', title: '可选出镜', desc: '需要真人感开场才用 fal；纯素材混剪直接跳过。', action: '可选' },
+  { key: 'assets', step: '04', title: '素材/B-roll', desc: '选择楼盘、马来西亚风光、配套和教育医疗素材，调整顺序和时长。', action: '选素材' },
+  { key: 'copy', step: '05', title: '按素材补全旁白', desc: '读取已选素材总时长，再生成完整旁白稿和字幕逻辑。', action: '补全脚本' },
+  { key: 'video', step: '06', title: '成片与自动审片', desc: '导出 9:16 MP4 后自动登记统一任务，并启动机械质检和豆包审片。', action: '成片' },
+  { key: 'subtitleCover', step: '07', title: '人工确认与发布包装', desc: '人工确认一次后自动生成三套封面、七页图文并选择主封面。', action: '审片包装' },
+  { key: 'growth', step: '08', title: '发布与流量监控', desc: '下载最终总包，发布后录入数据并复盘投流。', action: '发布复盘' }
 ]
 
 const badWords = ['最', '第一', '保证', '包赚', '稳赚', '绝对', '唯一', '国家级', '100%', '躺赚', '无风险']
@@ -233,6 +482,78 @@ const pluginMatrix = [
   { name: '平台发布', desc: '抖音/视频号/快手/小红书开放平台预留', status: 'publish' }
 ]
 
+const realDataConnectors = [
+  {
+    name: '百度搜索 / 百度营销',
+    status: '推荐优先接',
+    purpose: '拿搜索词、关键词规划、广告线索和高意向查询词',
+    fields: ['BAIDU_MARKETING_APP_ID', 'BAIDU_MARKETING_SECRET', 'BAIDU_MARKETING_ACCESS_TOKEN'],
+    note: '适合抓“买房条件/流程/税费/MM2H/城市区域”等主动搜索需求。'
+  },
+  {
+    name: '巨量引擎 / 抖音搜索',
+    status: '第二优先',
+    purpose: '拿抖音搜索、广告报表、线索表单、关键词和内容热度',
+    fields: ['OCEANENGINE_APP_ID', 'OCEANENGINE_SECRET', 'OCEANENGINE_ACCESS_TOKEN'],
+    note: '适合发现抖音里正在被搜索和评论的问题，用来做截流内容。'
+  },
+  {
+    name: '抖音开放平台',
+    status: '可接入',
+    purpose: '关键词视频搜索、授权账号评论、视频评论管理和回复',
+    fields: ['DOUYIN_CLIENT_KEY', 'DOUYIN_CLIENT_SECRET', 'DOUYIN_ACCESS_TOKEN'],
+    note: '官方能力更适合管理自己授权账号和合规获取评论；竞品全量采集需要谨慎。'
+  },
+  {
+    name: '小红书数据源',
+    status: '建议第三方/人工导入',
+    purpose: '笔记标题、评论问题、收藏转发趋势和图文选题',
+    fields: ['XHS_DATA_PROVIDER_KEY 或 CSV 导入'],
+    note: '小红书公开 API 能力有限，先做链接/CSV/表格导入，再考虑合规数据服务商。'
+  },
+  {
+    name: '企业微信 / SCRM',
+    status: '微信未接入前先网页模拟',
+    purpose: '报告领取、客户标签、私信筛选、顾问跟进和转化复盘',
+    fields: ['WECHAT_CORP_ID', 'WECHAT_AGENT_ID', 'WECHAT_SECRET'],
+    note: '微信生态更适合承接和培育，不建议当海外房产直接买量主入口。'
+  }
+]
+
+const interceptionOpportunityFallback = [
+  { score: 92, source: '百度搜索', keyword: '马来西亚买房税费怎么算', intent: '税费测算 / 交易前教育', action: '做税费计算器落地页 + 领取税费测算表', asset: '《马来西亚买房税费测算表》' },
+  { score: 88, source: '抖音搜索/评论', keyword: '马来西亚第二家园一定要买房吗', intent: '身份规划 / MM2H', action: '做 30 秒问答视频 + 评论关键词“身份”', asset: '《MM2H 与购房要求对照表》' },
+  { score: 86, source: '小红书图文', keyword: 'Mont Kiara 国际学校附近公寓', intent: '教育家庭 / 城市筛选', action: '做 5 页图文包 + 私信“学校”领取清单', asset: '《马来西亚国际学校择校清单》' },
+  { score: 84, source: '竞品评论区', keyword: '吉隆坡和新山哪里更值得买', intent: '城市比较 / 项目筛选', action: '做对比内容 + 领取城市对比表', asset: '《吉隆坡 vs 新山选盘表》' },
+  { score: 81, source: '百度长尾词', keyword: '中国人可以买马来西亚房产吗', intent: '资格判断 / 初筛', action: '做 FAQ 落地页 + 顾问筛选表单', asset: '《马来西亚买房资格清单》' }
+]
+
+const heatRadarSeedKeywords = [
+  '马来西亚房产', '马来西亚买房', '马来西亚投资房产', '大马房产', '马来西亚第二家园', 'MM2H',
+  '吉隆坡房产', '新山房产', '槟城房产', '马来西亚国际学校', '马来西亚买房税费', '马来西亚买房流程',
+  'Mont Kiara 国际学校附近公寓', '新山 RTS 附近房产', '吉隆坡和新山哪里更值得买', '中国人可以买马来西亚房产吗'
+]
+
+const heatRadarDataLoop = [
+  '每日固定查看竞品账号和关键词热度，不再叫“截流”，改成“热度雷达”',
+  '每个竞品账号只保留当日热度前 3 条内容/话题，避免信息太乱',
+  'AI 只负责分析热度、客户意图、可承接资料包和下一步动作',
+  '账号库长期固定，可添加、删除、置顶，后续接 API 后自动采集',
+  '当前没接三方 API 时先用手动导入/链接记录；上线后存 Supabase，素材和截图存 R2'
+]
+
+const heatRadarFallbackSnapshots: HeatRadarSnapshot[] = [
+  { id: 'seed_tax', date: todayKey(), account_id: 'seed', account_name: '行业热词', platform: '百度/巨量/小红书', topic: '马来西亚买房税费怎么算', signal: '交易前教育词，适合税费测算表承接', score: 94, intent: '税费/预算测算', source_url: '', recommended_action: '做税费测算落地页和 30 秒问答视频', lead_magnet: '《马来西亚买房税费测算表》' },
+  { id: 'seed_mm2h', date: todayKey(), account_id: 'seed', account_name: '行业热词', platform: '抖音/百度', topic: '马来西亚第二家园一定要买房吗', signal: '身份规划与购房门槛强相关', score: 92, intent: 'MM2H/身份规划', source_url: '', recommended_action: '做 MM2H 类别对照图文和私信关键词“身份”', lead_magnet: '《MM2H 与购房要求对照表》' },
+  { id: 'seed_mk', date: todayKey(), account_id: 'seed', account_name: '行业热词', platform: '小红书/抖音', topic: 'Mont Kiara 国际学校附近公寓', signal: '教育家庭高意向场景', score: 89, intent: '子女教育/区域选盘', source_url: '', recommended_action: '做国际学校周边选盘图文包', lead_magnet: '《马来西亚国际学校择校清单》' }
+]
+
+function asOpportunityList(plan: LeadAcquisitionPlanResponse | null) {
+  const fromPlan = (plan as any)?.interception_opportunities
+  if (Array.isArray(fromPlan) && fromPlan.length) return fromPlan
+  return interceptionOpportunityFallback
+}
+
 function nextStepOf(active: ModuleKey): ModuleKey {
   const order: ModuleKey[] = ['oneClick','assets','copy','voice','digitalHuman','video','subtitleCover','publish']
   const idx = order.indexOf(active)
@@ -242,6 +563,56 @@ function nextStepOf(active: ModuleKey): ModuleKey {
 function shortText(value: string, limit = 68) {
   const clean = (value || '').replace(/\s+/g, ' ').trim()
   return clean.length > limit ? clean.slice(0, limit) + '...' : clean
+}
+
+function heatEvidenceLine(item: HeatRadarSnapshot) {
+  const pieces = [item.platform, item.account_name, item.topic, item.signal].filter(Boolean)
+  return pieces.join('｜')
+}
+
+function hasRealHeatSignal(item: HeatRadarSnapshot) {
+  const text = `${item.source_url || ''} ${item.signal || ''} ${item.topic || ''}`
+  return Boolean(item.source_url) || /(赞|评|评论|藏|收藏|分享|转发|播放|浏览)\s*\d/i.test(text)
+}
+
+type HeatAccountGroup = {
+  key: string
+  name: string
+  platform: string
+  account?: HeatRadarAccount
+  items: HeatRadarSnapshot[]
+  bestScore: number
+}
+
+function groupHeatSnapshotsByAccount(items: HeatRadarSnapshot[], accounts: HeatRadarAccount[]): HeatAccountGroup[] {
+  const accountById = new Map(accounts.map(acc => [String(acc.id || acc.name || acc.url), acc]))
+  const groups = new Map<string, HeatAccountGroup>()
+  for (const item of items) {
+    const matched = accountById.get(String(item.account_id || ''))
+    const key = String(item.account_id || matched?.id || item.account_name || item.source_url || item.id || 'unknown')
+    const name = String(matched?.name || item.account_name || '未命名博主')
+    const platform = String(matched?.platform || item.platform || '平台')
+    if (!groups.has(key)) groups.set(key, { key, name, platform, account: matched, items: [], bestScore: 0 })
+    const group = groups.get(key)!
+    group.items.push(item)
+    group.bestScore = Math.max(group.bestScore, Number(item.score || 0))
+  }
+  const pinnedOrder = new Map(accounts.map((acc, idx) => [String(acc.id || acc.name || acc.url), idx]))
+  return Array.from(groups.values()).sort((a, b) => {
+    const ap = a.account?.pinned ? 0 : 1
+    const bp = b.account?.pinned ? 0 : 1
+    if (ap !== bp) return ap - bp
+    const ao = pinnedOrder.get(a.key) ?? 999
+    const bo = pinnedOrder.get(b.key) ?? 999
+    if (ao !== bo) return ao - bo
+    return b.bestScore - a.bestScore
+  }).map(group => ({ ...group, items: [...group.items].sort((a, b) => Number(b.score || 0) - Number(a.score || 0)) }))
+}
+
+function heatStageLabel(count: number, hasRewrite: boolean) {
+  if (hasRewrite) return 'AI 已完成目标和改写'
+  if (count > 0) return '已进入热点改写池'
+  return '等待真实采集'
 }
 
 function estimateSeconds(text: string, speed = 1) {
@@ -255,13 +626,93 @@ function formatBytes(size: number) {
   return `${(size / 1024 / 1024).toFixed(1)}MB`
 }
 
-function formatCollectorEventLine(ev: CollectorProgressEvent, index = 0) {
-  const stage = safeText(ev?.stage, '采集')
-  const message = safeText(ev?.message, '')
-  const target = safeText(ev?.video_url, safeText(ev?.account_url, ''))
-  const prefix = index ? `#${index + 1} ` : ''
-  return `${prefix}${stage}${message ? `：${message}` : ''}${target ? ` ｜ ${target}` : ''}`
+function splitProfileLines(value: string, fallback: string[] = []) {
+  const items = safeText(value).split(/[\n,，;；]+/).map(x => x.replace(/^[-·\d.、\s]+/, '').trim()).filter(Boolean)
+  return items.length ? items : fallback
 }
+
+
+function cleanReportTitle(value: string) {
+  return safeText(value).replace(/[《》]/g, '').replace(/报告|清单|表|流程图/g, '').trim()
+}
+
+function buildLeadMagnetReports(params: {
+  privateDomainAssets: string
+  businessPositioning: string
+  industry: string
+  audience: string
+  trendKeywords: string
+  customerSegments: string
+  reportDelivery: string
+}): LeadMagnetReport[] {
+  const assetNames = splitProfileLines(params.privateDomainAssets, [
+    '马来西亚第二家园避坑报告',
+    '马来西亚国际学校择校清单',
+    '海外置业预算测算表',
+    '马来西亚买房完整流程图',
+    '线下说明会名额'
+  ]).slice(0, 6)
+  const keywords = splitProfileLines(params.trendKeywords, ['第二家园', '海外置业', '国际学校', '预算测算', '避坑'])
+  const segments = splitProfileLines(params.customerSegments, [params.audience || '目标客户'])
+  const baseIndustry = params.businessPositioning || params.industry || '行业获客'
+  return assetNames.map((name, index) => {
+    const clean = cleanReportTitle(name) || `资料包 ${index + 1}`
+    const keyword = keywords[index % keywords.length] || clean
+    const segment = segments[index % segments.length] || params.audience || '目标客户'
+    const ctaWord = keyword.includes('预算') ? '预算' : keyword.includes('学校') ? '学校' : keyword.includes('身份') || keyword.includes('第二家园') ? '身份' : '报告'
+    return {
+      id: `report_${index}`,
+      title: name,
+      keyword: ctaWord,
+      subtitle: `${clean}｜先收藏，咨询前直接对照。`,
+      audience: segment,
+      promise: `用一份网页资料先筛出真正有需求的人，再引导私信/微信领取完整版本。`,
+      outline: [
+        `适合谁：${segment}`,
+        `先看什么：${keyword} 相关条件、预算和风险`,
+        `避开什么：只看价格、不看身份/教育/长期规划`,
+        `怎么判断：用 3 个问题筛选真实需求`,
+        `下一步：私信“${ctaWord}”领取完整清单`
+      ],
+      landingTitle: clean.length > 18 ? clean : `${clean}｜领取前先看这 5 点`,
+      landingSubtitle: `${baseIndustry}，先用网页版资料承接线索，微信未接入时也能演示完整获客链路。`,
+      cta: `评论区或私信发送「${ctaWord}」，领取完整资料并做需求筛选。`,
+      replyScript: `收到，我先把《${clean}》网页版发你。你更关注【身份/教育/预算/项目】哪一块？我按你的情况发对应清单。`,
+      shootingIdea: `拍摄一条“领取${clean}前先看这 3 点”的口播，画面用报告预览页 + 房产/学校/顾问素材，结尾引导私信“${ctaWord}”。`
+    }
+  })
+}
+
+function buildReportLandingCopy(report: LeadMagnetReport | undefined) {
+  if (!report) return ''
+  return [
+    report.landingTitle,
+    report.landingSubtitle,
+    '',
+    '页面结构：',
+    ...report.outline.map((x, i) => `${i + 1}. ${x}`),
+    '',
+    `CTA：${report.cta}`,
+    `私信回复：${report.replyScript}`
+  ].join('\n')
+}
+
+
+async function copyTextToClipboard(text: string) {
+  try {
+    await navigator.clipboard?.writeText(text)
+    return true
+  } catch {
+    const el = document.createElement('textarea')
+    el.value = text
+    document.body.appendChild(el)
+    el.select()
+    document.execCommand('copy')
+    document.body.removeChild(el)
+    return true
+  }
+}
+
 
 function readMediaDuration(event: any, fallback = 0) {
   const el = event?.currentTarget || event?.target
@@ -270,20 +721,32 @@ function readMediaDuration(event: any, fallback = 0) {
 }
 
 function AppInner() {
-  const [active, setActive] = useState<ModuleKey>('collector')
+  type MainTab = 'video-prod' | 'assets' | 'leads' | 'avatar' | 'providers'
+  const [mainTab, setMainTab] = useState<MainTab>('video-prod')
+  const [active, setActive] = useState<ModuleKey>('oneClick')
+  const [showAdvanced, setShowAdvanced] = useState(false)
   const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
   const [health, setHealth] = useState<any>(null)
   const [modelStatus, setModelStatus] = useState<ModelStatusResponse | null>(null)
+  const [jobs, setJobs] = useState<JobItem[]>([])
   const [contentNavOpen, setContentNavOpen] = useState(true)
+  const [navCollapsed, setNavCollapsed] = useState(false)
+  const [navMobileOpen, setNavMobileOpen] = useState(false)
 
-  const [industry, setIndustry] = useState('海外房产置业 · 第二家园')
-  const [audience, setAudience] = useState('有海外置业、第二家园、子女教育、养老度假和资产配置需求的华人家庭与企业主')
-  const [sellingPoints, setSellingPoints] = useState('海外第二家园规划、国家/城市筛选、项目匹配、置业流程、生活配套、长期服务和顾问式咨询')
-  const [style, setStyle] = useState('专业可信、顾问式成交、真实案例、短视频强钩子')
-  const [leadRegion, setLeadRegion] = useState('华人高净值家庭、企业主、留学家庭、养老度假人群、海外生活规划人群')
-  const [conversionGoal, setConversionGoal] = useState('私信咨询 / 需求筛选 / 加微信进入私域 / 预约顾问沟通')
-  const [trendKeywords, setTrendKeywords] = useState('海外房产,第二家园,海外置业,子女教育,养老度假,资产配置,海外生活')
+  const [industry, setIndustry] = useState(malaysiaProfilePreset.industry)
+  const [audience, setAudience] = useState(malaysiaProfilePreset.audience)
+  const [sellingPoints, setSellingPoints] = useState(malaysiaProfilePreset.sellingPoints)
+  const [style, setStyle] = useState(malaysiaProfilePreset.style)
+  const [leadRegion, setLeadRegion] = useState(malaysiaProfilePreset.leadRegion)
+  const [conversionGoal, setConversionGoal] = useState(malaysiaProfilePreset.conversionGoal)
+  const [trendKeywords, setTrendKeywords] = useState(malaysiaProfilePreset.trendKeywords)
+  const [businessPositioning, setBusinessPositioning] = useState(malaysiaProfilePreset.businessPositioning)
+  const [customerSegments, setCustomerSegments] = useState(malaysiaProfilePreset.customerSegments)
+  const [privateDomainAssets, setPrivateDomainAssets] = useState(malaysiaProfilePreset.privateDomainAssets)
+  const [contentPillars, setContentPillars] = useState(malaysiaProfilePreset.contentPillars)
+  const [shootingBrief, setShootingBrief] = useState(malaysiaProfilePreset.shootingBrief)
+  const [reportDelivery, setReportDelivery] = useState(malaysiaProfilePreset.reportDelivery)
   const [trendRadar, setTrendRadar] = useState<TrendRadarResponse | null>(null)
   const [competitors, setCompetitors] = useState<CompetitorAccount[]>([])
   const [competitorDraft, setCompetitorDraft] = useState<CompetitorAccount>({ name: '', platform: 'douyin', url: '', positioning: '', notes: '' })
@@ -299,13 +762,16 @@ function AppInner() {
   const [assetClipSettings, setAssetClipSettings] = useState<Record<string, AssetClipSetting>>({})
   const [assetDurations, setAssetDurations] = useState<Record<string, number>>({})
   const [selectedReferenceAssetId, setSelectedReferenceAssetId] = useState('')
+  const [assetLibraryPage, setAssetLibraryPage] = useState<'video' | 'image'>('video')
   const [assetSearch, setAssetSearch] = useState('')
   const [assetKindFilter, setAssetKindFilter] = useState<'all' | 'image' | 'video'>('all')
   const [assetFolderFilter, setAssetFolderFilter] = useState<AssetFolderKey>('all')
   const [assetUploadFolder, setAssetUploadFolder] = useState<AssetFolderKey>('self')
-  const [assetUploadMeta, setAssetUploadMeta] = useState<AssetUploadMetadata>({ material_type: '', city: '', region: '', source: '', reusable: true, remark: '', folder: 'self' })
+  const [assetUsageRole, setAssetUsageRole] = useState<'avatar' | 'content'>('content')
   const [assetTimeFilter, setAssetTimeFilter] = useState<'all' | 'today' | '7d' | '30d'>('all')
   const [assetSort, setAssetSort] = useState<'new' | 'old' | 'size_desc' | 'size_asc' | 'name'>('new')
+  const [assetVisibleCount, setAssetVisibleCount] = useState(24)
+  const [collectedVisibleCount, setCollectedVisibleCount] = useState(40)
   const [isDraggingAssets, setIsDraggingAssets] = useState(false)
   const [sourceUrl, setSourceUrl] = useState('')
   const [manualText, setManualText] = useState('')
@@ -317,31 +783,12 @@ function AppInner() {
   const [agentResult, setAgentResult] = useState<AutoCollectorRunResponse | null>(null)
   const [agentSeedLinks, setAgentSeedLinks] = useState('')
   const [agentLearnGoal, setAgentLearnGoal] = useState('学习这个博主的视频办法：钩子公式、情绪推进、镜头节奏、转化逻辑。只迁移方法，不模仿具体文案、不搬运素材。')
-  const [collectorProgress, setCollectorProgress] = useState<CollectorProgressState | null>(null)
-  const [collectorAccountLimit, setCollectorAccountLimit] = useState('3')
-  const [collectorSingleAccount, setCollectorSingleAccount] = useState('')
-
-
-  const [v1034Status, setV1034Status] = useState<V1034StatusResponse | null>(null)
-  const [accountImportText, setAccountImportText] = useState('')
-  const [accountLibraryResult, setAccountLibraryResult] = useState<any>(null)
-  const [collectorRealResult, setCollectorRealResult] = useState<any>(null)
-  const [obsidianDraft, setObsidianDraft] = useState('')
-  const [obsidianResult, setObsidianResult] = useState<any>(null)
-  const [aiControlQuestion, setAiControlQuestion] = useState('帮我检查视频生成链路、字幕、配音、素材库、OpenClaw、账号库、Obsidian 和 UI，生成待确认修复任务，不要自动改代码。')
-  const [aiControlTask, setAiControlTask] = useState<any>(null)
-  const [finalActionResult, setFinalActionResult] = useState<any>(null)
-  const [voiceForbiddenWords, setVoiceForbiddenWords] = useState('cut,smooth_cut,flash,pull_out,hard transition,闪白,硬切,快切')
-  const [voiceTone, setVoiceTone] = useState('真实顾问式，短视频口语，重点词自然加重')
-  const [voiceGlobalSpeed, setVoiceGlobalSpeed] = useState('1.00')
-  const [voicePause, setVoicePause] = useState('350')
-  const [voiceEmphasisWords, setVoiceEmphasisWords] = useState('第二家园,海外置业,子女教育,资产配置,私信咨询')
 
   const [copy, setCopy] = useState<GeneratedCopy>(emptyCopy)
   const [oneClick, setOneClick] = useState<OneClickGenerateResponse | null>(null)
-  const [oneClickInstruction, setOneClickInstruction] = useState('生成一条适合老板数字人口播的获客短视频，开头要强，字幕要有抖音口播感，结尾引导私信。')
+  const [oneClickInstruction, setOneClickInstruction] = useState('默认生成一条纯素材混剪获客短视频：先用强钩子旁白开场，再按楼盘/马来西亚风光/学校/配套素材讲清楚。只有选择数字人路线时，才额外生成真人模板口型同步开场。')
   const [oneClickChatInput, setOneClickChatInput] = useState('把开头改得更像老板提醒客户，减少书面词，字幕重点更强。')
-  const [oneClickOutputType, setOneClickOutputType] = useState('digital_human')
+  const [oneClickOutputType, setOneClickOutputType] = useState('mixed_video')
   const [oneClickMaterialMode, setOneClickMaterialMode] = useState('selected_assets')
   const [refineInstruction, setRefineInstruction] = useState('把开头改得更有压迫感，语气更像老板提醒客户；减少书面词，保留短视频口语感。')
   const [editPlan, setEditPlan] = useState<EditPlanResponse | null>(null)
@@ -353,22 +800,26 @@ function AppInner() {
   const [voiceSegments, setVoiceSegments] = useState<VoiceSegment[]>([])
   const [voiceNotes, setVoiceNotes] = useState<string[]>([])
   const [audio, setAudio] = useState<TTSResponse | null>(null)
+  const [digitalHumanAudio, setDigitalHumanAudio] = useState<TTSResponse | null>(null)
 
-  const [digitalHumanEngine, setDigitalHumanEngine] = useState('auto')
+  const [digitalHumanEngine, setDigitalHumanEngine] = useState('fal_lipsync')
+  const [digitalHumanSceneTemplate, setDigitalHumanSceneTemplate] = useState('样板间客厅讲解')
+  const [digitalHumanScenePrompt, setDigitalHumanScenePrompt] = useState('')
   const [digitalHumanJimengModel, setDigitalHumanJimengModel] = useState('omnihuman15')
   const [digitalHumanAvatarId, setDigitalHumanAvatarId] = useState('')
   const [digitalHumanDriverId, setDigitalHumanDriverId] = useState('')
-  const [digitalHumanConsent, setDigitalHumanConsent] = useState(false)
   const [digitalHuman, setDigitalHuman] = useState<DigitalHumanCreateResponse | null>(null)
   const [digitalHumanPollCount, setDigitalHumanPollCount] = useState(0)
   const [digitalHumanLastChecked, setDigitalHumanLastChecked] = useState('')
 
   const [segmentSeconds, setSegmentSeconds] = useState<Record<number, number>>({})
   const [segmentTransitions, setSegmentTransitions] = useState<Record<number, string>>({})
-  const [subtitleSize, setSubtitleSize] = useState(18)
-  const [subtitleMarginV, setSubtitleMarginV] = useState(70)
+  const [subtitleSize, setSubtitleSize] = useState(80)
+  const [humanMode, setHumanMode] = useState('none')
+  const [subtitleMarginV, setSubtitleMarginV] = useState(56)
   const [subtitlePosition, setSubtitlePosition] = useState<'bottom_safe' | 'middle_low' | 'center'>('bottom_safe')
-  const [subtitleColor, setSubtitleColor] = useState('#ffffff')
+  const [subtitlePreset, setSubtitlePreset] = useState<'douyin_boss' | 'knowledge_highlight' | 'clean_trust' | 'cta_pop'>('douyin_boss')
+  const subtitleColor = subtitlePreset === 'clean_trust' ? '#ffffff' : subtitlePreset === 'cta_pop' ? '#FFD84D' : '#ffffff'
   const [subtitleHighlight, setSubtitleHighlight] = useState('第二家园,海外置业,子女教育,养老度假,资产配置,私信咨询')
   const [coverStyle, setCoverStyle] = useState('海外第二家园强钩子封面')
 
@@ -388,24 +839,85 @@ function AppInner() {
   const [ad, setAd] = useState<AdAnalysisResponse | null>(null)
   const [platform, setPlatform] = useState('douyin')
   const [publish, setPublish] = useState<PlatformPublishResponse | null>(null)
-  const [lastHandoff, setLastHandoff] = useState('系统会把上一模块结果自动带到下一模块。')
-  const [autoAdvance, setAutoAdvance] = useState(true)
+  const [lastHandoff, setLastHandoff] = useState('新流程：先选生产路线；默认纯素材混剪。需要真人感片头时再生成数字人开场，否则直接选素材、配音、合成。')
   const [knowledgeDialog, setKnowledgeDialog] = useState({ open: false, source: '', title: '', content: '', tags: '老板口播,获客,短视频' })
 
   const [leadPlan, setLeadPlan] = useState<LeadAcquisitionPlanResponse | null>(null)
-  const [leadChannels, setLeadChannels] = useState<string[]>(['抖音截留获客', '博主联动流量', '采集目标客户', '自动监听', '自动回复', '目标用户导流私域'])
-  const [leadFixedOptions, setLeadFixedOptions] = useState('子女教育家庭、企业主资产配置、养老度假、海外第二居所、华人家庭、目标国家/城市、预算区间')
+  const [leadChannels, setLeadChannels] = useState<string[]>(['百度搜索关键词', '巨量搜索/抖音搜索', '抖音视频评论', '小红书笔记评论', '竞品账号监控', '微信/企微私域承接'])
+  const [leadFixedOptions, setLeadFixedOptions] = useState('子女教育家庭、企业主资产配置、养老度假、海外第二居所、华人家庭、马来西亚城市、预算区间、国际学校、第二家园身份')
+  const [heatAccounts, setHeatAccounts] = useState<HeatRadarAccount[]>([])
+  const [heatSnapshots, setHeatSnapshots] = useState<HeatRadarSnapshot[]>(() => loadLocalJson('ai_video_heat_snapshots_v1', [] as HeatRadarSnapshot[]))
+  const [heatDraft, setHeatDraft] = useState<HeatRadarAccount>({ id: '', name: '', platform: '抖音', url: '', tags: '马来西亚房产,第二家园,海外置业', notes: '', pinned: true, created_at: '' })
+  const [manualHeatText, setManualHeatText] = useState('')
+  const [heatCrawlerResult, setHeatCrawlerResult] = useState<HeatRadarRunResponse | null>(null)
+  const [heatRewrite, setHeatRewrite] = useState<HeatRadarRewriteResponse | null>(null)
+  const [heatCrawlerLimit, setHeatCrawlerLimit] = useState(3)
+  const [videoIntakeUrl, setVideoIntakeUrl] = useState('')
+  const [videoIntakeResult, setVideoIntakeResult] = useState<any>(null)
+  const [expandedHeatGroups, setExpandedHeatGroups] = useState<Record<string, boolean>>({})
+  const [heatAccountAudit, setHeatAccountAudit] = useState<HeatRadarAccountAuditResponse | null>(null)
+  const [heatAutomationToken, setHeatAutomationToken] = useState(() => window.localStorage.getItem('heatRadarIngestToken') || '')
+  const [heatAccountSearch, setHeatAccountSearch] = useState('')
+  const [heatPlatformFilter, setHeatPlatformFilter] = useState('all')
+  const [expandedHeatAccounts, setExpandedHeatAccounts] = useState<Record<string, boolean>>({})
+  const [heatAccountReviews, setHeatAccountReviews] = useState<any[]>([])
+  const [activeReportIndex, setActiveReportIndex] = useState(0)
+  const [reportCopyStatus, setReportCopyStatus] = useState('')
 
-  const materialAssets = useMemo(() => assets.map((a, i) => normalizeAsset(a, i)).filter(a => Boolean(a.id && a.url) && !safeText(a.filename).startsWith('collected_')), [assets])
-  const collectedVideos = useMemo(() => assets.map((a, i) => normalizeAsset(a, i)).filter(a => Boolean(a.id && a.url) && a.kind === 'video' && safeText(a.filename).startsWith('collected_')), [assets])
+  const [ecsCollectorCount, setEcsCollectorCount] = useState('1')
+  const [ecsCollectorTime, setEcsCollectorTime] = useState('02:00')
+  const [ecsCollectorAccount, setEcsCollectorAccount] = useState('')
+  const [ecsDryRunMode, setEcsDryRunMode] = useState(false)
+  const [ecsNoDelayMode, setEcsNoDelayMode] = useState(true)
+  const [collectorProgress, setCollectorProgress] = useState<CollectorProgressState | null>(null)
+  const [digitalHumanProviders, setDigitalHumanProviders] = useState<DigitalHumanProviderOption[]>([])
+
+  const ecsLimit = Math.max(1, Number(ecsCollectorCount) || 1)
+  const ecsDailyCommand = `powershell -ExecutionPolicy Bypass -File .\install_daily_task.ps1 -Time "${ecsCollectorTime || '02:00'}" -Limit ${ecsLimit}`
+  const ecsNoDelayArg = ecsNoDelayMode ? ' --no-delay' : ''
+  const ecsRunCommand = ecsCollectorAccount.trim()
+    ? `python run_all.py --headful --account "${ecsCollectorAccount.trim()}" --limit 1 --no-delay`
+    : `python run_all.py --headful --limit ${ecsLimit}${ecsNoDelayArg}`
+  const ecsDryRunCommand = ecsCollectorAccount.trim()
+    ? `python run_all.py --headful --dry-run --account "${ecsCollectorAccount.trim()}" --limit 1 --no-delay`
+    : `python run_all.py --headful --dry-run --limit ${ecsLimit}${ecsNoDelayArg}`
+
+  const collectorEventsForReport = useMemo(() => (collectorProgress?.events || []).slice(0, 18), [collectorProgress])
+  const latestCollectorEvent = collectorEventsForReport[0]
+  const collectorReportLine = useMemo(() => {
+    const events = collectorEventsForReport
+    if (!events.length) return '等待采集报告：网页下发命令后，ECS 会实时回传打开账号、提取视频、提交分析、入选/未入选原因。'
+    return formatCollectorEventLine(events[0], 0)
+  }, [collectorEventsForReport])
+
+  const allNormalizedAssets = useMemo(() => assets.map((a, i) => normalizeAsset(a, i)).filter(a => Boolean(a.id && a.url)), [assets])
+  const materialAssets = useMemo(() => allNormalizedAssets.filter(a => normalizeAssetFolder(a.folder, a.kind, a.filename) !== 'collected'), [allNormalizedAssets])
+  const collectedAssets = useMemo(() => allNormalizedAssets.filter(a => normalizeAssetFolder(a.folder, a.kind, a.filename) === 'collected'), [allNormalizedAssets])
+  const collectedVideos = useMemo(() => collectedAssets.filter(a => a.kind === 'video'), [collectedAssets])
+  const isGeneratedDigitalHumanAsset = (a: AssetItem) => {
+    const folder = normalizeAssetFolder((a as any).folder, a.kind, a.filename)
+    return folder === 'digital_human'
+      || safeText(a.source_type).includes('digital_human')
+      || safeText(a.filename).toLowerCase().startsWith('digital_human_')
+      || safeText(a.original_name).includes('数字人开场')
+  }
+
+  // 真人模板 = 你上传/采集到的“人像口播原素材”，不是已经生成出的数字人片段。
+  // 已生成的数字人片段只用于成片开头，不能再拿回去当 fal 模型，否则很容易出现开头重复/口型二次同步。
+  const digitalHumanIntroAssets = useMemo(() => materialAssets.filter(a => a.kind === 'video' && isGeneratedDigitalHumanAsset(a)), [materialAssets])
+  const uploadedAvatarAssets = useMemo(() => materialAssets.filter(a => a.usage_role === 'avatar' && !isGeneratedDigitalHumanAsset(a)), [materialAssets])
+  const collectedAvatarAssets = useMemo(() => collectedAssets.filter(a => a.usage_role === 'avatar' && !isGeneratedDigitalHumanAsset(a)), [collectedAssets])
+  const contentOnlyAssets = useMemo(() => materialAssets.filter(a => a.usage_role !== 'avatar' && !isGeneratedDigitalHumanAsset(a)), [materialAssets])
+  const digitalHumanDriverAssets = useMemo(() => [...uploadedAvatarAssets, ...collectedAvatarAssets].filter(a => a.kind === 'video'), [uploadedAvatarAssets, collectedAvatarAssets])
   const filteredMaterialAssets = useMemo(() => {
     const now = Date.now()
     const maxAge = assetTimeFilter === 'today' ? 24 * 3600 * 1000 : assetTimeFilter === '7d' ? 7 * 24 * 3600 * 1000 : assetTimeFilter === '30d' ? 30 * 24 * 3600 * 1000 : 0
     const q = assetSearch.trim().toLowerCase()
     const list = materialAssets.filter(a => {
+      if (a.kind !== assetLibraryPage) return false
       if (assetKindFilter !== 'all' && a.kind !== assetKindFilter) return false
       if (assetFolderFilter !== 'all' && normalizeAssetFolder((a as any).folder, a.kind, a.filename) !== assetFolderFilter) return false
-      if (q && !`${a.original_name} ${a.filename} ${a.kind}`.toLowerCase().includes(q)) return false
+      if (q && !`${a.original_name} ${a.filename} ${a.kind} ${assetRoleLabel(a.usage_role)} ${assetFolderLabel((a as any).folder, a.kind)}`.toLowerCase().includes(q)) return false
       if (maxAge) {
         const t = new Date(a.created_at).getTime()
         if (!Number.isFinite(t) || now - t > maxAge) return false
@@ -419,20 +931,86 @@ function AppInner() {
       if (assetSort === 'name') return safeText(a.original_name, a.filename).localeCompare(safeText(b.original_name, b.filename), 'zh-Hans-CN')
       return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
     })
-  }, [materialAssets, assetKindFilter, assetFolderFilter, assetSearch, assetSort, assetTimeFilter])
+  }, [materialAssets, assetLibraryPage, assetKindFilter, assetFolderFilter, assetSearch, assetSort, assetTimeFilter])
+  const visibleMaterialAssets = useMemo(() => filteredMaterialAssets.slice(0, assetVisibleCount), [filteredMaterialAssets, assetVisibleCount])
+  const visibleCollectedVideos = useMemo(() => collectedVideos.slice(0, collectedVisibleCount), [collectedVideos, collectedVisibleCount])
+  const materialVideoCount = useMemo(() => materialAssets.filter(a => a.kind === 'video').length + collectedVideos.length, [materialAssets, collectedVideos])
+  const materialImageCount = useMemo(() => materialAssets.filter(a => a.kind === 'image').length, [materialAssets])
+  const assetFolderTabOptions = useMemo<[AssetFolderKey, string][]>(() => assetLibraryPage === 'video'
+    ? [['all','全部视频'], ['digital_human','数字人片段'], ['self','自己拍的'], ['provided','别人提供'], ['collected','采集视频']]
+    : [['all','全部图片'], ['self','自己拍的'], ['provided','别人提供'], ['image','图片素材'], ['ai','AI生成图']], [assetLibraryPage])
   const selectedMaterialAssets = useMemo(() => selectedMaterialIds
     .map(id => materialAssets.find(a => a.id === id))
     .filter((a): a is AssetItem => Boolean(a && a.id && a.url))
     .map((a, i) => normalizeAsset(a, i)), [materialAssets, selectedMaterialIds])
+
+  useEffect(() => { setAssetVisibleCount(24); setCollectedVisibleCount(40) }, [assetLibraryPage, assetKindFilter, assetFolderFilter, assetSearch, assetSort, assetTimeFilter])
+  useEffect(() => { window.localStorage.setItem('ai_video_heat_snapshots_v1', JSON.stringify(heatSnapshots.slice(0, 200))) }, [heatSnapshots])
+  const pinnedHeatAccounts = useMemo(() => heatAccounts.filter(x => x.pinned).concat(heatAccounts.filter(x => !x.pinned)), [heatAccounts])
+  const filteredHeatAccounts = useMemo(() => {
+    const q = heatAccountSearch.trim().toLowerCase()
+    return pinnedHeatAccounts.filter(acc => {
+      if (heatPlatformFilter !== 'all' && acc.platform !== heatPlatformFilter) return false
+      if (!q) return true
+      return `${acc.name} ${acc.url} ${acc.tags} ${acc.notes}`.toLowerCase().includes(q)
+    })
+  }, [pinnedHeatAccounts, heatAccountSearch, heatPlatformFilter])
+  const todayHeatSnapshots = useMemo(() => {
+    const today = todayKey()
+    const realList = heatSnapshots.filter(x => {
+      const id = String(x.id || '')
+      const signal = String(x.signal || '')
+      const topic = String(x.topic || '')
+      return !id.startsWith('seed_') && !signal.includes('本地关键词模拟') && !topic.includes('本地关键词模拟')
+    })
+    const todayList = realList.filter(x => x.date === today)
+    const source = todayList.length ? todayList : realList
+    // Top5 是“可跟进候选池”，不是只看点赞；按 AI 分数优先，再看真实互动。
+    return [...source].sort((a, b) => Number(b.score || 0) - Number(a.score || 0)).slice(0, 5)
+  }, [heatSnapshots])
+
+  const primaryHeat = todayHeatSnapshots[0] || null
+  const realHeatCount = todayHeatSnapshots.filter(hasRealHeatSignal).length
+  const heatAccountGroups = useMemo(() => groupHeatSnapshotsByAccount(todayHeatSnapshots, pinnedHeatAccounts), [todayHeatSnapshots, pinnedHeatAccounts])
+  const heatSourceLines = useMemo(() => todayHeatSnapshots.map(heatEvidenceLine).filter(Boolean), [todayHeatSnapshots])
+  const heatWorkbenchStatus = heatStageLabel(todayHeatSnapshots.length, Boolean(heatRewrite))
   const referenceText = useMemo(() => extract?.transcript || manualText || sourceUrl, [extract, manualText, sourceUrl])
   const competitorNotes = useMemo(() => competitors.map(c => `${c.platform}｜${c.name}｜${c.positioning}｜${c.notes}`).join('\n'), [competitors])
-  const readyCompetitors = useMemo(() => competitors.filter(c => safeText(c.url) || safeText(c.name)), [competitors])
-  const readyCompetitorCount = readyCompetitors.length
-  const collectorEvents = useMemo(() => (collectorProgress?.events || []).slice(0, 40), [collectorProgress])
-  const latestCollectorEvent = collectorEvents[0]
-  const collectorRun = collectorProgress?.run || {}
-  const collectorStatusText = safeText(collectorRun?.status, collectorEvents.length ? '运行中/有日志' : '等待任务')
-  const collectorLogLine = latestCollectorEvent ? formatCollectorEventLine(latestCollectorEvent, 0) : '等待 worker 领取任务。请确认 ECS 上 command_worker.py 正在运行。'
+  const profileContext = useMemo(() => [
+    `业务定位：${businessPositioning || industry}`,
+    `客户分层：${customerSegments}`,
+    `监听关键词：${trendKeywords}`,
+    `私域承接物：${privateDomainAssets}`,
+    `内容栏目：${contentPillars}`,
+    `承接方式：${reportDelivery}`,
+    `内容栏目：${contentPillars}`,
+    `拍摄口播要求（仅用于内容生产，不用于截流雷达）：${shootingBrief}`,
+  ].filter(Boolean).join('\n'), [businessPositioning, industry, customerSegments, trendKeywords, privateDomainAssets, contentPillars, shootingBrief, reportDelivery])
+  const leadMagnetReports = useMemo(() => buildLeadMagnetReports({ privateDomainAssets, businessPositioning, industry, audience, trendKeywords, customerSegments, reportDelivery }), [privateDomainAssets, businessPositioning, industry, audience, trendKeywords, customerSegments, reportDelivery])
+  const activeReport = leadMagnetReports[Math.min(activeReportIndex, Math.max(0, leadMagnetReports.length - 1))]
+  const reportLandingCopy = useMemo(() => buildReportLandingCopy(activeReport), [activeReport])
+  const radarKeywordGroups = useMemo(() => {
+    const keywords = splitProfileLines(trendKeywords, ['海外置业', '第二家园', '国际学校', '预算', '避坑'])
+    return {
+      highIntent: keywords.filter(x => /预算|条件|流程|申请|推荐|说明会|咨询|办理/.test(x)).slice(0, 6),
+      contentHooks: keywords.filter(x => /避坑|坑|真相|费用|适合|对比|不要|后悔/.test(x)).slice(0, 6),
+      broadTraffic: keywords.filter(x => !/预算|条件|流程|申请|推荐|说明会|咨询|办理|避坑|坑|真相|费用|适合|对比|不要|后悔/.test(x)).slice(0, 8),
+    }
+  }, [trendKeywords])
+  const shootingTaskSeeds = useMemo(() => {
+    const pillars = splitProfileLines(contentPillars, ['避坑类', '预算类', '流程类'])
+    const reports = leadMagnetReports.length ? leadMagnetReports : []
+    return pillars.slice(0, 4).map((pillar, index) => {
+      const report = reports[index % Math.max(1, reports.length)]
+      return {
+        title: `${pillar.replace(/：.*$/, '')}｜${report?.landingTitle || '先讲一个客户最容易忽略的问题'}`,
+        hook: report ? `先别急着咨询，${report.title.replace(/[《》]/g, '')}里这 3 点先看懂。` : '客户最常踩的坑，其实不是预算，而是顺序错了。',
+        shots: ['顾问正面口播', '素材/B-roll 快切', '资料包网页预览', '结尾私信关键词 CTA'],
+        cta: report?.cta || '私信“报告”领取完整资料。'
+      }
+    })
+  }, [contentPillars, leadMagnetReports])
+  const sellingPointsWithProfile = useMemo(() => `${sellingPoints}\n\n【行业获客档案】\n${profileContext}\n\n【网页资料包/报告承接】\n${reportLandingCopy}`.trim(), [sellingPoints, profileContext, reportLandingCopy])
   const learningSummary = memoryContext?.learning_summary || '保存客户定位、竞品账号和采集结果后，AI 会在文案、雷达、投流建议里自动读取。'
   const currentScript = copy.script || ''
   const currentVideoName = video?.video_name || extract?.collected_video_name || ''
@@ -463,26 +1041,98 @@ function AppInner() {
     return Math.round(Math.min(180, Math.max(10, base)))
   }, [audio?.duration_seconds, voiceEstimatedSeconds, selectedAssetEstimatedSeconds])
 
+  const selectedAssetScriptContext = useMemo(() => {
+    const chosen = selectedMaterialAssets.length ? selectedMaterialAssets : materialAssets.slice(0, 6)
+    return chosen.map((asset, index) => {
+      const cfg = getClipSetting(asset, index)
+      const seconds = asset.kind === 'image'
+        ? Math.max(0.8, safeNumber(cfg.image_seconds, 2.8))
+        : Math.max(0.8, (cfg.video_end && cfg.video_end > cfg.video_start ? cfg.video_end - cfg.video_start : 3.2))
+      return `${index + 1}. ${asset.kind === 'video' ? '视频' : '图片'}｜${asset.original_name || asset.filename}｜约 ${Math.round(seconds * 10) / 10} 秒`
+    }).join('\n')
+  }, [selectedMaterialAssets, materialAssets, assetClipSettings])
+
+
+  const heatRadarForCopy = useMemo(() => heatSnapshots
+    .filter(x => !safeText(x.id).startsWith('seed_'))
+    .sort((a, b) => (b.score || 0) - (a.score || 0))
+    .slice(0, 8)
+    .map((x, i) => `${i + 1}. ${x.topic || (x as any).keyword || '行业选题'}｜意图：${x.intent || '未知'}｜建议：${x.recommended_action || x.signal || '待提炼'}｜资料包：${x.lead_magnet || '按内容匹配'}`)
+    .join('\n'), [heatSnapshots])
+
+  const strategyMemoryContext = useMemo(() => limitText(`【我的行业/业务定位】
+${businessPositioning}
+
+【目标客户】
+${customerSegments || audience}
+
+【产品/卖点】
+${sellingPointsWithProfile}
+
+【转化目标】
+${conversionGoal}
+
+【私域承接和资料包】
+${privateDomainAssets}
+${reportDelivery}
+
+【热度雷达真实信号】
+${heatRadarForCopy || trendKeywords || '暂无真实采集时，按马来西亚房产、第二家园、国际学校、养老度假、资产配置生成原创方案。'}
+
+【历史学习记忆】
+${memoryContext?.learning_summary || '暂无，先按当前行业定位和素材生成。'}
+
+【本次已选素材】
+${selectedAssetScriptContext || '暂未选择素材，先给出通用画面建议。'}`, 3600), [businessPositioning, customerSegments, audience, sellingPointsWithProfile, conversionGoal, privateDomainAssets, reportDelivery, heatRadarForCopy, trendKeywords, memoryContext?.learning_summary, selectedAssetScriptContext])
+
+  const normalizedOutputType = oneClickOutputType === 'graphic_post' ? 'image_text' : oneClickOutputType === 'mixed_assets' ? 'mixed_video' : oneClickOutputType
+  const isDigitalHumanRoute = normalizedOutputType === 'digital_human'
+  const isSelfShootRoute = normalizedOutputType === 'self_shoot'
+  const isGraphicRoute = normalizedOutputType === 'image_text' || normalizedOutputType === 'all'
+  const productionRouteLabel = isDigitalHumanRoute ? '数字人开场 + 素材混剪' : isSelfShootRoute ? '真人拍摄 + 素材混剪' : isGraphicRoute ? '图文引流' : '纯素材混剪'
+  const productionRouteHint = isDigitalHumanRoute
+    ? '可选择 fal 真人模板口型同步，或照片场景数字人片头；数字人只吃第 1 段开场音频，后面接楼盘/风光素材。'
+    : isSelfShootRoute
+      ? '不调用数字人，重点生成提词器、拍摄清单和后期混剪。'
+      : isGraphicRoute
+        ? '不合成长视频，重点生成首图、图文脚本和发布文案。'
+        : '默认路线：不调用数字人，直接用楼盘/风光/B-roll 素材 + 旁白字幕合成。'
+  const normalizedDigitalHumanEngine = String(digitalHumanEngine || '').toLowerCase()
+  const digitalHumanPhotoSceneMode = ['photo_scene', 'photo_scene_preview', 'scene_photo', 'photo_avatar'].includes(normalizedDigitalHumanEngine)
+  const digitalHumanNeedsVideo = ['fal_lipsync', 'fal', 'sync_lipsync', 'fal-ai/sync-lipsync'].includes(normalizedDigitalHumanEngine)
+  const digitalHumanAvatarCandidates = useMemo(() => {
+    return [...uploadedAvatarAssets, ...collectedAvatarAssets]
+      .filter(a => {
+        if (!a.id || !a.url) return false
+        if (digitalHumanNeedsVideo) return a.kind === 'video'
+        if (digitalHumanPhotoSceneMode) return a.kind === 'image'
+        return true
+      })
+  }, [uploadedAvatarAssets, collectedAvatarAssets, digitalHumanNeedsVideo, digitalHumanPhotoSceneMode])
+
   const leadScore = useMemo(() => {
     let score = 35
     if (extract?.hooks?.length) score += 15
     if (copy.hook) score += 15
     if (voiceSegments.length) score += 10
     if (selectedMaterialIds.length) score += 10
+    if (isDigitalHumanRoute && digitalHuman?.video_url) score += 8
+    if (!isDigitalHumanRoute) score += 5
     if (video?.video_url) score += 15
     return Math.min(100, score)
-  }, [extract, copy.hook, voiceSegments.length, selectedMaterialIds.length, video])
+  }, [extract, copy.hook, voiceSegments.length, selectedMaterialIds.length, video, isDigitalHumanRoute, digitalHuman?.video_url])
 
   const pipelineTodos = useMemo(() => [
     { ok: Boolean(industry && audience), text: '保存客户定位，让 AI 记住行业和客户画像', go: 'strategy' as ModuleKey },
     { ok: Boolean(leadPlan), text: '生成获客自动化作战图，明确截留、监听和私域承接', go: 'lead' as ModuleKey },
     { ok: Boolean(extract || agentResult), text: '采集 1 条同行视频或口令，沉淀钩子结构', go: 'collector' as ModuleKey },
-    { ok: Boolean(copy.script), text: '生成并细改口播文案，确认是否入知识库', go: 'copy' as ModuleKey },
-    { ok: Boolean(audio), text: '生成分段情绪配音，确认语速和停顿', go: 'voice' as ModuleKey },
-    { ok: selectedMaterialIds.length > 0, text: '选择自有素材，避免直接搬运采集视频', go: 'assets' as ModuleKey },
+    { ok: Boolean(copy.script), text: `生成${productionRouteLabel}脚本，确认是否入知识库`, go: 'copy' as ModuleKey },
+    { ok: selectedMaterialIds.length > 0, text: '选择楼盘/风光/配套素材，排好顺序和截取区间', go: 'assets' as ModuleKey },
+    ...(isDigitalHumanRoute ? [{ ok: Boolean(digitalHuman?.video_url), text: '生成可选数字人开场片段，或切换为纯素材混剪跳过', go: 'digitalHuman' as ModuleKey }] : []),
+    { ok: Boolean(audio), text: '生成最终配音，确认语速和停顿', go: 'voice' as ModuleKey },
     { ok: Boolean(video?.video_url), text: '合成视频并下载检查音画字幕', go: 'video' as ModuleKey },
     { ok: Boolean(publish), text: '生成平台发布草稿，后续接开放平台', go: 'publish' as ModuleKey },
-  ], [industry, audience, leadPlan, extract, copy.script, audio, selectedMaterialIds, video, publish])
+  ], [industry, audience, leadPlan, extract, copy.script, audio, selectedMaterialIds, video, publish, productionRouteLabel, isDigitalHumanRoute, digitalHuman?.video_url])
   const nextTodo = pipelineTodos.find(x => !x.ok)
 
   function openKnowledgeSave(source: string, item: GeneratedCopy) {
@@ -552,7 +1202,7 @@ function AppInner() {
     const res = await run('一键生成完整方案', () => apiPost<OneClickGenerateResponse>('/api/one-click/generate', {
       industry,
       audience,
-      selling_points: sellingPoints,
+      selling_points: sellingPointsWithProfile,
       style,
       duration_seconds: autoProjectSeconds,
       goal: conversionGoal,
@@ -560,7 +1210,7 @@ function AppInner() {
       material_mode: oneClickMaterialMode,
       selected_asset_names: selectedNames,
       reference_text: referenceText,
-      instruction: oneClickInstruction,
+      instruction: `${oneClickInstruction}\n\n请严格读取行业获客档案：\n${profileContext}`,
     }))
     applyOneClickResult(res!)
     setActive('oneClick')
@@ -573,10 +1223,28 @@ function AppInner() {
       current: oneClick,
       industry,
       audience,
-      selling_points: sellingPoints,
+      selling_points: sellingPointsWithProfile,
     }))
     applyOneClickResult(res!)
     setActive('oneClick')
+  }
+
+  function applyMalaysiaPreset() {
+    setIndustry(malaysiaProfilePreset.industry)
+    setBusinessPositioning(malaysiaProfilePreset.businessPositioning)
+    setAudience(malaysiaProfilePreset.audience)
+    setLeadRegion(malaysiaProfilePreset.leadRegion)
+    setConversionGoal(malaysiaProfilePreset.conversionGoal)
+    setSellingPoints(malaysiaProfilePreset.sellingPoints)
+    setStyle(malaysiaProfilePreset.style)
+    setTrendKeywords(malaysiaProfilePreset.trendKeywords)
+    setCustomerSegments(malaysiaProfilePreset.customerSegments)
+    setPrivateDomainAssets(malaysiaProfilePreset.privateDomainAssets)
+    setContentPillars(malaysiaProfilePreset.contentPillars)
+    setShootingBrief(malaysiaProfilePreset.shootingBrief)
+    setReportDelivery(malaysiaProfilePreset.reportDelivery)
+    setLeadFixedOptions('子女教育家庭、企业主资产配置、养老度假、海外第二居所、华人家庭、马来西亚城市、预算区间、国际学校、第二家园身份')
+    setLastHandoff('已套用“马来西亚房产 / 第二家园”行业获客档案。后续一键生成、文案、图文、拍摄和私域回复都会读取这套档案。')
   }
 
   async function reloadMemoryContext(applyProfile = false) {
@@ -592,6 +1260,13 @@ function AppInner() {
       if (profile.lead_region) setLeadRegion(profile.lead_region)
       if (profile.conversion_goal) setConversionGoal(profile.conversion_goal)
       if (profile.trend_keywords) setTrendKeywords(profile.trend_keywords)
+      if (profile.business_positioning) setBusinessPositioning(profile.business_positioning)
+      if (profile.customer_segments) setCustomerSegments(profile.customer_segments)
+      if (profile.private_domain_assets) setPrivateDomainAssets(profile.private_domain_assets)
+      if (profile.content_pillars) setContentPillars(profile.content_pillars)
+      if (profile.shooting_brief) setShootingBrief(profile.shooting_brief)
+      if (profile.report_delivery) setReportDelivery(profile.report_delivery)
+      if (profile.listening_keywords && !profile.trend_keywords) setTrendKeywords(profile.listening_keywords)
     }
     if (Array.isArray(ctx.competitors)) {
       setCompetitors(ctx.competitors.map((x: any) => ({
@@ -613,7 +1288,14 @@ function AppInner() {
       style,
       lead_region: leadRegion,
       conversion_goal: conversionGoal,
-      trend_keywords: trendKeywords
+      trend_keywords: trendKeywords,
+      business_positioning: businessPositioning,
+      listening_keywords: trendKeywords,
+      customer_segments: customerSegments,
+      private_domain_assets: privateDomainAssets,
+      content_pillars: contentPillars,
+      shooting_brief: shootingBrief,
+      report_delivery: reportDelivery
     }))
     await reloadMemoryContext(true)
   }
@@ -624,28 +1306,389 @@ function AppInner() {
   }
 
   async function makeLeadPlan() {
-    const res = await run('生成获客自动化作战图', () => apiPost<LeadAcquisitionPlanResponse>('/api/lead-acquisition/plan', {
+    const res = await run('生成热度雷达方案', () => apiPost<LeadAcquisitionPlanResponse>('/api/lead-acquisition/plan', {
       industry,
       audience,
-      selling_points: sellingPoints,
+      selling_points: limitText(sellingPointsWithProfile, 1200),
       style,
       lead_region: leadRegion,
       conversion_goal: conversionGoal,
       channels: leadChannels,
+      data_sources: realDataConnectors.map(x => x.name),
+      competitor_accounts: competitors.map(c => `${c.platform}:${c.name}:${c.url}`),
       fixed_options: leadFixedOptions,
       competitor_notes: competitorNotes,
       trend_keywords: trendKeywords,
-      existing_context: memoryContext?.learning_summary || ''
+      business_positioning: businessPositioning,
+      listening_keywords: trendKeywords,
+      customer_segments: customerSegments,
+      private_domain_assets: privateDomainAssets,
+      content_pillars: contentPillars,
+      shooting_brief: shootingBrief,
+      report_delivery: reportDelivery,
+      existing_context: `${memoryContext?.learning_summary || ''}\n\n${profileContext}\n\n当前热度雷达内容：${todayHeatSnapshots.map(x => `${x.platform}/${x.account_name}/${x.topic}/${x.signal}`).join('；')}`.trim()
     }))
     setLeadPlan(res!)
-    setLastHandoff('获客自动化作战图已生成。同行采集、文案生产、自动监听和私域承接会读取这套策略。')
+    setLastHandoff('热度雷达方案已生成。后续可把高热话题同步到文案、图文、报告承接和发布草稿。')
     setActive('lead')
     await reloadMemoryContext()
   }
 
+
+  function heatItemToSnapshot(item: any, index = 0): HeatRadarSnapshot {
+    const topic = String(item?.title || item?.topic || '未命名热度内容').trim()
+    const review = item?.raw?.ai_review || item?.raw?.review || {}
+    // 优先显示 AI 业务评分，避免把点赞/评论累加的热度分误当成业务价值分。
+    const score = Number(review?.score ?? item?.score ?? 0)
+    const decision = String(review?.decision || item?.decision || '').trim()
+    const reason = String(review?.reason || item?.reason || '').trim()
+    const dimsRaw = review?.buyer_dimensions || review?.dimension_labels || item?.buyer_dimensions || []
+    const buyerDimensions = Array.isArray(dimsRaw) ? dimsRaw.map((x: any) => typeof x === 'string' ? x : String(x?.label || x?.key || '')).filter(Boolean).slice(0, 4) : []
+    const nextAction = String(review?.next_action || item?.recommended_action || '把这个热度话题转成原创口播/图文，并用资料包承接。')
+    return {
+      id: String(item?.id || `heat_${Date.now()}_${index}`),
+      date: String(item?.date || todayKey()),
+      account_id: String(item?.account_id || ''),
+      account_name: String(item?.account_name || '公开来源'),
+      platform: String(item?.platform || '公开平台'),
+      topic,
+      signal: `${String(item?.date_basis || '').includes('recent') ? '最近留存' : '真实采集'}：赞${Number(item?.like_count || 0)} / 评${Number(item?.comment_count || 0)} / 藏${Number(item?.favorite_count || 0)} / 分享${Number(item?.share_count || 0)}`,
+      score,
+      intent: String(item?.intent || (decision ? `AI判断：${decision} / ${score}${buyerDimensions.length ? `｜${buyerDimensions.join(' / ')}` : ''}${reason ? `｜${reason}` : ''}` : (item?.matched_keywords?.length ? `匹配关键词：${item.matched_keywords.join('、')}` : '待 AI 判断客户意图'))),
+      source_url: String(item?.url || item?.source_url || ''),
+      recommended_action: nextAction,
+      lead_magnet: String(item?.lead_magnet || activeReport?.title || '网页资料包'),
+      buyer_dimensions: buyerDimensions,
+      reason,
+      decision
+    }
+  }
+
+  async function addHeatAccount() {
+    const draft = {
+      ...heatDraft,
+      name: heatDraft.name.trim(),
+      url: heatDraft.url.trim(),
+      tags: heatDraft.tags.trim(),
+      notes: heatDraft.notes.trim(),
+      created_at: heatDraft.created_at || new Date().toISOString()
+    }
+    if (!draft.name && !draft.url) {
+      setLastHandoff('请至少填写账号名称或主页/视频链接。')
+      return
+    }
+    try {
+      await run('保存热度账号', () => apiPost('/api/heat-radar/accounts', draft))
+      await reloadHeatRadarData()
+      setHeatDraft({ id: '', name: '', platform: '抖音', url: '', tags: '马来西亚房产,第二家园,海外置业', notes: '', pinned: true, created_at: '' })
+      setLastHandoff('博主已保存到账号库。')
+    } catch (err: any) {
+      setLastHandoff(`保存失败：${err?.message || err}`)
+      throw err
+    }
+  }
+
+  function toggleHeatAccount(id: string) {
+    setHeatAccounts(prev => prev.map(x => x.id === id ? { ...x, pinned: !x.pinned } : x))
+    setLastHandoff('置顶状态仅临时调整显示顺序；要永久保存请重新保存账号或后续接更新接口。')
+  }
+
+  async function removeHeatAccount(id: string) {
+    try {
+      await run('删除热度账号', () => apiDelete(`/api/heat-radar/accounts/${encodeURIComponent(id)}`))
+      await reloadHeatRadarData()
+      setLastHandoff('已从账号库移除。')
+    } catch (err: any) {
+      setLastHandoff(`删除失败：${err?.message || err}`)
+      throw err
+    }
+  }
+
+  async function removeHeatItem(id: string) {
+    if (!id) return
+    const snapshotBefore = heatSnapshots
+    setHeatSnapshots(prev => prev.filter(x => String(x.id) !== String(id)))
+    try {
+      await run('删除热度热点', () => apiDelete(`/api/heat-radar/items/${encodeURIComponent(id)}`))
+      await reloadHeatRadarData()
+      setLastHandoff('已从热度雷达删除，不会再进入 Top5。')
+    } catch (err: any) {
+      setHeatSnapshots(snapshotBefore)
+      setLastHandoff(`删除热点失败：${err?.message || err}`)
+      throw err
+    }
+  }
+
+  function importManualHeatData() {
+    const lines = manualHeatText.split(/\n+/).map(x => x.trim()).filter(Boolean)
+    if (!lines.length) return
+    const snapshots = lines.slice(0, 20).map((line, idx): HeatRadarSnapshot => ({
+      id: `manual_heat_${Date.now()}_${idx}`,
+      date: todayKey(),
+      account_id: 'manual',
+      account_name: '手动导入',
+      platform: '人工采集',
+      topic: line.slice(0, 120),
+      signal: '人工导入的真实观察内容，等待 AI 分析。',
+      score: 70 + Math.max(0, 20 - idx),
+      intent: '待判断：税费/流程/城市/身份/教育/预算',
+      source_url: '',
+      recommended_action: '把这条内容作为选题参考，生成原创口播或图文。',
+      lead_magnet: activeReport?.title || '网页资料包'
+    }))
+    setHeatSnapshots(prev => [...snapshots, ...prev].slice(0, 200))
+    setManualHeatText('')
+    setLastHandoff('手动热度数据已导入今日热度池。')
+  }
+
+  function generateDailyHeatRadar() {
+    const cleaned = heatSnapshots.filter(x => !String(x.id || '').startsWith('seed_') && !String(x.signal || '').includes('本地关键词模拟'))
+    setHeatSnapshots(cleaned)
+    setLastHandoff('已清理本地演示/模拟热度数据。热度雷达只显示自动采集、历史留存或手动导入的真实内容。')
+  }
+
+  function pickNextHeatAccountForCrawl() {
+    const candidates = heatAccounts.filter(acc => String(acc.url || acc.notes || '').trim())
+    if (!candidates.length) return null
+    const key = 'ai_video_heat_crawl_cursor_v1'
+    const raw = Number(window.localStorage.getItem(key) || '0')
+    const index = Number.isFinite(raw) ? Math.max(0, raw) % candidates.length : 0
+    const selected = candidates[index]
+    window.localStorage.setItem(key, String((index + 1) % candidates.length))
+    return selected
+  }
+
+  async function runPublicHeatCrawler() {
+    const gapKey = 'ai_video_heat_crawl_last_run_at_v1'
+    const minGapSeconds = 60
+    const lastRun = Number(window.localStorage.getItem(gapKey) || '0')
+    const elapsed = (Date.now() - lastRun) / 1000
+    if (lastRun && elapsed < minGapSeconds) {
+      setLastHandoff(`请稍等 ${Math.ceil(minGapSeconds - elapsed)} 秒再采集下一个账号，避免连续请求过快。`)
+      return
+    }
+
+    const selectedAccount = pickNextHeatAccountForCrawl()
+    if (!selectedAccount) {
+      setLastHandoff('请先在账号库添加至少 1 个带主页/视频链接的账号。')
+      return
+    }
+
+    window.localStorage.setItem(gapKey, String(Date.now()))
+    setLastHandoff(`本轮只采集 1 个账号：${selectedAccount.name || selectedAccount.url || '未命名账号'}。`)
+
+    const keywords = Array.from(new Set([...heatRadarSeedKeywords, ...trendKeywords.split(/[,，#\n\s]+/).map(x => x.trim()).filter(Boolean)])).slice(0, 60)
+    const res = await run('单账号采集真实热度', () => apiPost<HeatRadarRunResponse>('/api/heat-radar/run-public-crawl', {
+      accounts: [selectedAccount],
+      keywords,
+      limit_per_account: heatCrawlerLimit,
+      include_saved_accounts: false,
+      save_to_memory: true,
+      token: ''
+    }))
+    setHeatCrawlerResult(res!)
+    const snapshots = (res?.top_items || []).map((item, idx) => heatItemToSnapshot(item, idx))
+    // 有真实/留存结果才替换看板；没有结果时保留当前看板，避免点一次按钮以后页面变空。
+    if (snapshots.length) {
+      setHeatSnapshots(snapshots)
+    } else {
+      setHeatSnapshots(prev => prev.filter(x => !String(x.id || '').startsWith('seed_') && !String(x.signal || '').includes('本地关键词模拟')))
+    }
+    const topMode = String((res as any)?.top_mode || '')
+    const fallbackUsed = Boolean((res as any)?.fallback_used) || topMode === 'recent_top_fallback'
+    if (fallbackUsed) {
+      setLastHandoff(`本轮账号：${selectedAccount.name || selectedAccount.url || '未命名账号'}。没有采集到新内容，已展示最近留存的 ${snapshots.length || 0} 条内容。`)
+    } else if (res?.collected_count) {
+      setLastHandoff(`本轮只采集 1 个账号：${selectedAccount.name || selectedAccount.url || '未命名账号'}，采到 ${res.collected_count} 条真实内容。`)
+    } else {
+      setLastHandoff(`本轮只采集 1 个账号：${selectedAccount.name || selectedAccount.url || '未命名账号'}。没有采到新内容；可补具体视频链接或在备注里粘贴真实数据。`)
+    }
+  }
+
+
+
+
+  async function auditHeatAccountValue() {
+    const keywords = Array.from(new Set([...heatRadarSeedKeywords, ...trendKeywords.split(/[,，#\n\s]+/).map(x => x.trim()).filter(Boolean)])).slice(0, 80)
+    const res = await run('审计博主价值', () => apiPost<HeatRadarAccountAuditResponse>('/api/heat-radar/accounts/audit-staleness', {
+      accounts: heatAccounts,
+      keywords,
+      include_saved_accounts: true,
+      max_stale_days: 90,
+      token: heatAutomationToken
+    }))
+    setHeatAccountAudit(res!)
+    setLastHandoff(`已审计 ${res?.reviewed_count || 0} 个博主：保留 ${res?.keep?.length || 0}，观察 ${res?.watch?.length || 0}，建议暂停 ${res?.archive?.length || 0}。`)
+  }
+
+
+  function cleanupCandidateReviews() {
+    return ((heatAccountAudit?.archive || []) as any[]).filter(Boolean)
+  }
+
+  function findHeatAccountForReview(review: any) {
+    const reviewUrl = String(review?.account_url || review?.url || '').trim().toLowerCase()
+    const reviewName = String(review?.account_name || review?.name || '').trim().toLowerCase()
+    return heatAccounts.find(acc => {
+      const accUrl = String(acc.url || '').trim().toLowerCase()
+      const accName = String(acc.name || '').trim().toLowerCase()
+      return Boolean(reviewUrl && accUrl && (accUrl === reviewUrl || accUrl.includes(reviewUrl) || reviewUrl.includes(accUrl))) || Boolean(reviewName && accName && accName === reviewName)
+    })
+  }
+
+  async function removeSuggestedHeatAccount(review: any) {
+    const acc = findHeatAccountForReview(review)
+    if (!acc?.id) {
+      setLastHandoff(`没有在账号库找到「${review?.account_name || '未命名账号'}」的可删除记录；可能已经删除或 URL 不一致。`)
+      return
+    }
+    if (!confirm(`确认删除账号「${acc.name || review?.account_name || '未命名账号'}」？删除后 ECS 后续不会再采这个账号。`)) return
+    await removeHeatAccount(acc.id)
+    setHeatAccountAudit(prev => prev ? { ...prev, archive: (prev.archive || []).filter((x: any) => x !== review) } : prev)
+  }
+
+  async function removeAllSuggestedHeatAccounts() {
+    const candidates = cleanupCandidateReviews()
+    const matched = candidates.map(r => ({ review: r, account: findHeatAccountForReview(r) })).filter(x => x.account?.id)
+    if (!matched.length) {
+      setLastHandoff('当前没有可直接删除的建议账号。可以先点“生成清理建议”。')
+      return
+    }
+    if (!confirm(`确认批量删除 ${matched.length} 个建议删除账号？建议只在确认这些账号长期无价值后操作。`)) return
+    await run('批量删除建议账号', async () => {
+      for (const item of matched) {
+        await apiDelete(`/api/heat-radar/accounts/${encodeURIComponent(String(item.account!.id))}`)
+      }
+    })
+    await reloadHeatRadarData()
+    setHeatAccountAudit(prev => prev ? { ...prev, archive: [] } : prev)
+    setLastHandoff(`已删除 ${matched.length} 个建议删除账号。`)
+  }
+
+  async function copyOpenClawExample() {
+    const example = {
+      token: heatAutomationToken || '如果 Render 设置了 HEAT_RADAR_INGEST_TOKEN，这里填同一个 token',
+      source_name: 'openclaw',
+      run_id: `openclaw_${todayKey()}`,
+      keywords: heatRadarSeedKeywords.slice(0, 8),
+      auto_add_accounts: true,
+      auto_accept_min_score: 72,
+      max_stale_days: 90,
+      accounts: [{
+        name: 'Justin陈皆廷',
+        platform: '抖音',
+        url: 'https://www.douyin.com/user/xxx',
+        tags: ['马来西亚房产', '第二家园'],
+        last_post_at: new Date().toISOString(),
+        recent_items: [{
+          title: '马来西亚买房税费怎么算',
+          url: 'https://www.douyin.com/video/xxx',
+          published_at: new Date().toISOString(),
+          like_count: 1762,
+          comment_count: 80,
+          favorite_count: 261,
+          share_count: 580
+        }]
+      }],
+      items: []
+    }
+    await copyTextToClipboard(JSON.stringify(example, null, 2))
+    setLastHandoff('已复制 OpenClaw 接入 JSON 示例。让采集器每天 POST 到热度雷达入库接口即可。')
+  }
+
+  function applyHeatRewriteVariant(variant: any) {
+    if (!variant) return
+    setCopy({
+      title: String(variant.title || ''),
+      hook: String(variant.hook || ''),
+      script: String(variant.script || ''),
+      description: String(variant.caption || ''),
+      tags: Array.isArray(variant.tags) ? variant.tags : [],
+      shots: Array.isArray(variant.shots) ? variant.shots : [],
+      kb_refs: ['热度雷达改写']
+    })
+    if (variant.target_audience) setAudience(String(variant.target_audience))
+    if (variant.conversion_goal) setConversionGoal(String(variant.conversion_goal))
+    if (variant.lead_magnet) {
+      setOneClickInstruction(`基于热度雷达选题「${variant.source_topic || variant.title}」生成原创获客短视频。目标客户：${variant.target_audience || audience}。承接资料包：${variant.lead_magnet}。不能照抄竞品，只迁移结构，结尾引导私信领取资料。`)
+    }
+    setLastHandoff('已把热度雷达仿写稿同步到文案，并确定了目标客户和承接资料包。')
+    setActive('copy')
+  }
+
+  async function makeHeatRewritePlan() {
+    const heatItems = todayHeatSnapshots.slice(0, 3)
+    if (!heatItems.length) {
+      setLastHandoff('当前没有可用于仿写的热度内容。先采集真实热度，或导入具体视频/笔记链接。')
+      return
+    }
+    const res = await run('AI 仿写热度内容', () => apiPost<HeatRadarRewriteResponse>('/api/heat-radar/rewrite', {
+      heat_items: heatItems.map(x => ({
+        topic: x.topic,
+        platform: x.platform,
+        account_name: x.account_name,
+        signal: x.signal,
+        score: x.score,
+        intent: x.intent,
+        source_url: x.source_url,
+        recommended_action: x.recommended_action,
+        lead_magnet: x.lead_magnet
+      })),
+      industry,
+      audience,
+      selling_points: limitText(sellingPointsWithProfile, 1800),
+      conversion_goal: conversionGoal,
+      lead_magnet: activeReport?.title || privateDomainAssets.split(/\n+/)[0] || '网页资料包',
+      style,
+      target_duration_seconds: 35,
+      platform: 'douyin'
+    }))
+    setHeatRewrite(res!)
+    const first = res?.variants?.[0]
+    if (first?.target_audience) setAudience(first.target_audience)
+    if (first?.conversion_goal) setConversionGoal(first.conversion_goal)
+    setLastHandoff('AI 已读取当前热度雷达，完成目标人群判断、原创仿写方案和资料包承接建议。')
+  }
+
+  async function copyActiveReportLanding() {
+    if (!activeReport) return
+    await copyTextToClipboard(reportLandingCopy)
+    setReportCopyStatus('已复制网页报告文案/私信话术')
+    setTimeout(() => setReportCopyStatus(''), 1800)
+  }
+
+  function useReportForContent(report = activeReport) {
+    if (!report) return
+    setConversionGoal(`私信「${report.keyword}」领取${report.title} / 需求筛选 / 加微信顾问沟通`)
+    setOneClickInstruction(`围绕《${report.title}》生成一条获客短视频：开头指出客户常见误区，中间给 3 个判断点，结尾引导私信“${report.keyword}”领取网页报告。字幕要强钩子，不要太书面。`)
+    setCoverStyle(report.landingTitle)
+    setSubtitleHighlight([report.keyword, '报告', '预算', '避坑', '私信'].filter(Boolean).join(','))
+    setLastHandoff(`已把「${report.title}」设为当前转化资料包。一键生成、文案、图文和发布草稿会围绕这个报告承接。`)
+    setActive('oneClick')
+  }
+
+  function expandKeywordsFromProfile() {
+    const seed = splitProfileLines(trendKeywords, ['马来西亚房产', '第二家园', '国际学校'])
+    const expanded = Array.from(new Set([
+      ...seed,
+      ...seed.flatMap(k => [`${k} 条件`, `${k} 费用`, `${k} 流程`, `${k} 避坑`, `${k} 适合谁`, `${k} 预算`, `${k} 线下说明会`]),
+      '马来西亚海外置业靠谱吗', '中国人买马来西亚房产流程', '马来西亚第二家园申请条件', '马来西亚国际学校费用', '海外资产配置避坑', '养老度假海外第二居所'
+    ])).slice(0, 42)
+    setTrendKeywords(expanded.join('，'))
+    setLastHandoff('关键词雷达已按“高意向/内容钩子/泛流量”自动扩展，可继续生成获客作战图或今日拍摄任务。')
+  }
+
+  async function reloadJobs() {
+    const list = await listJobs(20)
+    setJobs(Array.isArray(list) ? list : [])
+  }
+
   async function reloadAssets() {
-    const list = await apiGet<AssetItem[]>('/api/assets')
-    setAssets(Array.isArray(list) ? list.map((item, index) => normalizeAsset(item, index)).filter(item => item.id && item.url) : [])
+    // 素材库只拉取元数据，不一次性渲染全部视频预览；避免 Chrome 因大量 MP4 标签 OOM。
+    const list = await apiGet<AssetItem[]>('/api/assets?limit=160&include_r2=true')
+    const normalized = Array.isArray(list) ? list.map((item, index) => normalizeAsset(item, index)).filter(item => item.id && item.url) : []
+    setAssets(normalized)
+    return normalized
   }
 
   async function reloadCollectorStatus() {
@@ -660,42 +1703,76 @@ function AppInner() {
     return status
   }
 
+  async function reloadHeatRadarData() {
+    const [accounts, items, reviews] = await Promise.all([
+      apiGet<any[]>('/api/heat-radar/accounts').catch(() => []),
+      apiGet<any[]>('/api/heat-radar/items').catch(() => []),
+      apiGet<any[]>('/api/heat-radar/account-reviews').catch(() => [])
+    ])
+    if (Array.isArray(accounts)) {
+      setHeatAccounts(accounts.map((x: any) => ({
+        id: String(x.id || `heat_acc_${Date.now()}_${Math.random()}`),
+        name: String(x.name || x.account_name || '未命名账号'),
+        platform: String(x.platform || '抖音'),
+        url: String(x.url || x.account_url || ''),
+        tags: Array.isArray(x.tags) ? x.tags.join(',') : String(x.tags || x.positioning || ''),
+        notes: String(x.notes || x.reason || ''),
+        pinned: Boolean(x.pinned ?? true),
+        created_at: String(x.created_at || '')
+      })))
+    }
+    if (Array.isArray(reviews)) setHeatAccountReviews(reviews)
+    if (Array.isArray(items)) {
+      const snapshots = items
+        .filter((item: any) => !item?.deleted && !String(item?.source_mode || '').match(/seed|demo|local/i))
+        .filter((item: any) => {
+          const review = item?.raw?.ai_review || item?.raw?.review || {}
+          const decision = String(review?.decision || item?.decision || '').toLowerCase()
+          const score = Number(review?.score ?? item?.score ?? item?.heat_score ?? 0)
+          // Top5 展示 accept/watch/高分候选；archive/reject 仍保留在滚动报告和审核记录里解释原因，不进入 Top5。
+          if (decision === 'archive' || decision === 'reject') return score >= 58
+          return decision === 'accept' || decision === 'watch' || score >= 45
+        })
+        .sort((a: any, b: any) => Number((b?.raw?.ai_review || b?.raw?.review || {})?.score ?? b?.score ?? b?.heat_score ?? 0) - Number((a?.raw?.ai_review || a?.raw?.review || {})?.score ?? a?.score ?? a?.heat_score ?? 0))
+        .slice(0, 80)
+        .map((item, idx) => heatItemToSnapshot(item, idx))
+      setHeatSnapshots(prev => {
+        // 后端热度项以 Supabase 为准；只保留手动导入内容，避免软删后旧 state 又被合并回来。
+        const manual = prev.filter(x => String(x.id || '').startsWith('manual_heat_'))
+        const seen = new Set(snapshots.map(x => x.id))
+        return [...snapshots, ...manual.filter(x => !seen.has(x.id))].slice(0, 200)
+      })
+    }
+  }
+
+
   async function reloadCollectorProgress() {
     const status = await apiGet<CollectorProgressState>('/api/collector/runs/latest?events_limit=40').catch(() => null)
     if (status) setCollectorProgress(status)
     return status
   }
 
-  async function createCollectorCommand(limitOverride?: number, accountOverride = '') {
-    const limit = Math.max(1, Math.min(120, Number(limitOverride || collectorAccountLimit) || 3))
-    const account = safeText(accountOverride || collectorSingleAccount)
+  async function reloadDigitalHumanProviders() {
+    const list = await apiGet<DigitalHumanProviderOption[]>('/api/digital-human/providers').catch(() => [])
+    setDigitalHumanProviders(Array.isArray(list) ? list : [])
+  }
+
+  async function createEcsCollectorCommand() {
+    const token = heatAutomationToken.trim()
+    if (token) window.localStorage.setItem('heatRadarIngestToken', token)
+    const limit = Math.max(1, Math.min(120, Number(ecsCollectorCount) || 1))
     const command = await run('创建 ECS 采集命令', () => apiPost<any>('/api/collector/commands', {
-      source: 'frontend_auto_collector',
-      mode: 'run_now',
+      token,
       limit,
-      account,
-      no_delay: true,
-      learn_goal: agentLearnGoal,
-      message: `网页自动采集：${account || '账号库顺序'} / ${limit} 个账号 / 快速模式`
+      account: ecsCollectorAccount.trim(),
+      dry_run: ecsDryRunMode,
+      headful: true,
+      no_delay: ecsNoDelayMode || limit <= 1,
+      mode: ecsDryRunMode ? 'dry_run' : 'manual',
+      message: `网页触发采集：${ecsCollectorAccount.trim() || '账号库顺序'} / ${limit} 个账号${ecsNoDelayMode || limit <= 1 ? ' / 快速模式不等待' : ' / 正常限速'}`
     }))
-    setLastHandoff(`已下发自动采集任务：${account || '账号库顺序'} / ${limit} 个账号。worker 领取后会回传实时日志。`)
-    await reloadCollectorProgress().catch(() => null)
-    await reloadAgentStatus().catch(() => null)
-    return command
-  }
-
-  async function collectSingleCompetitor(c: CompetitorAccount) {
-    const target = safeText(c.url, c.name)
-    if (!target) { setError('这个账号缺少主页/链接，先补 URL 或账号名。'); return }
-    setActive('collector')
-    setCollectorSingleAccount(target)
-    await createCollectorCommand(1, target)
-  }
-
-  async function runAutoCollectAndLearn(limitOverride?: number) {
-    if (!readyCompetitorCount) { setError('账号库为空：请先在竞品账号库导入或添加同行账号。'); setActive('competitor'); return }
-    await createCollectorCommand(limitOverride || Number(collectorAccountLimit) || 3)
-    await runAutoAgent().catch(() => null)
+    setLastHandoff(`已创建采集命令：${command?.command_id || command?.id || 'queued'}。ECS 上运行 command_worker.py 后会自动领取。`)
+    await reloadCollectorProgress()
   }
 
   async function runAutoAgent() {
@@ -720,87 +1797,6 @@ function AppInner() {
     setLastHandoff('抖音采集 Cookies 已更新。之后采集器会携带登录态，公开视频采集成功率会更高。')
   }
 
-
-  function validateAssetUploadMeta() {
-    const missing: string[] = []
-    if (!assetUploadMeta.material_type.trim()) missing.push('素材类型')
-    if (!assetUploadMeta.city.trim()) missing.push('城市')
-    if (!assetUploadMeta.region.trim()) missing.push('区域')
-    if (!assetUploadMeta.source.trim()) missing.push('来源')
-    if (!assetUploadMeta.remark.trim()) missing.push('备注')
-    if (missing.length) return `上传前必须补全：${missing.join('、')}`
-    return ''
-  }
-
-  async function refreshV1034Status() {
-    const res = await run('刷新 V10.34 生产状态', () => getV1034Status())
-    setV1034Status(res!)
-  }
-
-  async function importAndClassifyAccounts() {
-    if (!accountImportText.trim()) { setError('请先粘贴账号名称/主页链接/备注，每行一个。'); return }
-    const imported = await run('导入账号库', () => importDouyinAccounts(accountImportText))
-    const classified = await run('DeepSeek/规则分类账号库', () => classifyDouyinAccounts(300))
-    const list = await getDouyinAccounts().catch(() => null)
-    setAccountLibraryResult({ imported, classified, list })
-    setLastHandoff('账号库已导入 SQLite，并完成分类；不能判断的已进入待人工确认。')
-  }
-
-  async function runRealOpenClaw() {
-    const status = await getCollectorStatus().catch(() => null)
-    const missing: string[] = []
-    if (!status?.cookie_exists) missing.push('抖音 Cookies')
-    if (!readyCompetitorCount && !collectorSingleAccount.trim()) missing.push('账号库或单独账号')
-    if (missing.length) { setError(`OpenClaw 真采集缺少：${missing.join('、')}。不会假成功。`); setShowCookiePanel(true); return }
-    const runStart = await run('OpenClaw 真采集启动', () => startCollectorRun({
-      source: 'frontend_v10_34',
-      mode: 'douyin_account_collect',
-      account_url: collectorSingleAccount.trim(),
-      limit: Number(collectorAccountLimit) || 3,
-      metadata: { industry, audience, conversionGoal }
-    }))
-    const latest = await getLatestCollectorRun().catch(() => null)
-    const leads = await getRecentCommentLeads(30).catch(() => null)
-    const enhanced = await enhanceOpenClawComments(Array.isArray(leads?.items) ? leads.items : [], { industry, audience, conversionGoal }).catch((e) => ({ ok: false, error: e.message }))
-    setCollectorRealResult({ runStart, latest, leads, enhanced })
-    setLastHandoff('OpenClaw 已按真实接口启动；如果 worker 或 token 缺失，后端会返回具体缺什么。')
-  }
-
-  async function saveToObsidian(noteType: string, content: string) {
-    if (!content.trim()) { setError('没有可写入 Obsidian 的内容。'); return }
-    const res = await run('写入 Obsidian 生长库', () => writeObsidianNote(noteType, content, { industry, audience, conversionGoal }))
-    setObsidianResult(res)
-    setLastHandoff('已写入 /opt/ai-video/storage/obsidian-vault 对应知识库。')
-  }
-
-  async function createControlTask() {
-    if (!aiControlQuestion.trim()) { setError('请输入要检查的问题。'); return }
-    const res = await run('AI 总控台生成待确认修复任务', () => createAiControlTask(aiControlQuestion, {
-      active, industry, currentScript, hasVideo: Boolean(video?.video_url), v1034Status
-    }))
-    setAiControlTask(res)
-    setLastHandoff('AI 总控台只生成待确认修复任务，不会偷偷改代码。')
-  }
-
-  async function saveFinalVideo() {
-    if (!video?.video_url) { setError('当前没有最终视频可保存。'); return }
-    const res = await run('保存最终视频', () => saveFinalVideoRecord({ ...video, title: copy.title, script: currentScript }))
-    setFinalActionResult(res)
-  }
-
-  async function saveRawSegments() {
-    if (!video?.video_url) { setError('当前没有视频结果。'); return }
-    const res = await run('保存 raw 分段素材', () => saveRawSegmentsRecord({ ...video, title: copy.title, script: currentScript }))
-    setFinalActionResult(res)
-  }
-
-  async function discardCurrentVideo() {
-    if (!video?.video_url) { setError('当前没有视频结果。'); return }
-    const res = await run('废弃本次结果', () => discardVideoRecord({ ...video, title: copy.title }, 'manual_discard_from_frontend'))
-    setFinalActionResult(res)
-    setVideo(null)
-  }
-
   useEffect(() => {
     apiGet('/api/health').then(setHealth).catch((e) => setError(e.message || 'API 未连接'))
     apiGet<ModelStatusResponse>('/api/model/status').then(setModelStatus).catch(() => null)
@@ -808,9 +1804,11 @@ function AppInner() {
     reloadAssets().catch(() => null)
     reloadCollectorStatus().catch(() => null)
     reloadAgentStatus().catch(() => null)
-    reloadCollectorProgress().catch(() => null)
+    reloadJobs().catch(() => null)
     reloadMemoryContext(true).catch(() => null)
-    getV1034Status().then(setV1034Status).catch(() => null)
+    reloadHeatRadarData().catch(() => null)
+    reloadCollectorProgress().catch(() => null)
+    reloadDigitalHumanProviders().catch(() => null)
   }, [])
 
   useEffect(() => {
@@ -853,6 +1851,21 @@ function AppInner() {
     })
   }, [voiceSegments])
 
+
+  useEffect(() => {
+    if (active !== 'lead' && active !== 'collector') return
+    reloadCollectorProgress().catch(() => null)
+    const timer = window.setInterval(() => reloadCollectorProgress().catch(() => null), 3000)
+    return () => window.clearInterval(timer)
+  }, [active])
+
+  useEffect(() => {
+    if (oneClickOutputType === 'digital_human') {
+      setSubtitlePosition('bottom_safe')
+      setSubtitleMarginV(prev => Math.min(prev || 56, 56))
+    }
+  }, [oneClickOutputType])
+
   useEffect(() => {
     const status = String(digitalHuman?.status || '').toLowerCase()
     const shouldPoll = active === 'digitalHuman'
@@ -866,22 +1879,14 @@ function AppInner() {
     return () => window.clearInterval(timer)
   }, [active, digitalHuman?.job_id, digitalHuman?.video_url, digitalHuman?.status, digitalHuman?.engine, digitalHumanJimengModel])
 
-  useEffect(() => {
-    if (!['collector', 'competitor', 'monitor'].includes(active)) return
-    reloadCollectorProgress().catch(() => null)
-    const timer = window.setInterval(() => reloadCollectorProgress().catch(() => null), 4000)
-    return () => window.clearInterval(timer)
-  }, [active])
-
   async function handleUpload(files: FileList | null) {
     if (!files?.length) return
-    const missing = validateAssetUploadMeta()
-    if (missing) { setError(missing); return }
-    const uploadMeta = { ...assetUploadMeta, folder: assetUploadFolder === 'all' ? 'self' : assetUploadFolder }
-    const res = await run('上传素材', () => uploadAssetsWithMetadata(files, uploadMeta))
-    setAssets(prev => [...(res || []), ...prev])
-    const ids = (res || []).filter(a => !a.filename.startsWith('collected_')).map(a => a.id)
+    const res = await run('上传素材', () => uploadAssets(files, assetUploadFolder === 'all' ? 'self' : assetUploadFolder, assetUsageRole))
+    const normalized = (res || []).map((a, i) => normalizeAsset(a, i))
+    setAssets(prev => [...normalized, ...prev])
+    const ids = normalized.filter(a => a.usage_role !== 'avatar' && normalizeAssetFolder(a.folder, a.kind, a.filename) !== 'collected').map(a => a.id)
     if (ids.length) setSelectedMaterialIds(prev => Array.from(new Set([...ids, ...prev])))
+    if (normalized.some(a => a.usage_role === 'avatar')) setLastHandoff('人物素材已上传：它会出现在“可选数字人片头”，不会自动混进后面的楼盘/风光成片素材。')
   }
 
   function defaultClipSetting(asset: AssetItem, order: number): AssetClipSetting {
@@ -978,7 +1983,6 @@ function AppInner() {
     await reloadAssets()
     await reloadMemoryContext()
     setLastHandoff('同行采集结果已入库。下一步可以直接仿写改写，文案模块会自动读取这条采集内容。')
-    if (autoAdvance) setActive('copy')
   }
 
 
@@ -1006,13 +2010,54 @@ ${manualText || ''}`.trim()
     setActive('trend')
   }
 
+  async function handleShootingScriptFiles(files: FileList | null) {
+    if (!files || files.length === 0) return
+    const list = Array.from(files)
+    try {
+      await run('上传脚本资料', () => uploadAssets(files, 'provided', 'content'))
+      const textFile = list.find(file => /\.(txt|md|srt|csv)$/i.test(file.name))
+      if (textFile) {
+        const text = (await textFile.text()).slice(0, 6000)
+        setCopy(prev => ({
+          ...prev,
+          script: prev.script || text,
+          hook: prev.hook || text.split(/\n+/).map(x => x.trim()).filter(Boolean)[0]?.slice(0, 120) || prev.hook,
+        }))
+        setManualText(prev => `${prev ? prev + '\n\n' : ''}[脚本资料：${textFile.name}]\n${text.slice(0, 2500)}`)
+      }
+      await reloadAssets()
+      setLastHandoff(`已上传 ${list.length} 个脚本/资料文件。TXT/MD/SRT 会自动写入文案区；PDF/Word 先入素材库，后续可由 AI 按文件内容解析。`)
+    } catch (err: any) {
+      setError(`脚本资料上传失败：${err?.message || err}`)
+    }
+  }
+
+  async function analyzeHeatVideoIntake() {
+    const url = videoIntakeUrl.trim() || primaryHeat?.source_url || ''
+    if (!url) { setError('请先粘贴一个具体视频/笔记链接，或选择一条已采集热点。'); return }
+    const res = await run('下载并分析视频', () => apiPost<any>('/api/heat-radar/video-intake', {
+      token: heatAutomationToken,
+      account_name: primaryHeat?.account_name || heatDraft.name || '',
+      account_url: heatDraft.url || '',
+      platform: primaryHeat?.platform || heatDraft.platform || '抖音',
+      video_url: url,
+      title: primaryHeat?.topic || copy.title || '',
+      tags: heatRadarSeedKeywords.slice(0, 12),
+      notes: '页面手动触发：下载视频后交给视频理解模型，再做账号价值判断',
+      auto_save_review: true
+    }))
+    setVideoIntakeResult(res || null)
+    await reloadHeatRadarData()
+    setLastHandoff('视频已进入下载/理解/审核流程。若平台限制下载，会保留链接和标题并给出规则评分。')
+  }
+
   async function makeShootingPlan() {
     const res = await run('生成运营拍摄任务', () => apiPost<ShootingPlanResponse>('/api/shooting-plan', {
       title: copy.title,
       script: currentScript,
       industry,
       audience,
-      selling_points: sellingPoints,
+      selling_points: sellingPointsWithProfile,
       available_assets: [...materialAssets, ...collectedVideos].map(a => `${a.kind}:${a.original_name}`).join('；'),
       duration_seconds: autoProjectSeconds
     }))
@@ -1020,15 +2065,22 @@ ${manualText || ''}`.trim()
     setActive('shooting')
   }
 
-  async function makeSubtitleAI() {
+  async function refreshSubtitleKeywordsForScript(scriptText: string, jumpToSubtitle = false) {
+    const target = scriptText || currentScript || copy.hook || copy.title
+    if (!target.trim()) return null
     const res = await run('智能字幕重点', () => apiPost<SubtitleEmphasisResponse>('/api/subtitle-emphasis', {
-      script: currentScript || copy.hook || copy.title,
-      style: '强转化短视频字幕，重点词放大，痛点词高亮',
+      script: target,
+      style: '强转化短视频字幕，重点词放大，痛点词高亮；同时服务配音分段里的重读词。',
       brand_color: subtitleColor
     }))
     setSubtitleAI(res!)
     if (res?.keywords?.length) setSubtitleHighlight(res.keywords.map(k => k.word).join(','))
-    setActive('subtitleCover')
+    if (jumpToSubtitle) setActive('subtitleCover')
+    return res || null
+  }
+
+  async function makeSubtitleAI() {
+    await refreshSubtitleKeywordsForScript(currentScript || copy.hook || copy.title, true)
   }
 
   async function makeGrowthDecision() {
@@ -1043,12 +2095,239 @@ ${manualText || ''}`.trim()
     setActive('growth')
   }
 
+  function buildVoiceSegmentsFromScript(scriptText: string, titleText = '') {
+    const raw = [titleText, scriptText].filter(Boolean).join('\n')
+    const lines = raw
+      .replace(/。/g, '。\n')
+      .replace(/！/g, '！\n')
+      .replace(/？/g, '？\n')
+      .split(/\n+/)
+      .map(x => x.trim())
+      .filter(Boolean)
+    const merged: string[] = []
+    for (const line of lines) {
+      const last = merged[merged.length - 1]
+      if (last && (last.length + line.length) < 58) merged[merged.length - 1] = `${last} ${line}`
+      else merged.push(line)
+    }
+    return merged.slice(0, 18).map((text, index) => ({
+      ...defaultSegment,
+      text,
+      emotion: index === 0 ? '痛点提醒' : index === merged.length - 1 ? '行动号召' : '自然可信',
+      speed_ratio: index === 0 ? 1.08 : 1.0,
+      pause_after_ms: index === merged.length - 1 ? 520 : 300,
+    }))
+  }
+
+  function getDigitalHumanIntroText() {
+    const first = voiceSegments[0]?.text || copy.hook || (currentScript.split(/\n+/).map(x => x.trim()).filter(Boolean)[0] || '')
+    return limitText(first || currentScript || copy.title || '请用一句自然开场介绍今天的马来西亚置业重点。', 90)
+  }
+
+  function upsertDigitalHumanAssetToClient(res: DigitalHumanCreateResponse | null | undefined) {
+    if (!res?.video_url) return ''
+    const filename = res.video_name || `digital_human_intro_${Date.now()}.mp4`
+    const id = filename.replace(/\.[a-z0-9]+$/i, '') || `digital_human_${Date.now()}`
+    const item = normalizeAsset({
+      id,
+      filename,
+      original_name: `数字人开场_${copy.title || filename}`,
+      kind: 'video',
+      url: res.video_url,
+      size_bytes: 0,
+      folder: 'digital_human',
+      source_type: 'digital_human_intro',
+      usage_role: 'avatar',
+      created_at: new Date().toISOString(),
+    }, 0)
+    setAssets(prev => {
+      const rest = prev.filter(a => a.id !== item.id && a.url !== item.url && a.filename !== item.filename)
+      return [item, ...rest]
+    })
+    setAssetLibraryPage('video')
+    setAssetFolderFilter('digital_human')
+    return item.id
+  }
+
+  function attachDigitalHumanIntroToTimeline(res: DigitalHumanCreateResponse | null | undefined, refreshedIntro?: AssetItem | null) {
+    const localId = upsertDigitalHumanAssetToClient(res)
+    const introId = refreshedIntro?.id || localId
+    if (!introId) return ''
+
+    // 数字人片头是用真人模板 + 第 1 段音频生成的。最终剪辑里只保留数字人结果，
+    // 自动移除原真人模板/动作参考，避免“片头说一遍，后面模板又出现一遍”。
+    const idsToRemove = new Set([digitalHumanAvatarId, digitalHumanDriverId].filter(Boolean))
+    setSelectedMaterialIds(prev => [introId, ...prev.filter(id => id !== introId && !idsToRemove.has(id))])
+
+    const introSeconds = Math.max(3, Math.min(18, estimateSeconds(getDigitalHumanIntroText(), voiceSegments[0]?.speed_ratio)))
+    setAssetClipSettings(prev => ({
+      ...prev,
+      [introId]: { ...(prev[introId] || {}), order: 0, image_seconds: introSeconds, video_start: 0, video_end: introSeconds },
+    }))
+    return introId
+  }
+
+  function isSameOpeningLine(a: string, b: string) {
+    const clean = (v: string) => safeText(v).replace(/[\s，,。.!！?？、：:；;“”"'（）()【】《》]/g, '')
+    const x = clean(a)
+    const y = clean(b)
+    if (!x || !y) return false
+    const n = Math.min(x.length, y.length)
+    if (n < 5) return false
+    const short = x.length <= y.length ? x : y
+    const long = x.length <= y.length ? y : x
+    const head = short.slice(0, Math.min(12, short.length))
+    const keyTerms = ['马来西亚', '第二家园', '买房', '身份', '孩子', '教育', '资产配置', '别盲目', '别盲目跟风']
+    const sameKeywords = keyTerms.filter(k => x.includes(k) && y.includes(k)).length
+    return long.includes(head) || x.slice(0, 9) === y.slice(0, 9) || (sameKeywords >= 2 && Math.abs(x.length - y.length) < 24)
+  }
+
+  function getDigitalIntroAssetForCompose(): AssetItem | null {
+    const candidates = materialAssets.filter(a => {
+      const folder = normalizeAssetFolder((a as any).folder, a.kind, a.filename)
+      return a.kind === 'video' && (folder === 'digital_human' || a.source_type === 'digital_human_intro' || a.url === digitalHuman?.video_url || a.filename === digitalHuman?.video_name || safeText(a.original_name).includes('数字人'))
+    })
+    const matched = digitalHuman?.video_url
+      ? candidates.find(a => a.url === digitalHuman.video_url || a.filename === digitalHuman.video_name) || candidates[0]
+      : candidates.find(a => selectedMaterialIds.includes(a.id)) || null
+    if (matched) return matched
+    if (!digitalHuman?.video_url) return null
+    const filename = digitalHuman.video_name || `digital_human_intro_${Date.now()}.mp4`
+    return normalizeAsset({
+      id: filename.replace(/\.[a-z0-9]+$/i, '') || `digital_human_${Date.now()}`,
+      filename,
+      original_name: `数字人开场_${copy.title || filename}`,
+      kind: 'video',
+      url: digitalHuman.video_url,
+      size_bytes: 0,
+      created_at: new Date().toISOString(),
+      folder: 'digital_human',
+      source_type: 'digital_human_intro',
+      usage_role: 'avatar',
+    }, 0)
+  }
+
+  function getComposeAssetsForPreview(): AssetItem[] {
+    const digitalIntroAsset = getDigitalIntroAssetForCompose()
+    const idsToRemoveForCompose = new Set([digitalHumanAvatarId, digitalHumanDriverId].filter(Boolean))
+    const selectedAssetsForCompose = selectedMaterialIds
+      .filter(id => !idsToRemoveForCompose.has(id) && id !== digitalIntroAsset?.id)
+      .map(id => materialAssets.find(a => a.id === id))
+      .filter((a): a is AssetItem => Boolean(a && a.id && a.url))
+    const effectiveAssets = digitalIntroAsset
+      ? [digitalIntroAsset, ...selectedAssetsForCompose.filter(a => a.url !== digitalIntroAsset.url)]
+      : selectedAssetsForCompose
+    return (effectiveAssets.length ? effectiveAssets : contentOnlyAssets.slice(0, 6))
+      .map((asset, index) => normalizeAsset(asset, index))
+      .filter(asset => Boolean(asset.id && asset.url))
+  }
+
+  function getComposeClipPlan(asset: AssetItem, index: number, digitalIntroAsset?: AssetItem | null) {
+    const cfg = getClipSetting(asset, index)
+    const isIntro = Boolean(digitalIntroAsset && (asset.id === digitalIntroAsset.id || asset.url === digitalIntroAsset.url || asset.source_type === 'digital_human_intro'))
+    if (asset.kind === 'image') {
+      const seconds = Math.min(20, Math.max(0.8, safeNumber(cfg.image_seconds, 2.8)))
+      return { seconds, start: 0, end: 0, label: `${seconds.toFixed(1)}秒` }
+    }
+    const start = Math.max(0, safeNumber(cfg.video_start, 0))
+    const rawEnd = Math.max(0, safeNumber(cfg.video_end, 0))
+    const maxDur = Math.max(0, safeNumber(assetDurations[asset.id], 0))
+    let seconds = 0
+    if (rawEnd > start + 0.2) {
+      seconds = rawEnd - start
+    } else if (isIntro) {
+      seconds = Math.max(4, Math.min(18, estimateSeconds(getDigitalHumanIntroText())))
+    } else {
+      seconds = Math.max(1, safeNumber(cfg.image_seconds, 3))
+    }
+    if (maxDur > start + 0.3) seconds = Math.min(seconds, maxDur - start)
+    seconds = Math.min(20, Math.max(0.8, seconds))
+    const end = start + seconds
+    return { seconds, start, end, label: `${start.toFixed(1)}-${end.toFixed(1)}秒` }
+  }
+
+  function getComposeTimelinePreview() {
+    const digitalIntroAsset = getDigitalIntroAssetForCompose()
+    let cursor = 0
+    const rows = getComposeAssetsForPreview().map((asset, index) => {
+      const plan = getComposeClipPlan(asset, index, digitalIntroAsset)
+      const startAt = cursor
+      cursor += plan.seconds
+      return { asset, index, ...plan, startAt, endAt: cursor }
+    })
+    const materialSeconds = Math.round(cursor * 10) / 10
+    const audioSeconds = Math.round(safeNumber(audio?.duration_seconds, voiceEstimatedSeconds || 0) * 10) / 10
+    const finalSeconds = Math.round(Math.max(materialSeconds, audioSeconds, 5) * 10) / 10
+    return { rows, materialSeconds, audioSeconds, finalSeconds }
+  }
+
+  function buildComposeVoiceSegments(hasDigitalIntro: boolean): VoiceSegment[] {
+    const base = (voiceSegments.length ? voiceSegments : buildVoiceSegmentsFromScript(currentScript, copy.hook))
+      .map((seg, index) => ({ ...defaultSegment, ...seg, text: cleanSubtitleLikeText(seg.text || ''), pause_after_ms: seg.pause_after_ms ?? (index === 0 ? 260 : 320) }))
+      .filter(seg => seg.text)
+
+    const deduped: VoiceSegment[] = []
+    for (const seg of base) {
+      const last = deduped[deduped.length - 1]
+      if (last && isSameOpeningLine(last.text, seg.text)) continue
+      deduped.push(seg)
+    }
+
+    if (!hasDigitalIntro) return deduped
+
+    const introText = cleanSubtitleLikeText(getDigitalHumanIntroText())
+    const introCandidate = introText || deduped[0]?.text || currentScript.slice(0, 80)
+    // 数字人片头已经负责第一句，后面的旁白要承接，不允许再出现同一句/同主题开头。
+    const body = deduped
+      .filter(seg => !isSameOpeningLine(seg.text, introCandidate))
+      .filter((seg, index, arr) => index === 0 || !isSameOpeningLine(seg.text, arr[index - 1]?.text || ''))
+
+    const introSegment: VoiceSegment = {
+      ...defaultSegment,
+      text: introCandidate,
+      emotion: '自然可信',
+      speed_ratio: 0.98,
+      pause_after_ms: 120,
+    }
+    return [introSegment, ...body].filter(seg => safeText(seg.text))
+  }
+
+  function cleanSubtitleLikeText(text: string) {
+    return safeText(text).replace(/\s+/g, ' ').replace(/[。．.]+$/g, '').trim()
+  }
+
+  async function generateFullCopyAndVoiceDraft() {
+    const targetSeconds = safeProjectDuration(selectedAssetEstimatedSeconds || autoProjectSeconds || 45)
+    const res = await run('一次生成完整文案和配音分段', () => apiPost<GeneratedCopy>('/api/generate-copy', {
+      topic: `一次性生成 ${targetSeconds} 秒获客短视频完整脚本：可以纯素材混剪；如果用户后面选择数字人，只取第一段给数字人开场。`,
+      industry,
+      audience,
+      selling_points: limitText(`${strategyMemoryContext}
+
+【生成要求】
+1. 一次性输出完整标题、前三秒钩子、完整旁白，不要只写开头。
+2. 第一段必须能单独作为 5-15 秒真人模板数字人开场；后面自然切到楼盘/马来西亚风光/学校/配套素材。
+3. 每段句子短，方便我在配音分段里继续手改。
+4. 热度雷达只作为选题和痛点参考，不照抄别人。`, 4000),
+      style: `${style}，房产顾问真实口播，像在提醒客户，不夸张承诺。`,
+      duration_seconds: targetSeconds,
+      knowledge_examples: [manualText, heatRewrite?.variants?.[0]?.script || '', referenceText || ''].filter(Boolean).slice(0, 3)
+    }))
+    setCopy(res!)
+    const segments = buildVoiceSegmentsFromScript(res?.script || '', res?.hook || '')
+    setVoiceSegments(segments)
+    setSegmentSeconds(Object.fromEntries(segments.map((seg, idx) => [idx, estimateSeconds(seg.text, seg.speed_ratio)])))
+    await refreshSubtitleKeywordsForScript([res?.title, res?.hook, res?.script].filter(Boolean).join('\n'), false).catch(() => null)
+    setLastHandoff('完整脚本和配音分段已一次性生成。你先在“配音/旁白”里调整每段；生成声音后，如果要数字人，只会把第 1 段开场音频送去 fal。')
+    setActive('voice')
+  }
+
   async function generateDirectCopy() {
     const res = await run('生成文案', () => apiPost<GeneratedCopy>('/api/generate-copy', {
       topic: sellingPoints,
       industry,
       audience,
-      selling_points: `${sellingPoints}\n获客地域/人群：${leadRegion}\n转化目标：${conversionGoal}`,
+      selling_points: strategyMemoryContext,
       style,
       duration_seconds: autoProjectSeconds,
       knowledge_examples: manualText ? [manualText] : []
@@ -1059,12 +2338,85 @@ ${manualText || ''}`.trim()
     setActive('copy')
   }
 
+  async function generateDigitalHumanIntroCopy() {
+    const introSeconds = Math.min(18, Math.max(8, Math.round(selectedAssetEstimatedSeconds ? Math.min(selectedAssetEstimatedSeconds * 0.28, 15) : 12)))
+    const routeGoal = isDigitalHumanRoute
+      ? `生成 ${introSeconds} 秒数字人真人开场口播：像房产顾问对镜头讲话，最后一句自然切到楼盘/风光素材。`
+      : isSelfShootRoute
+        ? `生成 ${introSeconds} 秒真人拍摄开场口播：适合顾问自己拿手机拍，句子短，提词器好念。`
+        : isGraphicRoute
+          ? `生成图文引流首屏标题、前三秒钩子和短说明：适合小红书/朋友圈收藏转发。`
+          : `生成 ${introSeconds} 秒纯素材混剪开场旁白：不用真人出镜，用字幕和画面切入痛点。`
+    const routeRule = isDigitalHumanRoute
+      ? '【数字人规则】只写 5-15 秒开场；不要写完整长视频；不要夸张承诺；最后一句要能接楼盘/风光素材。'
+      : isSelfShootRoute
+        ? '【真人拍摄规则】句子要适合提词器；给顾问自然口播，不要 AI 腔；可以提示表情/停顿。'
+        : isGraphicRoute
+          ? '【图文规则】首图标题要强，中间讲重点，最后引导私信领取资料；不要生成数字人口播。'
+          : '【纯素材混剪规则】不需要数字人；用旁白 + 画面字幕开场，直接接楼盘、风光、学校和配套素材。'
+    const res = await run('生成开场/首段稿', () => apiPost<GeneratedCopy>('/api/generate-copy', {
+      topic: routeGoal,
+      industry,
+      audience,
+      selling_points: limitText(`${strategyMemoryContext}
+
+${routeRule}
+
+【当前路线】${productionRouteLabel}
+【路线说明】${productionRouteHint}`, 1200),
+      style: `${style}，短视频口语化，像本地顾问真实提醒客户。`,
+      duration_seconds: introSeconds,
+      knowledge_examples: [manualText, heatRewrite?.variants?.[0]?.script || '', referenceText || ''].filter(Boolean).slice(0, 3)
+    }))
+    setCopy(res!)
+    const scriptLines = [res?.hook, res?.script].filter(Boolean).join('\n').split(/\n+/).map(x => x.trim()).filter(Boolean).slice(0, 6)
+    setVoiceSegments(scriptLines.length ? scriptLines.map(text => ({ ...defaultSegment, text, emotion: '自然可信', speed_ratio: 1.06, pause_after_ms: 260 })) : [])
+    setLastHandoff(isDigitalHumanRoute
+      ? '数字人开场稿已生成。下一步先生成配音，再到“可选数字人”用 fal 真人模板口型同步。'
+      : isGraphicRoute
+        ? '图文首屏/钩子已生成。可以继续生成图文包，或转成旁白配音后做视频。'
+        : '开场旁白已生成。可以直接生成配音、选择素材并合成；这条路线不强制数字人。')
+    setActive(isGraphicRoute ? 'subtitleCover' : 'voice')
+  }
+
+  async function generateScriptFromSelectedAssets() {
+    const targetSeconds = safeProjectDuration(selectedAssetEstimatedSeconds || 45)
+    const routeBridge = isDigitalHumanRoute
+      ? (digitalHuman?.video_url ? '开头已有数字人片段；完整旁白要自然承接片头，后面按素材顺序讲。' : '如果后面补数字人片头，脚本首句要能自然承接；如果不补，也能作为纯素材旁白使用。')
+      : isSelfShootRoute
+        ? '不使用数字人，按真人顾问拍摄 + B-roll 画面顺序写完整旁白。'
+        : isGraphicRoute
+          ? '优先生成图文/短视频都能用的分屏文案；不需要数字人口播。'
+          : '不使用数字人，直接按楼盘/风光/B-roll 素材顺序写完整旁白。'
+    const res = await run('按素材时长生成旁白稿', () => apiPost<GeneratedCopy>('/api/generate-copy', {
+      topic: `根据已选素材，生成约 ${targetSeconds} 秒${productionRouteLabel}完整稿。${routeBridge}`,
+      industry,
+      audience,
+      selling_points: limitText(`${strategyMemoryContext}
+
+【已选素材顺序和时长】
+${selectedAssetScriptContext || '暂无素材，请按马来西亚楼盘、风光、配套、教育医疗的顺序生成通用旁白。'}
+
+【当前路线】${productionRouteLabel}
+【写法要求】${routeBridge} 按素材画面顺序写；不要照抄同行；不要承诺收益；每 1-2 句适合一段字幕；结尾引导私信领取资料。`, 1700),
+      style: `${style}，房产顾问旁白，口语化，画面转场自然。`,
+      duration_seconds: targetSeconds,
+      knowledge_examples: [copy.script, manualText, heatRewrite?.variants?.[0]?.script || ''].filter(Boolean).slice(0, 3)
+    }))
+    setCopy(res!)
+    setVoiceSegments((res?.script || '').split(/\n+/).map(x => x.trim()).filter(Boolean).slice(0, 12).map(text => ({ ...defaultSegment, text })))
+    setLastHandoff(isDigitalHumanRoute
+      ? '已按素材总时长生成完整旁白稿。现在生成最终配音，再合成数字人开场 + 素材混剪。'
+      : '已按素材总时长生成完整旁白稿。现在生成配音并直接合成素材混剪，不需要数字人。')
+    setActive('voice')
+  }
+
   async function rewrite() {
     const res = await run('原创改写', () => apiPost<GeneratedCopy>('/api/rewrite-from-inspiration', {
       reference_text: referenceText || '请根据业务信息生成原创老板口播文案。',
       industry,
       audience,
-      selling_points: `${sellingPoints}\n获客地域/人群：${leadRegion}\n转化目标：${conversionGoal}`,
+      selling_points: strategyMemoryContext,
       style,
       duration_seconds: autoProjectSeconds
     }))
@@ -1080,7 +2432,7 @@ ${manualText || ''}`.trim()
       instruction: `${refineInstruction}\n重点规避这些词：${matchedBadWords.join('、') || '暂无'}`,
       industry,
       audience,
-      selling_points: sellingPoints
+      selling_points: strategyMemoryContext
     }))
     setCopy(res!)
     openKnowledgeSave('文案细改版本', res!)
@@ -1106,7 +2458,7 @@ ${manualText || ''}`.trim()
       intensity: voiceIntensity,
       target_seconds: autoProjectSeconds,
       audience,
-      selling_points: sellingPoints
+      selling_points: strategyMemoryContext
     }))
     const segments = Array.isArray(res!.segments) ? res!.segments : []
     setVoiceSegments(segments)
@@ -1142,10 +2494,10 @@ ${manualText || ''}`.trim()
 
   async function makeSegmentTTS() {
     const segments = voiceSegments.length ? voiceSegments : [{ ...defaultSegment, text: currentScript || defaultSegment.text }]
+    if (!subtitleHighlight.trim()) await refreshSubtitleKeywordsForScript(segments.map(s => s.text).join('\n'), false).catch(() => null)
     const res = await run('生成分段情绪配音', () => apiPost<TTSResponse>('/api/tts-segments', { segments, voice, overall_rate: '+0%' }))
     setAudio(res!)
-    setLastHandoff('配音已生成。可以继续做数字人片段，或直接进入素材选择和剪辑合成。')
-    if (autoAdvance) setActive('assets')
+    setLastHandoff(isDigitalHumanRoute ? '配音已生成。需要真人感片头就去“可选数字人”；不需要就直接进入素材选择和合成。' : '配音已生成。当前路线不强制数字人，可以直接进入素材选择和成片合成。')
   }
 
 
@@ -1153,32 +2505,51 @@ ${manualText || ''}`.trim()
     const currentStatus = String(digitalHuman?.status || '').toLowerCase()
     const hasRunningJimengTask = Boolean(digitalHuman?.job_id && !digitalHuman?.video_url && !['failed', 'error', 'done'].includes(currentStatus))
     if (hasRunningJimengTask) {
-      setError('已有火山即梦数字人任务正在生成中，不要重复提交。火山当前并发额度通常是 1 个任务；请直接查询当前任务结果，或等任务结束后再新建。')
+      setError('已有数字人任务正在生成中，不要重复提交。请直接查询当前任务结果，或等任务结束后再新建。')
       await checkDigitalHumanStatus(false)
       return
     }
-    if (!audio?.file_name) { setError('请先在配音导演里生成配音音频。'); setActive('voice'); return }
-    if (!digitalHumanAvatarId) { setError('请先选择数字人形象素材：正脸照片、半身照片或本人视频。'); setActive('digitalHuman'); return }
+    if (!isDigitalHumanRoute) setOneClickOutputType('digital_human')
+    if (!audio?.file_name) { setError('请先在配音导演里生成整条配音音频；数字人只会重新合成第 1 段开场音频，不会拿整条音频去对口型。'); setActive('voice'); return }
+    if (!digitalHumanAvatarId) { setError(digitalHumanNeedsVideo ? 'fal 路线请先手动选择本人授权的 5-20 秒 MP4 真人模板视频。每条片子的开场可以不同，不会再自动固定。' : digitalHumanPhotoSceneMode ? '照片场景数字人请先选择本人授权照片。' : '请先选择数字人形象素材。'); setActive('digitalHuman'); return }
+    const chosenAvatar = assets.find(a => a.id === digitalHumanAvatarId)
+    if (digitalHumanNeedsVideo && chosenAvatar?.kind !== 'video') { setError('fal 真人模板口型同步必须用 MP4 视频模板，不能用图片。请上传/选择 5-20 秒正面半身说话视频。'); return }
+    if (digitalHumanPhotoSceneMode && chosenAvatar?.kind !== 'image') { setError('照片场景数字人必须选择 JPG/PNG/WebP 本人授权照片；视频模板请改选 fal.ai 真人模板口型同步。'); return }
+    const introText = getDigitalHumanIntroText()
+    const introAudio = await run('生成数字人开场音频', () => apiPost<TTSResponse>('/api/tts', { text: introText, voice, rate: '+0%' }))
+    if (!introAudio?.file_name) { setError('数字人开场音频生成失败，请先回到配音页确认文案。'); return }
+    setDigitalHumanAudio(introAudio)
     const res = await run('生成数字人片段', () => apiPost<DigitalHumanCreateResponse>('/api/digital-human/create', {
       avatar_asset_id: digitalHumanAvatarId,
       driver_video_asset_id: digitalHumanDriverId || undefined,
-      audio_file_name: audio.file_name,
+      audio_file_name: introAudio.file_name,
       title: copy.title,
-      script: currentScript,
+      script: introText,
       engine: digitalHumanEngine,
       jimeng_model: digitalHumanJimengModel,
-      consent_confirmed: digitalHumanConsent
+      scene_template: digitalHumanSceneTemplate,
+      scene_prompt: digitalHumanScenePrompt,
+      consent_confirmed: true
     }))
     setDigitalHuman(res!)
     setDigitalHumanVersion(prev => digitalHuman?.job_id || digitalHuman?.video_url ? prev + 1 : prev)
     setDigitalHumanPollCount(0)
     setDigitalHumanLastChecked(new Date().toLocaleTimeString())
     if (res?.video_url) {
-      setLastHandoff('数字人片段已生成。可以把它作为素材进入素材选择和剪辑合成。')
-      if (autoAdvance) setActive('assets')
+      const refreshed = await reloadAssets().catch(() => [] as AssetItem[])
+      const newIntro = (refreshed || []).find(a => a.filename === res.video_name || a.url === res.video_url || a.source_type === 'digital_human_intro')
+      attachDigitalHumanIntroToTimeline(res, newIntro)
+      setLastHandoff('数字人片段已生成：已自动放入“数字人片段”素材库，并排到本次合成第 1 位；原真人模板已从本次素材顺序移除，避免重复开头。')
     } else {
-      setLastHandoff('火山即梦任务已提交。不要重复提交；系统会自动查询，通常需要 5-30 分钟。')
+      setLastHandoff('fal 数字人任务已提交。不要重复提交；系统会自动查询，完成后会自动回存素材库并排到素材最前。')
     }
+  }
+
+
+  function skipDigitalHumanAndUseAssets() {
+    setOneClickOutputType('mixed_video')
+    setLastHandoff('已切换为纯素材混剪路线：不生成数字人，直接选择楼盘/风光/B-roll 素材，按素材时长补全旁白并合成。')
+    setActive('assets')
   }
 
   function clearDigitalHumanTask() {
@@ -1186,14 +2557,25 @@ ${manualText || ''}`.trim()
     setDigitalHumanPollCount(0)
     setDigitalHumanLastChecked('')
     try { window.localStorage.removeItem(DIGITAL_HUMAN_TASK_KEY) } catch {}
-    setLastHandoff('已清除当前数字人任务。可以重新提交一个新的 OmniHuman1.5 任务。')
+    setLastHandoff('已清除当前数字人任务。可以重新提交一个新的数字人片头任务。')
   }
 
   async function checkDigitalHumanStatus(silent = false) {
     if (!digitalHuman?.job_id) { if (!silent) setError('当前没有可查询的数字人 task_id。'); return }
     const taskModel = getDigitalHumanTaskModel(digitalHuman, digitalHumanJimengModel)
-    const url = `/api/digital-human/status/${encodeURIComponent(digitalHuman.job_id || '')}?model=${encodeURIComponent(taskModel)}`
-    const fetchStatus = () => apiGet<DigitalHumanCreateResponse>(url)
+    const isFalTask = String(digitalHuman.job_id || '').startsWith('fal:') || String(digitalHuman.engine || '').startsWith('fal:') || taskModel.includes('sync-lipsync')
+    const raw: any = digitalHuman.raw || {}
+    const endpoint = String(raw.endpoint || raw.model || (taskModel.includes('sync-lipsync') ? taskModel : '') || '').replace(/^fal:/, '')
+    const fetchStatus = () => isFalTask
+      ? apiPost<DigitalHumanCreateResponse>('/api/digital-human/status', {
+          job_id: digitalHuman.job_id,
+          model: 'fal_lipsync',
+          endpoint: endpoint || 'fal-ai/sync-lipsync',
+          status_url: raw.status_url || '',
+          response_url: raw.response_url || '',
+          raw,
+        })
+      : apiGet<DigitalHumanCreateResponse>(`/api/digital-human/status/${encodeURIComponent(digitalHuman.job_id || '')}?model=${encodeURIComponent(taskModel)}`)
     let res: DigitalHumanCreateResponse | undefined
     if (silent) {
       try { res = await fetchStatus() } catch { return }
@@ -1205,12 +2587,87 @@ ${manualText || ''}`.trim()
     setDigitalHumanLastChecked(new Date().toLocaleTimeString())
     setDigitalHumanPollCount(prev => prev + 1)
     if (res.video_url) {
-      setLastHandoff('数字人片段已生成。可以把它作为素材进入素材选择和剪辑合成。')
+      const refreshed = await reloadAssets().catch(() => [] as AssetItem[])
+      const newIntro = (refreshed || []).find(a => a.filename === res.video_name || a.url === res.video_url || a.source_type === 'digital_human_intro')
+      attachDigitalHumanIntroToTimeline(res, newIntro)
+      setLastHandoff('数字人片段已生成：已自动进素材库并排到素材顺序第 1 位；合成时会静音素材原音，只保留完整配音，避免声音重复。')
     } else if (String(res.status || '').toLowerCase() === 'failed') {
-      setLastHandoff('当前数字人任务不可继续查询。请查看火山原始返回，必要时清除当前任务后重新提交。')
+      setLastHandoff('当前数字人任务不可继续查询。请展开原始返回或去 fal 后台 Request History 查看；必要时清除任务后重试。')
     } else {
-      setLastHandoff('火山即梦仍在生成或排队中。系统会每 20 秒自动查询一次，也可以手动点击查询。')
+      setLastHandoff('数字人仍在生成或排队中。系统会每 20 秒自动查询一次，也可以手动点击查询。')
     }
+  }
+
+  async function registerComposedVideoForWorkflow(
+    result: ComposeResponse,
+    source = 'compose',
+  ) {
+    if (!result?.video_url || !result?.video_name) {
+      return ''
+    }
+
+    const registered = await apiPost<any>(
+      '/api/video/workflow/register-compose',
+      {
+        video_url: result.video_url,
+        video_name: result.video_name,
+        duration_seconds: result.duration_seconds || 0,
+        title: copy.title || industry || 'AI 视频',
+        script_text: currentScript,
+        description: copy.description || '',
+        keywords: subtitleHighlight,
+        style,
+        cta: conversionGoal,
+        platform: '小红书',
+        source,
+      },
+    )
+
+    const workflowJobId = String(
+      registered?.job_id || ''
+    ).trim()
+
+    if (!workflowJobId) {
+      throw new Error(
+        '后端没有返回统一任务 ID'
+      )
+    }
+
+    if (
+      registered?.next_action === 'run_review' &&
+      registered?.auto_review_scheduled !== true
+    ) {
+      throw new Error(
+        '统一任务已创建，但自动审片未成功排队'
+      )
+    }
+
+    window.localStorage.setItem(
+      WORKFLOW_JOB_KEY,
+      workflowJobId,
+    )
+
+    window.dispatchEvent(
+      new CustomEvent(
+        'ai-video-workflow-job',
+        {
+          detail: {
+            job_id: workflowJobId,
+          },
+        },
+      ),
+    )
+
+    if (registered?.workflow) {
+      window.localStorage.setItem(
+        `ai_video_workflow_v10_40_1_${workflowJobId}`,
+        JSON.stringify(
+          registered.workflow
+        ),
+      )
+    }
+
+    return workflowJobId
   }
 
   async function composeVideo() {
@@ -1218,61 +2675,103 @@ ${manualText || ''}`.trim()
       setError('请先生成或填写文案，再合成视频。')
       return
     }
-    const chosen = (selectedMaterialAssets.length ? selectedMaterialAssets : materialAssets.slice(0, 6))
-      .map((asset, index) => normalizeAsset(asset, index))
-      .filter(asset => Boolean(asset.id && asset.url))
+    const digitalIntroAsset = getDigitalIntroAssetForCompose()
+    const chosen = getComposeAssetsForPreview()
     if (!chosen.length) {
       setError('请先在素材选择页上传或选择至少 1 个图片/视频素材。')
       setActive('assets')
       return
     }
+
+    const hasDigitalIntro = Boolean(digitalIntroAsset && chosen.some(a => a.id === digitalIntroAsset.id || a.url === digitalIntroAsset.url))
+    const composeSegments = buildComposeVoiceSegments(hasDigitalIntro)
+    const composeScript = composeSegments.length ? composeSegments.map(s => s.text).join('\n') : currentScript.trim()
+
+    let composeAudio = audio
+    if (composeSegments.length) {
+      const freshAudio = await run(hasDigitalIntro ? '重新生成分离式配音' : '重新生成成片配音', () => apiPost<TTSResponse>('/api/tts-segments', {
+        segments: composeSegments,
+        voice,
+        overall_rate: '+0%'
+      }))
+      if (freshAudio?.file_name) {
+        composeAudio = freshAudio
+        setAudio(freshAudio)
+      }
+    }
+
     const assetPlan = chosen.map((asset, index) => {
-      const cfg = getClipSetting(asset, index)
-      const imageSeconds = safeNumber(cfg.image_seconds, 2.8)
-      const start = Math.max(0, safeNumber(cfg.video_start, 0))
-      const rawEnd = safeNumber(cfg.video_end, 0)
+      const clipPlan = getComposeClipPlan(asset, index, digitalIntroAsset)
+      const isIntro = hasDigitalIntro && (asset.id === digitalIntroAsset?.id || asset.url === digitalIntroAsset?.url || asset.source_type === 'digital_human_intro')
       return {
         asset_id: String(asset.id),
         order: index,
         kind: asset.kind === 'video' ? 'video' : 'image',
-        image_seconds: Math.min(20, Math.max(0.8, imageSeconds)),
-        video_start: asset.kind === 'video' ? start : 0,
-        video_end: asset.kind === 'video' && rawEnd > start ? rawEnd : 0,
+        image_seconds: Math.min(20, Math.max(0.8, clipPlan.seconds)),
+        video_start: asset.kind === 'video' ? clipPlan.start : 0,
+        video_end: asset.kind === 'video' ? clipPlan.end : 0,
+        url: asset.url,
+        filename: asset.filename,
+        source_type: asset.source_type || (isIntro ? 'digital_human_intro' : ''),
       }
     })
-    const safeSubtitleSegments = Array.isArray(audio?.segments) ? audio.segments.map((seg: any, index: number) => ({
+    const assetPlanSeconds = Math.round(assetPlan.reduce((sum, item) => {
+      if (item.kind === 'image') return sum + Math.max(0.8, safeNumber(item.image_seconds, 2.8))
+      return sum + Math.max(0.8, safeNumber(item.video_end, 0) - safeNumber(item.video_start, 0))
+    }, 0) * 10) / 10
+    const safeSubtitleSegments = Array.isArray(composeAudio?.segments) ? composeAudio.segments.map((seg: any, index: number) => ({
       index: Number.isFinite(Number(seg?.index)) ? Number(seg.index) : index,
       text: safeText(seg?.text, ''),
       start: Math.max(0, safeNumber(seg?.start, 0)),
       end: Math.max(0, safeNumber(seg?.end, safeNumber(seg?.start, 0) + safeNumber(seg?.duration, 0))),
       duration: Math.max(0, safeNumber(seg?.duration, safeNumber(seg?.end, 0) - safeNumber(seg?.start, 0))),
     })).filter((seg: any) => seg.text && seg.end > seg.start) : []
-    const durationSeconds = safeProjectDuration(audio?.duration_seconds, selectedAssetEstimatedSeconds, voiceEstimatedSeconds, autoProjectSeconds)
+    const durationSeconds = safeProjectDuration(Math.max(assetPlanSeconds, safeNumber(composeAudio?.duration_seconds, 0), voiceEstimatedSeconds, autoProjectSeconds))
     const res = await run('合成视频并烧字幕', () => apiPost<ComposeResponse>('/api/compose-video', {
       title: safeText(copy.title, '短视频'),
-      script: currentScript.trim(),
+      script: composeScript,
       asset_ids: chosen.map(a => String(a.id)),
       asset_plan: assetPlan,
-      audio_file_name: audio?.file_name || undefined,
+      audio_file_name: composeAudio?.file_name || undefined,
       duration_seconds: durationSeconds,
       voice,
       rate: '+0%',
       subtitle_size: subtitleSize,
       subtitle_margin_v: subtitleMarginV,
       subtitle_position: subtitlePosition,
-      transition_policy: 'smooth_dissolve_no_flash',
-      safe_crossfade: true,
-      save_raw_shots: true,
-      block_completed_on_quality_error: true,
+      subtitle_style_preset: subtitlePreset,
+      subtitle_keywords: subtitleHighlight,
+      keyword_sfx_enabled: true,
+      keyword_sfx_volume: 0.28,
       subtitle_segments: safeSubtitleSegments
     }))
     setVideo(res!)
-    setLastHandoff('视频已合成。字幕已按配音分段时间轴烧录；封面和平台发布会自动读取这条成片。')
-    if (autoAdvance) setActive('subtitleCover')
+
+    let workflowJobId = ''
+    try {
+      workflowJobId =
+        await registerComposedVideoForWorkflow(
+          res!,
+          'compose',
+        )
+    } catch (workflowError: any) {
+      setError(
+        `视频已生成，但统一任务登记失败：${
+          workflowError?.message ||
+          String(workflowError)
+        }。视频本身仍可下载。`,
+      )
+    }
+
+    setLastHandoff(
+      workflowJobId
+        ? `视频已出片并登记为任务 ${workflowJobId}。机械质检和豆包审片已自动启动；完成后在右下角工作流人工确认一次。`
+        : hasDigitalIntro ? '视频已出片：数字人片头和后续素材已分离，真人模板已去重，配音/字幕按本次最终脚本重新生成。' : '视频已出片。已把配音和字幕压到画面上，先预览一遍再决定是否调字幕位置。'
+    )
   }
 
   async function chatEditVideo() {
-    const richInstruction = `${editInstruction}\n字幕样式：字号 ${subtitleSize}，颜色 ${subtitleColor}，重点词：${subtitleHighlight}\n分段时长：${voiceSegments.map((s, i) => `第${i + 1}段 ${segmentSeconds[i] || estimateSeconds(s.text, s.speed_ratio)}秒 ${segmentTransitions[i] || '叠化'}`).join('；')}`
+    const richInstruction = `${editInstruction}\n字幕模板：${subtitlePreset}，字号 ${subtitleSize}，重点词：${subtitleHighlight}\n处理顺序：先按素材生成画面底片，再叠加配音和字幕，不把配音分段绑定到单个视频片段。`
     const res = await run('AI + 插件修改视频', () => apiPost<VideoEditChatResponse>('/api/video-edit-chat', {
       video_file_name: currentVideoName,
       instruction: richInstruction,
@@ -1282,7 +2781,35 @@ ${manualText || ''}`.trim()
     }))
     setEditChat(prev => [res!, ...prev])
     if (res?.new_video_url && res?.new_video_name) {
-      setVideo(prev => prev ? { ...prev, video_url: res.new_video_url!, video_name: res.new_video_name! } : { video_url: res.new_video_url!, video_name: res.new_video_name!, duration_seconds: autoProjectSeconds, warnings: res.warnings || [] })
+      const updatedVideo: ComposeResponse = video
+        ? {
+            ...video,
+            video_url: res.new_video_url,
+            video_name: res.new_video_name,
+            warnings: res.warnings || video.warnings || [],
+          }
+        : {
+            video_url: res.new_video_url,
+            video_name: res.new_video_name,
+            duration_seconds: autoProjectSeconds,
+            warnings: res.warnings || [],
+          }
+
+      setVideo(updatedVideo)
+
+      try {
+        await registerComposedVideoForWorkflow(
+          updatedVideo,
+          'ai_plugin_edit',
+        )
+      } catch (workflowError: any) {
+        setError(
+          `修改后视频已生成，但审片任务登记失败：${
+            workflowError?.message ||
+            String(workflowError)
+          }`,
+        )
+      }
     }
     setActive('video')
   }
@@ -1307,10 +2834,10 @@ ${manualText || ''}`.trim()
     const payload: any = {
       title: copy.title || industry || '图文引流包',
       hook: copy.hook || '先收藏，这几件事一定要弄懂。',
-      script: currentScript || copy.description || sellingPoints,
+      script: currentScript || copy.description || sellingPointsWithProfile,
       industry,
       audience,
-      selling_points: sellingPoints,
+      selling_points: sellingPointsWithProfile,
       style: `${style}；图文引流，不是封面；要像小红书/抖音收藏图文，精美、真实、强转化`,
       platform: graphicPlatform,
       slide_count: graphicSlideCount,
@@ -1369,41 +2896,78 @@ ${manualText || ''}`.trim()
     setActive('publish')
   }
 
-  const stageCards = [
-    { label: '1 素材选择', done: selectedMaterialIds.length > 0, value: selectedMaterialIds.length ? `已选 ${selectedMaterialIds.length} 个素材` : '先选素材' },
-    { label: '2 文案生产', done: Boolean(copy.hook || copy.script), value: copy.title || '待生成' },
-    { label: '3 配音分段', done: Boolean(audio), value: voiceSegments.length ? `${voiceSegments.length} 段 · ${selectedVoiceName}` : '待配音' },
-    { label: '4 数字人', done: Boolean(digitalHuman?.video_url), value: digitalHuman?.video_url ? `数字人 #${digitalHumanVersion}` : '可选' },
-    { label: '5 剪辑合成', done: Boolean(video?.video_url), value: video?.video_name || '待合成' },
-    { label: '6 字幕/封面/图文', done: Boolean(cover || subtitleAI || generatedImage || graphicPost), value: graphicPost ? `${graphicPost.images.length}张图文` : cover?.cover_name || generatedImage?.image_name || (subtitleAI ? '重点字幕已生成' : '待处理') },
-    { label: '7 平台发布', done: Boolean(publish), value: publish?.status || '草稿预留' }
+  const stageCards: Array<{ key: ModuleKey; label: string; done: boolean; value: string }> = [
+    { key: 'copy', label: '1 路线/文案', done: Boolean(copy.hook || copy.script), value: copy.title || productionRouteLabel },
+    { key: 'shooting', label: '2 脚本/拍摄', done: Boolean(shootingPlan) || !isSelfShootRoute, value: isSelfShootRoute ? (shootingPlan?.summary || '上传脚本或生成任务单') : '非必需' },
+    { key: isDigitalHumanRoute ? 'digitalHuman' : 'assets', label: '3 可选出镜', done: !isDigitalHumanRoute || Boolean(digitalHuman?.video_url), value: isDigitalHumanRoute ? (digitalHuman?.video_url ? '数字人片头已生成' : (digitalHumanAvatarId ? '已选真人模板' : '待选真人模板')) : '已跳过数字人' },
+    { key: 'voice', label: '4 配音/旁白', done: Boolean(audio), value: voiceSegments.length ? `${voiceSegments.length} 段 · ${selectedVoiceName}` : '待配音' },
+    { key: 'assets', label: '5 素材顺序', done: selectedMaterialIds.length > 0, value: selectedMaterialIds.length ? `已选 ${selectedMaterialIds.length} 个素材` : '待选素材' },
+    { key: 'video', label: '6 成片/审片', done: Boolean(video?.video_url), value: window.localStorage.getItem(WORKFLOW_JOB_KEY) ? '已登记审片任务' : (video?.video_name || '待合成') },
+    { key: 'subtitleCover', label: '7 发布包装', done: Boolean(window.localStorage.getItem(WORKFLOW_JOB_KEY)), value: window.localStorage.getItem(WORKFLOW_JOB_KEY) ? '审片/封面/图文已关联' : '待成片登记' },
+    { key: 'growth', label: '8 流量监控', done: Boolean(growthDecision), value: growthDecision?.decision || '待复盘' }
   ]
 
   const digitalHumanStatus = String(digitalHuman?.status || '').toLowerCase()
   const hasRunningDigitalHumanTask = Boolean(digitalHuman?.job_id && !digitalHuman?.video_url && !['failed', 'error', 'done'].includes(digitalHumanStatus))
   const digitalHumanPrimaryLabel = hasRunningDigitalHumanTask ? '查询当前数字人任务' : '生成数字人片段'
-  const contentNavKeys: ModuleKey[] = ['collector','competitor','trend','oneClick','assets','copy','voice','digitalHuman','video','subtitleCover','publish']
+  const contentNavKeys: ModuleKey[] = ['copy','voice','digitalHuman','assets','video','subtitleCover','growth']
 
-  return <div className="appShell">
-    <aside className="studioNav">
-      <div className="brandMark">
-        <div className="logo">AI</div>
-        <div><strong>AI 视频增长中枢</strong><span>采集 · 创作 · 合成 · 转化</span></div>
+  useEffect(() => {
+    setNavMobileOpen(false)
+  }, [active])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const syncLayout = () => {
+      if (window.innerWidth > 1100) setNavMobileOpen(false)
+      if (window.innerWidth <= 1280) setNavCollapsed(false)
+    }
+    syncLayout()
+    window.addEventListener('resize', syncLayout)
+    return () => window.removeEventListener('resize', syncLayout)
+  }, [])
+
+  function moduleVisible(key: ModuleKey): boolean {
+    if (mainTab === 'video-prod') return ['oneClick','copy','voice','digitalHuman','assets','video','subtitleCover'].includes(key);
+    if (mainTab === 'assets') return key === 'assets';
+    if (mainTab === 'leads') return key === 'lead' || key === 'monitor';
+    if (mainTab === 'avatar') return key === 'digitalHuman';
+    if (mainTab === 'providers') return key === 'dashboard';
+    if (showAdvanced) return ['strategy','competitor','trend','shooting','growth','publish','collector','monitor'].includes(key);
+    return false;
+  }
+
+  return <div className={`appShell responsiveShell ${navCollapsed ? 'navCollapsed' : ''} ${navMobileOpen ? 'navMobileOpen' : ''}`}>
+    {navMobileOpen && <button className="navBackdrop" aria-label="关闭菜单" onClick={() => setNavMobileOpen(false)} />}
+    <aside className={`studioNav responsiveNav ${navCollapsed ? 'collapsed' : ''}`}>
+      <div className="navTopRow">
+        <div className="brandMark">
+          <div className="logo">AI</div>
+          <div><strong>AI 视频增长中枢</strong><span>采集 · 创作 · 合成 · 转化</span></div>
+        </div>
+        <button className="navIconBtn desktopOnly" onClick={() => setNavCollapsed(v => !v)} title={navCollapsed ? '展开左侧菜单' : '收起左侧菜单'}>{navCollapsed ? '»' : '«'}</button>
       </div>
-      <button className="startButton" onClick={() => setActive('collector')}>开始采集</button>
-      <nav>
-        {modules.filter(item => ['dashboard','monitor','lead'].includes(item.key)).map(item => <button key={item.key} className={active === item.key ? 'active' : ''} onClick={() => setActive(item.key)}>
-          <span>{item.icon}</span><b>{item.title}</b><em>{item.tag}</em>
-        </button>)}
-        <button className={contentNavOpen ? 'groupHeader open' : 'groupHeader'} onClick={() => setContentNavOpen(!contentNavOpen)}>
-          <span>生</span><b>内容生产</b><em>{contentNavOpen ? '收起' : '展开'}</em>
+            <nav className="mainTabsNav">
+        {([
+          { tab: 'video-prod' as MainTab, icon: '🎬', label: '视频生产' },
+          { tab: 'assets' as MainTab, icon: '📦', label: '素材库' },
+          { tab: 'leads' as MainTab, icon: '🎯', label: '线索截流' },
+          { tab: 'avatar' as MainTab, icon: '👤', label: '数字人/真人' },
+          { tab: 'providers' as MainTab, icon: '⚙️', label: '设置' },
+        ] as const).map(item => (
+          <button key={item.tab} className={mainTab === item.tab ? 'active' : ''} onClick={() => { setMainTab(item.tab); setActive(item.tab === 'video-prod' ? 'oneClick' : item.tab === 'assets' ? 'assets' : item.tab === 'leads' ? 'lead' : item.tab === 'avatar' ? 'digitalHuman' : 'dashboard'); }}>
+            <span>{item.icon}</span><b>{item.label}</b>
+          </button>
+        ))}
+        <button className={`groupHeader ${showAdvanced ? 'open' : ''}`} onClick={() => setShowAdvanced(!showAdvanced)}>
+          <span>🔧</span><b>高级</b><em>{showAdvanced ? '收起' : '展开'}</em>
         </button>
-        {contentNavOpen && contentNavKeys.map(key => modules.find(item => item.key === key)).filter(Boolean).map(item => <button key={item!.key} className={`subNav ${active === item!.key ? 'active' : ''}`} onClick={() => setActive(item!.key)}>
-          <span>{item!.icon}</span><b>{item!.title}</b><em>{item!.tag}</em>
-        </button>)}
-        {modules.filter(item => ['strategy','competitor','trend','shooting','growth'].includes(item.key)).map(item => <button key={item.key} className={active === item.key ? 'active' : ''} onClick={() => setActive(item.key)}>
-          <span>{item.icon}</span><b>{item.title}</b><em>{item.tag}</em>
-        </button>)}
+        {showAdvanced && ['strategy','competitor','trend','shooting','growth','publish','collector','monitor'].map(key => {
+          const item = modules.find(m => m.key === key);
+          return item ? <button key={item.key} className={`subNav ${active === item.key ? 'active' : ''}`} onClick={() => { setActive(item.key); setShowAdvanced(true); }}>
+            <span>{item.icon}</span><b>{item.title}</b><em>{item.tag}</em>
+          </button> : null;
+        })}
       </nav>
       <div className="miniStatus"><span>API</span><strong className={health?.ok ? 'greenText' : 'redText'}>{health?.ok ? '已连接' : '未连接'}</strong><small>{health?.tts_provider || 'waiting'} · {health?.ark_video_model || '-'}</small></div>
     </aside>
@@ -1411,9 +2975,12 @@ ${manualText || ''}`.trim()
     <main className="studioMain">
       <header className="heroHeader">
         <div>
-          <span className="eyebrow">AI Growth Studio</span>
-          <h1>从同行洞察到成片发布，一套闭环获客生产线</h1>
-          <p>系统沉淀客户画像、竞品打法、文案资产和素材资产；每一步结果自动流转，减少重复操作，提升内容获客效率。</p>
+          <div className="heroToolbar">
+            <button className="navIconBtn mobileOnly" onClick={() => setNavMobileOpen(true)} aria-label="打开菜单">☰</button>
+            <span className="eyebrow">AI Growth Studio</span>
+          </div>
+          <h1>同行洞察、脚本生产、素材成片一体化</h1>
+          <p>默认走纯素材混剪；需要真人感片头时再启用数字人，最后统一成片和复盘投流。</p>
         </div>
         <div className="scoreCard"><span>当前进度</span><strong>{leadScore}%</strong><small>{leadScore >= 80 ? '可以进入发布前检查' : '继续补齐内容和素材'}</small></div>
       </header>
@@ -1421,9 +2988,8 @@ ${manualText || ''}`.trim()
       {error && <div className="globalError">{error}</div>}
       {busy && <div className="busy">正在执行：{busy}</div>}
       <div className="handoffBar">
-        <div><strong>当前联动</strong><span>{lastHandoff}</span></div>
-        <label><input type="checkbox" checked={autoAdvance} onChange={e => setAutoAdvance(e.target.checked)} /> 完成后自动切到下一步</label>
-        {nextTodo && <button onClick={() => setActive(nextTodo.go)}>下一件事：{nextTodo.text}</button>}
+        <div><strong>当前状态</strong><span>{lastHandoff}</span></div>
+        {nextTodo && <button className="handoffNextBtn" onClick={() => setActive(nextTodo.go)}><span>下一件事</span><b>{nextTodo.text}</b></button>}
       </div>
 
       {knowledgeDialog.open && <div className="modalMask">
@@ -1437,15 +3003,13 @@ ${manualText || ''}`.trim()
       </div>}
 
       <section className="progressRail">
-        {stageCards.map((s, idx) => <div key={s.label} className={`stage ${s.done ? 'done' : ''}`}>
+        {stageCards.map((s, idx) => <button key={s.label} className={`stage ${s.done ? 'done' : ''} ${active === s.key ? 'active' : ''}`} onClick={() => setActive(s.key)}>
           <span>{idx + 1}</span><strong>{s.label}</strong><em>{s.value}</em>
-        </div>)}
+        </button>)}
       </section>
 
-      {active === 'fullAi' && <FullAIConsole />}
-
-          {active === 'oneClick' && <section className="card modulePanel oneClickPanel">
-        <div className="sectionHeader"><div><h2>一键生成中心</h2><p>不跳步骤，也能在一个窗口里生成和修改完整项目；同步后仍可去文案、配音、数字人、素材、剪辑等单独步骤精修。</p></div><Button busy={busy === '一键生成完整方案' ? busy : ''} label="一键生成方案" onClick={runOneClickGenerate} /></div>
+      {moduleVisible('oneClick') && active === 'oneClick' && <section className="card modulePanel oneClickPanel">
+        <div className="sectionHeader"><div><h2>一键生成中心</h2><p>想快就一键出方案；想细调就进文案、配音、素材、剪辑单独改。</p></div><Button busy={busy === '一键生成完整方案' ? busy : ''} label="一键生成方案" onClick={runOneClickGenerate} /></div>
         <div className="oneClickIntro">
           <strong>推荐顺序</strong>
           <span>先选/上传素材 → 填行业和目标客户 → 一键生成文案、配音分段、剪辑和图文方案。没有素材时也能先出方案，但演示建议先选素材。</span>
@@ -1465,8 +3029,8 @@ ${manualText || ''}`.trim()
           <Field label="核心卖点"><textarea value={sellingPoints} onChange={e => setSellingPoints(e.target.value)} /></Field>
         </div>
         <div className="grid3">
-          <Field label="输出类型"><select value={oneClickOutputType} onChange={e => setOneClickOutputType(e.target.value)}><option value="digital_human">数字人口播</option><option value="mixed_video">素材混剪</option><option value="image_text">图文引流包</option><option value="all">视频 + 图文都要</option></select></Field>
-          <Field label="素材方式"><select value={oneClickMaterialMode} onChange={e => setOneClickMaterialMode(e.target.value)}><option value="selected_assets">使用已选素材</option><option value="digital_human_only">只做数字人</option><option value="ai_image">AI 生成图文素材</option><option value="manual_later">先出方案，素材后补</option></select></Field>
+          <Field label="输出类型"><select value={oneClickOutputType} onChange={e => setOneClickOutputType(e.target.value)}><option value="mixed_video">纯素材混剪（默认）</option><option value="digital_human">数字人开场 + 混剪</option><option value="self_shoot">真人拍摄 + 混剪</option><option value="image_text">图文引流包</option><option value="all">视频 + 图文都要</option></select></Field>
+          <Field label="素材方式"><select value={oneClickMaterialMode} onChange={e => setOneClickMaterialMode(e.target.value)}><option value="selected_assets">使用已选素材</option><option value="manual_later">先出方案，素材后补</option><option value="digital_human_only">只做数字人测试</option><option value="ai_image">AI 生成图文素材</option></select></Field>
           <div className="autoDurationCard"><span>生成长度</span><strong>自动跟随素材/配音</strong><em>{selectedMaterialAssets.length ? `已按 ${selectedMaterialAssets.length} 个素材顺序计算，不用手填。` : '配音生成后自动校准，不再手填秒数。'}</em></div>
         </div>
         <div className="grid2">
@@ -1479,7 +3043,7 @@ ${manualText || ''}`.trim()
           <div><strong>字幕/图文</strong><p>ASR：{modelStatus?.asr_provider || health?.asr_provider || '-'} / {modelStatus?.asr_model || health?.asr_model || '-'}<br />图片：{modelStatus?.image_provider || health?.image_provider || '-'} / {modelStatus?.image_model || health?.image_model || '-'}</p></div>
         </div>
         {oneClick && <div className="oneClickResult">
-          <div className="resultBox"><h3>{oneClick.project_title}</h3><p>{oneClick.summary}</p><div className="buttonRow"><button className="btn soft" onClick={() => applyOneClickResult(oneClick)}>重新同步到步骤</button><button className="btn ghost" onClick={() => setActive('copy')}>去文案细改</button><button className="btn ghost" onClick={() => setActive('voice')}>去配音</button><button className="btn ghost" onClick={() => setActive(oneClickOutputType === 'mixed_video' ? 'assets' : 'digitalHuman')}>{oneClickOutputType === 'mixed_video' ? '去素材混剪' : '去数字人'}</button></div>{oneClick.warnings?.map(w => <div className="warn" key={w}>{w}</div>)}</div>
+          <div className="resultBox"><h3>{oneClick.project_title}</h3><p>{oneClick.summary}</p><div className="buttonRow"><button className="btn soft" onClick={() => applyOneClickResult(oneClick)}>重新同步到步骤</button><button className="btn ghost" onClick={() => setActive('copy')}>去文案细改</button><button className="btn ghost" onClick={() => setActive('voice')}>去配音</button><button className="btn ghost" onClick={() => setActive(isDigitalHumanRoute ? 'digitalHuman' : 'assets')}>{isDigitalHumanRoute ? '去可选数字人' : '去素材混剪'}</button></div>{oneClick.warnings?.map(w => <div className="warn" key={w}>{w}</div>)}</div>
           <div className="grid2">
             <div className="miniResult"><h3>文案</h3><strong>{oneClick.copy.title}</strong><p>{oneClick.copy.hook}</p><pre>{oneClick.copy.script}</pre><div className="chips">{oneClick.copy.tags?.map(x => <Pill key={x}>{x}</Pill>)}</div></div>
             <div className="miniResult"><h3>配音分段</h3>{oneClick.voice_director?.segments?.map((seg, i) => <p key={`${seg.text}-${i}`}>第{i + 1}段：{seg.emotion} · {seg.text}</p>)}</div>
@@ -1491,7 +3055,7 @@ ${manualText || ''}`.trim()
         {!oneClick && <Empty>填写行业、客户和目标后，点“一键生成方案”。生成后可在这里继续对话修改，也会自动同步到后续步骤。</Empty>}
       </section>}
 
-      {active === 'dashboard' && <section className="dashboardStack">
+      {moduleVisible('dashboard') && active === 'dashboard' && <section className="dashboardStack">
         <div className="workflowBoard">
           {workflowSteps.map((step, idx) => <button className="workflowCard" key={`${step.step}-${step.title}`} onClick={() => setActive(step.key)}>
             <span>{step.step}</span>
@@ -1502,7 +3066,7 @@ ${manualText || ''}`.trim()
           </button>)}
         </div>
         <div className="opsGrid">
-          {modules.filter(x => ['monitor','lead','strategy','competitor','trend','shooting','growth'].includes(x.key)).map(item => <button className="moduleCard compact" key={item.key} onClick={() => setActive(item.key)}>
+          {modules.filter(x => ['lead','competitor','copy','shooting','assets','subtitleCover','growth','collector'].includes(x.key)).map(item => <button className="moduleCard compact" key={item.key} onClick={() => setActive(item.key)}>
             <span className="moduleIcon">{item.icon}</span>
             <strong>{item.title}</strong>
             <p>{item.desc}</p>
@@ -1511,63 +3075,266 @@ ${manualText || ''}`.trim()
         </div>
       </section>}
 
-      {active === 'monitor' && <section className="card modulePanel">
+      {moduleVisible('monitor') && active === 'monitor' && <section className="card modulePanel">
         <div className="sectionHeader"><div><h2>运营中控台</h2><p>这里是总览监控：看流程进度、数据库记忆、插件状态和下一步待办。详细数据和投流判断放在最后的增长模块。</p></div><div className="headerActions"><Button label="刷新数据库记忆" onClick={() => reloadMemoryContext(true)} kind="ghost" /><Button busy={busy === '生成行业爆点雷达' ? busy : ''} label="自动跑一次行业雷达" onClick={makeTrendRadar} kind="soft" /></div></div>
         <div className="monitorGrid">
           <div className="monitorCard"><span>流程完成度</span><strong>{leadScore}%</strong><p>{nextTodo ? nextTodo.text : '当前流程已基本闭环，可以进入发布和复盘。'}</p></div>
           <div className="monitorCard"><span>数据库记忆</span><strong>{memoryStatus}</strong><p>{memoryContext?.storage || '未连接'} · 账号 {(memoryContext?.competitors || []).length} · 采集 {(memoryContext?.videos || []).length} · 文案 {(memoryContext?.scripts || []).length}</p></div>
           <div className="monitorCard"><span>API 状态</span><strong>{health?.ok ? '在线' : '未连接'}</strong><p>{health?.tts_provider || '-'} · {health?.ark_video_model || '-'}</p></div>
+          <div className="monitorCard"><span>企业存储</span><strong>{health?.memory_status?.ok ? 'Supabase 正常' : (health?.memory_enabled ? 'Supabase 异常' : '未接 Supabase')}</strong><p>{health?.workspace_id || 'default'} · 严格模式 {health?.core_storage_strict ? '开' : '关'} · {health?.memory_status?.message || ''}</p></div>
+          <div className="monitorCard"><span>R2 素材</span><strong>{health?.r2_enabled ? '已配置' : '未配置'}</strong><p>素材强制 R2：{health?.require_r2_assets ? '开' : '关'}。正式使用建议开启。</p></div>
+          <div className="monitorCard"><span>任务队列</span><strong>{jobs.filter(j => j.status === 'running' || j.status === 'queued').length} 个进行中</strong><p>最近任务 {jobs.length} 条。长任务后续统一走 jobs。</p></div>
         </div>
-        <div className="v1034Panel productionPanel"><div className="sectionHeader compact"><div><h3>AI 总控台 / V10.34 生产状态</h3><p>只生成待确认修复任务，不会自动改代码。先看缺什么，再人工确认。</p></div><Button busy={busy === '刷新 V10.34 生产状态' ? busy : ''} label="刷新生产状态" onClick={refreshV1034Status} kind="ghost" /></div><div className="grid2"><Field label="总控台问题"><textarea value={aiControlQuestion} onChange={e => setAiControlQuestion(e.target.value)} /></Field><div><Button busy={busy === 'AI 总控台生成待确认修复任务' ? busy : ''} label="生成待确认修复任务" onClick={createControlTask} kind="soft" /><div className="chips">{v1034Status?.missing?.length ? v1034Status.missing.map(x => <Pill key={x} tone="orange">缺：{x}</Pill>) : <Pill tone="green">状态检查通过或待刷新</Pill>}</div>{aiControlTask && <div className="miniResult"><strong>{aiControlTask.title}</strong><p>{aiControlTask.summary}</p>{aiControlTask.checklist?.map((x: string) => <small key={x}>· {x}</small>)}</div>}</div></div></div>
         <div className="pluginGrid">{pluginMatrix.map(p => <div className="pluginCard" key={p.name}><strong>{p.name}</strong><p>{p.desc}</p><em>{p.status}</em></div>)}</div>
         <div className="todoPanel"><h3>下一步待办</h3>{pipelineTodos.map(item => <button key={item.text} className={item.ok ? 'done' : ''} onClick={() => setActive(item.go)}><span>{item.ok ? '✓' : '•'}</span>{item.text}</button>)}</div>
         <div className="memoryBox"><strong>AI 学习摘要</strong><p>{learningSummary}</p></div>
       </section>}
 
 
-      {active === 'lead' && <section className="card modulePanel leadPanel">
-        <div className="sectionHeader"><div><h2>获客自动化</h2><p>围绕海外房产置业和第二家园，把同行流量打法转成可执行的截留、监听、回复和私域承接流程。</p></div><div className="headerActions"><Button busy={busy === '生成获客自动化作战图' ? busy : ''} label="生成获客作战图" onClick={makeLeadPlan} kind="soft" /><Button label="保存行业档案" onClick={saveCustomerProfile} kind="ghost" /></div></div>
-        <div className="leadHero">
-          <div><span>当前业务</span><strong>{industry}</strong><p>{audience}</p></div>
-          <div><span>转化目标</span><strong>{conversionGoal}</strong><p>{leadRegion}</p></div>
+      {moduleVisible('lead') && active === 'lead' && <section className="card modulePanel leadRadarPanel heatRadarPanel heatRadarV3">
+        <div className="radarHeaderV3">
+          <div>
+            <Pill tone="green">Heat Radar</Pill>
+            <h2>热度雷达 · 今日重点 Top5</h2>
+            <p>这里不展开每个博主的全部内容，只展示今日/最近最值得跟进的 5 条真实热点。账号详情和对应历史热点放到「账号库」里点开查看。</p>
+          </div>
+          <div className="heatHeroActions">
+            <Button busy={busy === '单账号采集真实热度' ? busy : ''} label="尝试云端采集" onClick={runPublicHeatCrawler} kind="ghost" />
+            <Button busy={busy === 'AI 仿写热度内容' ? busy : ''} label="AI 读 Top5 并改写" onClick={makeHeatRewritePlan} kind="primary" disabled={!todayHeatSnapshots.length} />
+          </div>
         </div>
-        <div className="leadChannelSelect">
-          {['抖音截留获客','博主联动流量','采集目标客户','自动监听','自动回复','目标用户导流私域'].map(item => <button key={item} className={leadChannels.includes(item) ? 'selected' : ''} onClick={() => toggleLeadChannel(item)}>{item}</button>)}
+
+        <div className="radarMetricStrip">
+          <div><span>热点池</span><strong>{todayHeatSnapshots.length}</strong><em>今日/最近入库</em></div>
+          <div><span>真实指标</span><strong>{realHeatCount}</strong><em>含点赞/评论/收藏/分享</em></div>
+          <div><span>账号库</span><strong>{heatAccounts.length}</strong><em>{health?.workspace_id || 'default'}</em></div>
+          <div><span>AI 状态</span><strong>{heatRewrite ? '已改写' : '待分析'}</strong><em>{heatWorkbenchStatus}</em></div>
         </div>
-        <div className="grid2">
-          <Field label="目标客户与固定选项"><textarea value={leadFixedOptions} onChange={e => setLeadFixedOptions(e.target.value)} /></Field>
-          <Field label="监听关键词"><textarea value={trendKeywords} onChange={e => setTrendKeywords(e.target.value)} /></Field>
+        <div className="ecsCollectorPanel liveCollectorPanel">
+          <div className="ecsCollectorHead">
+            <div>
+              <Pill tone="green">ECS Worker</Pill>
+              <h3>采集任务进度</h3>
+              <p>网页负责下发采集命令、看进度和错误；ECS 负责打开抖音、提取视频，再提交主网站豆包分析并汇总到热度雷达。</p>
+            </div>
+            <div className="ecsStatusMini">
+              <span>账号库 {heatAccounts.length}</span>
+              <span>{collectorProgress?.run?.status || '等待任务'}</span>
+            </div>
+          </div>
+          <div className="ecsControlGrid">
+            <Field label="本次采集账号数"><input type="number" min="1" max="120" value={ecsCollectorCount} onChange={e => setEcsCollectorCount(e.target.value)} /></Field>
+            <Field label="每日自动时间"><input value={ecsCollectorTime} onChange={e => setEcsCollectorTime(e.target.value)} placeholder="02:00" /></Field>
+            <Field label="单独跑某个账号，可选"><input value={ecsCollectorAccount} onChange={e => setEcsCollectorAccount(e.target.value)} placeholder="例如：房产马来小哥" /></Field>
+            <label className="checkline compact"><input type="checkbox" checked={ecsDryRunMode} onChange={e => setEcsDryRunMode(e.target.checked)} /> 仅测试，不上传</label>
+            <label className="checkline compact"><input type="checkbox" checked={ecsNoDelayMode} onChange={e => setEcsNoDelayMode(e.target.checked)} /> 快速模式：账号间不等待</label>
+          </div>
+          <div className="buttonRow">
+            <Button busy={busy === '创建 ECS 采集命令' ? busy : ''} label="网页下发采集命令" onClick={createEcsCollectorCommand} kind="primary" />
+            <Button label="刷新进度" onClick={() => reloadCollectorProgress()} kind="ghost" />
+            <button className="btn ghost" onClick={() => navigator.clipboard?.writeText(ecsRunCommand)}>复制手动命令</button>
+          </div>
+          <div className="collectorTickerBox">
+            <div className="collectorTickerLabel">滚动报告</div>
+            <div className="collectorTickerTrack"><span>{collectorReportLine}</span></div>
+          </div>
+          <div className="collectorLiveGrid">
+            <div className="collectorRunCard">
+              <span>当前任务</span>
+              <strong>{collectorProgress?.run?.stage || '未开始'}</strong>
+              <p>{collectorProgress?.run?.message || 'ECS 上运行 command_worker.py 后，可从这里点按钮触发采集。'}</p>
+              <div className="collectorStats"><b>{Number(collectorProgress?.run?.completed_accounts || 0)} / {Number(collectorProgress?.run?.total_accounts || 0)}</b><em>账号进度</em></div>
+              {collectorProgress?.run?.last_error && <div className="warn compactWarn">{collectorProgress.run.last_error}</div>}
+            </div>
+            <div className="collectorRunCard">
+              <span>视频结果</span>
+              <strong>{Number(collectorProgress?.run?.success_videos || 0)} 成功 / {Number(collectorProgress?.run?.failed_videos || 0)} 失败</strong>
+              <p>当前账号：{collectorProgress?.run?.current_account || '暂无'}<br />当前视频：{collectorProgress?.run?.current_video || '暂无'}</p>
+            </div>
+          </div>
+          <div className="collectorEventList compactReport onePreviewReport">
+            {latestCollectorEvent ? <div className={`collectorEvent ${latestCollectorEvent.level === 'error' ? 'error' : ''}`}>
+              <span>{latestCollectorEvent.stage || 'event'}</span>
+              <strong>{formatCollectorEventLine(latestCollectorEvent, 0)}</strong>
+              <small>{latestCollectorEvent.video_url || latestCollectorEvent.account_url || latestCollectorEvent.created_at}</small>
+            </div> : <Empty>暂无采集事件。先在 ECS 启动命令监听，或手动运行一次采集。</Empty>}
+            {collectorEventsForReport.length > 1 && <details className="collectorHistoryDetails">
+              <summary>展开完整采集报告（{collectorEventsForReport.length} 条）</summary>
+              {collectorEventsForReport.slice(1, 18).map((ev, idx) => <div className={`collectorEvent ${ev.level === 'error' ? 'error' : ''}`} key={ev.id || `${ev.stage}-${idx}`}>
+                <span>{ev.stage || 'event'}</span>
+                <strong>{formatCollectorEventLine(ev, idx + 1)}</strong>
+                <small>{ev.video_url || ev.account_url || ev.created_at}</small>
+              </div>)}
+            </details>}
+          </div>
+          <details className="ecsCommandDetails">
+            <summary>手动命令 / 自动化设置</summary>
+            <div className="ecsCommandGrid">
+              <div><strong>先测试不上传</strong><code>{ecsDryRunCommand}</code><button onClick={() => navigator.clipboard?.writeText(ecsDryRunCommand)}>复制</button></div>
+              <div><strong>正式跑并上传</strong><code>{ecsRunCommand}</code><button onClick={() => navigator.clipboard?.writeText(ecsRunCommand)}>复制</button></div>
+              <div><strong>设置每日自动跑</strong><code>{ecsDailyCommand}</code><button onClick={() => navigator.clipboard?.writeText(ecsDailyCommand)}>复制</button></div>
+              <div><strong>网页按钮触发前提</strong><code>python command_worker.py</code><button onClick={() => navigator.clipboard?.writeText('python command_worker.py')}>复制</button></div>
+            </div>
+          </details>
         </div>
-        {!leadPlan && <div className="leadBlueprint">
-          <div><b>截留</b><span>同行爆款 → 钩子公式 → 同主题不同角度视频</span></div>
-          <div><b>监听</b><span>关键词、评论区问题、竞品更新自动沉淀</span></div>
-          <div><b>承接</b><span>自动回复模板 → 私信筛选 → 微信私域标签</span></div>
-          <div><b>复盘</b><span>播放、私信、留资、预约数据回流给下一条视频</span></div>
-        </div>}
-        {leadPlan && <div className="resultBox leadResult"><h3>{leadPlan.overview}</h3>
-          <div className="chips">{leadPlan.audience_segments?.map(x => <Pill key={x} tone="purple">{x}</Pill>)}</div>
-          <div className="leadPlaybookGrid">{leadPlan.channel_playbook?.map(item => <div className="leadPlaybook" key={item.channel}><strong>{item.channel}</strong><p>{item.goal}</p><h4>动作</h4>{item.actions?.map(x => <small key={x}>· {x}</small>)}<h4>自动化</h4>{item.automation?.map(x => <small key={x}>· {x}</small>)}<em>{item.success_metric}</em></div>)}</div>
-          <div className="splitGrid"><div><h4>监听词</h4>{leadPlan.listening_keywords?.map(x => <p key={x}>· {x}</p>)}</div><div><h4>触发内容</h4>{leadPlan.content_triggers?.map(x => <p key={x}>· {x}</p>)}</div><div><h4>每日自动任务</h4>{leadPlan.daily_automation_tasks?.map(x => <p key={x}>· {x}</p>)}</div></div>
-          <div className="splitGrid"><div><h4>自动回复</h4>{leadPlan.reply_templates?.map(x => <p key={x}>· {x}</p>)}</div><div><h4>私域承接</h4>{leadPlan.private_domain_sop?.map(x => <p key={x}>· {x}</p>)}</div><div><h4>下一步</h4>{leadPlan.next_actions?.map(x => <p key={x}>· {x}</p>)}</div></div>
-        </div>}
+
+        <div className="accountCleanupPanel">
+          <div className="cleanupHead">
+            <div>
+              <Pill tone="orange">账号清理建议</Pill>
+              <h3>建议删除 / 暂停采集账号</h3>
+              <p>AI 会按最近采集结果、成交顾虑价值和内容垂直度判断账号；只把长期无价值账号列为建议删除，不会自动删。</p>
+            </div>
+            <div className="buttonRow mini">
+              <Button busy={busy === '审计博主价值' ? busy : ''} label="生成清理建议" onClick={auditHeatAccountValue} kind="ghost" />
+              <button className="btn dangerGhost" onClick={removeAllSuggestedHeatAccounts}>批量删除建议项</button>
+            </div>
+          </div>
+          {heatAccountAudit ? <>
+            <div className="cleanupStats">
+              <span>保留 <b>{heatAccountAudit.keep?.length || 0}</b></span>
+              <span>观察 <b>{heatAccountAudit.watch?.length || 0}</b></span>
+              <span>建议删除 <b>{cleanupCandidateReviews().length}</b></span>
+            </div>
+            {cleanupCandidateReviews().length === 0 ? <Empty>暂无建议删除账号。watch 账号先保留观察，避免误删。</Empty> : <div className="cleanupList">
+              {cleanupCandidateReviews().slice(0, 1).map((r: any, idx: number) => {
+                const matched = findHeatAccountForReview(r)
+                return <div className="cleanupItem" key={`${r.account_url || r.account_name || idx}`}>
+                  <div><strong>{r.account_name || matched?.name || '未命名账号'}</strong><p>{r.reason || r.next_action || '近期内容没有明显成交价值，建议暂停或删除。'}</p><small>{r.account_url || matched?.url || '无链接'}</small></div>
+                  <div className="cleanupScore"><b>{Number(r.score || 0)}</b><em>{r.decision || 'archive'}</em></div>
+                  <button className="btn dangerGhost" onClick={() => removeSuggestedHeatAccount(r)}>{matched ? '删除账号' : '未匹配'}</button>
+                </div>
+              })}
+              {cleanupCandidateReviews().length > 1 && <details className="cleanupMore"><summary>展开剩余 {cleanupCandidateReviews().length - 1} 个建议</summary>
+                {cleanupCandidateReviews().slice(1).map((r: any, idx: number) => {
+                  const matched = findHeatAccountForReview(r)
+                  return <div className="cleanupItem compact" key={`${r.account_url || r.account_name || idx}-more`}>
+                    <div><strong>{r.account_name || matched?.name || '未命名账号'}</strong><p>{r.reason || r.next_action || '建议暂停采集。'}</p></div>
+                    <div className="cleanupScore"><b>{Number(r.score || 0)}</b><em>{r.decision || 'archive'}</em></div>
+                    <button className="btn dangerGhost" onClick={() => removeSuggestedHeatAccount(r)}>{matched ? '删除账号' : '未匹配'}</button>
+                  </div>
+                })}
+              </details>}
+            </div>}
+          </> : <Empty>还没生成清理建议。先让采集跑一轮，再点“生成清理建议”。</Empty>}
+        </div>
+
+        <div className="radarWorkbenchGrid">
+          <div className="radarTopPanel">
+            <div className="miniHeader">
+              <div><h3>今日重点 Top5</h3><p>按 AI 分数、客户顾虑价值和真实互动排序；archive/reject 不进这里，原因放在滚动报告。</p></div>
+              <Pill tone="blue">只看重点</Pill>
+            </div>
+            <div className="radarTopList">
+              {todayHeatSnapshots.length === 0 && <Empty>暂无入选候选。上方滚动报告会说明每条视频为什么没入选；也可以降低阈值或换更垂直的马来西亚账号。</Empty>}
+              {todayHeatSnapshots.slice(0, 1).map((item, index) => <article className="radarTopItem" key={item.id}>
+                <div className="radarRank">{index + 1}</div>
+                <div className="radarTopBody">
+                  <div className="timelineMeta"><span>{item.platform || '平台'}</span><span>{item.account_name || '未命名账号'}</span><strong>{item.score || 0} 分</strong></div>
+                  <h4>{item.topic || '未命名热点'}</h4>
+                  {!!item.buyer_dimensions?.length && <div className="dimensionChips">{item.buyer_dimensions.map(dim => <em key={dim}>{dim}</em>)}</div>}
+                  <p>{item.intent || item.recommended_action || '等待 AI 判断客户意图。'}</p>
+                  <em>{item.signal || '暂无真实互动指标'}</em>
+                  <div className="timelineActions compactActions">
+                    {item.source_url && <a href={item.source_url} target="_blank" rel="noreferrer">打开原链接</a>}
+                    <button onClick={() => { setVideoIntakeUrl(item.source_url || ''); setLastHandoff('已选中这条热点，可在下方继续做视频理解或 AI 改写。') }}>选中分析</button>
+                    <button onClick={makeHeatRewritePlan}>基于 Top5 改写</button>
+                    <button className="dangerTextBtn" onClick={() => removeHeatItem(item.id)}>删除热点</button>
+                  </div>
+                </div>
+              </article> )}
+              {todayHeatSnapshots.length > 1 && <details className="topMoreDetails">
+                <summary>展开剩余 {todayHeatSnapshots.length - 1} 条候选</summary>
+                {todayHeatSnapshots.slice(1).map((item, restIndex) => { const index = restIndex + 1; return <article className="radarTopItem" key={item.id}>
+                <div className="radarRank">{index + 1}</div>
+                <div className="radarTopBody">
+                  <div className="timelineMeta"><span>{item.platform || '平台'}</span><span>{item.account_name || '未命名账号'}</span><strong>{item.score || 0} 分</strong></div>
+                  <h4>{item.topic || '未命名热点'}</h4>
+                  {!!item.buyer_dimensions?.length && <div className="dimensionChips">{item.buyer_dimensions.map(dim => <em key={dim}>{dim}</em>)}</div>}
+                  <p>{item.intent || item.recommended_action || '等待 AI 判断客户意图。'}</p>
+                  <em>{item.signal || '暂无真实互动指标'}</em>
+                  <div className="timelineActions compactActions">
+                    {item.source_url && <a href={item.source_url} target="_blank" rel="noreferrer">打开原链接</a>}
+                    <button onClick={() => { setVideoIntakeUrl(item.source_url || ''); setLastHandoff('已选中这条热点，可在下方继续做视频理解或 AI 改写。') }}>选中分析</button>
+                    <button onClick={makeHeatRewritePlan}>基于 Top5 改写</button>
+                    <button className="dangerTextBtn" onClick={() => removeHeatItem(item.id)}>删除热点</button>
+                  </div>
+                </div>
+              </article> })}
+              </details>}
+            </div>
+          </div>
+
+          <div className="radarRewriteDock">
+            <div className="miniHeader"><div><h3>AI 热点改写</h3><p>读取 Top5 的标题、账号、链接和互动信号，先判断客户意图，再生成原创角度和脚本。</p></div><Pill tone="purple">热点 → 脚本</Pill></div>
+            {!heatRewrite && <div className="rewriteEmptyState compact"><strong>等待 AI 改写</strong><p>{heatSourceLines.length ? `已锁定热点依据：${shortText(heatSourceLines[0], 96)}` : '有真实热点后，点“AI 读 Top5 并改写”。'}</p><Button busy={busy === 'AI 仿写热度内容' ? busy : ''} label="AI 拆解 Top5" onClick={makeHeatRewritePlan} kind="primary" disabled={!todayHeatSnapshots.length} /></div>}
+            {heatRewrite && <div className="heatRewriteV2 compactRewrite">
+              <div className="targetStrip compact"><div><span>目标人群</span><strong>{heatRewrite.chosen_target}</strong><p>{heatRewrite.target_reason}</p></div><div><span>内容目标</span><strong>{heatRewrite.content_objective}</strong><p>{heatRewrite.primary_intent}</p></div><div><span>承接资料</span><strong>{heatRewrite.lead_magnet}</strong><p>{heatRewrite.rewrite_strategy?.slice(0, 2).join(' / ')}</p></div></div>
+              <div className="rewriteVariantGrid v2">{heatRewrite.variants?.slice(0, 3).map((v, i) => <div className="rewriteVariantCard" key={`${v.title}-${i}`}>
+                <Pill tone={i === 0 ? 'green' : 'purple'}>{i === 0 ? '推荐主推' : `备选 ${i + 1}`}</Pill>
+                <strong>{v.title}</strong><p>{v.hook}</p><small>来源：{v.source_topic}</small><div className="scriptPreview">{v.script}</div>
+                <div className="miniActions"><button onClick={() => applyHeatRewriteVariant(v)}>同步到文案</button><button onClick={() => { applyHeatRewriteVariant(v); setActive('copy') }}>进入文案生产</button></div>
+              </div>)}</div>
+            </div>}
+          </div>
+        </div>
+
+        <details className="radarIngestDock">
+          <summary><strong>采集 / 视频分析 / 备用导入</strong><span>原「采集接入」已合并到雷达；云 Worker、OpenClaw、手动真实数据都从这里进入。</span></summary>
+          <div className="radarIngestGrid">
+            <div className="heatPanel videoIngestMini">
+              <div className="miniHeader"><div><h3>具体视频分析</h3><p>粘贴具体视频/笔记链接，后端下载后交给视频理解模型；如果平台限制下载，也会保留标题和链接入库。</p></div></div>
+              <input value={videoIntakeUrl} onChange={e => setVideoIntakeUrl(e.target.value)} placeholder="粘贴具体视频/笔记链接；也可以先点上方某条热点的“选中分析”" />
+              <div className="buttonRow"><Button busy={busy === '下载并分析视频' ? busy : ''} label="下载并分析视频" onClick={analyzeHeatVideoIntake} kind="soft" />{videoIntakeResult && <Pill tone={videoIntakeResult.r2_video_url ? 'green' : 'orange'}>{videoIntakeResult.review?.decision || '待审核'} · {videoIntakeResult.review?.score || 0}分</Pill>}</div>
+            </div>
+            <div className="heatPanel">
+              <div className="miniHeader"><div><h3>备用导入</h3><p>采集器暂不可用时，粘贴真实标题、链接和互动指标，先跑 AI 判断和改写流程。</p></div><Pill tone="orange">备用</Pill></div>
+              <Field label="粘贴竞品内容 / 评论 / 热词"><textarea value={manualHeatText} onChange={e => setManualHeatText(e.target.value)} placeholder="一行一条：标题 + 链接 + 赞/评论/收藏/分享" /></Field>
+              <div className="buttonRow"><button className="btn soft" onClick={importManualHeatData}>导入真实数据</button><button className="btn ghost" onClick={generateDailyHeatRadar}>清理演示缓存</button></div>
+            </div>
+            <div className="heatPanel openClawMini">
+              <div className="miniHeader"><div><h3>OpenClaw / 云 Worker</h3><p>外部采集器每天把结果 POST 到这里。网站只负责入库、评分、R2 留存和 AI 改写。</p></div><Pill tone="purple">接口</Pill></div>
+              <div className="endpointBox"><span>POST</span><code>{API_BASE}/api/heat-radar/openclaw/ingest</code></div>
+              <Field label="接口 Token，可选"><input value={heatAutomationToken} onChange={e => setHeatAutomationToken(e.target.value)} placeholder="网页下发采集可留空；ECS 上传仍由后端校验" /></Field>
+              <div className="buttonRow"><button className="btn soft" onClick={copyOpenClawExample}>复制 JSON 示例</button><button className="btn ghost" onClick={auditHeatAccountValue}>审计账号价值</button></div>
+            </div>
+          </div>
+        </details>
+
+        {heatCrawlerResult && <div className="resultBox heatCrawlerResult slim"><h3>{heatCrawlerResult.analysis?.summary || '真实热度采集完成'}</h3><div className="splitGrid"><div><h4>跟进选题</h4>{(heatCrawlerResult.analysis?.content_angles || []).map((x: string) => <p key={x}>· {x}</p>)}</div><div><h4>客户意图</h4>{(heatCrawlerResult.analysis?.customer_intents || []).map((x: string) => <p key={x}>· {x}</p>)}</div><div><h4>资料承接</h4>{(heatCrawlerResult.analysis?.lead_magnets || []).map((x: string) => <p key={x}>· {x}</p>)}</div></div>{heatCrawlerResult.warnings?.slice(0, 3).map(w => <div className="warn compactWarn" key={w}>{w}</div>)}</div>}
       </section>}
 
-      {active === 'strategy' && <section className="card modulePanel">
-        <div className="sectionHeader"><div><h2>客户定位</h2><p>先把海外置业客户、第二家园需求和私域承接路径保存好，后续采集、文案、监听和投流都会自动读取。</p></div><div className="headerActions"><Button busy={busy === '保存行业档案' ? busy : ''} label="保存行业档案" onClick={saveCustomerProfile} kind="soft" /><Button busy={busy === '生成获客自动化作战图' ? busy : ''} label="生成获客作战图" onClick={makeLeadPlan} kind="ghost" /></div></div>
-        <div className="grid2">
-          <Field label="行业"><input value={industry} onChange={e => setIndustry(e.target.value)} /></Field>
-          <Field label="目标客户"><input value={audience} onChange={e => setAudience(e.target.value)} /></Field>
-          <Field label="获客地域 / 人群"><input value={leadRegion} onChange={e => setLeadRegion(e.target.value)} /></Field>
-          <Field label="转化目标"><input value={conversionGoal} onChange={e => setConversionGoal(e.target.value)} /></Field>
+      {mainTab === 'leads' && <LeadInbox />}
+
+      {moduleVisible('strategy') && active === 'strategy' && <section className="card modulePanel industryProfilePanel">
+        <div className="sectionHeader"><div><h2>行业获客档案</h2><p>把业务定位、监听词、目标客群、资料包和承接钩子沉淀成长期档案。后面截流雷达、文案、图文、剪辑、私信回复都会自动读取。</p></div><div className="headerActions"><Button label="套用马来西亚房产模板" onClick={applyMalaysiaPreset} kind="ghost" /><Button busy={busy === '保存行业档案' ? busy : ''} label="保存行业档案" onClick={saveCustomerProfile} kind="soft" /><Button busy={busy === '生成获客自动化作战图' ? busy : ''} label="生成获客作战图" onClick={makeLeadPlan} kind="primary" /></div></div>
+        <div className="profileHero">
+          <div><span>业务定位</span><strong>{businessPositioning || industry}</strong><p>{conversionGoal}</p></div>
+          <div><span>私域承接</span><strong>{reportDelivery}</strong><p>{privateDomainAssets.split(/\n+/)[0] || '资料包/报告/清单'}</p></div>
         </div>
-        <Field label="核心卖点"><textarea value={sellingPoints} onChange={e => setSellingPoints(e.target.value)} /></Field>
-        <Field label="视频风格"><input value={style} onChange={e => setStyle(e.target.value)} /></Field>
+        <div className="profileGrid">
+          <Field label="行业/赛道"><input value={industry} onChange={e => setIndustry(e.target.value)} /></Field>
+          <Field label="业务定位"><input value={businessPositioning} onChange={e => setBusinessPositioning(e.target.value)} placeholder="例如：中国人在马来西亚房产置业" /></Field>
+          <Field label="目标客户"><textarea value={audience} onChange={e => setAudience(e.target.value)} /></Field>
+          <Field label="获客地域 / 人群"><textarea value={leadRegion} onChange={e => setLeadRegion(e.target.value)} /></Field>
+          <Field label="转化目标"><input value={conversionGoal} onChange={e => setConversionGoal(e.target.value)} /></Field>
+          <Field label="内容风格"><input value={style} onChange={e => setStyle(e.target.value)} /></Field>
+        </div>
+        <div className="profileSection"><h3>监听词与客户分层</h3><div className="grid2"><Field label="监听关键词库" hint="用逗号或换行分隔，同行采集、雷达和选题会读取。"><textarea value={trendKeywords} onChange={e => setTrendKeywords(e.target.value)} /></Field><Field label="目标客户分层" hint="把不同人群拆开，生成内容时会按人群出不同钩子。"><textarea value={customerSegments} onChange={e => setCustomerSegments(e.target.value)} /></Field></div></div>
+        <div className="profileSection"><h3>私域承接与内容栏目</h3><div className="grid2"><Field label="私域承接物 / 报告清单"><textarea value={privateDomainAssets} onChange={e => setPrivateDomainAssets(e.target.value)} /></Field><Field label="内容栏目 / 选题方向"><textarea value={contentPillars} onChange={e => setContentPillars(e.target.value)} /></Field></div></div>
+        <div className="profileSection"><h3>内容承接规则</h3><Field label="口播/拍摄风格要求（给内容生产用）"><textarea value={shootingBrief} onChange={e => setShootingBrief(e.target.value)} /></Field><Field label="报告/微信承接方式"><input value={reportDelivery} onChange={e => setReportDelivery(e.target.value)} /></Field></div>
+        <div className="profileQuickActions">
+          <button onClick={() => setActive('copy')}>用档案生成视频脚本</button>
+          <button onClick={generateDirectCopy}>生成短视频文案</button>
+          <button onClick={makeGraphicPost}>生成图文引流包</button>
+          <button onClick={makeShootingPlan}>生成拍摄方案</button>
+        </div>
         <div className="memoryBox"><strong>AI 学习状态：{memoryStatus}</strong><p>{learningSummary}</p><button onClick={() => reloadMemoryContext(true)}>刷新数据库记忆</button></div>
         {ad && <div className="resultBox"><h3>{ad.decision}</h3><p>建议预算：{ad.suggested_budget} · 置信度：{Math.round(ad.confidence * 100)}%</p><div className="chips">{ad.target_audience?.map(x => <Pill key={x}>{x}</Pill>)}</div>{ad.optimization_tips?.map(x => <p key={x}>· {x}</p>)}</div>}
       </section>}
 
-      {active === 'trend' && <section className="card modulePanel">
-        <div className="sectionHeader"><div><h2>行业爆点与选题雷达</h2><p>根据行业、目标客户、同行账号和采集内容，生成可拍选题、监控关键词和下一步动作。</p></div><Button busy={busy === '生成行业爆点雷达' ? busy : ''} label="自动采集/生成行业雷达" onClick={makeTrendRadar} /></div>
+      {moduleVisible('trend') && active === 'trend' && <section className="card modulePanel">
+        <div className="sectionHeader"><div><h2>行业爆点与截流雷达</h2><p>根据搜索词、评论、同行账号和采集内容，生成可截流的机会、监控关键词和下一步动作。</p></div><Button busy={busy === '生成行业爆点雷达' ? busy : ''} label="自动采集/生成行业雷达" onClick={makeTrendRadar} /></div>
         <div className="grid2">
           <Field label="监控关键词"><input value={trendKeywords} onChange={e => setTrendKeywords(e.target.value)} placeholder="海外房产,第二家园,海外置业,子女教育,养老度假" /></Field>
           <Field label="同行备注汇总"><textarea value={`${competitorNotes}${extract?.summary ? '\n' + extract.summary : ''}`} readOnly placeholder="竞品账号库和同行采集结果会自动汇总到这里" /></Field>
@@ -1575,82 +3342,60 @@ ${manualText || ''}`.trim()
         {trendRadar ? <div className="resultBox"><h3>{trendRadar.summary}</h3><div className="trendGrid">{trendRadar.hot_topics?.map(item => <div className="trendCard" key={item.title}><div className="heat"><span>{item.heat}</span><em>热度</em></div><strong>{item.title}</strong><p>{item.reason}</p><small>角度：{item.angle}</small><small>钩子：{item.suggested_hook}</small>{item.risk && <div className="warn">{item.risk}</div>}</div>)}</div><div className="splitGrid"><div><h4>内容角度</h4>{trendRadar.content_angles?.map(x => <p key={x}>· {x}</p>)}</div><div><h4>拍摄建议</h4>{trendRadar.shooting_suggestions?.map(x => <p key={x}>· {x}</p>)}</div><div><h4>监控词</h4><div className="chips">{trendRadar.monitor_keywords?.map(x => <Pill key={x}>{x}</Pill>)}</div></div></div></div> : <Empty>保存客户定位、账号库和采集结果后，系统会自动读取数据库生成行业雷达。</Empty>}
       </section>}
 
-      {active === 'competitor' && <section className="card modulePanel">
-        <div className="sectionHeader"><div><h2>竞品账号池</h2><p>这里不是手工记录本，而是自动采集的账号池。系统会按账号库顺序抓近期视频、归类同行内容、学习钩子结构。</p></div><div className="headerActions"><Button label="刷新账号库" onClick={() => reloadMemoryContext()} kind="ghost" /><Button busy={busy === '创建 ECS 采集命令' ? busy : ''} label="采集全部账号" onClick={() => runAutoCollectAndLearn(Math.max(1, readyCompetitorCount || 3))} kind="primary" /><Button busy={busy === '保存竞品账号' ? busy : ''} label="加入账号库" onClick={addCompetitor} kind="soft" /></div></div>
-        <div className="autoStatsGrid">
-          <div><span>账号池</span><strong>{readyCompetitorCount}</strong><em>{readyCompetitorCount ? '可直接自动采集' : '先导入同行账号'}</em></div>
-          <div><span>已采集内容</span><strong>{(memoryContext?.videos || []).length}</strong><em>自动归入同行内容库</em></div>
-          <div><span>worker 状态</span><strong>{collectorStatusText}</strong><em>{collectorLogLine}</em></div>
+      {moduleVisible('competitor') && active === 'competitor' && <section className="card modulePanel accountLibraryPanel">
+        <div className="sectionHeader"><div><h2>账号库</h2><p>固定监控的博主/同行账号单独管理。热度雷达只看采集结果，这里只管账号、平台、标签和采集备注。</p></div><div className="headerActions"><Button label="刷新账号库" onClick={() => reloadHeatRadarData()} kind="ghost" /><Button busy={busy === '保存热度账号' ? busy : ''} label="保存账号" onClick={addHeatAccount} kind="soft" /></div></div>
+        <div className="accountLibraryGrid">
+          <div className="accountEditorCard">
+            <div className="grid2"><Field label="账号名称"><input value={heatDraft.name} onChange={e => setHeatDraft({ ...heatDraft, name: e.target.value })} placeholder="例如：Justin陈皆廷" /></Field><Field label="平台"><select value={heatDraft.platform} onChange={e => setHeatDraft({ ...heatDraft, platform: e.target.value })}><option>抖音</option><option>小红书</option><option>视频号</option><option>快手</option><option>其他</option></select></Field></div>
+            <Field label="主页/视频链接"><input value={heatDraft.url} onChange={e => setHeatDraft({ ...heatDraft, url: e.target.value })} placeholder="账号主页或重点视频链接" /></Field>
+            <Field label="监控标签"><input value={heatDraft.tags} onChange={e => setHeatDraft({ ...heatDraft, tags: e.target.value })} placeholder="马来西亚房产,第二家园,生活方式" /></Field>
+            <Field label="备注 / 采集策略"><textarea value={heatDraft.notes} onChange={e => setHeatDraft({ ...heatDraft, notes: e.target.value })} placeholder="例如：优先看置顶视频、近 3 天视频；生活类内容也可作为买房客户顾虑素材。" /></Field>
+            <div className="syncStatusBar"><span>API：{API_BASE}</span><span>Supabase：{health?.memory_enabled ? '已连接' : '未连接'}</span><span>Workspace：{health?.workspace_id || 'default'}</span><span>R2：{health?.r2_enabled ? '已连接' : '未连接'}</span></div>
+          </div>
+          <div className="accountListCard">
+            <div className="heatAccountFilters"><input value={heatAccountSearch} onChange={e => setHeatAccountSearch(e.target.value)} placeholder="搜索账号名 / 标签 / 链接" /><select value={heatPlatformFilter} onChange={e => setHeatPlatformFilter(e.target.value)}><option value="all">全部平台</option><option value="抖音">抖音</option><option value="小红书">小红书</option><option value="视频号">视频号</option><option value="快手">快手</option><option value="其他">其他</option></select></div>
+            <div className="heatAccountList compact">{filteredHeatAccounts.length === 0 && <Empty>暂无账号。先在左侧添加账号，保存后会进入统一账号库。</Empty>}{filteredHeatAccounts.map(acc => { const open = Boolean(expandedHeatAccounts[acc.id]); const relatedHeat = heatSnapshots.filter(item => { const a = `${item.account_id || ''} ${item.account_name || ''}`.toLowerCase(); const n = `${acc.id || ''} ${acc.name || ''}`.toLowerCase(); return Boolean(acc.name && a.includes(acc.name.toLowerCase())) || Boolean(acc.id && a.includes(acc.id.toLowerCase())) || Boolean(acc.url && String(item.source_url || '').includes(acc.url)); }).slice(0, 8); return <div className="heatAccountRow" key={acc.id}><button className="heatAccountRowHead" onClick={() => setExpandedHeatAccounts(prev => ({ ...prev, [acc.id]: !open }))}><strong>{acc.name || '未命名账号'}</strong><span>{acc.platform}</span><em>{acc.tags || '未设置标签'}</em><small>{relatedHeat.length ? `${relatedHeat.length} 条热点` : '无热点'}</small><b>{open ? '收起' : '展开'}</b></button>{open && <div className="heatAccountRowBody"><p>{acc.notes || '暂无备注'}</p><small>{acc.url || '未填链接'}</small><div className="accountHeatMiniList">{relatedHeat.length === 0 ? <Empty>这个账号还没有对应热点；采集完成后会显示在这里。</Empty> : relatedHeat.map((item, idx) => <div className="accountHeatMini" key={item.id}><span>{idx + 1}</span><div><strong>{item.topic}</strong><p>{item.signal || item.intent}</p></div><em>{item.score || 0}分</em></div>)}</div><div className="miniActions"><button onClick={() => { setVideoIntakeUrl(acc.url); setActive('lead') }}>去雷达分析</button><button onClick={() => toggleHeatAccount(acc.id)}>{acc.pinned ? '取消置顶' : '置顶'}</button><button onClick={() => removeHeatAccount(acc.id)}>删除</button></div></div>}</div> })}</div>
+          </div>
         </div>
-        <div className="v1034Panel"><div className="sectionHeader compact"><div><h3>账号库导入 + DeepSeek 分类</h3><p>导入后写入 SQLite，并按房产销售、租房出租、MM2H、教育留学、生活配套、装修交付、区域号、短视频教学/钩子教学分类；不能判断进待人工确认。</p></div><Button busy={busy === '导入账号库' || busy === 'DeepSeek/规则分类账号库' ? busy : ''} label="导入并分类" onClick={importAndClassifyAccounts} kind="soft" /></div><Field label="账号库批量导入，每行一个账号/主页/备注"><textarea value={accountImportText} onChange={e => setAccountImportText(e.target.value)} placeholder="天诺老吴 https://... 吉隆坡房产
-某某租房号 https://... 新山租房" /></Field>{accountLibraryResult && <div className="miniResult"><strong>导入 {accountLibraryResult.imported?.count || 0} 个 / 分类 {accountLibraryResult.classified?.classified_count || 0} 个</strong><pre>{JSON.stringify(accountLibraryResult.classified || accountLibraryResult, null, 2).slice(0, 1200)}</pre></div>}</div>
-        <details className="fallbackPanel" open={competitors.length === 0}>
-          <summary>手动补充账号（账号库为空或需要加新同行时使用）</summary>
-          <div className="grid4"><Field label="账号名称"><input value={competitorDraft.name} onChange={e => setCompetitorDraft({ ...competitorDraft, name: e.target.value })} placeholder="例如：天诺老吴" /></Field><Field label="平台"><select value={competitorDraft.platform} onChange={e => setCompetitorDraft({ ...competitorDraft, platform: e.target.value })}><option value="douyin">抖音</option><option value="shipinhao">视频号</option><option value="kuaishou">快手</option><option value="xiaohongshu">小红书</option></select></Field><Field label="主页/视频链接"><input value={competitorDraft.url} onChange={e => setCompetitorDraft({ ...competitorDraft, url: e.target.value })} placeholder="账号主页或爆款链接" /></Field><Field label="账号定位"><input value={competitorDraft.positioning} onChange={e => setCompetitorDraft({ ...competitorDraft, positioning: e.target.value })} placeholder="同城获客/投流/电商创业" /></Field></div>
-          <Field label="爆款特点 / 观察备注"><textarea value={competitorDraft.notes} onChange={e => setCompetitorDraft({ ...competitorDraft, notes: e.target.value })} placeholder="常用钩子、客户痛点、封面风格、评论区反馈、发布时间等" /></Field>
-        </details>
-        <div className="competitorList">{competitors.length === 0 && <Empty>账号池为空。导入账号后，系统会自动按账号库采集，不需要每条视频手填。</Empty>}{competitors.map((c, i) => <div className="competitorCard autoCompetitorCard" key={`${c.url || c.name}-${i}`}><div><strong>{c.name || '未命名账号'}</strong><Pill tone="purple">{c.platform}</Pill><Pill tone={c.url ? 'green' : 'orange'}>{c.url ? '可采集' : '缺链接'}</Pill></div><p>{c.positioning || '未填写定位'}</p><small>{c.url || '暂无主页/视频链接'}</small><em>{c.notes || '系统会在采集后自动补充钩子、评论需求和爆款结构。'}</em><div className="buttonRow mini"><Button busy={busy === '创建 ECS 采集命令' ? busy : ''} label="采集此账号" onClick={() => collectSingleCompetitor(c)} kind="soft" disabled={!Boolean(c.url || c.name)} /><button onClick={() => setCompetitors(prev => prev.filter((_, idx) => idx !== i))}>删除</button></div></div>)}</div>
       </section>}
 
-      {active === 'collector' && <section className="card modulePanel">
-        <div className="sectionHeader"><div><h2>自动化同行采集中心</h2><p>优先读取竞品账号库自动跑，不再要求你手工粘每条链接。采集后会归入同行内容库，再学习钩子公式、评论需求和转化结构。</p></div><div className="headerActions"><Button busy={busy === '创建 ECS 采集命令' ? busy : ''} label="一键采集全部账号" onClick={() => runAutoCollectAndLearn(Math.max(1, readyCompetitorCount || 3))} /><Button busy={busy === '自动采集/学习同行打法' ? busy : ''} label="学习已采集内容" onClick={runAutoAgent} kind="soft" /><Button label="刷新日志" onClick={() => { reloadCollectorProgress(); reloadMemoryContext(); }} kind="ghost" /></div></div>
-        <div className="autoStatsGrid collectorTopStats">
-          <div><span>账号库</span><strong>{readyCompetitorCount}</strong><em>{readyCompetitorCount ? '已准备，可自动采集' : '为空，请先加同行账号'}</em></div>
-          <div><span>采集器</span><strong>{collectorStatus?.enabled ? '已启用' : '待确认'}</strong><em>{collectorStatus?.cookie_exists ? 'Cookies 已配置' : '未配置 Cookies，可先跑公开内容'}</em></div>
-          <div><span>当前任务</span><strong>{collectorStatusText}</strong><em>{safeText(collectorRun?.stage, '等待 worker')}</em></div>
-          <div><span>同行内容库</span><strong>{(memoryContext?.videos || []).length}</strong><em>采集后自动沉淀</em></div>
+      {moduleVisible('collector') && active === 'collector' && <section className="card modulePanel">
+        <div className="sectionHeader"><div><h2>实时采集 Log</h2><p>这里不再做“状态卡片”，直接显示 ECS command_worker 回传的采集、AI 判断、入库和报错日志。状态统计已并入热度雷达。</p></div><div className="headerActions"><Button label="刷新日志" onClick={() => reloadCollectorProgress()} kind="ghost" /><Button busy={busy === '采集/拆解同行内容' ? busy : ''} label="手动采集链接" onClick={collectCompetitor} kind="soft" /></div></div>
+        <div className="grid2">
+          <Field label="抖音分享口令 / 视频链接"><textarea value={sourceUrl} onChange={e => setSourceUrl(e.target.value)} placeholder="直接粘贴：1.58 ... https://v.douyin.com/... 复制此链接..." /></Field>
+          <Field label="手动粘贴竞品文案 / 豆包 App 识别稿"><textarea value={manualText} onChange={e => setManualText(e.target.value)} placeholder="如果已经有真实口播稿，粘这里。" /></Field>
         </div>
-
-        <div className="autoCollectorPanel">
-          <div className="autoCollectorCopy"><h3>全自动流程</h3><p>系统会按账号库顺序打开同行账号，抓最近视频、点赞/评论等指标，同行内容归为同行，只学习钩子、节奏、评论需求和转化结构，不复制原文。</p><small>{collectorLogLine}</small></div>
-          <div className="autoCollectorControls">
-            <Field label="本次采集账号数"><input type="number" min="1" max="120" value={collectorAccountLimit} onChange={e => setCollectorAccountLimit(e.target.value)} /></Field>
-            <Field label="单独采集某个账号，可选"><input value={collectorSingleAccount} onChange={e => setCollectorSingleAccount(e.target.value)} placeholder="留空则按账号库顺序" /></Field>
-            <Button busy={busy === '创建 ECS 采集命令' ? busy : ''} label="下发采集任务" onClick={() => createCollectorCommand()} kind="primary" disabled={!readyCompetitorCount && !collectorSingleAccount.trim()} />
+        <div className="collectorTerminal">
+          <div className="collectorTerminalHead">
+            <span>RUN</span><strong>{collectorProgress?.run?.status || 'waiting'}</strong><em>{collectorProgress?.run?.run_id || '暂无 run_id'}</em>
           </div>
+          <div className="collectorTerminalBody">
+            {collectorEventsForReport.length === 0 ? <pre>[waiting] 暂无实时日志。ECS Worker 领取命令后会回传：打开账号、抓取视频、AI 判断、入库、失败原因。</pre> : collectorEventsForReport.map((ev, index) => <pre key={ev.id || `${ev.created_at}_${index}`} className={ev.level === 'error' ? 'error' : ''}>[{safeText(ev.created_at, '--').slice(11, 19) || '--'}] {formatCollectorEventLine(ev, index)}</pre>)}
+          </div>
+          <div className="collectorTerminalFoot"><span>{collectorReportLine}</span><button onClick={() => reloadCollectorProgress()}>刷新</button><button onClick={() => setShowCookiePanel(v => !v)}>{showCookiePanel ? '收起 Cookies' : 'Cookies'}</button></div>
         </div>
-
-        <div className="collectorLogPanel">
-          <div className="miniHeader"><div><h3>实时采集日志</h3><p>worker 领取任务后，这里会自动刷新打开账号、抓视频、AI 判断、入库和失败原因。</p></div><Pill tone={collectorEvents.length ? 'green' : 'orange'}>{collectorEvents.length ? `${collectorEvents.length} 条日志` : '等待日志'}</Pill></div>
-          <div className="collectorTerminalBody">{collectorEvents.length === 0 ? <pre>[waiting] 等待 worker 领取任务。请确认 ECS 上 command_worker.py 正在运行。</pre> : collectorEvents.slice(0, 18).map((ev, index) => <pre key={ev.id || `${ev.created_at}_${index}`} className={ev.level === 'error' ? 'error' : ''}>[{safeText(ev.created_at, '--').slice(11, 19) || '--'}] {formatCollectorEventLine(ev, index)}</pre>)}</div>
-        </div>
-
-        <details className="fallbackPanel">
-          <summary>备用导入：采不到时再手动粘口令 / 视频链接 / 文案</summary>
-          <div className="sectionHeader compact"><div><h3>手动备用采集</h3><p>只在账号库自动采集失败时使用。正常情况优先让系统从账号库跑。</p></div><Button busy={busy === '采集/拆解同行内容' ? busy : ''} label="手动采集/拆解" onClick={collectCompetitor} kind="soft" /></div>
-          <div className="grid2">
-            <Field label="抖音分享口令 / 视频链接"><textarea value={sourceUrl} onChange={e => setSourceUrl(e.target.value)} placeholder="直接粘贴：1.58 ... https://v.douyin.com/... 复制此链接..." /></Field>
-            <Field label="手动粘贴竞品文案 / 豆包 App 识别稿"><textarea value={manualText} onChange={e => setManualText(e.target.value)} placeholder="如果已经有真实口播稿，粘这里。" /></Field>
+        <details className="collectorTools" open={false}>
+          <summary>展开：手动采集链接 / 自动学习设置</summary>
+          <div className="agentPanel compactTools">
+            <div className="sectionHeader compact"><div><h3>自动学习同行打法</h3><p>读取账号库和链接，沉淀钩子、节奏和承接方式，不复制原文。</p></div><div className="buttonRow mini"><Button label="刷新智能体" onClick={() => reloadAgentStatus()} kind="ghost" /><Button busy={busy === '自动采集/学习同行打法' ? busy : ''} label="立即跑一轮" onClick={runAutoAgent} kind="soft" /></div></div>
+            <div className="grid2">
+              <Field label="种子链接（可选，一行一个）" hint="可以填某个博主的主页/爆款视频链接；空着时会自动读取竞品账号库 URL。"><textarea value={agentSeedLinks} onChange={e => setAgentSeedLinks(e.target.value)} placeholder="https://v.douyin.com/...
+https://www.douyin.com/user/..." /></Field>
+              <Field label="学习目标" hint="强调学习打法，不要复制文案。"><textarea value={agentLearnGoal} onChange={e => setAgentLearnGoal(e.target.value)} /></Field>
+            </div>
+            <div className="agentStats">
+              <Pill tone={agentStatus?.enabled ? 'green' : 'orange'}>{agentStatus?.enabled ? '后台定时已启用' : '后台定时未启用'}</Pill>
+              <Pill>竞品账号 {agentStatus?.competitors_count ?? competitors.length}</Pill>
+              <Pill tone={agentStatus?.memory_enabled ? 'green' : 'orange'}>{agentStatus?.memory_enabled ? 'Supabase 记忆库' : '本地记忆'}</Pill>
+              <Pill>每轮最多 {agentStatus?.run_limit ?? 3} 条</Pill>
+            </div>
+            {agentResult && <div className="resultBox"><h3>{agentResult.learning?.summary || '自动学习完成'}</h3><div className="splitGrid"><div><h4>学到的方法</h4>{(agentResult.learning?.creator_methods || []).map((x: string) => <p key={x}>· {x}</p>)}</div><div><h4>钩子公式</h4>{(agentResult.learning?.hook_formulas || []).map((x: any, i: number) => <p key={i}>· {x.name || '公式'}：{x.template || x.logic || JSON.stringify(x)}</p>)}</div><div><h4>迁移规则</h4>{(agentResult.learning?.transfer_rules || []).map((x: string) => <p key={x}>· {x}</p>)}</div></div>{agentResult.warnings?.slice(0, 6).map(w => <div className="warn" key={w}>{w}</div>)}</div>}
           </div>
         </details>
-
-        <div className="collectorAssist">
-          <div>
-            <strong>视频采集增强</strong>
-            <p>{collectorStatus?.hint || '正在读取采集器状态...'}</p>
-            <small>状态：{collectorStatus?.cookie_exists ? '已配置登录态 Cookies' : '未配置 Cookies'} · 采集器：{collectorStatus?.enabled ? '已启用' : '未启用'}</small>
-          </div>
-          <div className="buttonRow mini">
-            <Button label="刷新采集状态" onClick={() => reloadCollectorStatus()} kind="ghost" />
-            <Button label={showCookiePanel ? '收起 Cookies' : '上传 Cookies'} onClick={() => setShowCookiePanel(v => !v)} kind="soft" />
-          </div>
-        </div>
-
-        <div className="agentPanel">
-          <div className="sectionHeader compact"><div><h3>自动学习钩子智能体</h3><p>采集完成后，它会读取同行内容库，输出钩子公式、情绪推进、镜头节奏、评论需求和迁移规则。</p></div><div className="buttonRow mini"><Button label="刷新智能体" onClick={() => reloadAgentStatus()} kind="ghost" /><Button busy={busy === '自动采集/学习同行打法' ? busy : ''} label="立即学习已采集内容" onClick={runAutoAgent} kind="soft" /></div></div>
-          <Field label="学习目标（默认即可）" hint="强调学习打法，不复制文案。"><textarea value={agentLearnGoal} onChange={e => setAgentLearnGoal(e.target.value)} /></Field>
-          <div className="agentStats">
-            <Pill tone={agentStatus?.enabled ? 'green' : 'orange'}>{agentStatus?.enabled ? '后台定时已启用' : '后台定时未启用'}</Pill>
-            <Pill>竞品账号 {agentStatus?.competitors_count ?? competitors.length}</Pill>
-            <Pill tone={agentStatus?.memory_enabled ? 'green' : 'orange'}>{agentStatus?.memory_enabled ? 'Supabase 记忆库' : '本地记忆'}</Pill>
-            <Pill>每轮最多 {agentStatus?.run_limit ?? 3} 条</Pill>
-          </div>
-          {agentResult && <div className="resultBox"><h3>{agentResult.learning?.summary || '自动学习完成'}</h3><div className="splitGrid"><div><h4>学到的方法</h4>{(agentResult.learning?.creator_methods || []).map((x: string) => <p key={x}>· {x}</p>)}</div><div><h4>钩子公式</h4>{(agentResult.learning?.hook_formulas || []).map((x: any, i: number) => <p key={i}>· {x.name || '公式'}：{x.template || x.logic || JSON.stringify(x)}</p>)}</div><div><h4>迁移规则</h4>{(agentResult.learning?.transfer_rules || []).map((x: string) => <p key={x}>· {x}</p>)}</div></div>{agentResult.warnings?.slice(0, 6).map(w => <div className="warn" key={w}>{w}</div>)}</div>}
-        </div>
         {showCookiePanel && <div className="cookiePanel">
           <h4>上传 douyin_cookies.txt</h4>
           <p>遇到 “Fresh cookies needed” 时，需要导出你自己浏览器里的抖音 cookies。只用于你的后端采集公开可访问内容，不会提交到前端展示。</p>
-          <textarea value={collectorCookieText} onChange={e => setCollectorCookieText(e.target.value)} placeholder={"# Netscape HTTP Cookie File\n.douyin.com\tTRUE\t/\tTRUE\t..."} />
+          <textarea value={collectorCookieText} onChange={e => setCollectorCookieText(e.target.value)} placeholder="# Netscape HTTP Cookie File\n.douyin.com\tTRUE\t/\tTRUE\t..." />
           <div className="buttonRow">
             <Button busy={busy === '上传抖音 Cookies' ? busy : ''} label="保存 Cookies 到后端" onClick={saveCollectorCookies} disabled={!collectorCookieText.trim()} />
             <Button label="取消" onClick={() => setShowCookiePanel(false)} kind="ghost" />
@@ -1666,43 +3411,55 @@ ${manualText || ''}`.trim()
         <div className="memoryList"><h3>自动学习到的博主打法</h3>{(memoryContext?.events || []).filter((e: any) => e.event_type === 'auto_creator_learning').slice(0, 5).map((e: any) => <div className="memoryItem" key={e.id || e.created_at}><strong>{e.payload?.learning?.summary || e.title || '自动学习记录'}</strong><p>{(e.payload?.learning?.creator_methods || []).slice(0, 3).join('；')}</p><small>只学习结构方法，不照抄文案 · {e.created_at}</small></div>)}{!(memoryContext?.events || []).filter((e: any) => e.event_type === 'auto_creator_learning').length && <Empty>自动智能体跑过后，会把钩子公式、情绪推进和迁移规则沉淀到这里。</Empty>}</div>
       </section>}
 
-
-      {active === 'copy' && <section className="card modulePanel">
-        <div className="sectionHeader"><div><h2>第二步：文案生产</h2><p>文案不再手填时长，系统会按已选素材和最终配音自动决定长度。这里专注改标题、开头、口播稿和发布简介。</p></div></div>
-        <div className="grid4"><Field label="素材状态"><input value={selectedMaterialIds.length ? `已选 ${selectedMaterialIds.length} 个素材` : '未选素材，建议先去素材选择'} readOnly /></Field><Field label="标题字数方向"><input value="短、狠、直给" readOnly /></Field><Field label="开头策略"><input value="痛点/反差/警告/结果" readOnly /></Field><Field label="当前风险"><input value={matchedBadWords.length ? `${matchedBadWords.length} 个敏感词` : '暂无明显风险'} readOnly /></Field></div>
-        <div className="buttonRow"><Button busy={busy === '原创改写' ? busy : ''} label="第二步：仿写改写" onClick={rewrite} /><Button busy={busy === '生成文案' ? busy : ''} label="直接生成新文案" onClick={generateDirectCopy} kind="ghost" /><Button busy={busy === '文案细改' ? busy : ''} label="细改/优化文案" onClick={refineCopy} kind="soft" disabled={!currentScript} /><Button label="把当前文案放进知识库" onClick={() => openKnowledgeSave('手动保存当前文案', copy)} kind="ghost" disabled={!currentScript} /><Button label="继续去配音分段" onClick={() => setActive('voice')} kind="soft" disabled={!currentScript} /></div>
-        <div className="flowSource"><strong>自动带入来源</strong><span>客户定位：{industry} / {audience}</span><span>同行采集：{extract?.summary ? shortText(extract.summary) : '暂无'}</span><span>数据库记忆：{memoryContext?.memory_enabled ? 'Supabase 已启用' : '本地调试记忆'}</span></div>
-        <div className="copyEditor"><Field label="标题"><input value={copy.title} onChange={e => setCopy({ ...copy, title: e.target.value })} /></Field><Field label="黄金三秒钩子"><textarea value={copy.hook} onChange={e => setCopy({ ...copy, hook: e.target.value })} /></Field><Field label="完整口播稿"><textarea className="scriptArea" value={copy.script} onChange={e => setCopy({ ...copy, script: e.target.value })} placeholder="这里可以精修口播稿；选中文本后点“加入分段”。" /></Field><Field label="发布简介"><textarea value={copy.description} onChange={e => setCopy({ ...copy, description: e.target.value })} /></Field><Field label="细改要求"><input value={refineInstruction} onChange={e => setRefineInstruction(e.target.value)} /></Field></div>
+      {moduleVisible('copy') && active === 'copy' && <section className="card modulePanel copyFirstPanel">
+        <div className="sectionHeader"><div><h2>第一步：路线 / 完整文案 / 配音分段</h2><p>先一次性生成完整脚本和配音分段；要数字人时，只把第 1 段给数字人，后面继续接素材混剪。</p></div><div className="headerActions"><Button busy={busy === '一次生成完整文案和配音分段' ? busy : ''} label="一次生成完整脚本+配音分段" onClick={generateFullCopyAndVoiceDraft} kind="primary" /><Button busy={busy === '按素材时长生成旁白稿' ? busy : ''} label="按素材时长重写完整旁白" onClick={generateScriptFromSelectedAssets} kind="soft" /></div></div>
+        <div className="productionRouteGrid">
+          {[
+            ['digital_human','数字人开场','先生成 5-15 秒真人模板口播，自动入素材库做片头'],
+            ['mixed_assets','素材混剪','楼盘/马来西亚风光/周边配套按时长生成旁白'],
+            ['self_shoot','真人拍摄','自己拍摄时生成提词器、镜头和补拍清单'],
+            ['graphic_post','图文引流','适合小红书/朋友圈收藏型内容']
+          ].map(([value,title,desc]) => <button key={value} className={oneClickOutputType === value ? 'selected' : ''} onClick={() => setOneClickOutputType(value)}><strong>{title}</strong><span>{desc}</span></button>)}
+        </div>
+        <div className="grid4"><Field label="当前生产方式"><input value={productionRouteLabel} readOnly /></Field><Field label="素材总时长"><input value={selectedAssetEstimatedSeconds ? `约 ${selectedAssetEstimatedSeconds} 秒 / ${selectedMaterialIds.length} 个素材` : '未选素材，可后面再选'} readOnly /></Field><Field label="开头策略"><input value="痛点/反差/警告/结果" readOnly /></Field><Field label="当前风险"><input value={matchedBadWords.length ? `${matchedBadWords.length} 个敏感词` : '暂无明显风险'} readOnly /></Field></div>
+        <div className="buttonRow"><Button busy={busy === '一次生成完整文案和配音分段' ? busy : ''} label="一次生成完整脚本+配音分段" onClick={generateFullCopyAndVoiceDraft} kind="primary" /><Button busy={busy === '生成开场/首段稿' ? busy : ''} label="只生成开场段" onClick={generateDigitalHumanIntroCopy} kind="soft" /><Button busy={busy === '按素材时长生成旁白稿' ? busy : ''} label="按素材时长重写完整旁白" onClick={generateScriptFromSelectedAssets} kind="soft" /><Button busy={busy === '原创改写' ? busy : ''} label="借鉴热度雷达改写" onClick={rewrite} kind="ghost" /><Button busy={busy === '文案细改' ? busy : ''} label="AI 细改" onClick={refineCopy} disabled={!currentScript} kind="ghost" /></div>
+        <div className="flowSource"><strong>当前参考</strong><span>{industry} · {audience}</span><span>热点/同行：{extract?.summary ? shortText(extract.summary) : '暂无'}</span><span>记忆库：{memoryContext?.memory_enabled ? '已连接' : '本地模式'}</span></div>
+        <div className="copyEditor"><Field label="标题"><input value={copy.title} onChange={e => setCopy({ ...copy, title: e.target.value })} /></Field><Field label="黄金三秒钩子"><textarea value={copy.hook} onChange={e => setCopy({ ...copy, hook: e.target.value })} /></Field><Field label="完整视频脚本"><textarea className="scriptArea" value={copy.script} onChange={e => setCopy({ ...copy, script: e.target.value })} placeholder="这里精修完整脚本；可以来自热度仿写、PDF资料、拍摄稿或手动输入。" /></Field><Field label="发布简介"><textarea value={copy.description} onChange={e => setCopy({ ...copy, description: e.target.value })} /></Field><Field label="细改要求"><input value={refineInstruction} onChange={e => setRefineInstruction(e.target.value)} /></Field></div>
         <div className="chips">{matchedBadWords.length ? matchedBadWords.map(x => <Pill key={x} tone="red">风险词：{x}</Pill>) : <Pill tone="green">违禁词初筛通过</Pill>}</div>
       </section>}
 
-      {active === 'voice' && <section className="card modulePanel">
-        <div className="sectionHeader"><div><h2>第二步：口播稿 / 关键词 / 配音导演</h2><p>关键词、禁用词、AI 语气语调、语速、停顿、重读词都在第二步完成；不再使用任何浮层。</p></div></div>
-        <div className="grid4"><Field label="音色"><select value={voice} onChange={e => setVoice(e.target.value)}>{voices.map(v => <option key={v.id} value={v.id}>{v.name || v.id}</option>)}</select></Field><Field label="配音风格"><select value={voiceStyle} onChange={e => setVoiceStyle(e.target.value)}>{['老板压迫感','真实聊天感','短视频强钩子','销售转化感','案例讲述感','沉稳信任感'].map(x => <option key={x}>{x}</option>)}</select></Field><Field label="情绪强度"><select value={voiceIntensity} onChange={e => setVoiceIntensity(e.target.value)}>{['轻微','标准','强烈'].map(x => <option key={x}>{x}</option>)}</select></Field><div className="stackButtons"><Button busy={busy === '生成配音导演稿' ? busy : ''} label="生成配音导演稿" onClick={makeVoiceDirector} kind="ghost" disabled={!currentScript} /><Button busy={busy === '生成分段情绪配音' ? busy : ''} label="重新生成配音并校准时间轴" onClick={makeSegmentTTS} disabled={!currentScript} /></div></div>
+      {moduleVisible('voice') && active === 'voice' && <section className="card modulePanel">
+        <div className="sectionHeader"><div><h2>第四步：配音导演</h2><p>把口播拆成几段，调整语速、停顿和重点。生成后剪辑会按真实音频时长对齐字幕。</p></div></div>
+        <div className="grid4"><Field label="音色"><select value={voice} onChange={e => setVoice(e.target.value)}>{voices.map(v => <option key={v.id} value={v.id}>{v.name || v.id}</option>)}</select></Field><Field label="配音风格"><select value={voiceStyle} onChange={e => setVoiceStyle(e.target.value)}>{['老板压迫感','真实聊天感','短视频强钩子','销售转化感','案例讲述感','沉稳信任感'].map(x => <option key={x}>{x}</option>)}</select></Field><Field label="情绪强度"><select value={voiceIntensity} onChange={e => setVoiceIntensity(e.target.value)}>{['轻微','标准','强烈'].map(x => <option key={x}>{x}</option>)}</select></Field><div className="stackButtons"><Button busy={busy === '生成配音导演稿' ? busy : ''} label="AI重排配音分段" onClick={makeVoiceDirector} kind="ghost" disabled={!currentScript} /><Button busy={busy === '智能字幕重点' ? busy : ''} label="AI提取重读关键词" onClick={() => refreshSubtitleKeywordsForScript(currentScript, false)} kind="ghost" disabled={!currentScript} /><Button busy={busy === '生成分段情绪配音' ? busy : ''} label="生成声音并校准时间轴" onClick={makeSegmentTTS} disabled={!currentScript} /></div></div>
+        <div className="smartSubtitleBox voiceKeywords"><div><strong>配音重读 / 字幕关键词</strong><p>{subtitleHighlight || '点击 AI 提取，系统会把热度雷达和脚本里的费用、避坑、身份、学校、私信等转化词同步给配音和字幕。'}</p></div><Field label="可手动调整重点词"><input value={subtitleHighlight} onChange={e => setSubtitleHighlight(e.target.value)} placeholder="第二家园,费用,身份,国际学校,私信报告" /></Field></div>
         {voiceNotes.length > 0 && <div className="tips">{voiceNotes.map(x => <span key={x}>{x}</span>)}</div>}
-        <div className="hintBox">说明：豆包音色对不同 voice_type 的“情绪词”支持不完全一致，真正生效的是语速/音量/停顿参数；本版把范围加大，并把字幕对齐改为读取配音实际分段时间。</div>
+        <div className="hintBox">提示：想要更像真人口播，优先调语速、停顿和重点句；情绪只是辅助。</div>
         <div className="buttonRow"><button className="addSegment" onClick={addVoiceSegment}>+ 手动添加空白分段</button><button className="addSegment" onClick={addSelectedScriptAsSegment}>+ 把选中文案加入分段</button></div>
         <div className="segments">{voiceSegments.map((seg, i) => <div className="segmentCard" key={i}><div className="segmentHead"><strong>第 {i + 1} 段 · {audio?.segments?.[i]?.duration?.toFixed?.(1) || segmentSeconds[i] || estimateSeconds(seg.text, seg.speed_ratio)} 秒</strong><div><button onClick={() => moveVoiceSegment(i, -1)}>↑</button><button onClick={() => moveVoiceSegment(i, 1)}>↓</button><button onClick={() => removeVoiceSegment(i)}>删除</button></div></div><textarea value={seg.text} onChange={e => updateVoiceSegment(i, { text: e.target.value })} /><div className="presetRow"><button onClick={() => applyVoicePreset(i, 'urgent')}>急迫提醒</button><button onClick={() => applyVoicePreset(i, 'emphasis')}>重点加重</button><button onClick={() => applyVoicePreset(i, 'calm')}>冷静信任</button><button onClick={() => applyVoicePreset(i, 'cta')}>结尾号召</button></div><div className="segmentGrid"><Field label="情绪"><select value={seg.emotion} onChange={e => updateVoiceSegment(i, { emotion: e.target.value })}>{emotionOptions.map(x => <option key={x}>{x}</option>)}</select></Field><Field label={`语速 ${seg.speed_ratio.toFixed(2)}x`}><input type="range" min="0.65" max="1.55" step="0.01" value={seg.speed_ratio} onChange={e => updateVoiceSegment(i, { speed_ratio: Number(e.target.value) })} /></Field><Field label={`音量 ${seg.volume_ratio.toFixed(2)}x`}><input type="range" min="0.45" max="2.2" step="0.01" value={seg.volume_ratio} onChange={e => updateVoiceSegment(i, { volume_ratio: Number(e.target.value) })} /></Field><Field label={`停顿 ${seg.pause_after_ms}ms`}><input type="range" min="0" max="2200" step="50" value={seg.pause_after_ms} onChange={e => updateVoiceSegment(i, { pause_after_ms: Number(e.target.value) })} /></Field></div></div>)}</div>
         {audio && <div className="mediaBox"><audio controls src={audio.file_url} /><a href={audio.file_url} target="_blank">下载配音</a><Pill tone="green">已生成 {audio.segments?.length || voiceSegments.length} 段时间轴</Pill>{audio.warning && <div className="warn">{audio.warning}</div>}</div>}
       </section>}
 
-      {active === 'digitalHuman' && <section className="card modulePanel">
-        <div className="sectionHeader"><div><h2>数字人工作台</h2><p>每次生成都会有版本号，方便区分文案/配音修改后的不同数字人片段。旧素材只在 R2 时，也会尽量直接用 R2 链接提交。</p></div><Button busy={busy === '生成数字人片段' || busy === '查询数字人结果' ? busy : ''} label={digitalHumanPrimaryLabel} onClick={hasRunningDigitalHumanTask ? () => checkDigitalHumanStatus(false) : makeDigitalHuman} disabled={!hasRunningDigitalHumanTask && (!audio?.file_name || !digitalHumanAvatarId || !digitalHumanConsent)} /></div>
+      {moduleVisible('digitalHuman') && active === 'digitalHuman' && <section className="card modulePanel">
+        <div className="sectionHeader digitalHumanHeader"><div><h2>第三步：可选数字人片头</h2><p>这一步不是每条都必须用。需要真人感片头时，只把第 1 段开场配音送去 fal；成片配音会单独生成，避免数字人开头和后面旁白重复。</p></div><div className="headerActions digitalHumanActions"><Button label="跳过数字人，去素材混剪" onClick={skipDigitalHumanAndUseAssets} kind="ghost" /><button className="btn digitalHumanMainCta" onClick={hasRunningDigitalHumanTask ? () => checkDigitalHumanStatus(false) : makeDigitalHuman} disabled={Boolean(busy === '生成数字人片段' || busy === '查询数字人结果') || (!hasRunningDigitalHumanTask && (!audio?.file_name || !digitalHumanAvatarId))}>{busy === '生成数字人片段' || busy === '查询数字人结果' ? busy : digitalHumanPrimaryLabel}</button></div></div>
         <div className="grid3">
-          <Field label="数字人形象素材" hint="建议上传本人授权的正脸/半身照片，或 5-15 秒自然说话视频。"><select value={digitalHumanAvatarId} onChange={e => setDigitalHumanAvatarId(e.target.value)}><option value="">选择已上传照片/视频</option>{assets.map(a => <option key={a.id} value={a.id}>{a.kind} · {a.original_name || a.filename}</option>)}</select></Field>
-          <Field label="动作参考视频（可选）" hint="后续接 LivePortrait/MuseTalk 时可参考表情和头部动作。"><select value={digitalHumanDriverId} onChange={e => setDigitalHumanDriverId(e.target.value)}><option value="">不用动作参考</option>{assets.filter(a => a.kind === 'video').map(a => <option key={a.id} value={a.id}>{a.original_name || a.filename}</option>)}</select></Field>
-          <Field label="数字人引擎" hint="可选火山即梦/OmniHuman，或使用上传素材直接合成。"><select value={digitalHumanEngine} onChange={e => setDigitalHumanEngine(e.target.value)}><option value="auto">自动</option><option value="preview">静态预览/素材合成</option><option value="jimeng">火山即梦/OmniHuman</option><option value="webhook">外部 Webhook/API</option><option value="sadtalker">SadTalker</option><option value="musetalk">MuseTalk</option><option value="wav2lip">Wav2Lip</option><option value="liveportrait">LivePortrait</option></select></Field>
+          <Field label={digitalHumanNeedsVideo ? '真人模板视频 MP4' : digitalHumanPhotoSceneMode ? '本人授权照片' : '数字人形象素材'} hint={digitalHumanNeedsVideo ? 'fal 必须手动选择本人授权的 5-20 秒正面半身说话视频；每条视频可换不同模板，不能用图片。' : digitalHumanPhotoSceneMode ? '上传本人清晰正脸/半身照；系统会做楼道、样板间、园区等场景片头。' : '静态兜底可用照片；fal 路线必须用视频。'}><select value={digitalHumanAvatarId} onChange={e => setDigitalHumanAvatarId(e.target.value)}><option value="">{digitalHumanNeedsVideo ? '手动选择本条视频的真人模板' : digitalHumanPhotoSceneMode ? '选择本人照片' : '选择已上传照片/视频'}</option>{uploadedAvatarAssets.filter(a => digitalHumanNeedsVideo ? a.kind === 'video' : digitalHumanPhotoSceneMode ? a.kind === 'image' : true).map(a => <option key={a.id} value={a.id}>自己上传 · {a.kind} · {a.original_name || a.filename}</option>)}{collectedAvatarAssets.filter(a => digitalHumanNeedsVideo ? a.kind === 'video' : digitalHumanPhotoSceneMode ? a.kind === 'image' : true).map(a => <option key={a.id} value={a.id}>采集备用 · {a.kind} · {a.original_name || a.filename}</option>)}</select></Field>
+          <Field label="动作参考视频（可选）" hint="fal 当前不需要；后期 MuseTalk/LivePortrait 才用。"><select value={digitalHumanDriverId} onChange={e => setDigitalHumanDriverId(e.target.value)}><option value="">不用动作参考</option>{digitalHumanDriverAssets.map(a => <option key={a.id} value={a.id}>{assetFolderLabel(a.folder, a.kind)} · {a.original_name || a.filename}</option>)}</select></Field>
+          <Field label="数字人模式" hint="数字人不是必选。真人模板最真实；照片场景最灵活；都只吃第 1 段开场音频。"><select value={digitalHumanEngine} onChange={e => setDigitalHumanEngine(e.target.value)}><option value="fal_lipsync">真人模板视频：fal.ai 口型同步（最真实）</option><option value="photo_scene">照片场景数字人：楼道/样板间/园区片头</option><option value="preview">免费兜底：静态预览/素材口播</option><option value="webhook">外部 GPU Worker/API</option><option value="jimeng">火山即梦/OmniHuman（备用）</option></select></Field>
           {digitalHumanEngine === 'jimeng' && <Field label="即梦模型" hint="模拟真人优先选 OmniHuman1.5；普通视频生成可用视频3.0。"><select value={digitalHumanJimengModel} onChange={e => setDigitalHumanJimengModel(e.target.value)}><option value="omnihuman15">OmniHuman1.5（单图+音频真人口播）</option><option value="quick">数字人快速模式</option><option value="video30">即梦视频生成3.0（图生视频）</option></select></Field>}
+          {digitalHumanPhotoSceneMode && <><Field label="照片入场景" hint="先做稳定 MVP：把本人照片放入真实房产场景，再配第 1 段开场音频。"><select value={digitalHumanSceneTemplate} onChange={e => setDigitalHumanSceneTemplate(e.target.value)}><option>样板间客厅讲解</option><option>楼道电梯厅讲解</option><option>小区园林讲解</option><option>会所大堂讲解</option><option>项目沙盘旁讲解</option><option>学校门口讲解</option><option>吉隆坡城市风光</option><option>落地窗办公室讲解</option></select></Field><Field label="场景提示词（可选）" hint="不填就按上面的场景自动生成；想指定楼盘/城市/氛围可以写这里。"><textarea value={digitalHumanScenePrompt} onChange={e => setDigitalHumanScenePrompt(e.target.value)} placeholder="例如：马来西亚高端公寓样板间，自然光，顾问站在客厅，真实可信，竖屏短视频画面" /></Field></>}
         </div>
-        <label className="checkline"><input type="checkbox" checked={digitalHumanConsent} onChange={e => setDigitalHumanConsent(e.target.checked)} /> 我确认已获得本人形象和声音授权，仅用于合法商业内容。</label>
-        <div className="infoGrid"><div><strong>当前输入</strong><p>数字人版本：#{digitalHumanVersion}<br />形象素材：{digitalHumanAvatarId || '未选择'}<br />配音音频：{audio?.file_name || '未生成'}<br />脚本：{shortText(currentScript || '', 90) || '未生成'}</p></div><div><strong>接入建议</strong><p>需要真人口型同步时选择“火山即梦/OmniHuman”；旧素材如果存在 R2，刷新素材库后也能选择使用。</p></div></div>
-        {hasRunningDigitalHumanTask && <div className="warn strongWarn">已有任务正在火山侧排队/生成中。请不要再次点击提交，否则会触发 429 并发限制；等待当前任务完成或点击“查询当前数字人任务”。</div>}
-        {digitalHuman && <div className="resultBox"><h3>数字人 #{digitalHumanVersion} 结果</h3><p>{digitalHuman.message}</p><div className="resultMeta"><Pill tone={digitalHuman.video_url ? 'green' : digitalHuman.status === 'failed' ? 'red' : 'orange'}>状态：{digitalHuman.status || 'running'}</Pill>{digitalHumanLastChecked && <Pill tone="blue">最近查询：{digitalHumanLastChecked}</Pill>}{digitalHumanPollCount > 0 && <Pill tone="purple">已查询 {digitalHumanPollCount} 次</Pill>}</div>{digitalHuman.job_id && <p className="muted">任务 ID：{digitalHuman.job_id}<br />查询模型：{getDigitalHumanTaskModel(digitalHuman, digitalHumanJimengModel)}</p>}{digitalHuman.job_id && !digitalHuman.video_url && <div className="warn">OmniHuman1.5 是排队生成任务，不是实时接口。系统会每 20 秒自动查一次；如果超过 20-30 分钟仍无结果，请去火山控制台 / API Explorer 用这个 task_id 查询任务详情。</div>}{digitalHuman.warnings?.map(w => <div className="warn" key={w}>{w}</div>)}{digitalHuman.job_id && !digitalHuman.video_url && <div className="buttonRow"><button className="btn soft" onClick={() => checkDigitalHumanStatus(false)} disabled={busy === '查询数字人结果'}>{busy === '查询数字人结果' ? '查询中…' : '立即查询数字人结果'}</button><button className="btn ghost danger" onClick={clearDigitalHumanTask}>清除当前任务</button></div>}{digitalHuman.raw && <details className="rawBox"><summary>查看火山原始返回</summary><pre>{JSON.stringify(digitalHuman.raw, null, 2).slice(0, 2600)}</pre></details>}{digitalHuman.video_url && <video controls src={digitalHuman.video_url} className="previewVideo" />}{digitalHuman.video_url && <a className="download" href={digitalHuman.video_url} target="_blank">下载/打开数字人 #{digitalHumanVersion} 片段</a>}</div>}
+        <div className="templatePicker refinedPicker"><div><strong>{digitalHumanPhotoSceneMode ? '本条视频用哪张本人照片？' : '本条视频用哪个真人口播模板？'}</strong><p>{digitalHumanPhotoSceneMode ? '照片场景数字人每条都可以换照片和场景，不会固定同一个开头。' : '这里选的是你上传/采集的真人原始口播视频，不是已经生成出的数字人片段；数字人片段会自动放到成片开头。'}</p></div><div className="assetStats compactStats"><Pill tone="blue">真人模板 {uploadedAvatarAssets.length}</Pill><Pill tone="purple">采集备用真人 {collectedAvatarAssets.length}</Pill><Pill tone="green">已生成片头 {digitalHumanIntroAssets.length}</Pill><Pill tone="orange">内容素材 {contentOnlyAssets.length}</Pill></div><div className="templateGroup"><h4>优先：自己上传的真人模板视频/照片</h4><div className="templateCards">{uploadedAvatarAssets.filter(a => digitalHumanNeedsVideo ? a.kind === 'video' : digitalHumanPhotoSceneMode ? a.kind === 'image' : true).slice(0, 10).map(a => <button key={a.id} type="button" className={digitalHumanAvatarId === a.id ? 'templateCard selected' : 'templateCard'} onClick={() => setDigitalHumanAvatarId(a.id)}>{a.kind === 'video' ? <video src={videoPreviewUrl(a.url)} muted preload="metadata" playsInline /> : <img src={a.url} />}<span>{a.original_name || a.filename}</span></button>)}</div>{uploadedAvatarAssets.filter(a => digitalHumanNeedsVideo ? a.kind === 'video' : digitalHumanPhotoSceneMode ? a.kind === 'image' : true).length === 0 && <Empty>还没有自己上传的真人模板。去“素材选择”上传时选择“人物素材”，fal 路线需要 5-20 秒真人口播 MP4。</Empty>}</div><div className="templateGroup"><h4>备用：collected 里识别的真人素材</h4><div className="templateCards compactTemplates">{collectedAvatarAssets.filter(a => digitalHumanNeedsVideo ? a.kind === 'video' : digitalHumanPhotoSceneMode ? a.kind === 'image' : true).slice(0, 10).map(a => <button key={a.id} type="button" className={digitalHumanAvatarId === a.id ? 'templateCard selected' : 'templateCard'} onClick={() => setDigitalHumanAvatarId(a.id)}>{a.kind === 'video' ? <video src={videoPreviewUrl(a.url)} muted preload="metadata" playsInline /> : <img src={a.url} />}<span>{a.original_name || a.filename}</span></button>)}</div></div><div className="templateGroup mutedTemplateGroup"><h4>已生成数字人片头（自动进成片，不作为 fal 模型）</h4><div className="templateCards compactTemplates">{digitalHumanIntroAssets.slice(0, 8).map(a => <button key={a.id} type="button" className={selectedMaterialIds.includes(a.id) ? 'templateCard selected' : 'templateCard'} onClick={() => setSelectedMaterialIds(prev => prev.includes(a.id) ? prev.filter(id => id !== a.id) : [a.id, ...prev])}><video src={videoPreviewUrl(a.url)} muted preload="metadata" playsInline /><span>{a.original_name || a.filename}</span></button>)}</div>{digitalHumanIntroAssets.length === 0 && <p className="muted small">还没有已生成的数字人片头；生成后会自动进入成片素材首位。</p>}</div></div>
+                <div className="digitalHumanLeanGuide">
+          <div><strong>推荐模板</strong><p>上传 5-20 秒正面半身真人视频，人物看镜头、光线稳定、少转头。原视频说什么不重要，fal 会用新配音同步嘴型。</p></div>
+          <div><strong>当前输入</strong><p>版本：#{digitalHumanVersion}<br />模板/照片：{digitalHumanAvatarId || '未选择'}<br />场景：{digitalHumanPhotoSceneMode ? digitalHumanSceneTemplate : '不需要'}<br />完整成片配音：{audio?.file_name || '未生成'}<br />数字人片头配音：{digitalHumanAudio?.file_name || '点击生成时自动用第 1 段单独合成'}<br />数字人只读这一句：{shortText(getDigitalHumanIntroText(), 90) || '未生成'}</p></div>
+          <div><strong>生成后动作</strong><p>成功后自动入素材库，并自动放到素材顺序第 1 个；后面继续添加楼盘、风光、学校、配套 B-roll。</p></div>
+        </div>
+        {hasRunningDigitalHumanTask && <div className="warn strongWarn">已有数字人任务正在排队/生成中。请不要再次点击提交；等待当前任务完成或点击“查询当前数字人任务”。</div>}
+        {digitalHuman && <div className="resultBox"><h3>可选数字人 #{digitalHumanVersion} 结果</h3><p>{digitalHuman.message}</p><div className="resultMeta"><Pill tone={digitalHuman.video_url ? 'green' : digitalHuman.status === 'failed' ? 'red' : 'orange'}>状态：{digitalHuman.status || 'running'}</Pill>{digitalHumanLastChecked && <Pill tone="blue">最近查询：{digitalHumanLastChecked}</Pill>}{digitalHumanPollCount > 0 && <Pill tone="purple">已查询 {digitalHumanPollCount} 次</Pill>}</div>{digitalHuman.job_id && <p className="muted">任务 ID：{digitalHuman.job_id}<br />查询引擎：{getDigitalHumanTaskProvider(digitalHuman, digitalHumanJimengModel)}</p>}{digitalHuman.job_id && !digitalHuman.video_url && <div className="warn">数字人生成是异步任务。系统会每 20 秒自动查一次；fal 通常较快，如果长时间没有结果，请查看 Render Logs 或 fal 后台 Request History。</div>}{digitalHuman.warnings?.map(w => <div className="warn" key={w}>{w}</div>)}{digitalHuman.job_id && !digitalHuman.video_url && <div className="buttonRow"><button className="btn soft" onClick={() => checkDigitalHumanStatus(false)} disabled={busy === '查询数字人结果'}>{busy === '查询数字人结果' ? '查询中…' : '立即查询数字人结果'}</button><button className="btn ghost danger" onClick={clearDigitalHumanTask}>清除当前任务</button></div>}{digitalHuman.raw && <details className="rawBox"><summary>查看原始返回</summary><pre>{JSON.stringify(digitalHuman.raw, null, 2).slice(0, 2600)}</pre></details>}{digitalHuman.video_url && <video controls src={digitalHuman.video_url} className="previewVideo" />}{digitalHuman.video_url && <a className="download" href={digitalHuman.video_url} target="_blank">下载/打开数字人 #{digitalHumanVersion} 片段</a>}</div>}
       </section>}
 
-      {active === 'assets' && <section className="card modulePanel">
-        <div className="sectionHeader"><div><h2>第一步：素材选择与截取</h2><p>先选素材，再生成文案。图片可设置停留秒数，视频可预览并截取开始/结束时间；素材顺序会直接同步到剪辑。</p></div></div>
-        <div className="v1034Panel"><h3>素材入库信息（不填不准上传）</h3><div className="grid4"><Field label="素材类型"><select value={assetUploadMeta.material_type} onChange={e => setAssetUploadMeta({ ...assetUploadMeta, material_type: e.target.value })}><option value="">请选择</option><option value="楼盘外景">楼盘外景</option><option value="生活配套">生活配套</option><option value="交通出勤">交通出勤</option><option value="教育留学">教育留学</option><option value="人物口播">人物口播</option><option value="客户案例">客户案例</option><option value="其他">其他</option></select></Field><Field label="城市"><input value={assetUploadMeta.city} onChange={e => setAssetUploadMeta({ ...assetUploadMeta, city: e.target.value })} placeholder="吉隆坡 / 新山 / 槟城" /></Field><Field label="区域"><input value={assetUploadMeta.region} onChange={e => setAssetUploadMeta({ ...assetUploadMeta, region: e.target.value })} placeholder="具体区域 / 项目周边" /></Field><Field label="来源"><input value={assetUploadMeta.source} onChange={e => setAssetUploadMeta({ ...assetUploadMeta, source: e.target.value })} placeholder="自拍 / 业主 / 同行授权 / AI" /></Field></div><div className="grid2"><Field label="备注"><input value={assetUploadMeta.remark} onChange={e => setAssetUploadMeta({ ...assetUploadMeta, remark: e.target.value })} placeholder="画面内容、适合哪些口播句" /></Field><label className="checkline"><input type="checkbox" checked={assetUploadMeta.reusable} onChange={e => setAssetUploadMeta({ ...assetUploadMeta, reusable: e.target.checked })} /> 可复用素材</label></div></div>
+      {moduleVisible('assets') && active === 'assets' && <section className="card modulePanel">
+        <div className="sectionHeader"><div><h2>第四步：素材选择与截取</h2><p>这里选择楼盘、马来西亚风光、周边配套、学校和生活素材；如果已生成数字人，它会自动排在最前，否则直接用素材开场。</p></div><Button busy={busy === '按素材时长生成旁白稿' ? busy : ''} label="按素材时长生成旁白" onClick={generateScriptFromSelectedAssets} kind="soft" /></div>
         <div className={`uploadDrop ${isDraggingAssets ? 'dragging' : ''} ${busy === '上传素材' ? 'uploading' : ''}`} onDragOver={onAssetDragOver} onDragLeave={onAssetDragLeave} onDrop={onAssetDrop} aria-busy={busy === '上传素材'}>
           <div className="uploadIcon">↑</div>
           <div className="uploadCopy">
@@ -1712,9 +3469,13 @@ ${manualText || ''}`.trim()
           </div>
           <div className="uploadSide">
             <select value={assetUploadFolder} onChange={e => setAssetUploadFolder(e.target.value as AssetFolderKey)} disabled={busy === '上传素材'}>
-              <option value="self">自己拍的素材</option>
-              <option value="provided">别人提供的素材</option>
+              <option value="self">自己上传</option>
+              <option value="provided">客户/别人提供</option>
               <option value="image">图片素材</option>
+            </select>
+            <select value={assetUsageRole} onChange={e => setAssetUsageRole(e.target.value as 'avatar' | 'content')} disabled={busy === '上传素材'}>
+              <option value="content">内容素材：楼盘/风光/B-roll</option>
+              <option value="avatar">人物素材：数字人/真人口播</option>
             </select>
             <label className={`uploadPick ${busy === '上传素材' ? 'disabled' : ''}`}>
               选择文件
@@ -1722,43 +3483,89 @@ ${manualText || ''}`.trim()
             </label>
           </div>
         </div>
-        <div className="assetToolbar">
-          <input placeholder="搜索文件名" value={assetSearch} onChange={e => setAssetSearch(e.target.value)} />
-          <select value={assetKindFilter} onChange={e => setAssetKindFilter(e.target.value as any)}><option value="all">全部类型</option><option value="video">只看视频</option><option value="image">只看图片</option></select>
-          <select value={assetFolderFilter} onChange={e => setAssetFolderFilter(e.target.value as AssetFolderKey)}><option value="all">全部文件夹</option><option value="self">自己拍的素材</option><option value="provided">别人提供的素材</option><option value="image">图片素材</option><option value="collected">采集视频</option><option value="ai">AI生成图</option></select>
+        <div className="assetLibrarySwitch">
+          <button className={assetLibraryPage === 'video' ? 'active' : ''} onClick={() => { setAssetLibraryPage('video'); setAssetKindFilter('all'); setAssetFolderFilter('all') }}>
+            <strong>第一页：视频素材</strong><span>只展示 MP4/MOV，含数字人片段、楼盘视频、采集视频</span><em>{materialVideoCount} 个</em>
+          </button>
+          <button className={assetLibraryPage === 'image' ? 'active' : ''} onClick={() => { setAssetLibraryPage('image'); setAssetKindFilter('all'); setAssetFolderFilter('all') }}>
+            <strong>第二页：图片素材</strong><span>只展示 JPG/PNG/WEBP，按原文件夹分类</span><em>{materialImageCount} 个</em>
+          </button>
+        </div>
+        <div className="assetToolbar splitMode">
+          <input placeholder={assetLibraryPage === 'video' ? '搜索视频文件名' : '搜索图片文件名'} value={assetSearch} onChange={e => setAssetSearch(e.target.value)} />
+          <select value={assetFolderFilter} onChange={e => setAssetFolderFilter(e.target.value as AssetFolderKey)}>{assetFolderTabOptions.map(([key,label]) => <option key={key} value={key}>{label}</option>)}</select>
           <select value={assetTimeFilter} onChange={e => setAssetTimeFilter(e.target.value as any)}><option value="all">全部时间</option><option value="today">今天上传</option><option value="7d">近 7 天</option><option value="30d">近 30 天</option></select>
           <select value={assetSort} onChange={e => setAssetSort(e.target.value as any)}><option value="new">最新优先</option><option value="old">最早优先</option><option value="size_desc">文件从大到小</option><option value="size_asc">文件从小到大</option><option value="name">名称排序</option></select>
           <button className="btn ghost" onClick={() => { setAssetSearch(''); setAssetKindFilter('all'); setAssetFolderFilter('all'); setAssetTimeFilter('all'); setAssetSort('new') }}>重置</button>
         </div>
-        <div className="assetStats"><Pill tone="blue">自有素材 {materialAssets.length}</Pill><Pill tone="green">已选 {selectedMaterialIds.length}</Pill><Pill tone="purple">采集视频 {collectedVideos.length}</Pill>{selectedMaterialAssets.length > 0 && <span>已选顺序：{selectedMaterialAssets.map(a => a.original_name || a.filename).slice(0, 4).join(' → ')}{selectedMaterialAssets.length > 4 ? ` 等 ${selectedMaterialAssets.length} 个` : ''}</span>}</div>
-        <div className="assetFolderTabs">{[
-          ['all','全部素材'], ['self','自己拍的'], ['provided','别人提供'], ['image','图片素材'], ['collected','采集视频'], ['ai','AI生成图']
-        ].map(([key,label]) => <button key={key} className={assetFolderFilter === key ? 'active' : ''} onClick={() => setAssetFolderFilter(key as AssetFolderKey)}>{label}</button>)}</div>
+        <div className="assetStats"><Pill tone="blue">视频 {materialVideoCount}</Pill><Pill tone="purple">图片 {materialImageCount}</Pill><Pill tone="green">已选 {selectedMaterialIds.length}</Pill><Pill tone="orange">人物素材 {uploadedAvatarAssets.length + collectedAvatarAssets.length}</Pill>{assetLibraryPage === 'video' && <Pill tone="purple">采集视频 {collectedVideos.length}</Pill>}{selectedMaterialAssets.length > 0 && <span>已选顺序：{selectedMaterialAssets.map(a => a.original_name || a.filename).slice(0, 4).join(' → ')}{selectedMaterialAssets.length > 4 ? ` 等 ${selectedMaterialAssets.length} 个` : ''}</span>}</div>
+        <div className="assetFolderTabs">{assetFolderTabOptions.map(([key,label]) => <button key={key} className={assetFolderFilter === key ? 'active' : ''} onClick={() => setAssetFolderFilter(key as AssetFolderKey)}>{label}</button>)}</div>
 
-        <div className="grid2 assetGridWrap"><div><h3>自有素材库</h3><div className="assetCards">{filteredMaterialAssets.length === 0 && <Empty>没有匹配的素材。可以拖动上传或调整筛选条件。</Empty>}{filteredMaterialAssets.map(a => <div key={a.id} className={`assetCard ${selectedMaterialIds.includes(a.id) ? 'selected' : ''}`}><button className="assetPreview" onClick={() => window.open(a.url, '_blank')}>{a.kind === 'video' ? <video src={a.url} muted onLoadedMetadata={e => setAssetDurations(prev => ({ ...prev, [a.id]: readMediaDuration(e, 0) }))} /> : <img src={a.url} alt={a.original_name || a.filename} />}</button><div className="assetMeta"><strong title={a.original_name || a.filename}>{a.original_name || a.filename}</strong><span>{assetFolderLabel((a as any).folder, a.kind)} · {a.kind === 'video' ? '视频' : '图片'} · {formatBytes(a.size_bytes)} · {new Date(a.created_at).toLocaleDateString()}</span></div><div className="assetActions"><button className={selectedMaterialIds.includes(a.id) ? 'mini active' : 'mini'} onClick={() => toggleMaterial(a.id)}>{selectedMaterialIds.includes(a.id) ? '已选' : '选择'}</button><a className="mini" href={a.url} target="_blank">预览</a><button className="mini danger" onClick={() => removeAsset(a)}>删除</button></div></div>)}</div></div><div><h3>采集视频库</h3><div className="assetList">{collectedVideos.length === 0 && <Empty>暂时没有采集到视频。</Empty>}{collectedVideos.map(a => <div key={a.id} className={`assetRow collected ${selectedReferenceAssetId === a.id ? 'selected' : ''}`}><button onClick={() => setSelectedReferenceAssetId(a.id)}>作为参考</button><span>{a.original_name || a.filename}</span><em>{formatBytes(a.size_bytes)}</em><button className="mini danger" onClick={() => removeAsset(a)}>删除</button></div>)}</div></div></div>
+        <div className={`assetGridWrap ${assetLibraryPage === 'image' ? 'single' : 'grid2'}`}>
+          <div>
+            <div className="assetPanelHead"><h3>{assetLibraryPage === 'video' ? '视频素材库' : '图片素材库'}</h3><span>已显示 {visibleMaterialAssets.length}/{filteredMaterialAssets.length}；{assetLibraryPage === 'video' ? '视频只用占位卡，点击预览才打开源文件。' : '图片使用懒加载，按原分类筛选。'}</span></div>
+            <div className="assetCards">
+              {filteredMaterialAssets.length === 0 && <Empty>{assetLibraryPage === 'video' ? '当前视频页没有匹配素材。可以切换分类、上传 MP4/MOV，或去第二页看图片。' : '当前图片页没有匹配素材。可以切换分类、上传 JPG/PNG/WEBP，或回第一页看视频。'}</Empty>}
+              {visibleMaterialAssets.map(a => <div key={a.id} className={`assetCard ${selectedMaterialIds.includes(a.id) ? 'selected' : ''}`}>
+                <button className={`assetPreview ${a.kind === 'video' ? 'videoThumb' : ''}`} onClick={() => window.open(a.url, '_blank')} title="打开预览">
+                  {a.kind === 'video'
+                    ? <div className="videoPreviewWrap"><video src={videoPreviewUrl(a.url)} muted preload="metadata" playsInline /><span className="playBadge">▶</span></div>
+                    : <img src={a.url} alt={a.original_name || a.filename} loading="lazy" decoding="async" />}
+                </button>
+                <div className="assetMeta"><strong title={a.original_name || a.filename}>{a.original_name || a.filename}</strong><span>{assetFolderLabel((a as any).folder, a.kind)} · {assetRoleLabel(a.usage_role)} · {a.kind === 'video' ? '视频' : '图片'} · {formatBytes(a.size_bytes)} · {new Date(a.created_at).toLocaleDateString()}</span></div>
+                <div className="assetActions"><button className={selectedMaterialIds.includes(a.id) ? 'mini active' : 'mini'} onClick={() => toggleMaterial(a.id)}>{selectedMaterialIds.includes(a.id) ? '已选' : '选择'}</button><a className="mini" href={a.url} target="_blank">预览</a><button className="mini danger" onClick={() => removeAsset(a)}>删除</button></div>
+              </div>)}
+            </div>
+            {visibleMaterialAssets.length < filteredMaterialAssets.length && <div className="loadMoreRow"><button className="btn soft" onClick={() => setAssetVisibleCount(v => v + 24)}>再加载 24 个{assetLibraryPage === 'video' ? '视频' : '图片'}</button></div>}
+          </div>
+          {assetLibraryPage === 'video' && <div>
+            <div className="assetPanelHead"><h3>采集视频库</h3><span>已显示 {visibleCollectedVideos.length}/{collectedVideos.length}，只在视频页展示。</span></div>
+            <div className="assetList">
+              {collectedVideos.length === 0 && <Empty>暂时没有采集到视频。</Empty>}
+              {visibleCollectedVideos.map(a => <div key={a.id} className={`assetRow collected ${selectedReferenceAssetId === a.id ? 'selected' : ''}`}><button onClick={() => setSelectedReferenceAssetId(a.id)}>作参考</button><button onClick={() => toggleMaterial(a.id)}>进成片</button><span>{a.original_name || a.filename}</span><em>{formatBytes(a.size_bytes)}</em><button className="mini danger" onClick={() => removeAsset(a)}>删除</button></div>)}
+            </div>
+            {visibleCollectedVideos.length < collectedVideos.length && <div className="loadMoreRow"><button className="btn soft" onClick={() => setCollectedVisibleCount(v => v + 40)}>再加载 40 条采集视频</button></div>}
+          </div>}
+        </div>
         <div className="selectedTimeline"><h3>已选素材顺序 / 截取设置</h3>{selectedMaterialAssets.length === 0 && <Empty>先选择素材。剪辑会按照这里的顺序出现，不会再因为多段素材丢失而只剩纯文字背景。</Empty>}{selectedMaterialAssets.map((asset, index) => { const cfg = getClipSetting(asset, index); const maxDur = Math.max(1, assetDurations[asset.id] || 60); return <div key={asset.id} className="selectedClip"><div className="clipPreview">{asset.kind === 'video' ? <video controls src={asset.url} onLoadedMetadata={e => setAssetDurations(prev => ({ ...prev, [asset.id]: readMediaDuration(e, prev[asset.id] || 0) }))} /> : <img src={asset.url} />}</div><div className="clipControls"><div className="segmentHead"><strong>{index + 1}. {asset.original_name || asset.filename}</strong><div><button onClick={() => moveSelectedMaterial(index, -1)}>↑</button><button onClick={() => moveSelectedMaterial(index, 1)}>↓</button><button onClick={() => toggleMaterial(asset.id)}>移除</button></div></div>{asset.kind === 'image' ? <Field label={`图片停留 ${cfg.image_seconds.toFixed(1)} 秒`}><input type="range" min="0.8" max="8" step="0.1" value={cfg.image_seconds} onChange={e => updateClipSetting(asset.id, { image_seconds: Number(e.target.value) })} /></Field> : <div className="trimGrid"><Field label={`开始 ${cfg.video_start.toFixed(1)}s`}><input type="range" min="0" max={maxDur} step="0.1" value={cfg.video_start} onChange={e => updateClipSetting(asset.id, { video_start: Math.min(Number(e.target.value), cfg.video_end && cfg.video_end > 0 ? cfg.video_end - 0.3 : maxDur) })} /></Field><Field label={`结束 ${cfg.video_end ? cfg.video_end.toFixed(1) : '自动'}s`}><input type="range" min="0" max={maxDur} step="0.1" value={cfg.video_end || Math.min(maxDur, cfg.video_start + 3)} onChange={e => updateClipSetting(asset.id, { video_end: Number(e.target.value) })} /></Field><span>截取约 {Math.max(0.5, (cfg.video_end || Math.min(maxDur, cfg.video_start + 3)) - cfg.video_start).toFixed(1)} 秒</span></div>}<small>顺序会同步到剪辑合成；如果 R2 旧素材本地丢失，后端会先下载再合成。</small></div></div>})}</div>
         <div className="resultBox"><h3>素材匹配建议</h3><p>图片：每张建议 2-4 秒；视频：每段截 2-5 秒。人物口播主体在画面中间时，字幕建议放底部安全区，避免挡脸。</p></div>
       </section>}
 
-      {active === 'shooting' && <section className="card modulePanel">
-        <div className="sectionHeader"><div><h2>运营拍摄任务</h2><p>把文案变成老板、员工能直接照着拍的镜头清单、B-roll 清单和提词器。</p></div><Button busy={busy === '生成运营拍摄任务' ? busy : ''} label="生成拍摄任务单" onClick={makeShootingPlan} disabled={!currentScript} /></div>
-        {shootingPlan ? <div className="resultBox"><h3>{shootingPlan.summary}</h3><div className="shotTable">{shootingPlan.shot_tasks?.map((task, i) => <div className="shotRow" key={`${task.scene}-${i}`}><span>{task.priority}</span><strong>{task.scene}</strong><em>{task.duration}</em><p>{task.content}</p><small>{task.camera}</small><small>{task.props}</small></div>)}</div><div className="splitGrid"><div><h4>B-roll 补拍</h4>{shootingPlan.broll_list?.map(x => <p key={x}>· {x}</p>)}</div><div><h4>提词器短句</h4>{shootingPlan.teleprompter?.map(x => <p key={x}>· {x}</p>)}</div><div><h4>拍摄检查</h4>{shootingPlan.checklist?.map(x => <p key={x}>· {x}</p>)}</div></div></div> : <Empty>先生成文案，再生成拍摄任务单。</Empty>}
+      {moduleVisible('shooting') && active === 'shooting' && <section className="card modulePanel shootingScriptPanel">
+        <div className="sectionHeader"><div><h2>第二步：脚本 / 拍摄工作台</h2><p>这里处理“上传脚本/资料 → AI 解析 → 生成拍摄任务、提词器、B-roll 和素材需求”。用户可选数字人，也可自己拍摄。</p></div><Button busy={busy === '生成运营拍摄任务' ? busy : ''} label="分析脚本并生成拍摄清单" onClick={makeShootingPlan} disabled={!currentScript} /></div>
+        <div className="scriptDropZone" onDragOver={e => e.preventDefault()} onDrop={e => { e.preventDefault(); handleShootingScriptFiles(e.dataTransfer.files) }}>
+          <input id="shooting-script-upload" type="file" multiple accept=".pdf,.doc,.docx,.txt,.md,.srt,.csv,video/*,image/*" onChange={e => handleShootingScriptFiles(e.target.files)} />
+          <label htmlFor="shooting-script-upload"><strong>拖动上传脚本 / PDF / 拍摄素材</strong><span>TXT/MD/SRT 会自动写入文案区；PDF/Word 先进入素材库，后续可由 AI 解析或作为拍摄资料。</span></label>
+        </div>
+        <div className="productionRouteGrid compact">
+          {[['mixed_video','纯素材混剪'],['digital_human','可选数字人'],['self_shoot','自己拍摄'],['image_text','图文窗口']].map(([value,label]) => <button key={value} className={oneClickOutputType === value ? 'selected' : ''} onClick={() => setOneClickOutputType(value)}>{label}</button>)}
+        </div>
+        {shootingPlan ? <div className="resultBox"><h3>{shootingPlan.summary}</h3><div className="shotTable">{shootingPlan.shot_tasks?.map((task, i) => <div className="shotRow" key={`${task.scene}-${i}`}><span>{task.priority}</span><strong>{task.scene}</strong><em>{task.duration}</em><p>{task.content}</p><small>{task.camera}</small><small>{task.props}</small></div>)}</div><div className="splitGrid"><div><h4>B-roll 补拍</h4>{shootingPlan.broll_list?.map(x => <p key={x}>· {x}</p>)}</div><div><h4>提词器短句</h4>{shootingPlan.teleprompter?.map(x => <p key={x}>· {x}</p>)}</div><div><h4>拍摄检查</h4>{shootingPlan.checklist?.map(x => <p key={x}>· {x}</p>)}</div></div></div> : <Empty>先在文案生产里生成/粘贴脚本，或把脚本文件拖到上方上传区。</Empty>}
       </section>}
 
-      {active === 'video' && <section className="card modulePanel">
-        <div className="sectionHeader"><div><h2>第六步：剪辑合成 / 字幕烧录</h2><p>这里直接调字幕位置和素材顺序。时长跟配音走，素材按已选顺序自动铺满；字幕优先使用配音分段时间轴，减少音画不同步。</p></div><Button busy={busy === '合成视频并烧字幕' ? busy : ''} label="生成视频并下载 MP4" onClick={composeVideo} disabled={!currentScript} /></div>
-        <div className="grid4"><Field label="字幕字号"><input type="number" min="12" max="36" value={subtitleSize} onChange={e => setSubtitleSize(Number(e.target.value || 18))} /></Field><Field label="字幕位置"><select value={subtitlePosition} onChange={e => setSubtitlePosition(e.target.value as any)}><option value="bottom_safe">底部安全区，不挡脸</option><option value="middle_low">中下方，大字口播</option><option value="center">居中强调，慎用</option></select></Field><Field label={`离底部 ${subtitleMarginV}px`}><input type="range" min="20" max="260" step="5" value={subtitleMarginV} onChange={e => setSubtitleMarginV(Number(e.target.value))} /></Field><Field label="字幕颜色"><input type="color" value={subtitleColor} onChange={e => setSubtitleColor(e.target.value)} /></Field></div>
-        <div className="hintBox">字幕对齐规则：优先用“重新生成配音并校准时间轴”得到的分段时间；没有时间轴时才按文案长度估算。演示前建议先重新生成配音一次。</div>
-        <div className="timelineEditor"><h3>配音分段 / 转场参考</h3>{voiceSegments.length === 0 && <Empty>先生成配音导演稿，或手动添加分段。</Empty>}{voiceSegments.map((seg, i) => <div className="timelineRow" key={i}><span>第{i + 1}段</span><input type="number" min="1" max="60" step="0.5" value={audio?.segments?.[i]?.duration || segmentSeconds[i] || estimateSeconds(seg.text, seg.speed_ratio)} onChange={e => setSegmentSeconds(prev => ({ ...prev, [i]: Number(e.target.value) }))} /><select value={segmentTransitions[i] || '叠化'} onChange={e => setSegmentTransitions(prev => ({ ...prev, [i]: e.target.value }))}><option value="smooth_dissolve_no_flash">安全叠化（无闪屏）</option></select><em>{seg.text.slice(0, 28)}...</em></div>)}</div>
-        <div className="selectedTimeline compact"><h3>本次合成素材顺序</h3>{selectedMaterialAssets.length === 0 ? <Empty>未选择素材，会自动使用前几个素材；建议先去素材选择页确认顺序和截取区间。</Empty> : selectedMaterialAssets.map((asset, index) => { const cfg = getClipSetting(asset, index); return <div key={asset.id} className="assetRow"><span>{index + 1}</span><strong>{asset.original_name || asset.filename}</strong><em>{asset.kind === 'image' ? `${cfg.image_seconds.toFixed(1)}秒` : `${cfg.video_start.toFixed(1)}-${cfg.video_end ? cfg.video_end.toFixed(1) : '自动'}秒`}</em><button className="mini" onClick={() => setActive('assets')}>调整</button></div>})}</div>
-        {video && <div className="videoGrid"><video controls src={video.video_url} /><div className="downloadPanel"><a className="download" href={video.video_url} target="_blank">下载视频 MP4</a><div className="buttonRow"><Button busy={busy === '保存最终视频' ? busy : ''} label="保存最终视频" onClick={saveFinalVideo} kind="primary" /><Button busy={busy === '保存 raw 分段素材' ? busy : ''} label="保存 raw 分段素材" onClick={saveRawSegments} kind="soft" /><Button busy={busy === '废弃本次结果' ? busy : ''} label="废弃本次结果" onClick={discardCurrentVideo} kind="danger" /></div>{finalActionResult && <div className="hintBox">{JSON.stringify(finalActionResult).slice(0, 220)}</div>}{video.subtitle_url && <a href={video.subtitle_url} target="_blank">下载字幕 SRT</a>}{video.audio_url && <a href={video.audio_url} target="_blank">下载音频</a>}{video.warnings?.map(w => <div className="warn" key={w}>{w}</div>)}</div></div>}
+      {moduleVisible('video') && active === 'video' && <section className="card modulePanel">
+        <div className="sectionHeader"><div><h2>第六步：成片合成 / 自动审片</h2><p>成片完成后自动登记统一任务，立即启动机械质检和豆包审片；人工只需确认一次，后续封面和图文自动生成。</p></div><div className="headerActions"><Button busy={busy === '按素材时长生成旁白稿' ? busy : ''} label="按素材时长补全旁白" onClick={generateScriptFromSelectedAssets} kind="soft" /><Button busy={busy === '合成视频并烧字幕' ? busy : ''} label="生成视频并下载 MP4" onClick={composeVideo} disabled={!currentScript} /></div></div>
+        <div className="workflowBridgeHint"><div><strong>成片后的正式链路</strong><span>自动审片 → 人工确认 → 3套封面 → 7页图文 → 最终总包</span><small>{window.localStorage.getItem(WORKFLOW_JOB_KEY) ? `当前任务：${window.localStorage.getItem(WORKFLOW_JOB_KEY)}` : '生成成片后自动创建统一任务 ID'}</small></div><button className="btn soft" onClick={() => window.dispatchEvent(new Event('ai-video-workflow-open'))}>打开审片与发布工作流</button></div>
+        <div className="subtitlePresetGrid">
+          {[
+            ['douyin_boss','老板口播大字','白字黑描边 + 痛点词亮黄/红，适合强转化口播'],
+            ['knowledge_highlight','知识科普高亮','双行字幕 + 关键词放大，适合解释流程/费用'],
+            ['clean_trust','干净可信','克制白字 + 深色底描边，适合房产/教育信任感'],
+            ['cta_pop','结尾强 CTA','亮色重点词 + 结尾放大，适合私信/领取资料']
+          ].map(([value,title,desc]) => <button key={value} className={subtitlePreset === value ? 'selected' : ''} onClick={() => setSubtitlePreset(value as any)}><strong>{title}</strong><span>{desc}</span></button>)}
+        </div>
+        <div className="grid3"><Field label="字幕字号"><input type="number" min="48" max="120" value={subtitleSize} onChange={e => setSubtitleSize(Number(e.target.value || 20))} /></Field><Field label="字幕位置"><select value={subtitlePosition} onChange={e => setSubtitlePosition(e.target.value as any)}><option value="bottom_safe">底部安全区，不挡脸</option><option value="middle_low">中下方，大字口播</option><option value="center">居中强调，慎用</option></select></Field><Field label={`离底部 ${subtitleMarginV}px`}><input type="range" min="40" max="260" step="5" value={subtitleMarginV} onChange={e => setSubtitleMarginV(Number(e.target.value))} /></Field></div>
+        <div className="smartSubtitleBox"><div><strong>智能重点词</strong><p>{subtitleHighlight || '系统会从文案里识别费用、避坑、身份、学校、私信等转化词，自动放大或高亮。'}</p></div><Button busy={busy === '智能字幕重点' ? busy : ''} label="AI 识别重点词" onClick={makeSubtitleAI} disabled={!currentScript} kind="soft" /></div>
+        <div className="hintBox">对齐逻辑：以最终配音真实时长为准；先生成画面，再叠加配音与字幕。后半段会自动提前补偿，避免越往后越慢。</div>
+        <div className="selectedTimeline compact"><h3>本次合成素材顺序</h3>{(() => { const timeline = getComposeTimelinePreview(); return timeline.rows.length === 0 ? <Empty>未选择素材，会自动使用前几个素材；建议先去素材选择页确认顺序和截取区间。</Empty> : <><div className="timelineSummary"><strong>素材合计 {timeline.materialSeconds.toFixed(1)} 秒</strong><span>配音 {timeline.audioSeconds ? timeline.audioSeconds.toFixed(1) : '未生成'} 秒</span><em>最终导出约 {timeline.finalSeconds.toFixed(1)} 秒；现在按素材时间轴和配音较长者导出，不会再显示 48 秒素材但只出 29 秒视频。</em></div>{timeline.rows.map(row => <div key={`${row.asset.id}-${row.index}`} className="assetRow"><span>{row.index + 1}</span><strong>{row.asset.original_name || row.asset.filename}</strong><em>{row.startAt.toFixed(1)}-{row.endAt.toFixed(1)}s · 取 {row.label}</em><button className="mini" onClick={() => setActive('assets')}>调整</button></div>)}</> })()}</div>
+        {video && <div className="videoGrid"><video controls src={video.video_url} /><div className="downloadPanel"><a className="download" href={video.video_url} target="_blank">下载视频 MP4</a>{video.subtitle_url && <a href={video.subtitle_url} target="_blank">下载字幕 SRT</a>}{video.audio_url && <a href={video.audio_url} target="_blank">下载音频</a>}{video.warnings?.map(w => <div className="warn" key={w}>{w}</div>)}</div></div>}
         <div className="editChatBox"><Field label="AI + 插件剪辑指令"><textarea value={editInstruction} onChange={e => setEditInstruction(e.target.value)} placeholder="例如：去掉开头2秒、整体加速1.1倍、重新加字幕、转成9:16。" /></Field><Button busy={busy === 'AI + 插件修改视频' ? busy : ''} label="AI + 插件修改视频" onClick={chatEditVideo} kind="ghost" disabled={!currentVideoName} />{editChat.map((msg, i) => <div className="chatMsg" key={i}><strong>AI：</strong>{msg.assistant_message}<p>{msg.summary}</p><div className="chips">{msg.actions?.map(x => <Pill key={x}>{x}</Pill>)}</div>{msg.new_video_url && <a href={msg.new_video_url} target="_blank">打开修改后视频</a>}{msg.warnings?.map(w => <div className="warn" key={w}>{w}</div>)}</div>)}</div>
       </section>}
 
-      {active === 'subtitleCover' && <section className="card modulePanel visualPanel">
-        <div className="sectionHeader"><div><h2>第六步：字幕 / 封面 / 图文引流</h2><p>这里分清楚：封面负责视频点击；图文引流负责小红书/抖音图文/朋友圈获客，可以直接生成 3-8 张收藏型图文。</p></div><div className="stackButtons"><Button busy={busy === '智能字幕重点' ? busy : ''} label="智能识别重点字幕" onClick={makeSubtitleAI} disabled={!currentScript} kind="ghost" /><Button busy={busy === '生成图文引流包' ? busy : ''} label="生成图文引流包" onClick={makeGraphicPost} /></div></div>
+      {moduleVisible('subtitleCover') && active === 'subtitleCover' && <section className="card modulePanel visualPanel">
+        <div className="sectionHeader"><div><h2>第七步：审片 / 封面 / 图文发布包装</h2><p>正常流程由右下角工作流统一处理：人工确认后自动生成三套封面和七页事实校验图文。这里原有按钮保留，作为单项重试和手动精修。</p></div><div className="stackButtons"><Button busy={busy === '智能字幕重点' ? busy : ''} label="智能识别重点字幕" onClick={makeSubtitleAI} disabled={!currentScript} kind="ghost" /><Button busy={busy === '生成图文引流包' ? busy : ''} label="生成图文引流包" onClick={makeGraphicPost} /></div></div>
         <div className="visualTabs"><span>字幕</span><span>封面</span><span>图文素材</span></div>
-        <div className="grid4"><Field label="字幕字号"><input type="number" value={subtitleSize} onChange={e => setSubtitleSize(Number(e.target.value || 58))} /></Field><Field label="字幕颜色"><input type="color" value={subtitleColor} onChange={e => setSubtitleColor(e.target.value)} /></Field><Field label="重点词"><input value={subtitleHighlight} onChange={e => setSubtitleHighlight(e.target.value)} /></Field><Field label="封面大标题"><input value={copy.title || coverStyle} onChange={e => setCopy({ ...copy, title: e.target.value })} placeholder="例如：海外买房避坑指南" /></Field></div>
+        <div className="grid4"><Field label="字幕模板"><select value={subtitlePreset} onChange={e => setSubtitlePreset(e.target.value as any)}><option value="douyin_boss">老板口播大字</option><option value="knowledge_highlight">知识科普高亮</option><option value="clean_trust">干净可信</option><option value="cta_pop">结尾强 CTA</option></select></Field><Field label="字幕字号"><input type="number" min="48" max="120" value={subtitleSize} onChange={e => setSubtitleSize(Number(e.target.value || 20))} /></Field><Field label={`离底部 ${subtitleMarginV}px`} hint="数值越小越靠下；数字人口播建议 48-60，避免挡嘴。"><input type="range" min="36" max="180" step="4" value={subtitleMarginV} onChange={e => setSubtitleMarginV(Number(e.target.value))} /></Field><Field label="重点词"><input value={subtitleHighlight} onChange={e => setSubtitleHighlight(e.target.value)} placeholder="AI 可自动识别，也可补充关键词" /></Field><Field label="封面大标题"><input value={copy.title || coverStyle} onChange={e => setCopy({ ...copy, title: e.target.value })} placeholder="例如：海外买房避坑指南" /></Field></div>
         <div className="coverBuilder">
           <div>
             <h3>封面生成方式</h3>
@@ -1785,7 +3592,7 @@ ${manualText || ''}`.trim()
         {subtitleAI && <div className="resultBox"><h3>{subtitleAI.template}</h3><div className="chips">{subtitleAI.keywords?.map(k => <Pill key={k.word} tone="orange">{k.word} · {k.effect}</Pill>)}</div><div className="splitGrid"><div><h4>字幕建议</h4>{subtitleAI.srt_tips?.map(x => <p key={x}>· {x}</p>)}</div><div><h4>封面大字</h4>{subtitleAI.cover_text_options?.map(x => <p key={x}>· {x}</p>)}</div><div><h4>已写入重点词</h4><p>{subtitleHighlight}</p></div></div></div>}
       </section>}
 
-      {active === 'growth' && <section className="card modulePanel">
+      {moduleVisible('growth') && active === 'growth' && <section className="card modulePanel">
         <div className="sectionHeader"><div><h2>流量监控与投流决策</h2><p>先手动录入发布后的核心数据，系统会用规则 + AI 判断是否加热、换封面、重剪或停投。</p></div><Button busy={busy === '机器学习投流判断' ? busy : ''} label="生成投流决策" onClick={makeGrowthDecision} kind="soft" /></div>
         <div className="metricGrid">
           <Field label="播放量"><input type="number" value={growthMetrics.views} onChange={e => setGrowthMetrics({ ...growthMetrics, views: Number(e.target.value || 0) })} /></Field>
@@ -1801,13 +3608,44 @@ ${manualText || ''}`.trim()
         {growthDecision ? <div className="resultBox growthResult"><div className="scoreRing"><strong>{growthDecision.score}</strong><span>投流分</span></div><div><h3>{growthDecision.decision}</h3><p>{growthDecision.reason}</p><p>预算建议：{growthDecision.recommended_budget}</p><div className="splitGrid"><div><h4>动作</h4>{growthDecision.actions?.map(x => <p key={x}>· {x}</p>)}</div><div><h4>风险</h4>{growthDecision.alerts?.map(x => <p key={x}>· {x}</p>)}</div><div><h4>下一轮测试</h4>{growthDecision.next_test?.map(x => <p key={x}>· {x}</p>)}</div></div></div></div> : <Empty>发布后录入数据，系统会给投流/停投/重剪建议。</Empty>}
       </section>}
 
-      {active === 'publish' && <section className="card modulePanel">
+      {moduleVisible('publish') && active === 'publish' && <section className="card modulePanel">
         <div className="sectionHeader"><div><h2>第七步：平台发布</h2><p>先生成抖音、视频号、快手、小红书发布草稿。开放平台权限下来后再接真实发布和数据回流。</p></div></div>
         <div className="buttonRow"><Button busy={busy === '投流分析' ? busy : ''} label="投流分析" onClick={analyzeAd} kind="ghost" /><select value={platform} onChange={e => setPlatform(e.target.value)}><option value="douyin">抖音</option><option value="shipinhao">视频号</option><option value="kuaishou">快手</option><option value="xiaohongshu">小红书</option></select><Button busy={busy === '生成平台发布草稿' ? busy : ''} label="生成平台发布草稿" onClick={platformPublish} /></div>
         <div className="grid2">{ad && <div className="miniResult"><h3>{ad.decision}</h3><p>预算：{ad.suggested_budget}</p>{ad.optimization_tips?.map(x => <p key={x}>· {x}</p>)}</div>}{publish && <div className="miniResult"><h3>{publish.platform}：{publish.status}</h3><p>{publish.message}</p>{publish.checklist?.map(x => <p key={x}>· {x}</p>)}</div>}</div>
       </section>}
     </main>
   </div>
+}
+
+function LeadInbox() {
+  const [comment, setComment] = useState('')
+  const [leadIndustry, setLeadIndustry] = useState('real_estate')
+  const [result, setResult] = useState<any>(null)
+  const analyze = async () => {
+    if (!comment.trim()) return
+    const r = await fetch((window as any).__API_BASE + '/api/leads/analyze', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: comment, industry: leadIndustry, platform: 'douyin' })
+    }).then(r => r.json()).catch(e => ({ ok: false, error: String(e) }))
+    setResult(r)
+  }
+  return (
+    <div style={{ padding: 16, borderTop: '1px solid #333' }}>
+      <h3>Lead Inbox (Preview)</h3>
+      <div className="grid2"><div className="field"><label>行业</label><select value={leadIndustry} onChange={e => setLeadIndustry(e.target.value)}><option value="real_estate">房产</option><option value="foreign_trade">外贸</option></select></div></div>
+      <div className="field"><label>粘贴评论</label><textarea value={comment} onChange={e => setComment(e.target.value)} rows={2} placeholder="例：这个房子多少钱，能贷款吗？" /></div>
+      <button className="btn primary" onClick={analyze} disabled={!comment.trim()}>AI 分析</button>
+      {result && (
+        <div style={{ marginTop: 12, padding: 12, background: '#1a1a2e', borderRadius: 8 }}>
+          <div>意向等级：<strong>{result.intent_level === 'high' ? '高' : result.intent_level === 'medium' ? '中' : '低'}</strong> ({result.intent_type})</div>
+          <div style={{ marginTop: 8 }}>建议回复：<em>{result.suggested_reply}</em></div>
+          <div style={{ marginTop: 4, fontSize: 12, color: '#888' }}>下一步：{result.next_action} | 置信度：{result.confidence}</div>
+          {result.suggested_reply && <button className="btn soft" style={{ marginTop: 8 }} onClick={() => { navigator.clipboard.writeText(result.suggested_reply) }}>复制回复</button>}
+        </div>
+      )}
+    </div>
+  )
 }
 
 export default function App() {

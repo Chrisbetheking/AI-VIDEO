@@ -35,6 +35,9 @@ CARD = (255, 255, 255)
 from app.services.review_packaging_automation_provider import install_review_packaging_automation
 # AI_VIDEO_V10_39_REVIEW_AUTO_PACKAGING
 
+from app.services.main_workflow_provider import install_main_workflow_provider
+# AI_VIDEO_V10_40_1_REAL_MAIN_ADAPTER
+
 def _font(size: int, bold: bool = True):
     candidates = [
         "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc" if bold else "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
@@ -598,12 +601,13 @@ def _draw_916_variant(path: Path, frame: Path | None, variant: Dict[str, Any]):
     img.convert("RGB").save(path, quality=95)
 
 def install_graphic_window_provider(app):
+    install_main_workflow_provider(app)
     install_review_packaging_automation(app)
     @app.get("/api/graphic-window/health")
     def health():
         return {
             "ok": True,
-            "mode": "graphic_window_v6_review_auto_packaging",
+            "mode": "graphic_window_v7_1_real_main_workflow",
             "rule": "cover_only_9_16_xhs_uses_info_cards_maps_tables_budget_checklist_cta",
             "storage": str(GRAPHIC_ROOT),
             "pillow": True,

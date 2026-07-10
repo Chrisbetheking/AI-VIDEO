@@ -1,16 +1,13 @@
 import React from 'react'
 import { createRoot } from 'react-dom/client'
-import ProductWorkspaceBridge from './ProductWorkspaceBridge'
+import App from './App'
+import MainWorkflowDock from './MainWorkflowDock'
+// AI_VIDEO_V10_40_1_REAL_MAIN_DOCK
 import './styles.css'
-import './product-ux-fixes.css'
 
-const root = document.getElementById('root')
-if (!root) {
-  throw new Error('Root element #root not found')
-}
-
-createRoot(root).render(
+createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <ProductWorkspaceBridge />
+    <App />
+    <MainWorkflowDock />
   </React.StrictMode>,
 )
