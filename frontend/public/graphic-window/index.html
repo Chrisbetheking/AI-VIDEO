@@ -39,7 +39,7 @@ pre{white-space:pre-wrap;background:#0f172a;color:#dbeafe;border-radius:16px;pad
   <section class="grid">
     <div class="card">
       <h2>控制台</h2>
-      <div class="hint">先点「读取最新成片」，再生成3套9:16封面或小红书7页视觉故事包。</div>
+      <div class="hint">先点「读取最新成片」，再生成3套9:16封面或小红书7页事实校验图文包。</div>
 
       <label>视频 Job ID
         <input id="jobId" placeholder="留空时可读取最新成片"/>
@@ -82,7 +82,7 @@ pre{white-space:pre-wrap;background:#0f172a;color:#dbeafe;border-radius:16px;pad
       <div class="row">
         <button onclick="loadLatest()">读取最新成片</button>
         <button class="primary" onclick="makeCover()">生成3套9:16视频封面</button>
-        <button class="green" onclick="makeXhs()">生成小红书视觉故事包</button>
+        <button class="green" onclick="makeXhs()">生成事实校验小红书图文包</button>
       </div>
 
       <h3>日志</h3>
@@ -179,7 +179,7 @@ async function makeCover(){
 async function makeXhs(){
   try{
     setBusy(true)
-    log('生成小红书视觉故事包中...')
+    log('生成事实校验小红书图文包中...')
     const data = await api('/api/graphic-window/xiaohongshu/generate', payload())
     render(data)
   }catch(e){ log('失败：' + e.message) }
@@ -922,16 +922,44 @@ async function makeXhs(){
 })()
 </script>
 
-<!-- AI_VIDEO_V10_37_XHS_VISUAL_STORY_UI -->
+
+<!-- AI_VIDEO_V10_38_XHS_FACT_GUARD_UI -->
 <script>
 (function(){
-  const button = Array.from(document.querySelectorAll('button'))
-    .find(el => (el.textContent || '').includes('生成小红书视觉故事包'))
-  if(!button || !button.parentElement) return
-  const note = document.createElement('div')
-  note.style.cssText = 'margin-top:10px;padding:10px 12px;border-radius:12px;background:#f7f2e7;color:#76531d;font-size:13px;line-height:1.5'
-  note.textContent = 'V10.37：7页全部带实景画面；区域关系为逻辑示意；不调用FAL，不重新生成视频。'
-  button.parentElement.appendChild(note)
+  function addFactGuardNote(){
+    if(document.getElementById('xhsFactGuardRule')) return
+
+    const button = Array.from(
+      document.querySelectorAll('button')
+    ).find(
+      el => (el.textContent || '')
+        .includes('生成事实校验小红书图文包')
+    )
+
+    if(!button || !button.parentElement) return
+
+    const note = document.createElement('div')
+    note.id = 'xhsFactGuardRule'
+    note.style.cssText =
+      'margin-top:10px;padding:10px 12px;' +
+      'border-radius:12px;background:#eef8f1;' +
+      'color:#17653a;font-size:13px;line-height:1.55'
+
+    note.textContent =
+      'V10.38：先读取完整口播，再提取真实金额、区域、用途和原句证据。' +
+      '证据不足时自动取消预算→区域硬配，并生成 content_trace.json。'
+
+    button.parentElement.appendChild(note)
+  }
+
+  if(document.readyState === 'loading'){
+    document.addEventListener(
+      'DOMContentLoaded',
+      addFactGuardNote
+    )
+  }else{
+    addFactGuardNote()
+  }
 })()
 </script>
 </body>

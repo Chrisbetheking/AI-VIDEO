@@ -11,6 +11,8 @@ from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
 from fastapi import Body
+from app.services.xhs_fact_guard_v10_38 import generate_fact_checked_story
+# AI_VIDEO_V10_38_XHS_FACT_GUARD_ROUTE
 from app.services.xhs_visual_story_v10_37 import generate_visual_story
 # AI_VIDEO_V10_37_XHS_VISUAL_STORY_ROUTE
 from PIL import Image, ImageDraw, ImageFont, ImageEnhance
@@ -597,7 +599,7 @@ def install_graphic_window_provider(app):
     def health():
         return {
             "ok": True,
-            "mode": "graphic_window_v4_three_cover_variants_xhs_visual_story_pack",
+            "mode": "graphic_window_v5_three_cover_variants_xhs_fact_guard_pack",
             "rule": "cover_only_9_16_xhs_uses_info_cards_maps_tables_budget_checklist_cta",
             "storage": str(GRAPHIC_ROOT),
             "pillow": True,
@@ -691,7 +693,7 @@ def install_graphic_window_provider(app):
         job_id = str(payload.get("job_id") or "").strip()
         job = _find_job(job_id)
         video = _clean_video_path(job_id, job)
-        return generate_visual_story(
+        return generate_fact_checked_story(
             payload=payload,
             job=job,
             video=video,
