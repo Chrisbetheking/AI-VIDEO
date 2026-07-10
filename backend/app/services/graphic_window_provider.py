@@ -452,12 +452,150 @@ def _zip(pkg_dir: Path, images: List[Dict[str, Any]]):
     return f"{PUBLIC_BASE}/{pkg_dir.name}/images.zip" if zp.exists() else ""
 
 
+# AI_VIDEO_V10_36_THREE_COVER_VARIANTS
+def _cover_location(text: str) -> str:
+    raw = str(text or "")
+    for name in ["吉隆坡", "马来西亚", "新加坡", "曼谷", "迪拜"]:
+        if name in raw:
+            return name
+    return "海外"
+
+
+def _extract_budget_tokens(text: str) -> List[str]:
+    raw = str(text or "")
+    patterns = [
+        r"(?<!\d)(\d{1,4}(?:\.\d+)?\s*万元)(?!\d)",
+        r"(?<!\d)(\d{1,4}(?:\.\d+)?\s*万)(?!\d)",
+        r"(?<!\d)(RM\s*\d[\d,]*(?:\.\d+)?)",
+        r"(?<!\d)(MYR\s*\d[\d,]*(?:\.\d+)?)",
+        r"(?<!\d)(\d[\d,]*(?:\.\d+)?\s*马币)",
+    ]
+    found: List[str] = []
+    for pattern in patterns:
+        for value in re.findall(pattern, raw, flags=re.IGNORECASE):
+            cleaned = re.sub(r"\s+", "", str(value))
+            if cleaned and cleaned not in found:
+                found.append(cleaned)
+            if len(found) >= 3:
+                return found
+    return found
+
+
+def _cover_variants(title: str, script_text: str, keywords: Any) -> List[Dict[str, Any]]:
+    keyword_text = " ".join(str(x) for x in (keywords or []))
+    source = " ".join([str(title or ""), str(script_text or ""), keyword_text])
+    location = _cover_location(source)
+    budgets = _extract_budget_tokens(source)
+
+    if len(budgets) >= 3:
+        numeric_lines = [
+            f"{budgets[0]} / {budgets[1]}",
+            f"{budgets[2]}买哪个区",
+        ]
+        numeric_sub = f"{location}预算选区对照"
+    elif len(budgets) == 2:
+        numeric_lines = [
+            f"{budgets[0]} / {budgets[1]}",
+            f"{location}怎么选区",
+        ]
+        numeric_sub = "两档预算一次讲清"
+    elif len(budgets) == 1:
+        numeric_lines = [
+            f"预算{budgets[0]}",
+            f"{location}买哪个区",
+        ]
+        numeric_sub = "自住和投资逻辑不同"
+    else:
+        numeric_lines = [
+            "三档预算",
+            f"{location}怎么选区",
+        ]
+        numeric_sub = "低预算 / 中预算 / 高预算"
+
+    return [
+        {
+            "key": "numeric",
+            "name": "数字型",
+            "badge": "预算对照",
+            "lines": numeric_lines,
+            "sub": numeric_sub,
+            "reason": "让用户快速对号入座，适合预算选区主题",
+        },
+        {
+            "key": "pitfall",
+            "name": "避坑型",
+            "badge": "买房避坑",
+            "lines": ["预算再高", "也别买错区"],
+            "sub": f"{location}买房先看用途",
+            "reason": "突出错误成本，增强停留和点击冲动",
+        },
+        {
+            "key": "result",
+            "name": "结果型",
+            "badge": "选区逻辑",
+            "lines": ["自住 / 出租 / 升值", "选区完全不同"],
+            "sub": "先定需求 再看房",
+            "reason": "直接展示三种结果差异，适合搜索与收藏",
+        },
+    ]
+
+
+def _fit_font(draw: ImageDraw.ImageDraw, text: str, max_width: int, start: int = 102, minimum: int = 62):
+    size = start
+    while size > minimum:
+        font = _font(size, True)
+        box = draw.textbbox((0, 0), text, font=font)
+        if box[2] - box[0] <= max_width:
+            return font
+        size -= 4
+    return _font(minimum, True)
+
+
+def _draw_916_variant(path: Path, frame: Path | None, variant: Dict[str, Any]):
+    w, h = 1080, 1920
+    img = _gradient_overlay(_photo_bg(w, h, frame), bottom=205)
+    draw = ImageDraw.Draw(img)
+
+    x = 76
+    content_top = 1110
+    max_width = w - 152
+
+    badge_font = _font(34, True)
+    badge = str(variant.get("badge") or "封面候选")
+    badge_box = draw.textbbox((0, 0), badge, font=badge_font)
+    badge_w = badge_box[2] - badge_box[0] + 54
+    draw.rounded_rectangle(
+        (x, content_top, x + badge_w, content_top + 66),
+        radius=22,
+        fill=ACCENT + (245,),
+    )
+    draw.text(
+        (x + 27, content_top + 12),
+        badge,
+        font=badge_font,
+        fill=(26, 31, 42, 255),
+    )
+
+    y = content_top + 98
+    for raw_line in list(variant.get("lines") or [])[:2]:
+        line = _clean(str(raw_line), 30)
+        font = _fit_font(draw, line, max_width, start=106, minimum=64)
+        _shadow_text(draw, (x, y), line, font)
+        y += font.size + 30
+
+    y += 8
+    sub = _clean(str(variant.get("sub") or ""), 42)
+    sub_font = _fit_font(draw, sub, max_width, start=46, minimum=34)
+    draw.text((x, y), sub, font=sub_font, fill=ACCENT + (255,))
+
+    img.convert("RGB").save(path, quality=95)
+
 def install_graphic_window_provider(app):
     @app.get("/api/graphic-window/health")
     def health():
         return {
             "ok": True,
-            "mode": "graphic_window_v2_cover_916_xhs_growth_pack",
+            "mode": "graphic_window_v3_three_cover_variants_xhs_growth_pack",
             "rule": "cover_only_9_16_xhs_uses_info_cards_maps_tables_budget_checklist_cta",
             "storage": str(GRAPHIC_ROOT),
             "pillow": True,
@@ -480,40 +618,67 @@ def install_graphic_window_provider(app):
     def generate_video_cover(payload: Dict[str, Any] = Body(default_factory=dict)):
         job_id = str(payload.get("job_id") or "").strip()
         title = str(payload.get("title") or "").strip()
-        strategy = _title_strategy(title)
+        script_text = str(payload.get("script_text") or "").strip()
+        keywords = payload.get("keywords") or []
 
         job = _find_job(job_id)
-        video = _clean_video_path(job_id, job)
+        if not script_text:
+            script_text = str(
+                job.get("script_text")
+                or job.get("script")
+                or job.get("tts_script")
+                or ""
+            )
 
-        pkg_id = f"cover916_v2_{int(time.time())}_{random.randint(1000,9999)}"
+        video = _clean_video_path(job_id, job)
+        variants = _cover_variants(title, script_text, keywords)
+
+        pkg_id = f"cover916_v3_{int(time.time())}_{random.randint(1000,9999)}"
         pkg_dir = GRAPHIC_ROOT / pkg_id
         pkg_dir.mkdir(parents=True, exist_ok=True)
 
-        out = pkg_dir / "cover_9_16.jpg"
-        frame = _extract_frame(video, out, 1080, 1920, "2.8")
-        _draw_916_cover(out, frame, strategy)
+        frame_target = pkg_dir / "cover_frame_source.jpg"
+        frame = _extract_frame(video, frame_target, 1080, 1920, "2.8")
 
-        images = [{
-            "url": f"{PUBLIC_BASE}/{pkg_id}/cover_9_16.jpg",
-            "path": str(out),
-            "title": strategy["cover_main"],
-            "role": "9:16 视频封面",
-            "width": 1080,
-            "height": 1920,
-        }]
+        images: List[Dict[str, Any]] = []
+        for index, variant in enumerate(variants, 1):
+            out = pkg_dir / f"cover_{index:02d}_{variant['key']}.jpg"
+            _draw_916_variant(out, frame, variant)
+            images.append(
+                {
+                    "url": f"{PUBLIC_BASE}/{pkg_id}/{out.name}",
+                    "path": str(out),
+                    "title": " / ".join(variant["lines"]),
+                    "role": f"9:16视频封面 · {variant['name']}",
+                    "variant_key": variant["key"],
+                    "variant_name": variant["name"],
+                    "badge": variant["badge"],
+                    "subtitle": variant["sub"],
+                    "reason": variant["reason"],
+                    "width": 1080,
+                    "height": 1920,
+                }
+            )
 
         zip_url = _zip(pkg_dir, images)
+        recommended = "numeric" if ("预算" in title or _extract_budget_tokens(script_text)) else "pitfall"
 
         return {
             "ok": True,
             "mode": "video_cover",
-            "style": "v2_9_16_only_premium_cover",
+            "style": "v3_three_click_cover_variants",
             "package_id": pkg_id,
             "job_id": job_id,
             "title": title,
+            "cover_count": len(images),
+            "recommended_variant": recommended,
             "images": images,
-            "publish_title": f"{strategy['cover_main']}｜{strategy['cover_sub']}",
-            "publish_description": "已生成 9:16 视频封面。封面只服务点击率，不放模板名、不放尺寸、不放系统词。",
+            "cover_variants": variants,
+            "publish_title": images[0]["title"] if images else title,
+            "publish_description": (
+                "已生成3套9:16封面候选：数字型、避坑型、结果型。"
+                "数字型只使用文案中真实出现的金额；没有明确金额时使用‘三档预算’，不虚构数字。"
+            ),
             "hashtags": ["吉隆坡买房", "马来西亚房产", "海外置业", "房产投资"],
             "download_zip_url": zip_url,
             "warnings": [],
