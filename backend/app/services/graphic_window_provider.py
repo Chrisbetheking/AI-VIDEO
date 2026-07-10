@@ -11,6 +11,8 @@ from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
 from fastapi import Body
+from app.services.xhs_visual_story_v10_37 import generate_visual_story
+# AI_VIDEO_V10_37_XHS_VISUAL_STORY_ROUTE
 from PIL import Image, ImageDraw, ImageFont, ImageEnhance
 
 BASE = Path("/opt/ai-video")
@@ -595,7 +597,7 @@ def install_graphic_window_provider(app):
     def health():
         return {
             "ok": True,
-            "mode": "graphic_window_v3_three_cover_variants_xhs_growth_pack",
+            "mode": "graphic_window_v4_three_cover_variants_xhs_visual_story_pack",
             "rule": "cover_only_9_16_xhs_uses_info_cards_maps_tables_budget_checklist_cta",
             "storage": str(GRAPHIC_ROOT),
             "pillow": True,
@@ -687,60 +689,14 @@ def install_graphic_window_provider(app):
     @app.post("/api/graphic-window/xiaohongshu/generate")
     def generate_xhs(payload: Dict[str, Any] = Body(default_factory=dict)):
         job_id = str(payload.get("job_id") or "").strip()
-        title = str(payload.get("title") or "").strip()
-        cta = str(payload.get("cta") or "").strip()
-        strategy = _title_strategy(title)
-
         job = _find_job(job_id)
         video = _clean_video_path(job_id, job)
+        return generate_visual_story(
+            payload=payload,
+            job=job,
+            video=video,
+            graphic_root=GRAPHIC_ROOT,
+            public_base=PUBLIC_BASE,
+            zip_func=_zip,
+        )
 
-        pkg_id = f"xhs_growth_v2_{int(time.time())}_{random.randint(1000,9999)}"
-        pkg_dir = GRAPHIC_ROOT / pkg_id
-        pkg_dir.mkdir(parents=True, exist_ok=True)
-
-        images = []
-
-        # 第1页使用城市真实画面，后面全部信息图，不再一味复用视频截图
-        p1 = pkg_dir / "xhs_01_hook.jpg"
-        frame = _extract_frame(video, p1, 1242, 1660, "2.8")
-        _draw_xhs_hook(p1, strategy, frame)
-        images.append({"url": f"{PUBLIC_BASE}/{pkg_id}/{p1.name}", "path": str(p1), "title": "爆点封面", "role": "第1页", "width": 1242, "height": 1660})
-
-        pages = [
-            ("xhs_02_mindset.jpg", lambda p: _draw_xhs_text(p, 2, "很多人第一步就错了", "买海外房产不是先看价格 而是先分清投资还是自住")),
-            ("xhs_03_area_logic.jpg", _draw_xhs_map),
-            ("xhs_04_compare.jpg", _draw_xhs_compare),
-            ("xhs_05_budget.jpg", _draw_xhs_budget),
-            ("xhs_06_pitfalls.jpg", _draw_xhs_checklist),
-            ("xhs_07_cta.jpg", lambda p: _draw_xhs_cta(p, cta)),
-        ]
-
-        for name, drawer in pages:
-            out = pkg_dir / name
-            drawer(out)
-            page_no = len(images) + 1
-            images.append({
-                "url": f"{PUBLIC_BASE}/{pkg_id}/{out.name}",
-                "path": str(out),
-                "title": f"第{page_no}页",
-                "role": f"第{page_no}页",
-                "width": 1242,
-                "height": 1660,
-            })
-
-        zip_url = _zip(pkg_dir, images)
-
-        return {
-            "ok": True,
-            "mode": "xiaohongshu",
-            "style": "v2_growth_carousel_mixed_visuals",
-            "package_id": pkg_id,
-            "job_id": job_id,
-            "title": title,
-            "images": images,
-            "publish_title": "别急着买吉隆坡房：预算不同，选区完全不同",
-            "publish_description": "吉隆坡买房不要只看价格。投资、自住、预算不同，区域选择逻辑完全不一样。评论区告诉我你的预算和用途，我按你的需求拆解区域。",
-            "hashtags": ["吉隆坡买房", "马来西亚房产", "海外置业", "小红书房产", "房产投资"],
-            "download_zip_url": zip_url,
-            "warnings": [],
-        }

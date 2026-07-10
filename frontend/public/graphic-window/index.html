@@ -33,13 +33,13 @@ pre{white-space:pre-wrap;background:#0f172a;color:#dbeafe;border-radius:16px;pad
   <section class="hero">
     <b>AI-VIDEO GRAPHIC WINDOW</b>
     <h2>9:16视频封面 / 小红书爆款图文包</h2>
-    <p>不调用 FAL，不重新生成视频。视频封面一次生成3套9:16候选（数字型、避坑型、结果型）；小红书生成 7 页图文包，包含钩子、区域逻辑、对比表、预算分层、避坑和引流。</p>
+    <p>不调用 FAL，不重新生成视频。视频封面一次生成3套9:16候选（数字型、避坑型、结果型）；小红书生成7页视觉故事包：每页都有实景画面，并穿插区域关系、预算分档、用途对比、避坑与收藏清单。</p>
   </section>
 
   <section class="grid">
     <div class="card">
       <h2>控制台</h2>
-      <div class="hint">先点「读取最新成片」，再生成3套9:16封面或小红书7页图文包。</div>
+      <div class="hint">先点「读取最新成片」，再生成3套9:16封面或小红书7页视觉故事包。</div>
 
       <label>视频 Job ID
         <input id="jobId" placeholder="留空时可读取最新成片"/>
@@ -82,7 +82,7 @@ pre{white-space:pre-wrap;background:#0f172a;color:#dbeafe;border-radius:16px;pad
       <div class="row">
         <button onclick="loadLatest()">读取最新成片</button>
         <button class="primary" onclick="makeCover()">生成3套9:16视频封面</button>
-        <button class="green" onclick="makeXhs()">生成小红书爆款图文包</button>
+        <button class="green" onclick="makeXhs()">生成小红书视觉故事包</button>
       </div>
 
       <h3>日志</h3>
@@ -179,7 +179,7 @@ async function makeCover(){
 async function makeXhs(){
   try{
     setBusy(true)
-    log('生成小红书爆款图文包中...')
+    log('生成小红书视觉故事包中...')
     const data = await api('/api/graphic-window/xiaohongshu/generate', payload())
     render(data)
   }catch(e){ log('失败：' + e.message) }
@@ -919,6 +919,19 @@ async function makeXhs(){
     applyThreeCoverLabels()
   }
   setInterval(applyThreeCoverLabels, 1200)
+})()
+</script>
+
+<!-- AI_VIDEO_V10_37_XHS_VISUAL_STORY_UI -->
+<script>
+(function(){
+  const button = Array.from(document.querySelectorAll('button'))
+    .find(el => (el.textContent || '').includes('生成小红书视觉故事包'))
+  if(!button || !button.parentElement) return
+  const note = document.createElement('div')
+  note.style.cssText = 'margin-top:10px;padding:10px 12px;border-radius:12px;background:#f7f2e7;color:#76531d;font-size:13px;line-height:1.5'
+  note.textContent = 'V10.37：7页全部带实景画面；区域关系为逻辑示意；不调用FAL，不重新生成视频。'
+  button.parentElement.appendChild(note)
 })()
 </script>
 </body>
