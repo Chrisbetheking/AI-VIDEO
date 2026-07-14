@@ -18,8 +18,8 @@ from fastapi import BackgroundTasks, Body, FastAPI, HTTPException
 from fastapi.encoders import jsonable_encoder
 
 
-VERSION = "10.40.5"
-MODE = "clean_subtitle_sentence_keyword_hub"
+VERSION = "10.40.6"
+MODE = "full_chain_closed_loop_hub"
 
 BASE = Path(os.getenv("AI_VIDEO_BASE", "/opt/ai-video"))
 STORAGE = BASE / "storage"
@@ -1182,6 +1182,77 @@ def _xhs_count(
     )
 
 
+
+def _visual_audit_path(job_id: str) -> Path:
+    return _workflow_dir(job_id) / "visual_integrity.json"
+
+
+def _visual_audit_for(job_id: str) -> Dict[str, Any]:
+    return _json_read(_visual_audit_path(job_id))
+
+
+def _review_video_path(job: Dict[str, Any], review: Dict[str, Any]) -> Optional[Path]:
+    mechanical = _dict(review.get("mechanical"))
+    return (
+        _allowed_local_path(mechanical.get("local_path"))
+        or _recursive_find_path(
+            job,
+            {
+                "final_video_path", "subtitled_video_path", "output_path",
+                "local_path", "video_path",
+            },
+        )
+    )
+
+
+async def _run_visual_integrity_audit(
+    app: FastAPI, job_id: str, job: Dict[str, Any], review: Dict[str, Any],
+) -> Dict[str, Any]:
+    video_path = _review_video_path(job, review)
+    if not video_path:
+        report = {
+            "ok": False, "version": VERSION, "job_id": job_id,
+            "passed": False, "status": "quarantine",
+            "reasons": ["找不到当前任务最终视频，无法执行画面完整性审计"],
+            "created_at": _now(),
+        }
+        _atomic_json(_visual_audit_path(job_id), report)
+        return report
+    status, report = await _internal_json(
+        app, "POST", "/api/video/integration/video/audit",
+        {
+            "path": str(video_path), "allow_bottom_subtitle": True,
+            "sample_count": 18, "job_id": job_id,
+        }, timeout=360,
+    )
+    if status >= 400:
+        report = {
+            "ok": False, "version": VERSION, "job_id": job_id,
+            "passed": False, "status": "quarantine",
+            "reasons": ["画面完整性审计接口失败"],
+            "detail": report, "created_at": _now(),
+        }
+    else:
+        report = {**report, "job_id": job_id, "video_path": str(video_path)}
+    _atomic_json(_visual_audit_path(job_id), report)
+    return report
+
+
+def _require_clean_visual(job_id: str) -> Dict[str, Any]:
+    report = _visual_audit_for(job_id)
+    if not report:
+        raise HTTPException(409, "尚未完成画面完整性审计，不能人工通过或生成发布包装。")
+    if report.get("passed") is not True:
+        raise HTTPException(
+            409,
+            {
+                "message": "画面存在素材自带字幕、水印或重复镜头，已阻止发布。",
+                "visual_integrity": report,
+            },
+        )
+    return report
+
+
 def _next_action(
     job: Dict[str, Any],
     review: Dict[str, Any],
@@ -1394,6 +1465,7 @@ async def _workflow_snapshot(
     delivery = _delivery_for(
         job_id,
     )
+    visual_integrity = _visual_audit_for(job_id)
 
     next_action = _next_action(
         job,
@@ -1403,6 +1475,12 @@ async def _workflow_snapshot(
         selection,
         delivery,
     )
+    if _is_job_done(job) and review:
+        if not visual_integrity:
+            next_action = "run_review"
+        elif visual_integrity.get("passed") is not True:
+            next_action = "return_to_edit"
+
     stage_index, stages = _stage_payload(
         next_action
     )
@@ -1422,6 +1500,7 @@ async def _workflow_snapshot(
             selection.get("cover_video")
         ),
         "delivery": delivery,
+        "visual_integrity": visual_integrity,
         "next_action": next_action,
         "stage_index": stage_index,
         "stages": stages,
@@ -2726,10 +2805,19 @@ async def _auto_review_registered_job(
             timeout=300,
         )
 
+        visual_integrity = {}
+        if status < 400:
+            job = await _load_job(app, job_id)
+            review = await _get_optional(app, f"/api/video/review/{job_id}")
+            visual_integrity = await _run_visual_integrity_audit(
+                app, job_id, job, review
+            )
+
         record = {
             "version": VERSION,
             "job_id": job_id,
             "status_code": status,
+            "visual_integrity": visual_integrity,
             "ok": status < 400,
             "completed_at": _now(),
             "result": result,
@@ -2790,6 +2878,11 @@ def install_main_workflow_provider(
             "script_artifact_sanitizer": True,
             "visual_embedded_text_block": True,
             "sentence_keyword_editor": True,
+            "visual_integrity_gate": True,
+            "asset_cleanliness_gate": True,
+            "obsidian_openclaw_closed_loop": True,
+            "graphic_window_embedded_tab": True,
+            "button_contracts": True,
             "cover_intro_duration_seconds": 1.0,
             "main_ui_compose_bridge": True,
             "auto_review_after_compose": True,
@@ -2897,6 +2990,10 @@ def install_main_workflow_provider(
                 detail=result,
             )
 
+        job = await _load_job(app, job_id)
+        review = await _get_optional(app, f"/api/video/review/{job_id}")
+        await _run_visual_integrity_audit(app, job_id, job, review)
+
         return await _workflow_snapshot(
             app,
             job_id,
@@ -2915,6 +3012,7 @@ def install_main_workflow_provider(
             app,
             job_id,
         )
+        _require_clean_visual(job_id)
         request_payload = {
             **_safe_payload_from_job(
                 job_id,
@@ -3031,6 +3129,7 @@ def install_main_workflow_provider(
             app,
             job_id,
         )
+        _require_clean_visual(job_id)
         override_note = (
             _string(
                 payload.get("note")

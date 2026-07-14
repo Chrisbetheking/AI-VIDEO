@@ -3,6 +3,7 @@ import VideoCreationWizard from './VideoCreationWizard'
 import DouyinAccountLibrary from './DouyinAccountLibrary'
 import OpenClawWorkbench from './OpenClawWorkbench'
 import ContentBrainWorkbench from './ContentBrainWorkbench'
+import GraphicWindowWorkbench from './GraphicWindowWorkbench'
 import {
   emptyProjectDraft,
   getStoredToken,
@@ -69,6 +70,7 @@ const NAV_ITEMS: NavItem[] = [
   { key: 'digital', label: '数字人库', desc: '选择照片/视频出镜' },
   { key: 'leads', label: '获客线索', desc: 'OpenClaw 截流待处理' },
   { key: 'brain', label: '内容大脑', desc: 'Obsidian / 选题知识库' },
+  { key: 'graphic', label: '图文窗口', desc: '封面 / 图文 / 发布包装' },
   { key: 'settings', label: '设置', desc: '连接状态与清空' },
 ]
 
@@ -106,6 +108,7 @@ function tabFromHash(hash: string): WorkspaceTab | null {
   if (['#asset-library', '#materials', '#r2-assets'].includes(hash)) return 'assets'
   if (['#openclaw-capture', '#openclaw-workbench', '#lead-acquisition'].includes(hash)) return 'leads'
   if (['#content-brain', '#obsidian-brain', '#knowledge-brain'].includes(hash)) return 'brain'
+  if (['#graphic-window', '#publish-package', '#xiaohongshu-package'].includes(hash)) return 'graphic'
   if (['#digital-human-safe', '#digital-human-workspace', '#digital-human-library'].includes(hash)) return 'digital'
   if (['#settings', '#system-settings'].includes(hash)) return 'settings'
   return null
@@ -117,6 +120,7 @@ function tabHash(tab: WorkspaceTab) {
   if (tab === 'assets') return '#asset-library'
   if (tab === 'leads') return '#openclaw-capture'
   if (tab === 'brain') return '#content-brain'
+  if (tab === 'graphic') return '#graphic-window'
   if (tab === 'settings') return '#settings'
   return '#digital-human-library'
 }
@@ -127,6 +131,7 @@ function tabTitle(tab: WorkspaceTab) {
   if (tab === 'assets') return 'R2 素材库'
   if (tab === 'leads') return 'OpenClaw 获客线索'
   if (tab === 'brain') return '内容大脑 / Obsidian 知识库'
+  if (tab === 'graphic') return '图文窗口 / 发布包装'
   if (tab === 'settings') return '系统设置'
   return '数字人照片 / 出镜素材库'
 }
@@ -137,6 +142,7 @@ function tabSubtitle(tab: WorkspaceTab) {
   if (tab === 'assets') return '复用后端 /api/assets 和 R2 存储，上传、预览、选择真实素材后同步到当前视频。'
   if (tab === 'leads') return '复用 OpenClaw 评论/CSV/JSON 分析链路，筛出目标客户、生成首条回复，等待人工处理。'
   if (tab === 'brain') return '把 OpenClaw 客户问题、同行采集、生成文案和 Obsidian Markdown 沉淀成可复用选题大脑。'
+  if (tab === 'graphic') return '在左侧主界面内完成 3 套封面、7 页图文、发布文案和最终交付包装。'
   if (tab === 'settings') return '前台不展示后端 Token，只显示连接状态；支持一键清空本地草稿。'
   return '从已上传到素材库的照片/视频中选择谁出镜，绑定到当前视频，不再使用假卡片。'
 }
@@ -671,6 +677,7 @@ export default function ProductWorkspaceBridge() {
     if (tab === 'digital') return <DigitalHumanLibraryPanel project={project} setProject={setProject} goTab={open} />
     if (tab === 'leads') return <OpenClawWorkbench project={project} setProject={setProject} goTab={open} />
     if (tab === 'brain') return <ContentBrainWorkbench project={project} setProject={setProject} goTab={open} />
+    if (tab === 'graphic') return <GraphicWindowWorkbench project={project} goTab={open} />
     return <SettingsPanel project={project} setProject={setProject} />
   }
 

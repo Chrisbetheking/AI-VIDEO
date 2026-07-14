@@ -9,7 +9,7 @@ export const API_BASE = isLocal
 export const TOKEN_KEY = 'ai_video_api_token'
 export const BACKEND_MAX_FULL_AI_SHOTS = 50
 
-export type WorkspaceTab = 'pureai' | 'collect' | 'assets' | 'digital' | 'leads' | 'brain' | 'settings'
+export type WorkspaceTab = 'pureai' | 'collect' | 'assets' | 'digital' | 'leads' | 'brain' | 'graphic' | 'settings'
 
 export type ProjectSegment = {
   index: number

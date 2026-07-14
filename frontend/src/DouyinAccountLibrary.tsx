@@ -160,55 +160,47 @@ export default function DouyinAccountLibrary({
   }
 
   async function createMission() {
-    setBusy('下发采集任务')
+    setBusy('检查并启动真实采集')
     setError('')
     setResult(null)
 
     const payload = {
-      source: 'frontend_douyin_collector',
+      source: 'frontend_douyin_collector_v10_40_6',
       platform: 'douyin',
       mission_type: mode,
       market: project.market,
+      keyword: splitInput(keywords)[0] || project.topic,
       keywords: splitInput(keywords),
       seed_accounts: splitInput(seedAccounts),
       max_accounts: mode === 'traffic' ? 30 : 50,
       max_videos_per_account: 20,
-      max_comments_per_video:
-        mode === 'comments' ? 80 : 30,
-      run_openclaw_analysis: true,
+      max_comments_per_video: mode === 'comments' ? 80 : 30,
+      collect_accounts: true,
+      collect_videos: true,
+      collect_comments: true,
       run_deepseek: true,
-      auto_timeline: true,
     }
 
     try {
-      let data: any
-      try {
-        data = await apiPost(
-          '/api/collector/commands/create',
-          payload,
-          120000,
-        )
-      } catch {
-        data = await apiPost(
-          '/api/collector/douyin/accounts/bulk-upsert',
-          {
-            accounts: payload.seed_accounts.map(
-              (name: string) => ({
-                category:
-                  mode === 'traffic'
-                    ? 'traffic_teaching'
-                    : 'competitor',
-                account_name: name,
-                niche: payload.keywords,
-                source: 'frontend_collect_target',
-              }),
-            ),
-          },
-          120000,
-        )
+      const health = await apiGet('/api/video/integration/openclaw/status', 60000)
+      if (!health?.online) {
+        throw new Error('OpenClaw 离线，无法开始采集。已阻止“只保存账号却显示采集成功”的假任务。')
+      }
+      const data = await apiPost(
+        '/api/video/integration/openclaw/start',
+        payload,
+        240000,
+      )
+      if (!data?.job_id) {
+        throw new Error('真实采集接口没有返回 job_id，系统已阻止假成功。')
       }
       setResult(data)
-      await refreshHeatRadar()
+      setProject({
+        ...project,
+        openclaw_job_id: String(data.job_id),
+        openclaw_job: data,
+        openclaw_target_accounts: seedAccounts,
+      })
     } catch (err) {
       setError(detailToText(err))
     } finally {

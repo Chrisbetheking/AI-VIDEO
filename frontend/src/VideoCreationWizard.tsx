@@ -96,7 +96,6 @@ type ContentBrainCard = {
   usedCount?: number
 }
 
-const CONTENT_BRAIN_KEY = 'ai_video_content_brain_cards_v9'
 const WIZARD_DRAFT_KEY = 'ai_video_wizard_draft_v10_13'
 const CLEAN_ONCE_KEY = 'ai_video_wizard_v10_10_cleaned_once'
 
@@ -121,16 +120,6 @@ function saveWizardDraft(value: Record<string, any>) {
   try {
     window.localStorage.setItem(WIZARD_DRAFT_KEY, JSON.stringify(value))
   } catch {}
-}
-
-function loadApprovedContentBrainCards(): ContentBrainCard[] {
-  try {
-    const raw = window.localStorage.getItem(CONTENT_BRAIN_KEY)
-    const parsed = raw ? JSON.parse(raw) : []
-    return Array.isArray(parsed) ? parsed.filter((card) => card && card.status === 'approved') : []
-  } catch {
-    return []
-  }
 }
 
 
@@ -200,6 +189,8 @@ function usefulKeyword(value: string) {
   const raw = String(value || '')
   const clean = normalizeKeywordValue(raw)
   if (!clean) return ''
+  if (/^(?:ai_?kw|keyword|kw|region|area|audience|crowd|user|区域|人群|城市|标签)[_-]?\d+(?:[_-].*)?$/i.test(clean)) return ''
+  if (/(?:internal|placeholder|占位|字段id|keyword_id)/i.test(clean)) return ''
   if (BAD_KEYWORDS.has(clean)) return ''
   if (clean.length < 2 || clean.length > 12) return ''
   if (/^[\d.]+$/.test(clean)) return ''
@@ -703,26 +694,20 @@ function generateShotPlan(segments: ScriptSegment[], duration: number, city: str
 }
 
 function highlightText(text: string, keywords: KeywordInsight[]) {
-  let nodes: React.ReactNode[] = [text]
-  keywords.slice(0, 8).forEach((kw) => {
-    const next: React.ReactNode[] = []
-    nodes.forEach((node) => {
-      if (typeof node !== 'string') {
-        next.push(node)
-        return
-      }
-      const idx = node.toLowerCase().indexOf(kw.value.toLowerCase())
-      if (idx < 0) {
-        next.push(node)
-        return
-      }
-      next.push(node.slice(0, idx))
-      next.push(<mark key={`${kw.id}_${idx}`}>{node.slice(idx, idx + kw.value.length)}</mark>)
-      next.push(node.slice(idx + kw.value.length))
-    })
-    nodes = next
+  const cleanKeywords = keywords
+    .map((item) => ({ ...item, value: usefulKeyword(item.value) }))
+    .filter((item) => item.value)
+    .sort((a, b) => b.value.length - a.value.length)
+  if (!cleanKeywords.length) return [text]
+  const escaped = cleanKeywords.map((item) => item.value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+  const pattern = new RegExp(`(${escaped.join('|')})`, 'gi')
+  const map = new Map(cleanKeywords.map((item) => [item.value.toLowerCase(), item]))
+  return text.split(pattern).map((part, index) => {
+    const keyword = map.get(part.toLowerCase())
+    return keyword
+      ? <mark className={`aiw-keywordMark ${keyword.priority}`} key={`${keyword.id}_${index}`}>{part}</mark>
+      : part
   })
-  return nodes
 }
 
 function extractVideoUrl(job: JobPayload | null): string {
@@ -803,6 +788,9 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
   const [sourceError, setSourceError] = useState('')
   const [sourceResult, setSourceResult] = useState<any>(initialDraft.sourceResult || null)
   const [remoteBrainCards, setRemoteBrainCards] = useState<ContentBrainCard[]>([])
+  const [knowledgeContext, setKnowledgeContext] = useState<any>(null)
+  const [selectedKnowledgeIds, setSelectedKnowledgeIds] = useState<string[]>(Array.isArray(project.selected_knowledge_card_ids) ? project.selected_knowledge_card_ids : [])
+  const [assetGateResult, setAssetGateResult] = useState<any>(null)
   const [disabledKeywordValues, setDisabledKeywordValues] = useState<string[]>(Array.isArray(initialDraft.disabledKeywordValues) ? initialDraft.disabledKeywordValues : [])
   const [aiKeywordInsights, setAiKeywordInsights] = useState<KeywordInsight[]>([])
   const [aiBusy, setAiBusy] = useState('')
@@ -823,7 +811,7 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
   const reviewLaunchRef = useRef('')
 
   const approvedBrainCards = useMemo(() => {
-    const merged = [...remoteBrainCards, ...loadApprovedContentBrainCards()]
+    const merged = [...remoteBrainCards]
     const seen = new Set<string>()
     return merged.filter((card) => {
       const key = String(card.id || `${card.title}|${card.content}`)
@@ -856,8 +844,14 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
   const selectedSubtitleStyle = subtitleStyles.find((item) => item.id === subtitleStyleId) || subtitleStyles[0] || SUBTITLE_STYLE_FALLBACK[0]
   const selectedAssets = asArray(project.asset_context || project.selected_assets || project.r2_material_context)
   const avatarConfig = project.avatar_config || null
-  const leadCount = asArray(project.leads).length
+  const currentTaskLeads = asArray(project.current_task_leads).filter((item: any) => {
+    const bound = String(item?.job_id || item?.run_id || item?.video_job_id || '')
+    return !jobId || !bound || bound === jobId
+  })
+  const historicalLeads = asArray(project.historical_leads || project.leads)
+  const leadCount = currentTaskLeads.length
   const workflowAction = String(workflow?.next_action || '')
+  const visualIntegrity = workflow?.visual_integrity && typeof workflow.visual_integrity === 'object' ? workflow.visual_integrity : {}
   const workflowParts = workflowResultParts(workflow)
   const workflowReview = workflowParts.review
   const workflowPackaging = workflowParts.packaging
@@ -886,24 +880,31 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
 
   useEffect(() => {
     let alive = true
-    apiGet(`/api/video/content-brain/cards?status=approved&query=${encodeURIComponent(`${topic} ${city} ${market}`)}&limit=80`, 60000)
+    apiGet(`/api/video/integration/knowledge/context?topic=${encodeURIComponent(topic)}&city=${encodeURIComponent(city)}&market=${encodeURIComponent(market)}&limit=20`, 60000)
       .then((res) => {
         if (!alive) return
         const list = Array.isArray(res?.cards) ? res.cards : []
+        setKnowledgeContext(res)
         setRemoteBrainCards(list.map((item: any) => ({
           id: String(item.id || ''),
           title: String(item.title || ''),
           type: String(item.type || item.card_type || ''),
-          source: String(item.source || 'backend_content_brain'),
+          source: String(item.source || 'integration_knowledge'),
           content: String(item.content || ''),
           tags: Array.isArray(item.tags) ? item.tags : [],
           score: Number(item.score || 0),
           status: String(item.status || 'approved'),
           usedCount: Number(item.usedCount || item.used_count || 0),
         })))
+        if (!selectedKnowledgeIds.length && Array.isArray(res?.selected_ids)) {
+          setSelectedKnowledgeIds(res.selected_ids.slice(0, 12).map(String))
+        }
       })
       .catch(() => {
-        if (alive) setRemoteBrainCards([])
+        if (alive) {
+          setKnowledgeContext(null)
+          setRemoteBrainCards([])
+        }
       })
     return () => { alive = false }
   }, [topic, city, market])
@@ -1127,9 +1128,9 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
       return
     }
 
-    setSourceBusy(sourceMode === 'account' ? 'account_collect' : 'viral_collect')
+    setSourceBusy('检查 OpenClaw 并启动真实采集')
     const sourcePayload = {
-      source: 'video_creation_wizard_source_step',
+      source: 'video_creation_wizard_v10_40_6',
       platform: 'douyin',
       mission_type: sourceMode === 'account' ? 'competitor' : 'comments',
       market,
@@ -1140,42 +1141,17 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
       max_accounts: sourceMode === 'account' ? 20 : 5,
       max_videos_per_account: sourceMode === 'account' ? 12 : 3,
       max_comments_per_video: 80,
-      run_openclaw_analysis: true,
-      auto_timeline: true,
-      payload: {
-        source_mode: sourceMode,
-        target: sourceMode === 'account' ? 'account_videos_comments' : 'viral_video_comments',
-        competitor_source: competitorSource,
-        topic,
-        market,
-        run_openclaw_analysis: true,
-      },
+      collect_accounts: true,
+      collect_videos: true,
+      collect_comments: true,
     }
 
     try {
-      let data: any
-      try {
-        data = await apiPost('/api/collector/commands', { type: sourceMode === 'account' ? 'douyin_account_collect' : 'openclaw_collect_comments', ...sourcePayload }, 120000)
-      } catch {
-        try {
-          data = await apiPost('/api/collector/commands/create', sourcePayload, 120000)
-        } catch {
-          data = await apiPost('/api/collector/douyin/accounts/bulk-upsert', {
-            accounts: (sourcePayload.seed_accounts.length ? sourcePayload.seed_accounts : sourcePayload.keywords).map((name: string) => ({
-              category: sourceMode === 'account' ? 'competitor' : 'viral_video',
-              account_name: name,
-              url: sourceMode === 'viral' ? competitorSource : '',
-              niche: topic || market,
-              source: 'video_creation_wizard_source_step',
-            })),
-          }, 120000)
-        }
-      }
-
+      const health = await apiGet('/api/video/integration/openclaw/status', 60000)
+      if (!health?.online) throw new Error('OpenClaw 离线，无法开始真实采集；系统不会再用“只保存账号”冒充采集成功。')
+      const data = await apiPost('/api/video/integration/openclaw/start', sourcePayload, 240000)
+      if (!data?.job_id) throw new Error('真实采集接口没有返回 job_id，已阻止假成功。')
       setSourceResult(data)
-      const sourceNote = sourceMode === 'account'
-        ? `基于同行主页/账号「${competitorSource}」采集后生成：${topic}`
-        : `基于爆款链接「${competitorSource}」评论和内容生成：${topic}`
       setProject({
         ...project,
         market,
@@ -1183,9 +1159,12 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
         city,
         sourceMode,
         competitorSource,
+        openclaw_job_id: String(data.job_id),
+        openclaw_job: data,
         collector_source_result: data,
-        contentInsights: [...asArray(project.contentInsights), { source_mode: sourceMode, source: competitorSource, result: data, note: sourceNote }],
       })
+      setSourceError('')
+      setAiStatus(`真实采集任务 ${data.job_id} 已启动。文案先使用已批准知识，任务完成后可在 OpenClaw 页沉淀新问题。`)
       await aiGenerateScriptAndVoice(data)
     } catch (err: any) {
       setSourceError(err?.message || String(err))
@@ -1216,7 +1195,9 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
       subtitle_style_id: subtitleStyleId || 'douyin_pop',
       subtitle_style: selectedSubtitleStyle,
       ai_status: aiStatus,
-      content_brain_context: videoBrainCards,
+      content_brain_context: videoBrainCards.filter((card) => !selectedKnowledgeIds.length || selectedKnowledgeIds.includes(String(card.id || ""))),
+      selected_knowledge_card_ids: selectedKnowledgeIds,
+      knowledge_source_counts: knowledgeContext?.counts || {},
       script_segments: segments,
       segment_voice_settings: voiceSettings,
       manual_shot_plan: shotPlan,
@@ -1351,7 +1332,9 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
         script_mode: scriptMode,
         manual_keywords: cleanManualKeywords,
         competitor_source: competitorSource,
-        content_brain_context: compactBrainForWizard(videoBrainCards),
+        content_brain_context: compactBrainForWizard(videoBrainCards.filter((card) => !selectedKnowledgeIds.length || selectedKnowledgeIds.includes(String(card.id || "")))),
+        selected_knowledge_card_ids: selectedKnowledgeIds,
+        knowledge_source_counts: knowledgeContext?.counts || {},
         source_result: sourceResult,
       }, 180000)
       const nextTopic = String(data?.topic || data?.title || topic || '').trim()
@@ -1468,7 +1451,9 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
       target_duration_seconds: targetDuration,
       manual_keywords: cleanManualKeywords,
       competitor_source: competitorSource,
-      content_brain_context: compactBrainForWizard(videoBrainCards),
+      content_brain_context: compactBrainForWizard(videoBrainCards.filter((card) => !selectedKnowledgeIds.length || selectedKnowledgeIds.includes(String(card.id || "")))),
+        selected_knowledge_card_ids: selectedKnowledgeIds,
+        knowledge_source_counts: knowledgeContext?.counts || {},
       ignored_brain_cards: nonVideoBrainCards.map((card) => ({ id: card.id, title: card.title, type: card.type })),
       source_result: sourceData,
       current_script: script,
@@ -1648,28 +1633,36 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
 
   function markSelectedTextAsKeyword() {
     const editor = segmentEditorRef.current
-    if (!editor) return
+    if (!editor || !selectedSegment) return
     const start = editor.selectionStart || 0
     const end = editor.selectionEnd || 0
     const selected = cleanSegmentText(segmentEditDraft.slice(start, end))
     const keyword = usefulKeyword(selected)
 
     if (!keyword) {
-      setVoicePreviewError('请先在本句编辑框里划选 2–12 个字，再点“标为关键词”。')
+      setVoicePreviewError('请先在本句编辑框里划选 2–12 个有效文字；内部 ID 和占位符会被拦截。')
       editor.focus()
       return
     }
 
-    const merged = cleanManualKeywordText(
-      [cleanManualKeywords, keyword].filter(Boolean).join('，'),
-    )
+    const cleanedSentence = cleanSegmentText(segmentEditDraft)
+    const nextTexts = segments.map((segment) => segment.id === selectedSegment.id ? cleanedSentence : segment.text)
+    applyEditedSegments(nextTexts, Math.max(0, selectedSegment.index - 1))
+
+    const nextInsight: KeywordInsight = {
+      id: `user_kw_${Date.now()}_${keyword}`,
+      value: keyword,
+      category: '用户划词',
+      reason: `第 ${selectedSegment.index} 句人工划选，必须同步到重音、字幕高亮和镜头语义。`,
+      priority: 'high',
+    }
+    setAiKeywordInsights((current) => mergeKeywordInsights([nextInsight], current.filter((item) => item.value.toLowerCase() !== keyword.toLowerCase())))
+    const merged = cleanManualKeywordText([keyword, cleanManualKeywords].filter(Boolean).join('，'))
     setManualKeywords(merged)
-    setDisabledKeywordValues((current) =>
-      current.filter((item) => item.toLowerCase() !== keyword.toLowerCase()),
-    )
+    setDisabledKeywordValues((current) => current.filter((item) => item.toLowerCase() !== keyword.toLowerCase()))
     setVoicePreviewError('')
-    setAiStatus(`已将“${keyword}”标为关键词；会同步进入重音、字幕高亮和镜头语义。`)
-    noteButton(`第 ${selectedSegment?.index || 1} 句已划词：${keyword}`)
+    setAiStatus(`已保存本句并把“${keyword}”设为最高优先级关键词；句子高亮、配音重音、字幕和镜头会立即同步。`)
+    noteButton(`第 ${selectedSegment.index} 句已保存并划词：${keyword}`)
   }
 
   function autoTuneVoiceAll() {
@@ -1714,6 +1707,40 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
     setProject({ ...project, manual_shot_plan: next, shot_overrides: next })
   }
 
+  async function auditSelectedAssets() {
+    const candidates = selectedAssets.filter((asset: any) => !assetHasEmbeddedText(asset))
+    if (!candidates.length) {
+      const result = { ok: true, passed: [], quarantined: [], skipped: 0 }
+      setAssetGateResult(result)
+      return candidates
+    }
+
+    const reports = await Promise.all(candidates.map(async (asset: any) => {
+      const value = String(asset?.local_path || asset?.path || asset?.url || asset?.preview_url || '')
+      if (!value) return { asset, passed: false, reasons: ['素材没有可审计地址'] }
+      try {
+        const report = await apiPost('/api/video/integration/assets/gate', {
+          path: value,
+          url: value,
+          sample_count: 12,
+        }, 360000)
+        return { asset, ...report }
+      } catch (err: any) {
+        return { asset, passed: false, reasons: [err?.message || String(err)] }
+      }
+    }))
+
+    const passed = reports.filter((item: any) => item.passed === true).map((item: any) => item.asset)
+    const quarantined = reports.filter((item: any) => item.passed !== true)
+    const result = { ok: true, passed, quarantined, reports }
+    setAssetGateResult(result)
+
+    if (candidates.length && !passed.length) {
+      throw new Error(`选择的 ${candidates.length} 个素材全部未通过净素材门禁。请到素材库更换无字幕、无水印、无头像的素材，或清空所选素材后使用 AI 干净镜头。`)
+    }
+    return passed
+  }
+
   async function startGenerate() {
     setError('')
     setBusy('启动生成')
@@ -1729,7 +1756,14 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
       keywords,
     )
     const cleanScript = joinSegmentTexts(cleanSegments.map((segment) => segment.text))
-    const cleanAssets = selectedAssets.filter((asset: any) => !assetHasEmbeddedText(asset))
+    let cleanAssets: any[] = []
+    try {
+      cleanAssets = await auditSelectedAssets()
+    } catch (assetError: any) {
+      setBusy('')
+      setError(assetError?.message || String(assetError))
+      return
+    }
     const finalProject = syncProject({
       script: cleanScript,
       segments: cleanSegments,
@@ -1811,7 +1845,10 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
       subtitle_text_policy: 'clean_script_only_no_slash_no_literal_newline',
       subtitle_source: 'sanitized_script_segments',
       ai_status: aiStatus,
-      content_brain_context: compactBrainForWizard(videoBrainCards),
+      content_brain_context: compactBrainForWizard(videoBrainCards.filter((card) => !selectedKnowledgeIds.length || selectedKnowledgeIds.includes(String(card.id || "")))),
+      selected_knowledge_card_ids: selectedKnowledgeIds,
+      knowledge_source_counts: knowledgeContext?.counts || {},
+      knowledge_trace_required: true,
       manual_shot_plan: finalShots.slice(0, renderShotCount),
       shot_overrides: finalShots.slice(0, renderShotCount),
       transition_plan: finalShots.slice(0, renderShotCount).map((shot) => ({
@@ -1823,7 +1860,8 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
       selected_assets: cleanAssets,
       r2_material_context: cleanAssets,
       avatar_config: finalProject.avatar_config || avatarConfig,
-      openclaw_lead_context: finalProject.leads || [],
+      openclaw_lead_context: currentTaskLeads,
+      openclaw_job_id: finalProject.openclaw_job_id || '',
       extra: {
         source: 'one_scene_condo_tour_douyin_subtitle_v10_17_clean_text',
         source_mode: sourceMode,
@@ -1845,6 +1883,17 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
       if (!data?.job_id) throw new Error('后端没有返回 job_id')
       setJob(data)
       setJobId(data.job_id)
+      syncProject({
+        currentJobId: String(data.job_id),
+        job_id: String(data.job_id),
+        workflow_job_id: String(data.job_id),
+        full_ai_job_id: String(data.job_id),
+        selected_knowledge_card_ids: selectedKnowledgeIds,
+        asset_gate_result: assetGateResult,
+      })
+      selectedKnowledgeIds.forEach((id) => {
+        void apiPost(`/api/video/integration/knowledge/cards/${encodeURIComponent(id)}/mark-used`, {}, 30000).catch(() => {})
+      })
       setBusy('单场景动态生成中')
     } catch (err: any) {
       setBusy('')
@@ -1991,9 +2040,14 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
           <div className="aiw-info">已启用 {keywords.length} 个关键词；关闭的词不会再硬塞进口播文案。</div>
           <h4>内容大脑联动</h4>
           <div className="aiw-brainMiniPanel">
-            <b>视频创作可用 {videoBrainCards.length} 条；已隔离回复/镜头类 {nonVideoBrainCards.length} 条</b>
-            <p>内容大脑不会再把模板名、序号和回复话术硬塞进口播。知识库只作为 DeepSeek 上下文，关键词必须经 DeepSeek 二次筛选。</p>
-            <div className="aiw-chipRow">{videoBrainCards.slice(0, 8).map((card) => <span className="aiw-keywordPill" key={card.id || card.title}>{card.title || card.type}</span>)}</div>
+            <b>本次知识来源：Obsidian {knowledgeContext?.counts?.obsidian || 0} 条 · OpenClaw {knowledgeContext?.counts?.openclaw || 0} 条 · 同行 {knowledgeContext?.counts?.competitor || 0} 条 · 历史 {knowledgeContext?.counts?.history || 0} 条</b>
+            <p>只有已批准且勾选的知识会进入 DeepSeek 文案上下文；每条来源可追踪，内部占位 ID 不会进入关键词。</p>
+            <div className="aiw-knowledgeSourceGrid">{videoBrainCards.slice(0, 12).map((card) => (
+              <label key={card.id || card.title} className={selectedKnowledgeIds.includes(String(card.id || "")) ? 'selected' : ''}>
+                <input type="checkbox" checked={selectedKnowledgeIds.includes(String(card.id || ""))} onChange={() => setSelectedKnowledgeIds((current) => current.includes(String(card.id || "")) ? current.filter((id) => id !== String(card.id || "")) : [...current, String(card.id || "")].filter(Boolean).slice(0, 20))} />
+                <span><b>{card.title || card.type}</b><em>{card.source}</em></span>
+              </label>
+            ))}</div>
             <div className="aiw-actions">
               <button className="aiw-muted" onClick={() => openWorkspaceTab('brain')}>去内容大脑</button>
               <button className="aiw-muted" onClick={() => void aiAnalyzeKeywords()}>让 DeepSeek 从知识库分析关键词</button>
@@ -2047,10 +2101,8 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
   }
 
   function openGraphicWindow() {
-    const target = new URL('/graphic-window/', window.location.origin)
-    if (jobId) target.searchParams.set('job_id', jobId)
-    target.searchParams.set('source', 'video_creation_wizard')
-    window.open(target.toString(), '_blank', 'noopener,noreferrer')
+    syncProject({ currentJobId: jobId, job_id: jobId, workflow_job_id: jobId })
+    goTab('graphic')
   }
 
   function renderStepTwo() {
@@ -2173,6 +2225,10 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
                   }}
                 />
               </label>
+              <div className="aiw-richKeywordPreview">
+                <b>关键词着色预览</b>
+                <p>{highlightText(segmentEditDraft, keywords)}</p>
+              </div>
 
               <div className="aiw-actions aiw-sentenceActions">
                 <button className="aiw-primary" type="button" onClick={saveSelectedSegment}>
@@ -2537,6 +2593,16 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
               </b>
             </div>
             <div>
+              <span>画面净度</span>
+              <b className={visualIntegrity?.passed === true ? 'aiw-textSuccess' : visualIntegrity?.passed === false ? 'aiw-textDanger' : ''}>
+                {visualIntegrity?.passed === true
+                  ? '通过：无素材字幕/水印/长重复'
+                  : visualIntegrity?.passed === false
+                    ? '未通过：已阻止发布'
+                    : '审片时自动检测'}
+              </b>
+            </div>
+            <div>
               <span>发布包装</span>
               <b>
                 {coverCount || pageCount
@@ -2554,7 +2620,7 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
             </div>
             <div>
               <span>OpenClaw</span>
-              <b>{leadCount} 条待处理线索</b>
+              <b>当前 {leadCount} 条 / 历史 {historicalLeads.length} 条</b>
             </div>
           </div>
         </section>
@@ -2609,6 +2675,13 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
               {workflowReview?.summary && (
                 <div className="aiw-info">
                   {workflowReview.summary}
+                </div>
+              )}
+              {visualIntegrity?.passed === false && (
+                <div className="aiw-error aiw-visualAuditFailure">
+                  <b>画面完整性审计未通过，不能人工覆盖：</b>
+                  <ul>{asArray(visualIntegrity?.reasons).map((reason: any, index: number) => <li key={`${reason}-${index}`}>{String(reason)}</li>)}</ul>
+                  <span>请返回镜头和素材，替换带字幕、水印、头像或重复画面后重新生成。</span>
                 </div>
               )}
 
@@ -3000,6 +3073,30 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
               )}
             </>
           )}
+
+          <div className="aiw-finalOutputPanel">
+            <div className="aiw-subsectionTitle">
+              <b>最终视频产出</b>
+              <span>这一部分永久显示，不再等到某个状态才突然出现</span>
+            </div>
+            <div className="aiw-finalOutputMatrix">
+              <div className={videoUrl ? 'done' : ''}><span>原始成片</span><b>{videoUrl ? '已生成' : '待生成'}</b></div>
+              <div className={visualIntegrity?.passed === true ? 'done' : visualIntegrity?.passed === false ? 'failed' : ''}><span>画面审计</span><b>{visualIntegrity?.passed === true ? '已通过' : visualIntegrity?.passed === false ? '未通过' : '待审片'}</b></div>
+              <div className={workflowSelection?.index !== undefined ? 'done' : ''}><span>主封面</span><b>{workflowSelection?.index !== undefined ? `已选方案 ${Number(workflowSelection.index) + 1}` : '待选择'}</b></div>
+              <div className={coverVideoReady ? 'done' : ''}><span>封面最终视频</span><b>{coverVideoReady ? '已完成' : '待合成'}</b></div>
+              <div className={workflowDelivery?.download_zip_url ? 'done' : ''}><span>最终发布总包</span><b>{workflowDelivery?.download_zip_url ? '已完成' : '待生成'}</b></div>
+            </div>
+            <div className="aiw-actions aiw-finalOutputActions">
+              <button className="aiw-primary" type="button" disabled={!jobId || workflowAction !== 'compose_cover_video' || Boolean(workflowBusy)} onClick={() => void runWorkflowAction('封面合成最终视频', `/api/video/workflow/${encodeURIComponent(jobId)}/compose-cover-video`, { duration_seconds: 1.0 }, 900000)}>
+                {coverVideoReady ? '重新合成封面最终视频' : '封面合成最终视频'}
+              </button>
+              <button className="aiw-purple" type="button" disabled={!jobId || workflowAction !== 'build_final_delivery' || Boolean(workflowBusy)} onClick={() => void runWorkflowAction('生成最终总包', `/api/video/workflow/${encodeURIComponent(jobId)}/finalize`, {}, 420000)}>
+                生成最终发布总包
+              </button>
+              {workflowDelivery?.final_video_url && <a className="aiw-linkButton" href={workflowDelivery.final_video_url} target="_blank" rel="noreferrer">下载最终视频</a>}
+              {workflowDelivery?.download_zip_url && <a className="aiw-linkButton" href={workflowDelivery.download_zip_url} target="_blank" rel="noreferrer">下载最终总包</a>}
+            </div>
+          </div>
 
           <div className="aiw-quickLinks">
             <button

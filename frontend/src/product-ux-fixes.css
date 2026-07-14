@@ -2307,3 +2307,224 @@
   }
 }
 /* ===== /V10.40.5 clean script + sentence editor + keyword marking ===== */
+
+/* ===== V10.40.6 full-chain closed loop ===== */
+.aiw-graphicWorkbench {
+  min-height: calc(100vh - 150px);
+}
+
+.aiw-graphicFrame {
+  display: block;
+  width: 100%;
+  min-height: 1120px;
+  margin-top: 14px;
+  border: 1px solid #e9d5ff;
+  border-radius: 20px;
+  background: #fff;
+}
+
+.aiw-knowledgeSourceGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 9px;
+  margin: 12px 0;
+}
+
+.aiw-knowledgeSourceGrid label {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid #ede9fe;
+  border-radius: 14px;
+  background: #fff;
+  cursor: pointer;
+}
+
+.aiw-knowledgeSourceGrid label.selected {
+  border-color: #7c3aed;
+  background: #faf5ff;
+}
+
+.aiw-knowledgeSourceGrid span,
+.aiw-knowledgeSourceGrid b,
+.aiw-knowledgeSourceGrid em {
+  display: block;
+}
+
+.aiw-knowledgeSourceGrid b {
+  color: #374151;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.aiw-knowledgeSourceGrid em {
+  margin-top: 4px;
+  color: #8b95a7;
+  font-size: 10px;
+  font-style: normal;
+}
+
+.aiw-keywordMark {
+  padding: 1px 4px;
+  border-radius: 6px;
+  background: #fde68a;
+  color: #7c2d12;
+  font-weight: 950;
+}
+
+.aiw-keywordMark.high {
+  background: #f59e0b;
+  color: #fff;
+}
+
+.aiw-keywordMark.low {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.aiw-richKeywordPreview {
+  padding: 12px;
+  border: 1px dashed #c4b5fd;
+  border-radius: 14px;
+  background: #fbfaff;
+}
+
+.aiw-richKeywordPreview b {
+  display: block;
+  margin-bottom: 7px;
+  color: #6d28d9;
+  font-size: 12px;
+}
+
+.aiw-richKeywordPreview p {
+  margin: 0;
+  color: #374151;
+  line-height: 1.8;
+  white-space: pre-wrap;
+}
+
+.aiw-textSuccess {
+  color: #15803d !important;
+}
+
+.aiw-textDanger {
+  color: #dc2626 !important;
+}
+
+.aiw-visualAuditFailure ul {
+  margin: 8px 0;
+  padding-left: 20px;
+}
+
+.aiw-finalOutputPanel {
+  margin-top: 16px;
+  padding: 15px;
+  border: 1px solid #c4b5fd;
+  border-radius: 18px;
+  background: linear-gradient(135deg, #faf5ff, #fff);
+}
+
+.aiw-finalOutputMatrix {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.aiw-finalOutputMatrix div {
+  min-height: 75px;
+  padding: 11px 8px;
+  border: 1px solid #e5e7eb;
+  border-radius: 13px;
+  background: #f8fafc;
+  text-align: center;
+}
+
+.aiw-finalOutputMatrix span,
+.aiw-finalOutputMatrix b {
+  display: block;
+}
+
+.aiw-finalOutputMatrix span {
+  color: #64748b;
+  font-size: 10px;
+  font-weight: 900;
+}
+
+.aiw-finalOutputMatrix b {
+  margin-top: 8px;
+  color: #374151;
+  font-size: 12px;
+}
+
+.aiw-finalOutputMatrix .done {
+  border-color: #86efac;
+  background: #f0fdf4;
+}
+
+.aiw-finalOutputMatrix .done b {
+  color: #15803d;
+}
+
+.aiw-finalOutputMatrix .failed {
+  border-color: #fca5a5;
+  background: #fef2f2;
+}
+
+.aiw-finalOutputMatrix .failed b {
+  color: #dc2626;
+}
+
+.aiw-finalOutputActions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 9px;
+  margin-top: 12px;
+}
+
+.aiw-brainGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(250px, 1fr));
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.aiw-brainCard {
+  display: flex;
+  flex-direction: column;
+  min-height: 230px;
+  padding: 15px;
+  border: 1px solid #e9d5ff;
+  border-radius: 16px;
+  background: #fff;
+}
+
+.aiw-brainCard p {
+  flex: 1;
+  color: #596579;
+  line-height: 1.65;
+}
+
+@media (max-width: 1180px) {
+  .aiw-finalOutputMatrix {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .aiw-brainGrid {
+    grid-template-columns: repeat(2, minmax(240px, 1fr));
+  }
+}
+
+@media (max-width: 760px) {
+  .aiw-knowledgeSourceGrid,
+  .aiw-finalOutputMatrix,
+  .aiw-finalOutputActions,
+  .aiw-brainGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .aiw-graphicFrame {
+    min-height: 900px;
+  }
+}
+/* ===== /V10.40.6 full-chain closed loop ===== */
