@@ -299,7 +299,7 @@ function mergeKeywordInsights(primary: KeywordInsight[], fallback: KeywordInsigh
     seen.add(key)
     out.push(normalized)
   })
-  return out.slice(0, 22)
+  return out.slice(0, 36)
 }
 
 type Props = {
@@ -576,7 +576,7 @@ function extractKeywords(text: string, manual = ''): KeywordInsight[] {
     add('默认核心', '用途', '用于区分自住、出租和投资', 'medium')
   }
 
-  return items.slice(0, 18)
+  return items.slice(0, 30)
 }
 
 function attachSegmentKeywords(segments: ScriptSegment[], keywords: KeywordInsight[]) {
@@ -738,9 +738,22 @@ function extractVideoUrl(job: JobPayload | null): string {
   return typeof direct === 'string' ? direct : ''
 }
 
+function jobFailed(job: JobPayload | null) {
+  const values = [job?.status, job?.stage, job?.child_job?.status, job?.child_job?.stage]
+    .map((value) => String(value || '').toLowerCase())
+  return values.some((value) => /^(failed|error|cancelled|canceled|rejected)$/.test(value))
+}
+
+function jobActivelyGenerating(job: JobPayload | null) {
+  const stage = `${job?.stage || ''} ${job?.child_job?.stage || ''}`.toLowerCase()
+  return /(queued|generating|processing|rendering|composing|burn|uploading|fal_shot|tts|subtitle)/.test(stage)
+}
+
 function finalStatus(job: JobPayload | null) {
-  const text = `${job?.status || ''} ${job?.stage || ''} ${job?.child_job?.status || ''} ${job?.child_job?.stage || ''}`.toLowerCase()
-  return ['completed', 'succeeded', 'success', 'done', 'finished', 'failed', 'error'].some((x) => text.includes(x))
+  if (jobFailed(job)) return true
+  if (jobActivelyGenerating(job)) return false
+  const values = [job?.status, job?.child_job?.status].map((value) => String(value || '').toLowerCase())
+  return values.some((value) => /^(completed|succeeded|success|done|finished)$/.test(value))
 }
 
 
@@ -906,7 +919,7 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
 
   useEffect(() => {
     let alive = true
-    apiGet(`/api/video/integration/knowledge/context?topic=${encodeURIComponent(topic)}&city=${encodeURIComponent(city)}&market=${encodeURIComponent(market)}&limit=20`, 60000)
+    apiGet(`/api/video/integration/knowledge/context?topic=${encodeURIComponent(topic)}&city=${encodeURIComponent(city)}&market=${encodeURIComponent(market)}&limit=30`, 60000)
       .then((res) => {
         if (!alive) return
         const list = Array.isArray(res?.cards) ? res.cards : []
@@ -923,7 +936,7 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
           usedCount: Number(item.usedCount || item.used_count || 0),
         })))
         if (!selectedKnowledgeIds.length && Array.isArray(res?.selected_ids)) {
-          setSelectedKnowledgeIds(res.selected_ids.slice(0, 12).map(String))
+          setSelectedKnowledgeIds(res.selected_ids.slice(0, 20).map(String))
         }
       })
       .catch(() => {
@@ -1036,9 +1049,13 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
         if (hasVideo && finalStatus(data)) {
           setBusy('')
           setError('')
-        } else if (!hasVideo && finalStatus(data)) {
+        } else if (!hasVideo && jobFailed(data)) {
           setBusy('')
-          setError(`任务 ${jobId} 已结束，但没有返回当前任务的成片地址。`)
+          setError(`任务 ${jobId} 生成失败：${data?.message || data?.error?.detail || data?.status || '未知错误'}`)
+        } else if (!hasVideo && finalStatus(data)) {
+          // 某些上游会提前把父任务标记 completed，但子镜头仍在生成。
+          // 没有成片地址时继续轮询，不再错误提示“任务已结束”。
+          setError('')
         }
       } catch (err: any) {
         if (!alive) return
@@ -1734,7 +1751,7 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
   }
 
   function smartPickKeywords() {
-    const keep = new Set(allKeywords.filter((kw) => kw.priority === 'high' || ['预算/价格', '区域', '人群', '用途', '风险判断'].includes(kw.category)).slice(0, 10).map((kw) => kw.value.toLowerCase()))
+    const keep = new Set(allKeywords.filter((kw) => kw.priority === 'high' || ['预算/价格', '区域', '人群', '用途', '风险判断'].includes(kw.category)).slice(0, 18).map((kw) => kw.value.toLowerCase()))
     setDisabledKeywordValues(allKeywords.filter((kw) => !keep.has(kw.value.toLowerCase())).map((kw) => kw.value))
   }
 
@@ -2089,14 +2106,14 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
               return <button type="button" key={kw.id} className={`aiw-keywordCard ${kw.priority} ${off ? 'muted' : 'active'}`} onClick={() => toggleKeyword(kw.value)}><b>{kw.value}</b><span>{off ? '已关闭' : kw.category}</span><em>{kw.reason}</em></button>
             })}
           </div>
-          <div className="aiw-info">已启用 {keywords.length} 个关键词；关闭的词不会再硬塞进口播文案。</div>
+          <div className="aiw-info">已启用 {keywords.length} 个关键词；系统最多保留 36 个候选，建议启用 12～18 个，覆盖区域、预算、人群、用途、痛点、场景和承接动作。</div>
           <h4>内容大脑联动</h4>
           <div className="aiw-brainMiniPanel">
             <b>本次知识来源：Obsidian {knowledgeContext?.counts?.obsidian || 0} 条 · OpenClaw {knowledgeContext?.counts?.openclaw || 0} 条 · 同行 {knowledgeContext?.counts?.competitor || 0} 条 · 历史 {knowledgeContext?.counts?.history || 0} 条</b>
             <p>只有已批准且勾选的知识会进入 DeepSeek 文案上下文；每条来源可追踪，内部占位 ID 不会进入关键词。</p>
-            <div className="aiw-knowledgeSourceGrid">{videoBrainCards.slice(0, 12).map((card) => (
+            <div className="aiw-knowledgeSourceGrid">{videoBrainCards.slice(0, 20).map((card) => (
               <label key={card.id || card.title} className={selectedKnowledgeIds.includes(String(card.id || "")) ? 'selected' : ''}>
-                <input type="checkbox" checked={selectedKnowledgeIds.includes(String(card.id || ""))} onChange={() => setSelectedKnowledgeIds((current) => current.includes(String(card.id || "")) ? current.filter((id) => id !== String(card.id || "")) : [...current, String(card.id || "")].filter(Boolean).slice(0, 20))} />
+                <input type="checkbox" checked={selectedKnowledgeIds.includes(String(card.id || ""))} onChange={() => setSelectedKnowledgeIds((current) => current.includes(String(card.id || "")) ? current.filter((id) => id !== String(card.id || "")) : [...current, String(card.id || "")].filter(Boolean).slice(0, 30))} />
                 <span><b>{card.title || card.type}</b><em>{card.source}</em></span>
               </label>
             ))}</div>
@@ -2178,7 +2195,7 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
           <p>整段文案可以改；保存单句后会同步更新配音、镜头和字幕。</p>
 
           <div className="aiw-chipRow aiw-keywordToolbar">
-            {keywords.slice(0, 12).map((kw) => (
+            {keywords.slice(0, 20).map((kw) => (
               <button
                 type="button"
                 className="aiw-keywordPill"

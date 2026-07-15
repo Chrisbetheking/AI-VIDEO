@@ -2611,3 +2611,68 @@
   }
 }
 /* ===== /V10.40.7 engine source fix ===== */
+
+/* ===== V10.40.8 isolation / cached tasks / realtime progress ===== */
+.aiw-isolationGrid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 10px;
+}
+.aiw-isolationGrid button {
+  display: grid;
+  gap: 4px;
+  min-height: 76px;
+  padding: 12px;
+  border: 1px solid #e9d5ff;
+  border-radius: 15px;
+  background: #fff;
+  color: #64748b;
+  cursor: pointer;
+}
+.aiw-isolationGrid button.active {
+  border-color: #7c3aed;
+  background: #faf5ff;
+  box-shadow: 0 8px 22px rgba(124, 58, 237, .12);
+}
+.aiw-isolationGrid b { color: #6d28d9; font-size: 22px; }
+.aiw-isolationGrid span { font-size: 12px; font-weight: 900; }
+.aiw-accountIsolation { margin-bottom: 14px; }
+.aiw-loginState {
+  min-height: 43px;
+  display: flex;
+  align-items: center;
+  padding: 0 13px;
+  border: 1px solid #dbe3ef;
+  border-radius: 13px;
+  background: #f8fafc;
+  color: #475569;
+  font-weight: 800;
+}
+.aiw-runHistory {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+.aiw-runHistory button {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  background: #fff;
+  text-align: left;
+  cursor: pointer;
+}
+.aiw-runHistory button.active { border-color: #7c3aed; background: #faf5ff; }
+.aiw-runHistory b { color: #334155; }
+.aiw-runHistory span { color: #7c3aed; font-weight: 900; }
+.aiw-runHistory em { overflow: hidden; color: #94a3b8; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 1180px) {
+  .aiw-isolationGrid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .aiw-runHistory { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 760px) {
+  .aiw-isolationGrid, .aiw-runHistory { grid-template-columns: 1fr; }
+}
+/* ===== /V10.40.8 ===== */

@@ -14,6 +14,8 @@ type Props = {
 }
 
 const API = '/api/video/integration'
+const OPENCLAW_PROFILE_KEY = 'ai_video_openclaw_profile_v10408'
+const OPENCLAW_RUN_CACHE_KEY = 'ai_video_openclaw_run_cache_v10408'
 
 function rows(value: any): any[] {
   if (Array.isArray(value)) return value
@@ -32,10 +34,42 @@ function statusFailed(value: string) {
   return /fail|error|cancel|reject/i.test(value)
 }
 
+function loadProfile() {
+  try {
+    return localStorage.getItem(OPENCLAW_PROFILE_KEY) || 'company_main'
+  } catch {
+    return 'company_main'
+  }
+}
+
+function loadRunCache(profile: string) {
+  try {
+    const raw = localStorage.getItem(OPENCLAW_RUN_CACHE_KEY)
+    const parsed = raw ? JSON.parse(raw) : {}
+    return parsed && typeof parsed === 'object' ? parsed[profile] || null : null
+  } catch {
+    return null
+  }
+}
+
+function saveRunCache(profile: string, value: any) {
+  try {
+    const raw = localStorage.getItem(OPENCLAW_RUN_CACHE_KEY)
+    const parsed = raw ? JSON.parse(raw) : {}
+    const next = parsed && typeof parsed === 'object' ? parsed : {}
+    next[profile] = value
+    localStorage.setItem(OPENCLAW_RUN_CACHE_KEY, JSON.stringify(next))
+    localStorage.setItem(OPENCLAW_PROFILE_KEY, profile)
+  } catch {}
+}
+
 export default function OpenClawWorkbench({ project, setProject, goTab }: Props) {
   const [health, setHealth] = useState<any>(null)
-  const [jobId, setJobId] = useState(String(project.openclaw_job_id || ''))
-  const [job, setJob] = useState<any>(project.openclaw_job || null)
+  const [accountProfile, setAccountProfile] = useState(String(project.openclaw_account_profile || loadProfile()))
+  const cachedRun = loadRunCache(String(project.openclaw_account_profile || loadProfile()))
+  const [jobId, setJobId] = useState(String(project.openclaw_job_id || cachedRun?.job_id || ''))
+  const [job, setJob] = useState<any>(project.openclaw_job || cachedRun || null)
+  const [runHistory, setRunHistory] = useState<any[]>([])
   const [keyword, setKeyword] = useState(String(project.topic || '吉隆坡买房'))
   const [targets, setTargets] = useState(String(project.openclaw_target_accounts || ''))
   const [mode, setMode] = useState<'accounts' | 'comments'>('comments')
@@ -47,12 +81,46 @@ export default function OpenClawWorkbench({ project, setProject, goTab }: Props)
 
   const jobStatus = String(job?.status || job?.stage || '')
   const online = health?.online === true
-  const progress = Number(job?.raw?.progress || job?.progress || 0)
+  const progress = Number(job?.progress || job?.raw?.progress || 0)
+  const runCounts = job?.counts && typeof job.counts === 'object' ? job.counts : {}
+  const workerOnline = health?.worker_online === true
+  const loginOk = health?.login_ok === true
   const stats = useMemo(() => ({
     total: leads.length,
     high: leads.filter((item) => Number(item.score || item.lead_score || 0) >= 70).length,
     current: leads.filter((item) => String(item.job_id || item.run_id || '') === jobId).length,
   }), [leads, jobId])
+
+  async function restoreLatest(profile = accountProfile) {
+    try {
+      const data = await apiGet(`${API}/openclaw/latest?account_profile=${encodeURIComponent(profile)}`, 60000)
+      const restored = data?.run
+      if (restored?.job_id) {
+        setJobId(String(restored.job_id))
+        setJob(restored)
+        saveRunCache(profile, restored)
+        setProject({
+          ...project,
+          openclaw_account_profile: profile,
+          openclaw_job_id: String(restored.job_id),
+          openclaw_job: restored,
+        })
+      }
+    } catch {
+      const cached = loadRunCache(profile)
+      if (cached?.job_id) {
+        setJobId(String(cached.job_id))
+        setJob(cached)
+      }
+    }
+  }
+
+  async function refreshRunHistory(profile = accountProfile) {
+    try {
+      const data = await apiGet(`${API}/openclaw/runs?account_profile=${encodeURIComponent(profile)}&limit=20`, 60000)
+      setRunHistory(Array.isArray(data?.runs) ? data.runs : [])
+    } catch {}
+  }
 
   async function refreshHealth() {
     setBusy('检查 OpenClaw')
@@ -91,11 +159,13 @@ export default function OpenClawWorkbench({ project, setProject, goTab }: Props)
     try {
       const data = await apiGet(`${API}/openclaw/job/${encodeURIComponent(targetJobId)}`, 90000)
       setJob(data)
-      setProject({ ...project, openclaw_job_id: targetJobId, openclaw_job: data })
+      saveRunCache(accountProfile, data)
+      setProject({ ...project, openclaw_account_profile: accountProfile, openclaw_job_id: targetJobId, openclaw_job: data })
       const state = String(data?.status || '')
       if (statusDone(state)) {
         setNotice('真实采集任务已完成，可以沉淀客户问题和刷新线索。')
         await refreshLeads()
+        await refreshRunHistory(accountProfile)
       }
       if (statusFailed(state)) setError(`OpenClaw 任务失败：${state}`)
     } catch (err) {
@@ -105,11 +175,24 @@ export default function OpenClawWorkbench({ project, setProject, goTab }: Props)
 
   useEffect(() => {
     void refreshHealth()
+    void refreshRunHistory(accountProfile)
     if (jobId) void poll(jobId)
+    else void restoreLatest(accountProfile)
     return () => {
       if (polling.current) window.clearInterval(polling.current)
     }
   }, [])
+
+  useEffect(() => {
+    localStorage.setItem(OPENCLAW_PROFILE_KEY, accountProfile)
+    const cached = loadRunCache(accountProfile)
+    setJobId(String(cached?.job_id || ''))
+    setJob(cached || null)
+    setProject({ ...project, openclaw_account_profile: accountProfile })
+    void restoreLatest(accountProfile)
+    void refreshRunHistory(accountProfile)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accountProfile])
 
   useEffect(() => {
     if (polling.current) window.clearInterval(polling.current)
@@ -132,6 +215,7 @@ export default function OpenClawWorkbench({ project, setProject, goTab }: Props)
         `${API}/openclaw/start`,
         {
           mission_type: mode === 'accounts' ? 'competitor' : 'comments',
+          account_profile: accountProfile,
           platform: 'douyin',
           market: project.market,
           keyword,
@@ -150,14 +234,17 @@ export default function OpenClawWorkbench({ project, setProject, goTab }: Props)
       if (!id) throw new Error('OpenClaw 没有返回真实 job_id，系统已阻止假成功。')
       setJobId(id)
       setJob(data)
+      saveRunCache(accountProfile, data)
       setProject({
         ...project,
         topic: keyword || project.topic,
+        openclaw_account_profile: accountProfile,
         openclaw_job_id: id,
         openclaw_job: data,
         openclaw_target_accounts: targets,
       })
-      setNotice(`真实采集任务已启动：${id}`)
+      setNotice(`真实采集任务已启动并缓存到“${accountProfile}”：${id}`)
+      await refreshRunHistory(accountProfile)
     } catch (err) {
       setError(detailToText(err))
     } finally {
@@ -173,7 +260,7 @@ export default function OpenClawWorkbench({ project, setProject, goTab }: Props)
     setBusy('沉淀知识')
     setError('')
     try {
-      const data = await apiPost(`${API}/openclaw/harvest/${encodeURIComponent(jobId)}`, {}, 240000)
+      const data = await apiPost(`${API}/openclaw/harvest/${encodeURIComponent(jobId)}`, { collection: 'lead' }, 240000)
       setNotice(`读取 ${data?.rows_read || 0} 条结果，新增 ${data?.added_to_brain || 0} 条知识候选。`)
       await refreshLeads()
     } catch (err) {
@@ -214,6 +301,27 @@ export default function OpenClawWorkbench({ project, setProject, goTab }: Props)
         <div><b>{stats.high}</b><span>高意向</span></div>
       </div>
 
+      <div className="aiw-panel aiw-accountIsolation">
+        <div className="aiw-sectionTitleRow">
+          <div><h3>工作账号隔离</h3><span>公司号、备用号和测试号分别保存任务、缓存、线索和沉淀记录；切换页面后任务不会消失。</span></div>
+          <span className="aiw-statusBadge">{accountProfile}</span>
+        </div>
+        <div className="aiw-form two">
+          <label>
+            当前工作账号
+            <select value={accountProfile} onChange={(event) => setAccountProfile(event.target.value)}>
+              <option value="company_main">公司主号</option>
+              <option value="company_backup">公司备用号</option>
+              <option value="personal_test">个人测试号</option>
+            </select>
+          </label>
+          <label>
+            登录准备
+            <div className="aiw-loginState">后端 {health?.backend_online ? '在线' : '离线'} · Worker {workerOnline ? '在线' : '待确认'} · 抖音登录 {loginOk ? '有效' : '明天登录后检查'}</div>
+          </label>
+        </div>
+      </div>
+
       <div className="aiw-form two">
         <label>
           采集关键词
@@ -242,9 +350,27 @@ export default function OpenClawWorkbench({ project, setProject, goTab }: Props)
         <h3>当前真实任务</h3>
         <div className="aiw-statusRows">
           <div><span>job_id</span><b>{jobId || '-'}</b></div>
+          <div><span>隔离账号</span><b>{accountProfile}</b></div>
           <div><span>状态</span><b>{jobStatus || '未启动'}</b></div>
+          <div><span>当前阶段</span><b>{job?.stage || jobStatus || '-'}</b></div>
           <div><span>实际接口</span><b>{job?.endpoint || health?.endpoint || '-'}</b></div>
           <div><span>最近进度</span><b>{progress || 0}%</b></div>
+          <div><span>已采集</span><b>{runCounts.accounts || 0} 账号 / {runCounts.videos || 0} 视频 / {runCounts.comments || 0} 评论 / {runCounts.leads || 0} 线索</b></div>
+          <div><span>最后更新</span><b>{job?.updated_at ? new Date(Number(job.updated_at) * 1000).toLocaleString() : '-'}</b></div>
+        </div>
+      </div>
+
+      <div className="aiw-panel">
+        <div className="aiw-sectionTitleRow"><div><h3>账号任务缓存</h3><span>来自服务器持久化记录；换页面、刷新或换设备后仍能恢复。</span></div><button className="aiw-muted" onClick={() => void refreshRunHistory(accountProfile)}>刷新缓存</button></div>
+        <div className="aiw-runHistory">
+          {runHistory.slice(0, 8).map((item) => (
+            <button key={item.job_id} className={String(item.job_id) === jobId ? 'active' : ''} onClick={() => { setJobId(String(item.job_id)); setJob(item); saveRunCache(accountProfile, item) }}>
+              <b>{item.mission_type || 'comments'} · {item.progress || 0}%</b>
+              <span>{item.status || item.stage || 'queued'}</span>
+              <em>{String(item.job_id || '').slice(0, 24)}</em>
+            </button>
+          ))}
+          {!runHistory.length && <div className="aiw-empty">当前账号还没有历史任务。</div>}
         </div>
       </div>
 

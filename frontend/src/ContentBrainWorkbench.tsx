@@ -18,6 +18,7 @@ type BrainCard = {
   title: string
   type: string
   lane: string
+  collection?: 'lead' | 'copy' | 'video' | 'visual' | 'research'
   source: string
   source_ref?: string
   content: string
@@ -42,6 +43,8 @@ export default function ContentBrainWorkbench({
   const [cards, setCards] = useState<BrainCard[]>([])
   const [statusFilter, setStatusFilter] = useState('pending')
   const [lane, setLane] = useState('all')
+  const [collection, setCollection] = useState('all')
+  const [importCollection, setImportCollection] = useState<'lead' | 'copy' | 'video' | 'visual' | 'research'>('copy')
   const [markdown, setMarkdown] = useState('')
   const [vaultPath, setVaultPath] = useState('')
   const [obsidian, setObsidian] = useState<any>(null)
@@ -55,9 +58,10 @@ export default function ContentBrainWorkbench({
       cards.filter(
         (card) =>
           (statusFilter === 'all' || card.status === statusFilter) &&
-          (lane === 'all' || card.lane === lane),
+          (lane === 'all' || card.lane === lane) &&
+          (collection === 'all' || card.collection === collection),
       ),
-    [cards, statusFilter, lane],
+    [cards, statusFilter, lane, collection],
   )
 
   const counts = useMemo(() => ({
@@ -65,7 +69,12 @@ export default function ContentBrainWorkbench({
     approved: cards.filter((card) => card.status === 'approved').length,
     rejected: cards.filter((card) => card.status === 'rejected').length,
     obsidian: cards.filter((card) => card.source === 'obsidian_vault').length,
-    openclaw: cards.filter((card) => card.source === 'openclaw').length,
+    openclaw: cards.filter((card) => String(card.source || '').toLowerCase().includes('openclaw')).length,
+    lead: cards.filter((card) => card.collection === 'lead').length,
+    copy: cards.filter((card) => card.collection === 'copy').length,
+    video: cards.filter((card) => card.collection === 'video').length,
+    visual: cards.filter((card) => card.collection === 'visual').length,
+    research: cards.filter((card) => card.collection === 'research').length,
   }), [cards])
 
   async function refresh() {
@@ -157,11 +166,12 @@ export default function ContentBrainWorkbench({
           markdown,
           source: 'manual_obsidian_markdown',
           source_ref: 'content_brain_workbench',
+          collection: importCollection,
         },
         180000,
       )
       setMarkdown('')
-      setNotice(`已新增 ${data?.added || 0} 条待审核知识。`)
+      setNotice(`已新增 ${data?.added || 0} 条待审核知识，并隔离到 ${importCollection} 区。`)
       await refresh()
     } catch (err) {
       setError(detailToText(err))
@@ -196,7 +206,7 @@ export default function ContentBrainWorkbench({
     setBusy('沉淀 OpenClaw 知识')
     setError('')
     try {
-      const data = await apiPost(`${API}/openclaw/harvest/${encodeURIComponent(jobId)}`, {}, 240000)
+      const data = await apiPost(`${API}/openclaw/harvest/${encodeURIComponent(jobId)}`, { collection: 'lead' }, 240000)
       setNotice(`读取 ${data?.rows_read || 0} 条结果，新增 ${data?.added_to_brain || 0} 条知识候选。`)
       await refresh()
     } catch (err) {
@@ -215,7 +225,29 @@ export default function ContentBrainWorkbench({
         { folder: 'AI-VIDEO-Content-Brain', limit: 500 },
         240000,
       )
-      setNotice(`已向 Obsidian 写回 ${data?.written || 0} 条批准知识。`)
+      setNotice(`已向 Obsidian 分目录写回 ${data?.written || 0} 条批准知识：截流、文案、视频、画面和研究互不混放。`)
+    } catch (err) {
+      setError(detailToText(err))
+    } finally {
+      setBusy('')
+    }
+  }
+
+  async function moveCollection(card: BrainCard, nextCollection: 'lead' | 'copy' | 'video' | 'visual' | 'research') {
+    setBusy(`移动 ${card.title}`)
+    setError('')
+    try {
+      await apiPost(
+        `${API}/knowledge/cards/${encodeURIComponent(card.id)}/decision`,
+        {
+          status: card.status,
+          collection: nextCollection,
+          reason: `人工移动到 ${nextCollection} 隔离区`,
+        },
+        60000,
+      )
+      setNotice(`“${card.title}”已移动到 ${nextCollection} 隔离区。`)
+      await refresh()
     } catch (err) {
       setError(detailToText(err))
     } finally {
@@ -290,6 +322,16 @@ export default function ContentBrainWorkbench({
 
         <div className="aiw-panel">
           <h3>手动导入与 OpenClaw 沉淀</h3>
+          <label>
+            导入到哪个隔离区
+            <select value={importCollection} onChange={(event) => setImportCollection(event.target.value as any)}>
+              <option value="lead">截流线索</option>
+              <option value="copy">生产文案</option>
+              <option value="video">视频知识</option>
+              <option value="visual">画面规则</option>
+              <option value="research">研究与历史</option>
+            </select>
+          </label>
           <textarea
             className="aiw-brainMarkdown"
             value={markdown}
@@ -301,6 +343,20 @@ export default function ContentBrainWorkbench({
             <button className="aiw-purple" disabled={Boolean(busy)} onClick={harvestOpenClaw}>从真实 OpenClaw 任务沉淀</button>
             <button className="aiw-muted" onClick={() => goTab('leads')}>去启动 OpenClaw</button>
           </div>
+        </div>
+      </div>
+
+      <div className="aiw-panel aiw-isolationPanel">
+        <div className="aiw-sectionTitleRow">
+          <div><h3>知识隔离区</h3><span>截流客户、生产文案、视频知识、画面规则和历史研究分别存放，生产文案默认不会读取截流私信。</span></div>
+        </div>
+        <div className="aiw-isolationGrid">
+          <button className={collection === 'lead' ? 'active' : ''} onClick={() => setCollection('lead')}><b>{counts.lead}</b><span>截流线索</span></button>
+          <button className={collection === 'copy' ? 'active' : ''} onClick={() => setCollection('copy')}><b>{counts.copy}</b><span>生产文案</span></button>
+          <button className={collection === 'video' ? 'active' : ''} onClick={() => setCollection('video')}><b>{counts.video}</b><span>视频知识</span></button>
+          <button className={collection === 'visual' ? 'active' : ''} onClick={() => setCollection('visual')}><b>{counts.visual}</b><span>画面规则</span></button>
+          <button className={collection === 'research' ? 'active' : ''} onClick={() => setCollection('research')}><b>{counts.research}</b><span>研究与历史</span></button>
+          <button className={collection === 'all' ? 'active' : ''} onClick={() => setCollection('all')}><b>{cards.length}</b><span>全部</span></button>
         </div>
       </div>
 
@@ -334,6 +390,7 @@ export default function ContentBrainWorkbench({
               <div className="aiw-leadHead"><b>{card.title}</b><span>{card.status}</span></div>
               <p>{card.content}</p>
               <div className="aiw-leadMeta">
+                <span>隔离区：{card.collection || 'research'}</span>
                 <span>来源：{card.source}</span>
                 <span>分区：{card.lane}</span>
                 <span>评分：{card.score || 0}</span>
@@ -341,7 +398,8 @@ export default function ContentBrainWorkbench({
               <div className="aiw-actions mini">
                 {card.status !== 'approved' && <button onClick={() => decide(card, 'approved')}>批准</button>}
                 {card.status !== 'rejected' && <button onClick={() => decide(card, 'rejected')}>拒绝</button>}
-                {card.status === 'approved' && <button onClick={() => useForVideo(card)}>用于生产文案</button>}
+                {card.collection === 'lead' && <button onClick={() => void moveCollection(card, 'copy')}>转为生产选题</button>}
+                {card.status === 'approved' && card.collection !== 'lead' && card.collection !== 'visual' && <button onClick={() => useForVideo(card)}>用于生产文案</button>}
               </div>
             </article>
           ))}

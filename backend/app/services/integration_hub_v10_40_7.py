@@ -19,8 +19,8 @@ import httpx
 import numpy as np
 from fastapi import Body, FastAPI, HTTPException, Query
 
-VERSION = "10.40.7"
-MODE = "engine_source_fix"
+VERSION = "10.40.8"
+MODE = "knowledge_isolation_task_cache_progress"
 BASE = Path(os.getenv("AI_VIDEO_BASE", "/opt/ai-video"))
 STORAGE = BASE / "storage"
 ROOT = Path(os.getenv("AI_VIDEO_INTEGRATION_ROOT", str(STORAGE / "integration_hub_v10_40_7")))
@@ -41,6 +41,101 @@ OPENCLAW_START = ["/api/openclaw/discovery/start", "/api/collector/commands", "/
 OPENCLAW_JOB = ["/api/openclaw/discovery/job/{job_id}", "/api/collector/runs/{job_id}", "/api/collector/commands/{job_id}"]
 OPENCLAW_RESULTS = ["/api/video/comment-leads/recent?limit=300", "/api/openclaw/videos", "/api/openclaw/accounts", "/api/collector/runs/latest"]
 INTERNAL_KEYWORD = re.compile(r"^(?:ai_?kw|keyword|kw|region|area|audience|crowd|user|区域|人群|城市|标签)[_-]?\d+(?:[_-].*)?$", re.I)
+
+KNOWLEDGE_COLLECTIONS = {"lead", "copy", "video", "visual", "research"}
+COLLECTION_FOLDERS = {
+    "lead": "01-截流线索",
+    "copy": "02-生产文案",
+    "video": "03-视频知识",
+    "visual": "04-画面规则",
+    "research": "05-研究与历史",
+}
+ACTIVE_RUN_STATUSES = {"queued", "pending", "created", "starting", "running", "processing", "collecting", "analyzing"}
+
+
+def infer_collection(raw: Dict[str, Any], card_type: str = "", lane: str = "", source: str = "") -> str:
+    explicit = text(raw.get("collection") or raw.get("knowledge_collection") or raw.get("bucket")).lower()
+    if explicit in KNOWLEDGE_COLLECTIONS:
+        return explicit
+    joined = " ".join([card_type, lane, source, text(raw.get("title")), text(raw.get("content"))]).lower()
+    if lane == "reply" or card_type in {"lead_question", "reply_template"} or any(token in joined for token in ["openclaw", "comment_lead", "客户线索", "评论截流"]):
+        return "lead"
+    if lane == "visual" or card_type == "visual_rule" or any(token in joined for token in ["镜头", "画面规则", "素材规则", "字幕规则"]):
+        return "visual"
+    if card_type in {"topic", "hook", "script", "production_copy", "copy_template"} or any(token in joined for token in ["生产文案", "选题", "标题", "钩子", "口播"]):
+        return "copy"
+    if lane == "video":
+        return "video"
+    return "research"
+
+
+def run_progress(value: Dict[str, Any]) -> int:
+    candidates = [
+        value.get("progress"),
+        value.get("percent"),
+        as_dict(value.get("raw")).get("progress"),
+        as_dict(value.get("response")).get("progress"),
+        as_dict(as_dict(value.get("response")).get("data")).get("progress"),
+    ]
+    for candidate in candidates:
+        try:
+            number = float(candidate)
+        except Exception:
+            continue
+        if 0 <= number <= 1:
+            number *= 100
+        return max(0, min(100, int(round(number))))
+    return 0
+
+
+def run_stage(value: Dict[str, Any]) -> str:
+    for candidate in [
+        value.get("stage"), value.get("status"), value.get("message"),
+        as_dict(value.get("raw")).get("stage"),
+        as_dict(value.get("response")).get("stage"),
+        as_dict(value.get("response")).get("status"),
+    ]:
+        clean = text(candidate)
+        if clean:
+            return clean
+    return "queued"
+
+
+def run_counts(value: Dict[str, Any]) -> Dict[str, int]:
+    combined = {}
+    for source in [value, as_dict(value.get("raw")), as_dict(value.get("response")), as_dict(as_dict(value.get("response")).get("data"))]:
+        combined.update(source)
+    result: Dict[str, int] = {}
+    aliases = {
+        "accounts": ["accounts", "account_count", "accounts_collected", "discovered_accounts"],
+        "videos": ["videos", "video_count", "videos_collected", "discovered_videos"],
+        "comments": ["comments", "comment_count", "comments_collected"],
+        "leads": ["leads", "lead_count", "qualified_leads"],
+    }
+    for key, names in aliases.items():
+        for name in names:
+            try:
+                result[key] = max(result.get(key, 0), int(float(combined.get(name) or 0)))
+            except Exception:
+                pass
+    return result
+
+
+def public_run(value: Dict[str, Any]) -> Dict[str, Any]:
+    item = as_dict(value)
+    request = as_dict(item.get("request"))
+    status = text(item.get("status") or run_stage(item) or "queued")
+    return {
+        **item,
+        "job_id": text(item.get("job_id")),
+        "status": status,
+        "stage": run_stage(item),
+        "progress": run_progress(item),
+        "counts": run_counts(item),
+        "account_profile": text(item.get("account_profile") or request.get("account_profile") or "company_main"),
+        "mission_type": text(item.get("mission_type") or request.get("mission_type") or "comments"),
+        "is_active": status.lower() in ACTIVE_RUN_STATUSES,
+    }
 
 
 def now() -> int:
@@ -116,12 +211,17 @@ def normalize_card(raw: Dict[str, Any], source: str = "integration") -> Dict[str
         score = max(0, min(100, int(float(raw.get("score") or 70))))
     except Exception:
         score = 70
+    card_type = text(raw.get("type") or raw.get("card_type") or "market_note")
+    lane = text(raw.get("lane") or "video")
+    card_source = text(raw.get("source") or source)
+    collection = infer_collection(raw, card_type, lane, card_source)
     return {
         "id": text(raw.get("id")) or uid("brain"),
         "title": title[:90],
-        "type": text(raw.get("type") or raw.get("card_type") or "market_note"),
-        "lane": text(raw.get("lane") or "video"),
-        "source": text(raw.get("source") or source),
+        "type": card_type,
+        "lane": lane,
+        "collection": collection,
+        "source": card_source,
         "source_ref": text(raw.get("source_ref") or raw.get("url") or raw.get("path")),
         "content": content[:5000],
         "tags": clean_keywords(as_list(tags)),
@@ -136,7 +236,7 @@ def normalize_card(raw: Dict[str, Any], source: str = "integration") -> Dict[str
 
 
 def card_key(card: Dict[str, Any]) -> str:
-    seed = "|".join([text(card.get("type")), text(card.get("title")), text(card.get("content"))[:220]])
+    seed = "|".join([text(card.get("collection")), text(card.get("type")), text(card.get("title")), text(card.get("content"))[:220]])
     return hashlib.sha256(re.sub(r"\s+", "", seed).lower().encode()).hexdigest()
 
 
@@ -179,7 +279,7 @@ def merge_cards(incoming: Iterable[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]
     return save_cards(cards), added
 
 
-def markdown_cards(markdown: str, source: str, source_ref: str = "") -> List[Dict[str, Any]]:
+def markdown_cards(markdown: str, source: str, source_ref: str = "", collection: str = "") -> List[Dict[str, Any]]:
     blocks = [block.strip() for block in re.split(r"\n(?=#{1,4}\s)|\n---+\n|\n\s*\n+", text(markdown)) if len(block.strip()) >= 12]
     out: List[Dict[str, Any]] = []
     for block in blocks[:200]:
@@ -197,10 +297,12 @@ def markdown_cards(markdown: str, source: str, source_ref: str = "") -> List[Dic
             card_type, lane = "topic", "video"
         if re.search(r"hook|开头|钩子|前三秒", lower):
             card_type, lane = "hook", "video"
+        resolved_collection = collection if collection in KNOWLEDGE_COLLECTIONS else infer_collection({"title": title, "content": block}, card_type, lane, source)
         out.append({
             "title": title,
             "type": card_type,
             "lane": lane,
+            "collection": resolved_collection,
             "source": source,
             "source_ref": source_ref,
             "content": re.sub(r"^#{1,4}\s+", "", block, flags=re.M).strip(),
@@ -226,7 +328,7 @@ def extract_rows(value: Any) -> List[Dict[str, Any]]:
     return out
 
 
-def lead_card(item: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+def lead_card(item: Dict[str, Any], collection: str = "lead") -> Optional[Dict[str, Any]]:
     body = text(item.get("text") or item.get("comment") or item.get("message") or item.get("question") or item.get("content"))
     if len(body) < 5:
         return None
@@ -240,7 +342,7 @@ def lead_card(item: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     if score < 55:
         return None
     return {
-        "title": body[:42], "type": "lead_question", "lane": "reply", "source": "openclaw",
+        "title": body[:42], "type": "lead_question", "lane": "reply", "collection": collection if collection in KNOWLEDGE_COLLECTIONS else "lead", "source": "openclaw",
         "source_ref": text(item.get("source_url") or item.get("video_url") or item.get("account_url")),
         "content": body, "tags": clean_keywords([item.get("account_name"), item.get("author"), priority, "OpenClaw", "客户问题"]),
         "score": score, "status": "pending", "decision_reason": "OpenClaw A/B 级或高分客户问题，等待人工批准。", "raw": item,
@@ -602,7 +704,13 @@ def audit_video(path: Path, allow_bottom: bool, count: int) -> Dict[str, Any]:
 
 
 def knowledge_context(cards: Sequence[Dict[str, Any]], topic: str, city: str, market: str, limit: int) -> Dict[str, Any]:
-    keys = clean_keywords(re.split(r"[,，、\s]+", " ".join([topic, city, market]))); approved = [card for card in cards if card.get("status") == "approved"]; scored=[]; counts={"obsidian":0,"openclaw":0,"competitor":0,"history":0}
+    keys = clean_keywords(re.split(r"[,，、\s]+", " ".join([topic, city, market])))
+    approved = [
+        card for card in cards
+        if card.get("status") == "approved"
+        and text(card.get("collection")) in {"copy", "video", "research"}
+    ]
+    scored=[]; counts={"obsidian":0,"openclaw":0,"competitor":0,"history":0,"lead_isolated":sum(1 for c in cards if c.get("collection")=="lead"),"visual_isolated":sum(1 for c in cards if c.get("collection")=="visual")}
     for card in approved:
         source = text(card.get("source")).lower(); group = "obsidian" if "obsidian" in source else "openclaw" if "openclaw" in source else "competitor" if any(token in source for token in ["heat","douyin","competitor","collector"]) else "history"; counts[group]+=1
         hay = " ".join([text(card.get("title")), text(card.get("content")), " ".join(as_list(card.get("tags")))]).lower(); match = sum(1 for key in keys if key.lower() in hay); scored.append((float(card.get("score") or 0)+match*18+min(12,int(card.get("used_count") or 0)*2),card))
@@ -619,15 +727,17 @@ def install_integration_hub_v10_40_7(app: FastAPI) -> None:
 
     @app.get("/api/video/integration/health")
     def health():
-        vault = _discover_vault(); return {"ok":True,"version":VERSION,"mode":MODE,"knowledge_backend":True,"obsidian_configured":bool(vault),"obsidian_vault":str(vault) if vault else "","legacy_migration":read_json(MIGRATION_FILE,migration),"knowledge_total":len(load_cards()),"openclaw_orchestration":True,"asset_cleanliness_gate":True,"video_visual_integrity_gate":True,"graphic_window_embedded_tab":True,"button_contracts":True,"engine_source_fix":True,"storage":str(ROOT)}
+        vault = _discover_vault(); return {"ok":True,"version":VERSION,"mode":MODE,"knowledge_backend":True,"obsidian_configured":bool(vault),"obsidian_vault":str(vault) if vault else "","legacy_migration":read_json(MIGRATION_FILE,migration),"knowledge_total":len(load_cards()),"openclaw_orchestration":True,"asset_cleanliness_gate":True,"video_visual_integrity_gate":True,"graphic_window_embedded_tab":True,"button_contracts":True,"engine_source_fix":True,"knowledge_isolation":True,"persistent_openclaw_runs":True,"account_profile_isolation":True,"realtime_progress":True,"storage":str(ROOT)}
 
     @app.get("/api/video/integration/knowledge/cards")
-    def get_cards(status: str = Query("all"), source: str = Query(""), lane: str = Query("all"), limit: int = Query(500, ge=1, le=2000)):
+    def get_cards(status: str = Query("all"), source: str = Query(""), lane: str = Query("all"), collection: str = Query("all"), limit: int = Query(500, ge=1, le=2000)):
         cards=load_cards();
         if status!="all": cards=[c for c in cards if c.get("status")==status]
         if source: cards=[c for c in cards if source.lower() in text(c.get("source")).lower()]
         if lane!="all": cards=[c for c in cards if c.get("lane")==lane]
-        return {"ok":True,"version":VERSION,"cards":cards[:limit],"count":min(len(cards),limit)}
+        if collection!="all": cards=[c for c in cards if c.get("collection")==collection]
+        collections={name:sum(1 for c in cards if c.get("collection")==name) for name in sorted(KNOWLEDGE_COLLECTIONS)}
+        return {"ok":True,"version":VERSION,"cards":cards[:limit],"count":min(len(cards),limit),"total":len(cards),"collections":collections}
 
     @app.post("/api/video/integration/knowledge/cards")
     def create_card(payload: Dict[str, Any] = Body(default_factory=dict)):
@@ -635,7 +745,7 @@ def install_integration_hub_v10_40_7(app: FastAPI) -> None:
 
     @app.post("/api/video/integration/knowledge/import-markdown")
     def import_markdown(payload: Dict[str, Any] = Body(default_factory=dict)):
-        cards, added = merge_cards(markdown_cards(text(payload.get("markdown")), text(payload.get("source") or "manual_markdown"), text(payload.get("source_ref")))); return {"ok":True,"version":VERSION,"added":added,"count":len(cards)}
+        cards, added = merge_cards(markdown_cards(text(payload.get("markdown")), text(payload.get("source") or "manual_markdown"), text(payload.get("source_ref")), text(payload.get("collection")))); return {"ok":True,"version":VERSION,"added":added,"count":len(cards)}
 
     @app.post("/api/video/integration/knowledge/cards/{card_id}/decision")
     def decide(card_id: str, payload: Dict[str, Any] = Body(default_factory=dict)):
@@ -643,7 +753,12 @@ def install_integration_hub_v10_40_7(app: FastAPI) -> None:
         if status not in {"pending","approved","rejected"}: raise HTTPException(422,"status 必须是 pending/approved/rejected")
         cards=load_cards(); found=False
         for card in cards:
-            if card.get("id")==card_id: card["status"]=status; card["decision_reason"]=text(payload.get("reason") or f"人工设置为 {status}"); card["updated_at"]=now(); found=True
+            if card.get("id")==card_id:
+                card["status"]=status
+                next_collection=text(payload.get("collection"))
+                if next_collection in KNOWLEDGE_COLLECTIONS: card["collection"]=next_collection
+                card["decision_reason"]=text(payload.get("reason") or f"人工设置为 {status}")
+                card["updated_at"]=now(); found=True
         if not found: raise HTTPException(404,f"找不到知识卡：{card_id}")
         save_cards(cards); return {"ok":True,"version":VERSION}
 
@@ -694,30 +809,55 @@ def install_integration_hub_v10_40_7(app: FastAPI) -> None:
     def obsidian_writeback(payload: Dict[str, Any] = Body(default_factory=dict)):
         vault=vault_path();
         if not vault: raise HTTPException(409,"尚未配置有效 Vault")
-        folder=vault/text(payload.get("folder") or "AI-VIDEO-Content-Brain"); folder.mkdir(parents=True,exist_ok=True); written=0
+        root_folder=vault/text(payload.get("folder") or "AI-VIDEO-Content-Brain"); root_folder.mkdir(parents=True,exist_ok=True); written=0; by_collection={}
         for card in [c for c in load_cards() if c.get("status")=="approved"][:int(payload.get("limit") or 500)]:
-            safe=re.sub(r"[^\w\u4e00-\u9fff.-]+","_",text(card.get("title")))[:80] or text(card.get("id")); target=folder/f"{safe}_{text(card.get('id'))[-8:]}.md"; target.write_text("\n".join([f"# {text(card.get('title'))}","",f"- 来源：{text(card.get('source'))}",f"- 类型：{text(card.get('type'))}",f"- 分区：{text(card.get('lane'))}",f"- 分数：{card.get('score')}",f"- 标签：{', '.join(as_list(card.get('tags')))}","",text(card.get("content")),""]),encoding="utf-8"); written+=1
-        return {"ok":True,"version":VERSION,"folder":str(folder),"written":written}
+            collection=text(card.get("collection")) if text(card.get("collection")) in KNOWLEDGE_COLLECTIONS else "research"
+            folder=root_folder/COLLECTION_FOLDERS[collection]; folder.mkdir(parents=True,exist_ok=True)
+            safe=re.sub(r"[^\w\u4e00-\u9fff.-]+","_",text(card.get("title")))[:80] or text(card.get("id")); target=folder/f"{safe}_{text(card.get('id'))[-8:]}.md"
+            target.write_text("\n".join([f"# {text(card.get('title'))}","",f"- 隔离区：{collection}",f"- 来源：{text(card.get('source'))}",f"- 类型：{text(card.get('type'))}",f"- 分区：{text(card.get('lane'))}",f"- 分数：{card.get('score')}",f"- 标签：{', '.join(as_list(card.get('tags')))}","",text(card.get("content")),""]),encoding="utf-8")
+            written+=1; by_collection[collection]=by_collection.get(collection,0)+1
+        return {"ok":True,"version":VERSION,"folder":str(root_folder),"written":written,"by_collection":by_collection,"folders":COLLECTION_FOLDERS}
 
     @app.get("/api/video/integration/openclaw/status")
     async def openclaw_status():
         attempts=[]
         for path in OPENCLAW_HEALTH:
             status,data=await internal_json(app,"GET",path,timeout=30); attempts.append({"path":path,"status":status})
-            if status<400 and data.get("ok",True) is not False: return {"ok":True,"version":VERSION,"online":True,"endpoint":path,"detail":data,"attempts":attempts}
-        return {"ok":True,"version":VERSION,"online":False,"detail":"OpenClaw worker/服务未返回健康状态","attempts":attempts}
+            if status<400 and data.get("ok",True) is not False:
+                detail=as_dict(data)
+                worker_online=bool(detail.get("worker_online", detail.get("online", True)))
+                login_ok=bool(detail.get("login_ok", detail.get("logged_in", detail.get("authenticated", False))))
+                return {"ok":True,"version":VERSION,"online":True,"backend_online":True,"worker_online":worker_online,"login_ok":login_ok,"endpoint":path,"detail":data,"attempts":attempts}
+        return {"ok":True,"version":VERSION,"online":False,"backend_online":False,"worker_online":False,"login_ok":False,"detail":"OpenClaw worker/服务未返回健康状态","attempts":attempts}
+
+    @app.get("/api/video/integration/openclaw/runs")
+    def openclaw_runs(account_profile: str = Query(""), active_only: bool = Query(False), limit: int = Query(30, ge=1, le=200)):
+        runs=read_json(RUN_FILE,{})
+        values=[public_run(as_dict(value)) for value in (runs.values() if isinstance(runs,dict) else [])]
+        if account_profile: values=[item for item in values if item.get("account_profile")==account_profile]
+        if active_only: values=[item for item in values if item.get("is_active")]
+        values.sort(key=lambda item:int(item.get("updated_at") or item.get("created_at") or 0),reverse=True)
+        return {"ok":True,"version":VERSION,"runs":values[:limit],"total":len(values)}
+
+    @app.get("/api/video/integration/openclaw/latest")
+    def openclaw_latest(account_profile: str = Query("company_main")):
+        data=openclaw_runs(account_profile=account_profile,active_only=False,limit=50)
+        values=as_list(data.get("runs"))
+        active=next((item for item in values if item.get("is_active")),None)
+        return {"ok":True,"version":VERSION,"account_profile":account_profile,"run":active or (values[0] if values else None),"active":bool(active)}
 
     @app.post("/api/video/integration/openclaw/start")
     async def openclaw_start(payload: Dict[str, Any] = Body(default_factory=dict)):
         health=await openclaw_status();
         if not health.get("online"): raise HTTPException(503,"OpenClaw 离线，无法开始采集。请先启动 worker 并确认账号登录。")
-        request={**payload,"source":text(payload.get("source") or "integration_hub_v10_40_7"),"run_openclaw_analysis":True,"persist_results":True}
+        account_profile=text(payload.get("account_profile") or "company_main")
+        request={**payload,"account_profile":account_profile,"source":text(payload.get("source") or "integration_hub_v10_40_8"),"run_openclaw_analysis":True,"persist_results":True}
         endpoint,status,data=await first_available(app,"POST",OPENCLAW_START,request,180)
         if status>=400: raise HTTPException(status,data)
         job_id=text(data.get("job_id") or data.get("run_id") or data.get("command_id") or data.get("id"))
         if not job_id: raise HTTPException(502,"采集接口返回成功但没有 job_id/run_id，已阻止假成功。")
-        runs=read_json(RUN_FILE,{}); runs=runs if isinstance(runs,dict) else {}; runs[job_id]={"job_id":job_id,"status":text(data.get("status") or "queued"),"endpoint":endpoint,"request":request,"response":data,"created_at":now(),"updated_at":now()}; atomic_json(RUN_FILE,runs)
-        return {"ok":True,"version":VERSION,"online":True,"job_id":job_id,"status":runs[job_id]["status"],"endpoint":endpoint,"raw":data}
+        runs=read_json(RUN_FILE,{}); runs=runs if isinstance(runs,dict) else {}; runs[job_id]={"job_id":job_id,"status":text(data.get("status") or "queued"),"stage":text(data.get("stage") or data.get("status") or "queued"),"progress":run_progress(data),"account_profile":account_profile,"mission_type":text(request.get("mission_type") or "comments"),"endpoint":endpoint,"request":request,"response":data,"created_at":now(),"updated_at":now()}; atomic_json(RUN_FILE,runs)
+        return {"ok":True,"version":VERSION,**public_run(runs[job_id]),"online":True,"endpoint":endpoint,"raw":data}
 
     @app.get("/api/video/integration/openclaw/job/{job_id}")
     async def openclaw_job(job_id: str):
@@ -728,11 +868,13 @@ def install_integration_hub_v10_40_7(app: FastAPI) -> None:
         returned=text(data.get("job_id") or data.get("run_id") or data.get("id") or job_id)
         if returned!=job_id: raise HTTPException(409,"OpenClaw 状态接口返回不同任务 ID，已阻止串任务。")
         status_text=text(data.get("status") or data.get("stage") or "running")
-        if isinstance(runs,dict): runs[job_id]={**local,"job_id":job_id,"status":status_text,"endpoint":endpoint,"response":data,"updated_at":now()}; atomic_json(RUN_FILE,runs)
-        return {"ok":True,"version":VERSION,"job_id":job_id,"status":status_text,"endpoint":endpoint,"raw":data}
+        if isinstance(runs,dict):
+            runs[job_id]={**local,"job_id":job_id,"status":status_text,"stage":text(data.get("stage") or status_text),"progress":run_progress(data),"endpoint":endpoint,"response":data,"updated_at":now()}
+            atomic_json(RUN_FILE,runs)
+        return {"ok":True,"version":VERSION,**public_run(as_dict(runs.get(job_id)) if isinstance(runs,dict) else {"job_id":job_id,"status":status_text,"response":data}),"endpoint":endpoint,"raw":data}
 
     @app.post("/api/video/integration/openclaw/harvest/{job_id}")
-    async def harvest(job_id: str):
+    async def harvest(job_id: str, payload: Dict[str, Any] = Body(default_factory=dict)):
         # First read the exact job payload, then only accept global rows that explicitly
         # declare the same job/run/command id. This prevents cross-task knowledge leaks.
         job_paths=[path.format(job_id=job_id) for path in OPENCLAW_JOB]
@@ -751,9 +893,9 @@ def install_integration_hub_v10_40_7(app: FastAPI) -> None:
                 if row_id==job_id: bound.append(row)
             rows.extend(bound)
             sources.append({"path":path,"status":status,"rows":len(extracted),"bound_rows":len(bound)})
-        cards=[card for card in (lead_card(row) for row in rows) if card]
+        collection=text(payload.get("collection") or "lead"); cards=[card for card in (lead_card(row, collection) for row in rows) if card]
         merged,added=merge_cards(cards)
-        return {"ok":True,"version":VERSION,"job_id":job_id,"strict_job_binding":True,"rows_read":len(rows),"qualified_cards":len(cards),"added_to_brain":added,"brain_total":len(merged),"sources":sources}
+        return {"ok":True,"version":VERSION,"job_id":job_id,"strict_job_binding":True,"rows_read":len(rows),"qualified_cards":len(cards),"added_to_brain":added,"brain_total":len(merged),"collection":collection,"sources":sources}
 
     @app.post("/api/video/integration/assets/gate")
     def asset_gate(payload: Dict[str, Any] = Body(default_factory=dict)):
