@@ -19,8 +19,13 @@ import httpx
 import numpy as np
 from fastapi import Body, FastAPI, HTTPException, Query
 
-VERSION = "10.40.8"
-MODE = "knowledge_isolation_task_cache_progress"
+from app.services.collector_control import (
+    collector_queue_mirror_status,
+    collector_worker_heartbeat,
+)
+
+VERSION = "10.40.8.2"
+MODE = "runtime_recovery_queue_bridge"
 BASE = Path(os.getenv("AI_VIDEO_BASE", "/opt/ai-video"))
 STORAGE = BASE / "storage"
 ROOT = Path(os.getenv("AI_VIDEO_INTEGRATION_ROOT", str(STORAGE / "integration_hub_v10_40_7")))
@@ -125,6 +130,10 @@ def public_run(value: Dict[str, Any]) -> Dict[str, Any]:
     item = as_dict(value)
     request = as_dict(item.get("request"))
     status = text(item.get("status") or run_stage(item) or "queued")
+    created_at = int(item.get("created_at") or 0)
+    updated_at = int(item.get("updated_at") or created_at or 0)
+    queue_age_seconds = max(0, now() - created_at) if created_at and status.lower() in {"queued", "pending", "waiting"} else 0
+    queue_stalled = bool(queue_age_seconds >= 90 and status.lower() in {"queued", "pending", "waiting"})
     return {
         **item,
         "job_id": text(item.get("job_id")),
@@ -135,6 +144,9 @@ def public_run(value: Dict[str, Any]) -> Dict[str, Any]:
         "account_profile": text(item.get("account_profile") or request.get("account_profile") or "company_main"),
         "mission_type": text(item.get("mission_type") or request.get("mission_type") or "comments"),
         "is_active": status.lower() in ACTIVE_RUN_STATUSES,
+        "queue_age_seconds": queue_age_seconds,
+        "queue_stalled": queue_stalled,
+        "updated_at": updated_at,
     }
 
 
@@ -821,14 +833,44 @@ def install_integration_hub_v10_40_7(app: FastAPI) -> None:
     @app.get("/api/video/integration/openclaw/status")
     async def openclaw_status():
         attempts=[]
+        fallback_online=False
+        fallback_detail={}
+        fallback_endpoint=""
         for path in OPENCLAW_HEALTH:
-            status,data=await internal_json(app,"GET",path,timeout=30); attempts.append({"path":path,"status":status})
+            status,data=await internal_json(app,"GET",path,timeout=30)
+            attempts.append({"path":path,"status":status})
             if status<400 and data.get("ok",True) is not False:
-                detail=as_dict(data)
-                worker_online=bool(detail.get("worker_online", detail.get("online", True)))
-                login_ok=bool(detail.get("login_ok", detail.get("logged_in", detail.get("authenticated", False))))
-                return {"ok":True,"version":VERSION,"online":True,"backend_online":True,"worker_online":worker_online,"login_ok":login_ok,"endpoint":path,"detail":data,"attempts":attempts}
-        return {"ok":True,"version":VERSION,"online":False,"backend_online":False,"worker_online":False,"login_ok":False,"detail":"OpenClaw worker/服务未返回健康状态","attempts":attempts}
+                fallback_online=True
+                fallback_detail=as_dict(data)
+                fallback_endpoint=path
+                break
+
+        heartbeat=collector_worker_heartbeat(max_age_seconds=20)
+        collector_worker_online=bool(heartbeat.get("online"))
+        login_ok=bool(
+            fallback_detail.get("login_ok")
+            or fallback_detail.get("logged_in")
+            or fallback_detail.get("authenticated")
+        )
+        backend_online=bool(fallback_online or collector_worker_online)
+        return {
+            "ok": True,
+            "version": VERSION,
+            "online": backend_online,
+            "backend_online": backend_online,
+            "worker_online": collector_worker_online,
+            "collector_worker_online": collector_worker_online,
+            "fallback_worker_online": fallback_online,
+            "login_ok": login_ok,
+            "endpoint": fallback_endpoint or "/api/collector/commands/next",
+            "detail": fallback_detail,
+            "collector_heartbeat": heartbeat,
+            "attempts": attempts,
+        }
+
+    @app.get("/api/video/integration/openclaw/queue-status")
+    def openclaw_queue_status(limit: int = Query(50, ge=1, le=200)):
+        return {"ok": True, "version": VERSION, **collector_queue_mirror_status(limit)}
 
     @app.get("/api/video/integration/openclaw/runs")
     def openclaw_runs(account_profile: str = Query(""), active_only: bool = Query(False), limit: int = Query(30, ge=1, le=200)):
@@ -846,32 +888,197 @@ def install_integration_hub_v10_40_7(app: FastAPI) -> None:
         active=next((item for item in values if item.get("is_active")),None)
         return {"ok":True,"version":VERSION,"account_profile":account_profile,"run":active or (values[0] if values else None),"active":bool(active)}
 
+    async def _start_real_openclaw(payload: Dict[str, Any], *, supersedes: str = "") -> Dict[str, Any]:
+        health=await openclaw_status()
+        if not health.get("backend_online"):
+            raise HTTPException(503,"OpenClaw 后端离线，无法开始采集。")
+        if not health.get("collector_worker_online"):
+            raise HTTPException(503,"ECS Collector Worker 没有真实心跳，已阻止继续堆积 queued 任务。")
+        if text(payload.get("platform") or "douyin").lower()=="douyin" and not health.get("login_ok"):
+            raise HTTPException(409,"Worker 已在线，但抖音账号尚未登录。请登录对应隔离账号后再启动任务。")
+
+        account_profile=text(payload.get("account_profile") or "company_main")
+        request={
+            **payload,
+            "account_profile": account_profile,
+            "source": text(payload.get("source") or "integration_hub_v10_40_8_2"),
+            "run_openclaw_analysis": True,
+            "persist_results": True,
+        }
+
+        # 新 OpenClaw discovery 优先；不存在时，把完整任务封装进 legacy raw，
+        # 避免 Pydantic 只保留 limit/account 导致 raw={}、任务无法执行。
+        endpoint="/api/openclaw/discovery/start"
+        status,data=await internal_json(app,"POST",endpoint,request,timeout=180)
+        if status>=400:
+            seed_accounts=[text(item) for item in as_list(request.get("seed_accounts")) if text(item)]
+            keyword=text(request.get("keyword") or request.get("market"))
+            limit=max(1,min(int(request.get("max_accounts") or len(seed_accounts) or 1),120))
+            legacy_payload={
+                "limit": limit,
+                "account": seed_accounts[0] if seed_accounts else keyword,
+                "headful": True,
+                "no_delay": limit<=3,
+                "mode": text(request.get("mission_type") or "manual"),
+                "message": f"等待 ECS Worker 领取：{text(request.get('mission_type') or 'comments')} · {limit} 个账号",
+                "raw": request,
+            }
+            endpoint="/api/collector/commands"
+            status,data=await internal_json(app,"POST",endpoint,legacy_payload,timeout=180)
+
+        if status>=400:
+            raise HTTPException(status,data)
+        job_id=text(data.get("job_id") or data.get("run_id") or data.get("command_id") or data.get("id"))
+        if not job_id:
+            raise HTTPException(502,"采集接口返回成功但没有 job_id/run_id，已阻止假成功。")
+
+        runs=read_json(RUN_FILE,{})
+        runs=runs if isinstance(runs,dict) else {}
+        if supersedes and supersedes in runs:
+            old=as_dict(runs.get(supersedes))
+            runs[supersedes]={
+                **old,
+                "status":"superseded",
+                "stage":"superseded",
+                "is_active":False,
+                "superseded_by":job_id,
+                "updated_at":now(),
+            }
+        runs[job_id]={
+            "job_id":job_id,
+            "status":text(data.get("status") or "queued"),
+            "stage":text(data.get("stage") or data.get("status") or "queued"),
+            "progress":run_progress(data),
+            "account_profile":account_profile,
+            "mission_type":text(request.get("mission_type") or "comments"),
+            "endpoint":endpoint,
+            "request":request,
+            "response":data,
+            "created_at":now(),
+            "updated_at":now(),
+            "supersedes":supersedes,
+        }
+        atomic_json(RUN_FILE,runs)
+        return {
+            "ok":True,
+            "version":VERSION,
+            **public_run(runs[job_id]),
+            "online":True,
+            "endpoint":endpoint,
+            "raw":data,
+        }
+
     @app.post("/api/video/integration/openclaw/start")
     async def openclaw_start(payload: Dict[str, Any] = Body(default_factory=dict)):
-        health=await openclaw_status();
-        if not health.get("online"): raise HTTPException(503,"OpenClaw 离线，无法开始采集。请先启动 worker 并确认账号登录。")
-        account_profile=text(payload.get("account_profile") or "company_main")
-        request={**payload,"account_profile":account_profile,"source":text(payload.get("source") or "integration_hub_v10_40_8"),"run_openclaw_analysis":True,"persist_results":True}
-        endpoint,status,data=await first_available(app,"POST",OPENCLAW_START,request,180)
-        if status>=400: raise HTTPException(status,data)
-        job_id=text(data.get("job_id") or data.get("run_id") or data.get("command_id") or data.get("id"))
-        if not job_id: raise HTTPException(502,"采集接口返回成功但没有 job_id/run_id，已阻止假成功。")
-        runs=read_json(RUN_FILE,{}); runs=runs if isinstance(runs,dict) else {}; runs[job_id]={"job_id":job_id,"status":text(data.get("status") or "queued"),"stage":text(data.get("stage") or data.get("status") or "queued"),"progress":run_progress(data),"account_profile":account_profile,"mission_type":text(request.get("mission_type") or "comments"),"endpoint":endpoint,"request":request,"response":data,"created_at":now(),"updated_at":now()}; atomic_json(RUN_FILE,runs)
-        return {"ok":True,"version":VERSION,**public_run(runs[job_id]),"online":True,"endpoint":endpoint,"raw":data}
+        return await _start_real_openclaw(payload)
+
+    @app.post("/api/video/integration/openclaw/requeue/{job_id}")
+    async def openclaw_requeue(job_id: str):
+        runs=read_json(RUN_FILE,{})
+        local=as_dict(runs.get(job_id)) if isinstance(runs,dict) else {}
+        if not local:
+            raise HTTPException(404,f"找不到可重新排队的任务：{job_id}")
+        request=as_dict(local.get("request"))
+        if not request:
+            raise HTTPException(409,"旧任务没有保存完整请求参数，不能安全重新排队。")
+        return await _start_real_openclaw(request,supersedes=job_id)
+
+    def _mirror_command(job_id: str) -> Dict[str, Any]:
+        mirror=collector_queue_mirror_status(200)
+        for command in as_list(mirror.get("commands")):
+            command_id=text(command.get("id") or command.get("command_id"))
+            if command_id==job_id:
+                return as_dict(command)
+        return {}
 
     @app.get("/api/video/integration/openclaw/job/{job_id}")
     async def openclaw_job(job_id: str):
-        paths=[path.format(job_id=job_id) for path in OPENCLAW_JOB]; endpoint,status,data=await first_available(app,"GET",paths,timeout=90); runs=read_json(RUN_FILE,{}); local=as_dict(runs.get(job_id)) if isinstance(runs,dict) else {}
+        runs=read_json(RUN_FILE,{})
+        local=as_dict(runs.get(job_id)) if isinstance(runs,dict) else {}
+        mirror=_mirror_command(job_id)
+        if mirror:
+            data=mirror
+            endpoint="/api/collector/commands/next · local mirror"
+            status=200
+        else:
+            paths=[path.format(job_id=job_id) for path in OPENCLAW_JOB]
+            endpoint,status,data=await first_available(app,"GET",paths,timeout=90)
+
         if status>=400:
-            if local: return {"ok":True,"version":VERSION,"job_id":job_id,"status":local.get("status","unknown"),"local":local,"upstream_available":False}
+            if local:
+                public=public_run(local)
+                return {
+                    "ok":True,
+                    "version":VERSION,
+                    **public,
+                    "upstream_available":False,
+                }
             raise HTTPException(404,f"找不到 OpenClaw 任务：{job_id}")
-        returned=text(data.get("job_id") or data.get("run_id") or data.get("id") or job_id)
-        if returned!=job_id: raise HTTPException(409,"OpenClaw 状态接口返回不同任务 ID，已阻止串任务。")
+
+        returned=text(data.get("job_id") or data.get("run_id") or data.get("command_id") or data.get("id") or job_id)
+        if returned!=job_id:
+            raise HTTPException(409,"OpenClaw 状态接口返回不同任务 ID，已阻止串任务。")
         status_text=text(data.get("status") or data.get("stage") or "running")
         if isinstance(runs,dict):
-            runs[job_id]={**local,"job_id":job_id,"status":status_text,"stage":text(data.get("stage") or status_text),"progress":run_progress(data),"endpoint":endpoint,"response":data,"updated_at":now()}
+            runs[job_id]={
+                **local,
+                "job_id":job_id,
+                "status":status_text,
+                "stage":text(data.get("stage") or status_text),
+                "progress":run_progress(data),
+                "endpoint":endpoint,
+                "response":data,
+                "updated_at":now(),
+            }
             atomic_json(RUN_FILE,runs)
-        return {"ok":True,"version":VERSION,**public_run(as_dict(runs.get(job_id)) if isinstance(runs,dict) else {"job_id":job_id,"status":status_text,"response":data}),"endpoint":endpoint,"raw":data}
+        return {
+            "ok":True,
+            "version":VERSION,
+            **public_run(as_dict(runs.get(job_id)) if isinstance(runs,dict) else {"job_id":job_id,"status":status_text,"response":data}),
+            "endpoint":endpoint,
+            "raw":data,
+        }
+
+    @app.get("/api/video/wizard-video/latest-done")
+    def wizard_video_latest_done(
+        limit: int = Query(30, ge=1, le=100),
+        strict_one_scene: int = Query(1),
+    ):
+        try:
+            from app.services.job_persistence_provider import get_job, list_recent_jobs
+            jobs=list_recent_jobs(max(limit,100))
+        except Exception as exc:
+            raise HTTPException(500,f"读取视频任务持久化失败：{exc}")
+
+        terminal={"done","completed","success","finished"}
+        candidates=[]
+        for item in jobs:
+            status=text(item.get("status")).lower()
+            job_type=text(item.get("job_type")).lower()
+            video_url=text(item.get("video_url"))
+            if status not in terminal or not video_url:
+                continue
+            if job_type not in {"full_ai","compose","one_scene","video"}:
+                continue
+            candidates.append(item)
+
+        if not candidates:
+            raise HTTPException(404,"暂时没有已完成并带 video_url 的成片任务")
+
+        candidates.sort(key=lambda item:float(item.get("updated_at") or item.get("created_at") or 0),reverse=True)
+        found=candidates[0]
+        detailed=get_job(text(found.get("job_id"))) or {}
+        merged={**found,**as_dict(detailed)}
+        merged["video_url"]=text(merged.get("video_url") or found.get("video_url"))
+        merged["recovery_job_type"]=text(found.get("job_type"))
+        merged["workflow_bound"]=text(found.get("job_type")).lower() in {"full_ai","one_scene"}
+        return {
+            "ok":True,
+            "version":VERSION,
+            "job":merged,
+            "recovery_mode":"exact_full_ai" if merged["workflow_bound"] else "latest_completed_compose",
+            "strict_one_scene_requested":bool(strict_one_scene),
+        }
 
     @app.post("/api/video/integration/openclaw/harvest/{job_id}")
     async def harvest(job_id: str, payload: Dict[str, Any] = Body(default_factory=dict)):

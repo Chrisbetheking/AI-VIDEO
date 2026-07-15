@@ -1037,10 +1037,26 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
   }, [segments.length])
 
   useEffect(() => {
-    if (!jobId || !busy) return
+    if (!jobId) return
+
+    const initialStatus = String(job?.status || job?.stage || '').toLowerCase()
+    if (extractVideoUrl(job) && finalStatus(job)) return
+    if (jobFailed(job)) return
+
     let alive = true
+    let timer: number | null = null
     pollFailureRef.current = 0
     pollInFlightRef.current = false
+    if (!busy && !/not_found|failed|error|cancelled|rejected/.test(initialStatus)) {
+      setBusy('恢复任务状态')
+    }
+
+    const stopPolling = () => {
+      alive = false
+      if (timer) window.clearInterval(timer)
+      timer = null
+      pollInFlightRef.current = false
+    }
 
     const queryCurrentJob = async () => {
       if (!alive || pollInFlightRef.current) return
@@ -1051,17 +1067,25 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
         if (String(data?.job_id || jobId) !== jobId) {
           throw new Error('后端返回了不同任务 ID，已阻止串任务。')
         }
+
+        const status = String(data?.status || data?.stage || '').toLowerCase()
         pollFailureRef.current = 0
         setJob(data)
+
         const hasVideo = Boolean(extractVideoUrl(data))
         if (hasVideo && finalStatus(data)) {
           setBusy('')
           setError('')
+          stopPolling()
         } else if (!hasVideo && jobFailed(data)) {
           setBusy('')
           setError(`任务 ${jobId} 生成失败：${data?.message || data?.error?.detail || data?.status || '未知错误'}`)
+          stopPolling()
+        } else if (status === 'not_found') {
+          setBusy('')
+          setError(`原任务 ${jobId} 的父任务状态已在后端重启后清空，但最终合成视频可能已经完成。请点击“找回最新成片”，系统会从持久化 compose/full_ai 任务中恢复。`)
+          stopPolling()
         } else {
-          // 只要任务仍在生成，单次网络抖动恢复后立即清除查询警告。
           setError((current) => current.startsWith('网络查询暂时失败') || current.startsWith('连续查询失败') ? '' : current)
         }
       } catch (err: any) {
@@ -1069,11 +1093,10 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
         pollFailureRef.current += 1
         const failures = pollFailureRef.current
         const detail = err?.message || String(err)
-        // 查询接口偶发失败不等于生成任务失败；保持 busy 并继续轮询，绝不拿其他任务替代。
         if (failures < 5) {
           setError(`网络查询暂时失败（${failures}/5），正在自动重试。任务 ${jobId} 仍可能在后台生成：${detail}`)
         } else {
-          setError(`连续查询失败 ${failures} 次，但系统不会停止或替换任务 ${jobId}。请保持页面打开，或稍后刷新继续恢复：${detail}`)
+          setError(`连续查询失败 ${failures} 次，但系统不会停止或替换任务 ${jobId}。可继续等待，或手动点击“找回最新成片”：${detail}`)
         }
       } finally {
         pollInFlightRef.current = false
@@ -1081,13 +1104,12 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
     }
 
     void queryCurrentJob()
-    const timer = window.setInterval(() => void queryCurrentJob(), 5000)
-    return () => {
-      alive = false
-      pollInFlightRef.current = false
-      window.clearInterval(timer)
-    }
-  }, [jobId, busy])
+    timer = window.setInterval(() => void queryCurrentJob(), 5000)
+
+    return stopPolling
+    // 任务 ID 是唯一绑定；页面刷新后即使 busy 没有恢复，也会继续轮询同一任务。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [jobId])
 
 
   useEffect(() => {
@@ -1319,35 +1341,65 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
 
   async function recoverLatestDoneVideo(silent = false) {
     try {
-      const data = await apiGet('/api/video/wizard-video/latest-done?limit=30&strict_one_scene=1', 60000)
+      const data = await apiGet('/api/video/wizard-video/latest-done?limit=100&strict_one_scene=1', 60000)
       const found = data?.job || data?.latest || null
       const foundUrl = found?.video_url || found?.url || ''
       if (foundUrl) {
-        const recovered = { ok: true, status: 'done', stage: 'recovered_from_recent_jobs', progress: 100, ...found, video_url: foundUrl }
+        const recovered = {
+          ok: true,
+          status: 'done',
+          stage: 'recovered_from_persisted_video_jobs',
+          progress: 100,
+          ...found,
+          video_url: foundUrl,
+          recovery_mode: data?.recovery_mode || found?.recovery_mode || '',
+          workflow_bound: Boolean(found?.workflow_bound ?? data?.workflow_bound),
+        }
         setJob(recovered)
         setJobId(String(found.job_id || jobId || 'recovered_latest'))
         setBusy('')
         setError('')
-        if (!silent) noteButton('已从后端最近任务里找回成片。')
+        if (!silent) {
+          noteButton(
+            recovered.workflow_bound
+              ? '已找回完整 full_ai 成片任务。'
+              : '已找回最新完成的 compose 成片；视频可预览，发布工作流需重新绑定原 full_ai 任务。',
+          )
+        }
         return recovered
       }
-    } catch (err) {
+    } catch {
       try {
-        const data = await apiGet('/api/video/jobs/recent?limit=30', 60000)
+        const data = await apiGet('/api/video/jobs/recent?limit=100', 60000)
         const jobs = Array.isArray(data?.jobs) ? data.jobs : []
-        const found = jobs.find((item: any) => item?.status === 'done' && item?.video_url && (String(item?.job_type || '').toLowerCase() === 'one_scene' || String(item?.job_id || '').startsWith('one_scene_') || item?.single_scene))
+        const allowedTypes = new Set(['full_ai', 'compose', 'one_scene', 'video'])
+        const terminal = new Set(['done', 'completed', 'success', 'finished'])
+        const found = jobs.find((item: any) => (
+          terminal.has(String(item?.status || '').toLowerCase())
+          && Boolean(item?.video_url)
+          && allowedTypes.has(String(item?.job_type || '').toLowerCase())
+        ))
         if (found?.video_url) {
-          const recovered = { ok: true, status: 'done', stage: 'recovered_from_jobs_recent', progress: 100, ...found }
+          const recovered = {
+            ok: true,
+            status: 'done',
+            stage: 'recovered_from_jobs_recent',
+            progress: 100,
+            ...found,
+            workflow_bound: ['full_ai', 'one_scene'].includes(String(found?.job_type || '').toLowerCase()),
+          }
           setJob(recovered)
           setJobId(String(found.job_id || jobId || 'recovered_latest'))
           setBusy('')
           setError('')
-          if (!silent) noteButton('已从 jobs/recent 找回成片。')
+          if (!silent) noteButton(`已从 jobs/recent 找回 ${found.job_type || 'video'} 成片。`)
           return recovered
         }
       } catch {}
     }
-    if (!silent) setError('暂时没有找到已完成成片，可能还在 fal/合成/字幕烧录。')
+    if (!silent) {
+      setError('没有找到已完成且带 video_url 的 full_ai/compose 成片。请稍后重试，不会使用其他无关任务替代。')
+    }
     return null
   }
 

@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import json
 import os
 import re
+import threading
+import time
 import uuid
+from pathlib import Path
 from datetime import datetime, timezone
 from typing import Any
 
@@ -10,6 +14,149 @@ from app.services.memory import MemoryStore, MemoryWriteError, now_iso
 
 
 TERMINAL_STAGES = {'run_finished', 'run_failed', 'cancelled'}
+
+
+QUEUE_MIRROR_PATH = Path(
+    os.getenv(
+        'AI_VIDEO_COLLECTOR_QUEUE_MIRROR',
+        '/opt/ai-video/backend/data/collector_commands_queue.json',
+    )
+)
+WORKER_HEARTBEAT_PATH = Path(
+    os.getenv(
+        'AI_VIDEO_COLLECTOR_WORKER_HEARTBEAT',
+        '/opt/ai-video/backend/data/collector_worker_heartbeat.json',
+    )
+)
+_QUEUE_LOCK = threading.RLock()
+
+
+def _atomic_json(path: Path, value: Any) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + '.tmp')
+    tmp.write_text(
+        json.dumps(value, ensure_ascii=False, indent=2, default=str),
+        encoding='utf-8',
+    )
+    tmp.replace(path)
+
+
+def _read_queue_mirror() -> list[dict[str, Any]]:
+    with _QUEUE_LOCK:
+        if not QUEUE_MIRROR_PATH.exists():
+            return []
+        try:
+            data = json.loads(QUEUE_MIRROR_PATH.read_text(encoding='utf-8'))
+            return data if isinstance(data, list) else []
+        except Exception:
+            return []
+
+
+def _write_queue_mirror(rows: list[dict[str, Any]]) -> None:
+    with _QUEUE_LOCK:
+        _atomic_json(QUEUE_MIRROR_PATH, rows[-500:])
+
+
+def _mirror_upsert(command: dict[str, Any]) -> dict[str, Any]:
+    clean = _sanitize_payload(command)
+    command_id = str(clean.get('id') or clean.get('command_id') or '')
+    if not command_id:
+        return clean
+    rows = _read_queue_mirror()
+    replaced = False
+    for index, row in enumerate(rows):
+        row_id = str(row.get('id') or row.get('command_id') or '')
+        if row_id == command_id:
+            rows[index] = {**row, **clean, 'id': command_id, 'command_id': command_id}
+            replaced = True
+            break
+    if not replaced:
+        rows.append({**clean, 'id': command_id, 'command_id': command_id})
+    rows.sort(key=lambda item: str(item.get('created_at') or ''))
+    _write_queue_mirror(rows)
+    return clean
+
+
+def _mirror_patch(command_id: str, patch: dict[str, Any]) -> dict[str, Any]:
+    rows = _read_queue_mirror()
+    result: dict[str, Any] = {'id': command_id, 'command_id': command_id, **patch}
+    found = False
+    for index, row in enumerate(rows):
+        row_id = str(row.get('id') or row.get('command_id') or '')
+        if row_id == command_id:
+            result = {**row, **patch, 'id': command_id, 'command_id': command_id}
+            rows[index] = result
+            found = True
+            break
+    if not found:
+        rows.append(result)
+    _write_queue_mirror(rows)
+    return result
+
+
+def _mirror_oldest_queued() -> dict[str, Any] | None:
+    queued = [
+        row for row in _read_queue_mirror()
+        if str(row.get('status') or '').lower() == 'queued'
+    ]
+    queued.sort(key=lambda item: str(item.get('created_at') or ''))
+    return queued[0] if queued else None
+
+
+def _write_worker_heartbeat(command_id: str = '', result: str = 'poll') -> None:
+    try:
+        _atomic_json(
+            WORKER_HEARTBEAT_PATH,
+            {
+                'ok': True,
+                'worker': 'collector-command-worker',
+                'last_seen': time.time(),
+                'last_seen_iso': now_iso(),
+                'command_id': command_id,
+                'result': result,
+            },
+        )
+    except Exception:
+        pass
+
+
+def collector_worker_heartbeat(max_age_seconds: int = 20) -> dict[str, Any]:
+    if not WORKER_HEARTBEAT_PATH.exists():
+        return {
+            'ok': True,
+            'online': False,
+            'age_seconds': None,
+            'path': str(WORKER_HEARTBEAT_PATH),
+        }
+    try:
+        data = json.loads(WORKER_HEARTBEAT_PATH.read_text(encoding='utf-8'))
+        age = max(0.0, time.time() - float(data.get('last_seen') or 0))
+        return {
+            'ok': True,
+            'online': age <= max(5, int(max_age_seconds)),
+            'age_seconds': round(age, 1),
+            'path': str(WORKER_HEARTBEAT_PATH),
+            **data,
+        }
+    except Exception as exc:
+        return {
+            'ok': False,
+            'online': False,
+            'error': str(exc),
+            'path': str(WORKER_HEARTBEAT_PATH),
+        }
+
+
+def collector_queue_mirror_status(limit: int = 50) -> dict[str, Any]:
+    rows = _read_queue_mirror()
+    rows.sort(key=lambda item: str(item.get('updated_at') or item.get('created_at') or ''), reverse=True)
+    return {
+        'ok': True,
+        'path': str(QUEUE_MIRROR_PATH),
+        'heartbeat': collector_worker_heartbeat(),
+        'commands': rows[:max(1, min(int(limit or 50), 200))],
+        'total': len(rows),
+    }
 
 
 def _token_ok(token: str) -> bool:
@@ -143,39 +290,102 @@ def latest_collector_status(memory: MemoryStore, events_limit: int = 30) -> dict
 def create_collector_command(memory: MemoryStore, payload: dict[str, Any]) -> dict[str, Any]:
     payload = _sanitize_payload(payload)
     # 前端只负责下发命令；真正执行、上报和上传仍由 ECS Worker 使用 HEAT_RADAR_INGEST_TOKEN 校验。
-    # 这样网页不会因为浏览器本地没有 token 而误报，ECS 侧安全校验不变。
     command_id = f"cmd_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}"
+    limit = max(1, min(_safe_int(payload.get('limit'), 1), 120))
+    raw = payload.get('raw') if isinstance(payload.get('raw'), dict) else {}
     command = {
         'id': command_id,
         'command_id': command_id,
         'status': 'queued',
-        'limit': max(1, min(_safe_int(payload.get('limit'), 1), 120)),
+        'limit': limit,
         'account': payload.get('account') or '',
         'dry_run': bool(payload.get('dry_run')),
         'headful': bool(payload.get('headful', True)),
-        'no_delay': bool(payload.get('no_delay')) or max(1, min(_safe_int(payload.get('limit'), 1), 120)) <= 3,
+        'no_delay': bool(payload.get('no_delay')) or limit <= 3,
         'mode': payload.get('mode') or 'manual',
-        'message': payload.get('message') or f"等待 ECS Worker 领取命令：{max(1, min(_safe_int(payload.get('limit'), 1), 120))} 个账号",
-        'raw': payload.get('raw') or {},
+        'message': payload.get('message') or f"等待 ECS Worker 领取命令：{limit} 个账号",
+        'raw': raw,
     }
-    return memory.insert('collector_commands', command, require_supabase=True)
+    saved = memory.insert('collector_commands', command, require_supabase=True)
+    _mirror_upsert(saved)
+    return saved
 
 
 def next_collector_command(memory: MemoryStore, token: str) -> dict[str, Any]:
     require_ingest_token(token)
-    queued = memory.list('collector_commands', limit=20, include_deleted=True, extra_params={'status': 'eq.queued', 'order': 'created_at.asc'})
-    if not queued:
-        return {'ok': True, 'command': None}
-    cmd = queued[0]
-    claimed = memory.update_by_id('collector_commands', str(cmd.get('id') or cmd.get('command_id')), {'status': 'claimed', 'claimed_at': now_iso(), 'message': 'ECS Worker 已领取'}, require_supabase=True)
-    return {'ok': True, 'command': _sanitize_payload(claimed)}
+    _write_worker_heartbeat(result='poll')
+
+    queued = memory.list(
+        'collector_commands',
+        limit=50,
+        include_deleted=True,
+        extra_params={'status': 'eq.queued', 'order': 'created_at.asc'},
+    )
+    cmd = queued[0] if queued else _mirror_oldest_queued()
+    if not cmd:
+        return {
+            'ok': True,
+            'command': None,
+            'heartbeat': collector_worker_heartbeat(),
+            'queue_source': 'empty',
+        }
+
+    command_id = str(cmd.get('id') or cmd.get('command_id') or '')
+    patch = {
+        'status': 'claimed',
+        'claimed_at': now_iso(),
+        'message': 'ECS Worker 已领取',
+    }
+
+    claimed: dict[str, Any]
+    try:
+        claimed = memory.update_by_id(
+            'collector_commands',
+            command_id,
+            patch,
+            require_supabase=True,
+        )
+        claimed = {**cmd, **claimed, **patch}
+        queue_source = 'supabase'
+    except Exception:
+        # Supabase 查询/更新异常时仍使用服务器本地耐久镜像交付，
+        # 避免 Worker 明明在线却永远拿不到 queued 命令。
+        claimed = {**cmd, **patch}
+        queue_source = 'local_mirror'
+
+    _mirror_upsert(claimed)
+    _write_worker_heartbeat(command_id=command_id, result='claimed')
+    return {
+        'ok': True,
+        'command': _sanitize_payload(claimed),
+        'heartbeat': collector_worker_heartbeat(),
+        'queue_source': queue_source,
+    }
 
 
 def complete_collector_command(memory: MemoryStore, command_id: str, payload: dict[str, Any]) -> dict[str, Any]:
     payload = _sanitize_payload(payload)
     require_ingest_token(str(payload.get('token') or ''))
     status = payload.get('status') or ('failed' if payload.get('error') else 'finished')
-    return memory.update_by_id('collector_commands', command_id, {'status': status, 'finished_at': now_iso(), 'message': payload.get('message') or '', 'raw': payload.get('raw') or {}}, require_supabase=True)
+    patch = {
+        'status': status,
+        'finished_at': now_iso(),
+        'message': payload.get('message') or '',
+        'raw': payload.get('raw') or {},
+    }
+    try:
+        saved = memory.update_by_id(
+            'collector_commands',
+            command_id,
+            patch,
+            require_supabase=True,
+        )
+        result = {**saved, **patch}
+    except Exception:
+        result = _mirror_patch(command_id, patch)
+    _mirror_upsert(result)
+    _write_worker_heartbeat(command_id=command_id, result=str(status))
+    return result
 
 
 def recommended_digital_human_providers() -> list[dict[str, Any]]:

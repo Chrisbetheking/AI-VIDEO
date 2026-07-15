@@ -84,35 +84,40 @@ export default function OpenClawWorkbench({ project, setProject, goTab }: Props)
   const backendOnline = health?.backend_online === true || online
   const progress = Number(job?.progress || job?.raw?.progress || 0)
   const runCounts = job?.counts && typeof job.counts === 'object' ? job.counts : {}
-  const workerOnline = health?.worker_online === true
+  const collectorWorkerOnline = health?.collector_worker_online === true || health?.worker_online === true
+  const fallbackWorkerOnline = health?.fallback_worker_online === true
   const loginOk = health?.login_ok === true
   const taskQueued = /queued|pending|waiting/i.test(jobStatus)
   const taskRunning = /claimed|running|collect|crawl|processing|working/i.test(jobStatus)
+  const queueStalled = job?.queue_stalled === true
+  const queueAgeSeconds = Number(job?.queue_age_seconds || 0)
   const readinessLabel = !backendOnline
     ? 'OpenClaw 后端离线'
-    : !workerOnline
-      ? '后端在线 · Worker 待领取'
+    : !collectorWorkerOnline
+      ? '后端在线 · Collector Worker 无心跳'
       : !loginOk
-        ? 'Worker 在线 · 抖音待登录'
+        ? 'Collector Worker 在线 · 抖音待登录'
         : 'OpenClaw 可采集'
-  const readinessClass = backendOnline && workerOnline && loginOk
+  const readinessClass = backendOnline && collectorWorkerOnline && loginOk
     ? 'aiw-badge ok'
     : backendOnline
       ? 'aiw-badge warn'
       : 'aiw-badge'
-  const emptyLeadMessage = taskQueued
-    ? '任务已经进入服务器队列，正在等待 ECS Worker 领取；当前 0 条结果不代表 OpenClaw 离线。'
-    : taskRunning
-      ? '任务正在执行，暂时还没有产出线索；页面会继续轮询并保留任务缓存。'
-      : statusDone(jobStatus)
-        ? '任务已经结束，但本次没有产出可用线索。'
-        : !backendOnline
-          ? 'OpenClaw 后端离线，目前无法查询任务和线索。'
-          : !workerOnline
-            ? '后端在线，但 ECS Worker 尚未在线或没有领取任务。'
-            : !loginOk
-              ? 'Worker 已在线，但抖音账号尚未完成登录。'
-              : '当前账号还没有真实采集结果。'
+  const emptyLeadMessage = queueStalled
+    ? `任务已排队 ${Math.max(1, Math.round(queueAgeSeconds / 60))} 分钟但仍未被领取。请先完成抖音登录，再重新排队当前任务。`
+    : taskQueued
+      ? '任务已经进入服务器队列，正在等待 Collector Worker 领取；当前 0 条结果不代表后端离线。'
+      : taskRunning
+        ? '任务正在执行，暂时还没有产出线索；页面会继续轮询并保留任务缓存。'
+        : statusDone(jobStatus)
+          ? '任务已经结束，但本次没有产出可用线索。'
+          : !backendOnline
+            ? 'OpenClaw 后端离线，目前无法查询任务和线索。'
+            : !collectorWorkerOnline
+              ? '后端在线，但 Collector Worker 没有真实心跳。'
+              : !loginOk
+                ? 'Collector Worker 已在线，但抖音账号尚未完成登录。'
+                : '当前账号还没有真实采集结果。'
   const stats = useMemo(() => ({
     total: leads.length,
     high: leads.filter((item) => Number(item.score || item.lead_score || 0) >= 70).length,
@@ -238,7 +243,9 @@ export default function OpenClawWorkbench({ project, setProject, goTab }: Props)
     try {
       const state = await apiGet(`${API}/openclaw/status`, 60000)
       setHealth(state)
-      if (!state?.online) throw new Error('OpenClaw 离线，无法开始采集。请先启动 worker 并确认抖音账号登录。')
+      if (!state?.backend_online) throw new Error('OpenClaw 后端离线，无法开始采集。')
+      if (!state?.collector_worker_online) throw new Error('Collector Worker 没有真实心跳，已阻止继续堆积 queued 任务。')
+      if (!state?.login_ok) throw new Error('Collector Worker 已在线，但抖音账号尚未登录。请登录当前隔离账号后再启动。')
       const data = await apiPost(
         `${API}/openclaw/start`,
         {
@@ -277,6 +284,40 @@ export default function OpenClawWorkbench({ project, setProject, goTab }: Props)
           ? `任务已进入服务器队列并缓存到“${accountProfile}”，正在等待 ECS Worker 领取：${id}`
           : `真实采集任务已启动并缓存到“${accountProfile}”：${id}`,
       )
+      await refreshRunHistory(accountProfile)
+    } catch (err) {
+      setError(detailToText(err))
+    } finally {
+      setBusy('')
+    }
+  }
+
+  async function requeueCurrent() {
+    if (!jobId) {
+      setError('没有可重新排队的任务 ID。')
+      return
+    }
+    setBusy('重新排队')
+    setError('')
+    setNotice('')
+    try {
+      const state = await apiGet(`${API}/openclaw/status`, 60000)
+      setHealth(state)
+      if (!state?.collector_worker_online) throw new Error('Collector Worker 没有真实心跳，不能重新排队。')
+      if (!state?.login_ok) throw new Error('请先完成当前隔离账号的抖音登录，再重新排队。')
+      const data = await apiPost(`${API}/openclaw/requeue/${encodeURIComponent(jobId)}`, {}, 240000)
+      const nextId = String(data?.job_id || '')
+      if (!nextId) throw new Error('重新排队没有返回新 job_id。')
+      setJobId(nextId)
+      setJob(data)
+      saveRunCache(accountProfile, data)
+      setProject({
+        ...project,
+        openclaw_account_profile: accountProfile,
+        openclaw_job_id: nextId,
+        openclaw_job: data,
+      })
+      setNotice(`旧任务 ${jobId} 已保留为历史，新任务已进入真实队列：${nextId}`)
       await refreshRunHistory(accountProfile)
     } catch (err) {
       setError(detailToText(err))
@@ -350,7 +391,9 @@ export default function OpenClawWorkbench({ project, setProject, goTab }: Props)
           </label>
           <label>
             登录准备
-            <div className="aiw-loginState">后端 {health?.backend_online ? '在线' : '离线'} · Worker {workerOnline ? '在线' : '待确认'} · 抖音登录 {loginOk ? '有效' : '明天登录后检查'}</div>
+            <div className="aiw-loginState">
+              后端 {health?.backend_online ? '在线' : '离线'} · Collector {collectorWorkerOnline ? '在线' : '无心跳'} · Fallback {fallbackWorkerOnline ? '在线' : '离线'} · 抖音登录 {loginOk ? '有效' : '未登录'}
+            </div>
           </label>
         </div>
       </div>
@@ -373,8 +416,23 @@ export default function OpenClawWorkbench({ project, setProject, goTab }: Props)
 
       <div className="aiw-actions">
         <button className="aiw-muted" disabled={Boolean(busy)} onClick={refreshHealth}>{busy === '检查 OpenClaw' ? busy : '检查服务与登录状态'}</button>
-        <button className="aiw-primary" disabled={Boolean(busy) || !backendOnline} onClick={start}>{busy === '启动真实采集' ? busy : workerOnline ? '启动真实 OpenClaw 任务' : '加入服务器任务队列'}</button>
+        <button
+          className="aiw-primary"
+          disabled={Boolean(busy) || !backendOnline || !collectorWorkerOnline || !loginOk}
+          onClick={start}
+        >
+          {busy === '启动真实采集'
+            ? busy
+            : !collectorWorkerOnline
+              ? 'Collector Worker 无心跳'
+              : !loginOk
+                ? '先登录抖音账号'
+                : '启动真实 OpenClaw 任务'}
+        </button>
         <button className="aiw-muted" disabled={Boolean(busy) || !jobId} onClick={() => void poll()}>{jobId ? '刷新当前任务' : '没有任务 ID'}</button>
+        <button className="aiw-muted" disabled={Boolean(busy) || !jobId || !queueStalled} onClick={requeueCurrent}>
+          {busy === '重新排队' ? busy : '重新排队当前任务'}
+        </button>
         <button className="aiw-purple" disabled={Boolean(busy) || !jobId || !statusDone(jobStatus)} onClick={harvest}>
           {statusDone(jobStatus) ? '沉淀到内容大脑' : '任务完成后可沉淀'}
         </button>
@@ -388,8 +446,11 @@ export default function OpenClawWorkbench({ project, setProject, goTab }: Props)
           <div><span>隔离账号</span><b>{accountProfile}</b></div>
           <div><span>状态</span><b>{jobStatus || '未启动'}</b></div>
           <div><span>当前阶段</span><b>{job?.stage || jobStatus || '-'}</b></div>
-          <div><span>实际接口</span><b>{job?.endpoint || health?.endpoint || '-'}</b></div>
-          <div><span>队列说明</span><b>{job?.response?.message || job?.message || (taskQueued ? '等待 ECS Worker 领取' : '-')}</b></div>
+          <div><span>任务接口</span><b>{job?.endpoint || '-'}</b></div>
+          <div><span>健康接口</span><b>{health?.endpoint || '-'}</b></div>
+          <div><span>Collector 心跳</span><b>{health?.collector_heartbeat?.age_seconds != null ? `${health.collector_heartbeat.age_seconds}s 前` : '无心跳'}</b></div>
+          <div><span>队列说明</span><b>{job?.response?.message || job?.message || (taskQueued ? '等待 Collector Worker 领取' : '-')}</b></div>
+          <div><span>排队时长</span><b>{taskQueued ? `${Math.max(0, Math.round(queueAgeSeconds))} 秒${queueStalled ? ' · 已卡住' : ''}` : '-'}</b></div>
           <div><span>最近进度</span><b>{progress || 0}%</b></div>
           <div><span>已采集</span><b>{runCounts.accounts || 0} 账号 / {runCounts.videos || 0} 视频 / {runCounts.comments || 0} 评论 / {runCounts.leads || 0} 线索</b></div>
           <div><span>最后更新</span><b>{job?.updated_at ? new Date(Number(job.updated_at) * 1000).toLocaleString() : '-'}</b></div>
