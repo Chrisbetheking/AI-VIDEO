@@ -18,8 +18,8 @@ from fastapi import BackgroundTasks, Body, FastAPI, HTTPException
 from fastapi.encoders import jsonable_encoder
 
 
-VERSION = "10.40.6"
-MODE = "full_chain_closed_loop_hub"
+VERSION = "10.40.7"
+MODE = "engine_source_fix_hub"
 
 BASE = Path(os.getenv("AI_VIDEO_BASE", "/opt/ai-video"))
 STORAGE = BASE / "storage"
@@ -2879,6 +2879,10 @@ def install_main_workflow_provider(
             "visual_embedded_text_block": True,
             "sentence_keyword_editor": True,
             "visual_integrity_gate": True,
+            "per_shot_visual_audit_retry": True,
+            "duration_based_shot_count": True,
+            "subtitle_style_runtime_overrides": True,
+            "legacy_knowledge_migration": True,
             "asset_cleanliness_gate": True,
             "obsidian_openclaw_closed_loop": True,
             "graphic_window_embedded_tab": True,

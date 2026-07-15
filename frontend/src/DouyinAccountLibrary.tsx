@@ -469,9 +469,9 @@ export default function DouyinAccountLibrary({
       </div>
 
       <div className="aiw-metrics">
-        <div><b>{heatAccounts.length}</b><span>固定账号</span></div>
-        <div><b>{heatItems.length}</b><span>真实热度内容</span></div>
-        <div><b>{accountReviews.length}</b><span>历史账号审查</span></div>
+        <div><b>{heatAccounts.length}</b><span>当前加载账号</span></div>
+        <div><b>{heatItems.length}</b><span>当前加载热度</span></div>
+        <div><b>{accountReviews.length}</b><span>当前加载审查</span></div>
         <div><b>{Number(accountAudit?.archive?.length || 0)}</b><span>建议暂停账号</span></div>
       </div>
 

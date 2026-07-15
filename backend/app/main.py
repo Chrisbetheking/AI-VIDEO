@@ -103,7 +103,7 @@ from app.schemas import (
 from app.services.ad_analysis import analyze_ad
 from app.services.cover import create_cover
 from app.services.image_generation import generate_image_to_file
-from app.services.deepseek import DeepSeekError, generate_copy, generate_edit_plan, generate_growth_decision, generate_lead_acquisition_plan, generate_shooting_plan, generate_subtitle_emphasis, generate_trend_radar, generate_voice_director, refine_copy_with_instruction, rewrite_from_inspiration, test_deepseek, video_edit_chat_advice
+from app.services.deepseek import DeepSeekError, _chat_json, generate_copy, generate_edit_plan, generate_growth_decision, generate_lead_acquisition_plan, generate_shooting_plan, generate_subtitle_emphasis, generate_trend_radar, generate_voice_director, refine_copy_with_instruction, rewrite_from_inspiration, test_deepseek, video_edit_chat_advice
 from app.services.doubao import extract_with_doubao
 from app.services.digital_human import call_external_digital_human_worker, call_fal_lipsync, query_fal_lipsync, call_jimeng_digital_human, query_jimeng_digital_human, create_photo_scene_avatar_image, create_static_avatar_preview, extract_hook_text
 from app.services.collector import get_collector_cookie_status, save_collector_cookie_text
@@ -111,7 +111,7 @@ from app.services.kb import KnowledgeBase
 from app.services.memory import MemoryStore, MemoryWriteError
 from app.services.publisher import create_publish_package
 from app.services.storage import maybe_upload_to_r2, maybe_delete_from_r2, maybe_list_r2_objects, read_last_storage_error, test_r2_connection
-from app.services.tts import get_tts_voices, synthesize_tts, synthesize_tts_segments
+from app.services.tts import get_tts_voices, synthesize_tts, synthesize_tts_segments, probe_duration
 from app.services.volcengine_voice_clone import get_voice_clone_status, upload_and_train_voice, save_voice_data, load_voice_data, load_voice_type
 from app.services.assets_store import read_assets, upsert_asset, remove_asset, now_iso
 from app.services.video import IMAGE_EXTS, VIDEO_EXTS, MediaClip, compose_video
@@ -126,6 +126,24 @@ from app.services.graphic_post import create_graphic_post
 from app.services.heat_radar import run_public_heat_radar, generate_heat_radar_rewrite, ingest_openclaw_heat_radar, audit_heat_radar_accounts, analyze_heat_radar_video_intake
 from app.services.collector_control import create_collector_run, append_collector_event, latest_collector_status, create_collector_command, next_collector_command, complete_collector_command, recommended_digital_human_providers
 from app.services.jobs import create_job, get_job, list_jobs, update_job
+from app.services.v10_34_production_provider import (
+    SAFE_TRANSITION as V1034_SAFE_TRANSITION,
+    NEGATIVE_PROMPT as V1034_NEGATIVE_PROMPT,
+    sanitize_shots_for_fal as v1034_sanitize_shots_for_fal,
+    save_raw_fal_shot as v1034_save_raw_fal_shot,
+    validate_completed as v1034_validate_completed,
+    import_accounts as v1034_import_accounts,
+    classify_all_accounts as v1034_classify_accounts,
+    list_accounts as v1034_list_accounts,
+    append_obsidian as v1034_append_obsidian,
+    create_repair_task as v1034_create_repair_task,
+    save_final_record as v1034_save_final_record,
+    status as v1034_status,
+    semantic_shot_plan as v1034_semantic_shot_plan,
+    computer_use_status as v1034_computer_use_status,
+    start_computer_use_run as v1034_start_computer_use_run,
+    save_voice_version as v1034_save_voice_version,
+)
 
 app = FastAPI(title='AI-VIDEO 正式版 API', version='1.0.0')
 settings = get_settings()
@@ -2105,6 +2123,14 @@ async def api_compose_video(req: ComposeRequest, request: Request, settings: Set
     video_public = maybe_upload_to_r2(settings, result.video_path, prefix='videos')
     subtitle_public = maybe_upload_to_r2(settings, result.subtitle_path, prefix='subtitles') if result.subtitle_path else None
     audio_public = maybe_upload_to_r2(settings, result.audio_path, prefix='audio') if result.audio_path else None
+    if not media_clips:
+        raise HTTPException(status_code=422, detail='V10.34A：没有 shots / 素材片段，不能 completed。')
+    if result.subtitle_path is None or not result.subtitle_path.exists():
+        raise HTTPException(status_code=422, detail='V10.34A：字幕失败，不能 completed。')
+    if audio_path and result.duration_seconds and probe_duration(audio_path) > float(result.duration_seconds) + 0.75:
+        raise HTTPException(status_code=422, detail='V10.34A：音频时长大于视频时长，不能 completed。')
+    pre_warnings.append('V10.34A：已强制安全过渡 smooth_dissolve_no_flash / crossfade，不允许 cut、flash、pull_out、hard transition。')
+
     return ComposeResponse(
         video_url=file_url(request, result.video_path.name, video_public),
         video_name=result.video_path.name,
@@ -3458,7 +3484,11 @@ def _run_fal_storyboard_job(job_id: str, req: _FalStoryboardRequest):
     job["updated_at"] = _fal_time.time()
 
     outputs = []
-    shots = req.shots[: max(1, min(req.max_shots, 12))]
+    raw_shots = req.shots[: max(1, min(req.max_shots, 12))]
+    sanitized_shots = v1034_sanitize_shots_for_fal([x.model_dump() for x in raw_shots], req.title)
+    shots = [_FalStoryboardShot(**x) for x in sanitized_shots]
+    job['transition_policy'] = V1034_SAFE_TRANSITION
+    job['sanitized_shots'] = sanitized_shots
 
     try:
         for idx, shot in enumerate(shots, start=1):
@@ -3479,11 +3509,22 @@ def _run_fal_storyboard_job(job_id: str, req: _FalStoryboardRequest):
                 video_write_mode=req.video_write_mode,
             )
 
+            video_url = result.get("video_url") or ""
+            shot_meta = sanitized_shots[idx - 1] if idx - 1 < len(sanitized_shots) else shot.model_dump()
+            raw_record = v1034_save_raw_fal_shot(job_id, idx, shot_meta, video_url, result) if video_url else {}
             outputs.append({
                 "shot_id": shot.shot_id or f"shot_{idx:02d}",
                 "prompt": shot.prompt,
+                "negative_prompt": shot_meta.get("negative_prompt") or V1034_NEGATIVE_PROMPT,
+                "scene_type": shot_meta.get("scene_type") or f"scene_{idx:02d}",
+                "narration_segment": shot_meta.get("narration_segment") or "",
+                "duration": shot_meta.get("duration") or shot_meta.get("duration_hint") or 0,
+                "transition": V1034_SAFE_TRANSITION,
                 "image_url": shot.image_url,
-                "video_url": result.get("video_url"),
+                "raw_clip": video_url,
+                "video_url": video_url,
+                "job_id": job_id,
+                "raw_record": raw_record,
                 "result": result,
             })
 
@@ -3825,7 +3866,8 @@ def _run_full_ai_pipeline(job_id: str, req: _FullAIVideoRequest):
             "num_frames": req.num_frames,
             "frames_per_second": req.frames_per_second,
             "max_shots": req.max_shots,
-            "shots": [x.model_dump() for x in req.shots[: max(1, min(req.max_shots, 12))]],
+            "negative_prompt": V1034_NEGATIVE_PROMPT,
+            "shots": v1034_sanitize_shots_for_fal([x.model_dump() for x in req.shots[: max(1, min(req.max_shots, 12))]], req.title),
         }
 
         storyboard_start = _full_ai_post_json("/api/video/fal/storyboard/start", storyboard_payload, timeout=60)
@@ -3915,6 +3957,12 @@ def _run_full_ai_pipeline(job_id: str, req: _FullAIVideoRequest):
             raise RuntimeError("compose failed or timeout: " + str(compose_result)[:1000])
 
         final_url = compose_result.get("video_url") or ((compose_result.get("result") or {}).get("r2") or {}).get("public_url") or ""
+
+        job["video_duration_seconds"] = ((compose_result.get("result") or {}).get("duration_seconds") or 0)
+        job["raw_shots"] = shots
+        quality_gate = v1034_validate_completed(job)
+        if not quality_gate.get("ok"):
+            raise RuntimeError("V10.34A 质量门禁阻止 completed：" + "；".join(quality_gate.get("errors") or []))
 
         job["status"] = "done"
         job["stage"] = "finished"
@@ -5691,470 +5739,350 @@ try:
 except Exception as _wizard_ai_exc:
     print("WIZARD_AI_PROVIDER_LOAD_FAILED", _wizard_ai_exc)
 # ===== /WIZARD AI DEEPSEEK PROVIDER =====
-# ===== VIDEO WIZARD V10.5 RECOVERY SUBTITLE DIVERSITY =====
-try:
-    from app.services.subtitle_style_library_provider import install_subtitle_style_library
-    install_subtitle_style_library(app)
-    print("OK_SUBTITLE_STYLE_LIBRARY_REGISTERED", flush=True)
-except Exception as exc:
-    print(f"WARN_SUBTITLE_STYLE_LIBRARY_REGISTER_FAILED: {exc}", flush=True)
-
-try:
-    from app.services.wizard_video_recovery_provider import install_wizard_video_recovery
-    install_wizard_video_recovery(app)
-    print("OK_WIZARD_VIDEO_RECOVERY_REGISTERED", flush=True)
-except Exception as exc:
-    print(f"WARN_WIZARD_VIDEO_RECOVERY_REGISTER_FAILED: {exc}", flush=True)
-
-try:
-    from app.services.full_ai_tts_first_v2_provider import install_full_ai_tts_first_v2
-    install_full_ai_tts_first_v2(app)
-    print("OK_FULL_AI_TTS_FIRST_V2_REGISTERED", flush=True)
-except Exception as exc:
-    print(f"WARN_FULL_AI_TTS_FIRST_V2_REGISTER_FAILED: {exc}", flush=True)
-# ===== /VIDEO WIZARD V10.5 RECOVERY SUBTITLE DIVERSITY =====
 
 
-# ===== FAL_PROMPT_GUARD_V10_6 =====
-try:
-    from app.services.fal_prompt_guard_v10_6_provider import install_fal_prompt_guard_v10_6
-    install_fal_prompt_guard_v10_6(app)
-except Exception as exc:
-    print("FAL_PROMPT_GUARD_V10_6_LOAD_FAILED", exc)
-# ===== /FAL_PROMPT_GUARD_V10_6 =====
 
-# ===== FAL_PROMPT_GUARD_V10_7 =====
-try:
-    from app.services.fal_prompt_guard_v10_7_provider import install_fal_prompt_guard_v10_7
-    install_fal_prompt_guard_v10_7(app)
-except Exception as exc:
-    print("FAL_PROMPT_GUARD_V10_7_LOAD_FAILED", exc)
-# ===== /FAL_PROMPT_GUARD_V10_7 =====
+# ===== V10.34 A-G PRODUCTION-SAFE ROUTES =====
+class _V1034AccountImportRequest(BaseModel):
+    raw_text: str = ""
 
-# ===== VIDEO_RECOVERY_SUBTITLE_DIVERSITY_V10_7_COMPAT =====
-try:
-    from app.services.subtitle_style_library_provider import install_subtitle_style_library
-    install_subtitle_style_library(app)
-except Exception as exc:
-    print("SUBTITLE_STYLE_LIBRARY_V10_7_LOAD_FAILED", exc)
-try:
-    from app.services.wizard_video_recovery_provider import install_wizard_video_recovery
-    install_wizard_video_recovery(app)
-except Exception as exc:
-    print("WIZARD_VIDEO_RECOVERY_V10_7_LOAD_FAILED", exc)
-try:
-    from app.services.full_ai_tts_first_v2_provider import install_full_ai_tts_first_v2
-    install_full_ai_tts_first_v2(app)
-except Exception as exc:
-    print("FULL_AI_TTS_FIRST_V2_V10_7_LOAD_FAILED", exc)
-# ===== /VIDEO_RECOVERY_SUBTITLE_DIVERSITY_V10_7_COMPAT =====
+class _V1034AccountClassifyRequest(BaseModel):
+    limit: int = 200
 
-# ===== FAL_PROMPT_GUARD_V10_12 =====
-try:
-    from app.services.fal_prompt_guard_v10_12_provider import install_fal_prompt_guard_v10_12
-    install_fal_prompt_guard_v10_12(app)
-except Exception as exc:
-    print("FAL_PROMPT_GUARD_V10_12_LOAD_FAILED", exc)
-# ===== /FAL_PROMPT_GUARD_V10_12 =====
+class _V1034ObsidianWriteRequest(BaseModel):
+    note_type: str = "topic"
+    content: str = ""
+    metadata: dict = {}
 
-# ===== ONE_SCENE_VIDEO_PIPELINE_V10_12 =====
-try:
-    from app.services.full_ai_one_scene_provider import install_full_ai_one_scene
-    install_full_ai_one_scene(app)
-except Exception as exc:
-    print("FULL_AI_ONE_SCENE_LOAD_FAILED", exc)
-try:
-    from app.services.wizard_video_recovery_provider import install_wizard_video_recovery
-    install_wizard_video_recovery(app)
-except Exception as exc:
-    print("WIZARD_VIDEO_RECOVERY_V10_12_LOAD_FAILED", exc)
-# ===== /ONE_SCENE_VIDEO_PIPELINE_V10_12 =====
+class _V1034AIControlRequest(BaseModel):
+    question: str = ""
+    context: dict = {}
 
-# ===== FAL_PROMPT_GUARD_V10_13 =====
-try:
-    from app.services.fal_prompt_guard_v10_13_provider import install_fal_prompt_guard_v10_13
-    install_fal_prompt_guard_v10_13(app)
-except Exception as exc:
-    print("FAL_PROMPT_GUARD_V10_13_LOAD_FAILED", exc)
-# ===== /FAL_PROMPT_GUARD_V10_13 =====
+class _V1034FinalRequest(BaseModel):
+    video: dict = {}
+    reason: str = ""
 
-# ===== SUBTITLE_STYLE_LIBRARY_V10_13 =====
-try:
-    from app.services.subtitle_style_library_provider import install_subtitle_style_library
-    install_subtitle_style_library(app)
-except Exception as exc:
-    print("SUBTITLE_STYLE_LIBRARY_V10_13_LOAD_FAILED", exc)
-# ===== /SUBTITLE_STYLE_LIBRARY_V10_13 =====
+class _V1034SemanticShotRequest(BaseModel):
+    topic: str = ""
+    city: str = ""
+    market: str = ""
+    script: str = ""
+    script_text: str = ""
+    segments: List[dict] = []
+    keywords: List[dict] = []
+    target_duration_seconds: float = 30
+    content_type: str = ""
+    source_assets: List[dict] = []
 
-# ===== FAL_PROMPT_GUARD_V10_15 =====
-try:
-    from app.services.fal_prompt_guard_v10_15_provider import install_fal_prompt_guard_v10_15
-    install_fal_prompt_guard_v10_15(app)
-except Exception as exc:
-    print("FAL_PROMPT_GUARD_V10_15_LOAD_FAILED", exc)
-# ===== /FAL_PROMPT_GUARD_V10_15 =====
+class _V1034VoicePreviewRequest(BaseModel):
+    mode: str = "all"
+    topic: str = ""
+    script: str = ""
+    segments: List[dict] = []
+    keywords: List[dict] = []
+    voice: str = ""
+    voice_settings: dict = {}
 
-# ===== FAL_PROMPT_GUARD_V10_16 =====
-try:
-    from app.services.fal_prompt_guard_v10_16_provider import install_fal_prompt_guard_v10_16
-    install_fal_prompt_guard_v10_16(app)
-except Exception as exc:
-    print("FAL_PROMPT_GUARD_V10_16_LOAD_FAILED", exc)
-# ===== /FAL_PROMPT_GUARD_V10_16 =====
+class _V1034ComputerUseRequest(BaseModel):
+    mode: str = "douyin_account_collect"
+    computer_use: bool = True
+    require_cookie: bool = True
+    accounts: List[str] = []
+    target_accounts: List[str] = []
+    seed_accounts: List[str] = []
+    keywords: List[str] = []
+    keyword: str = ""
+    mission_type: str = "competitor"
+    max_accounts: int = 20
+    max_videos_per_account: int = 10
+    max_comments_per_video: int = 60
+    request: dict = {}
 
-# ===== FAL_PROMPT_GUARD_V10_17 =====
-try:
-    from app.services.fal_prompt_guard_v10_17_provider import install_fal_prompt_guard_v10_17
-    install_fal_prompt_guard_v10_17(app)
-except Exception as exc:
-    print("FAL_PROMPT_GUARD_V10_17_LOAD_FAILED", exc)
-# ===== /FAL_PROMPT_GUARD_V10_17 =====
+@app.get('/api/video/v10-34/status')
+def api_v1034_status() -> dict:
+    return v1034_status()
 
-# ===== FAL_PROMPT_GUARD_V10_18 =====
-try:
-    from app.services.fal_prompt_guard_v10_18_provider import install_fal_prompt_guard_v10_18
-    install_fal_prompt_guard_v10_18(app)
-except Exception as exc:
-    print("FAL_PROMPT_GUARD_V10_18_LOAD_FAILED", exc)
-# ===== /FAL_PROMPT_GUARD_V10_18 =====
+@app.post('/api/video/v10-34/semantic-shots')
+async def api_v1034_semantic_shots(req: _V1034SemanticShotRequest, settings: Settings = Depends(get_settings)) -> dict:
+    payload = req.model_dump()
+    if not (payload.get('script') or payload.get('script_text') or payload.get('segments')):
+        raise HTTPException(status_code=400, detail='没有口播稿/segments，不能生成镜头。')
+    fallback = v1034_semantic_shot_plan(payload)
+    if not settings.deepseek_api_key.strip():
+        fallback['provider'] = 'semantic_rule_fallback_no_deepseek_key'
+        return fallback
+    try:
+        system = '你是短视频镜头导演。必须输出严格 JSON，只能包含 shots 数组。每个镜头必须和对应口播语义一致，不能套固定模板。'
+        user = f'''请根据口播稿逐句生成竖屏短视频镜头计划。必须遵守：
+1. 说生活配套就给生活配套画面；说交通就给交通出勤画面；说教育就给学校/家庭教育周边；说餐饮/商超就给商业配套；说户型采光就给室内/阳台/卧室/厨房；说预算资产就给顾问带看/住宅品质，不要文件和计算器。
+2. 所有 transition 必须是 smooth_dissolve_no_flash。
+3. 禁止 cut、smooth_cut、flash、pull_out、hard transition、分屏、拼贴、多宫格、文件桌面、纸张、图表、计算器、可读文字、logo、水印。
+4. 输出 shots 数组，每项字段：index,title,scene,scene_type,narration_segment,duration,camera,transition,prompt,negative_prompt。
 
-# AI_VIDEO_V10_19_ROUTE_LOCK_START
-try:
-    from app.services.full_ai_route_lock_provider import install_full_ai_route_lock
-    install_full_ai_route_lock(app)
-except Exception as _ai_video_route_lock_exc:
-    print("V10_19_ROUTE_LOCK_LOAD_FAILED", _ai_video_route_lock_exc)
-# AI_VIDEO_V10_19_ROUTE_LOCK_END
+主题：{payload.get('topic')}
+城市：{payload.get('city')}
+目标时长：{payload.get('target_duration_seconds')}
+关键词：{payload.get('keywords')}
+口播稿/segments：{json.dumps(payload.get('segments') or payload.get('script') or payload.get('script_text'), ensure_ascii=False)[:7000]}
+'''.strip()
+        data = await _chat_json(settings, system, user, temperature=0.45, timeout=90)
+        raw_shots = data.get('shots') if isinstance(data, dict) else None
+        if isinstance(raw_shots, list) and raw_shots:
+            safe = v1034_sanitize_shots_for_fal(raw_shots, payload.get('topic') or '')
+            for i, shot in enumerate(safe, start=1):
+                shot.setdefault('id', f'deepseek_shot_{i}')
+                shot.setdefault('index', i)
+                shot['transition'] = V1034_SAFE_TRANSITION
+            return {'ok': True, 'provider': 'deepseek_semantic_shot_director', 'shots': safe, 'fallback_available': fallback.get('shots', [])}
+    except Exception as exc:
+        fallback['provider'] = 'semantic_rule_fallback_after_deepseek_error'
+        fallback['deepseek_error'] = str(exc)[:500]
+        return fallback
+    fallback['provider'] = 'semantic_rule_fallback_empty_deepseek'
+    return fallback
 
-# V10_28_REVIEW_RAW_ASSET_WORKFLOW
-# Manual review workflow for generated videos:
-# - completed generation enters pending/manual review on the frontend
-# - approved assets save RAW video before burnt subtitles
-# - future slicing uses local raw_no_subtitle.mp4 only and never calls FAL
-try:
-    import json as _v10_28_json
-    import os as _v10_28_os
-    import re as _v10_28_re
-    import shutil as _v10_28_shutil
-    import subprocess as _v10_28_subprocess
-    import time as _v10_28_time
-    import uuid as _v10_28_uuid
-    import urllib.request as _v10_28_urllib_request
-    from pathlib import Path as _V1028Path
-    from typing import Any as _V1028Any, Dict as _V1028Dict, List as _V1028List, Optional as _V1028Optional
-
-    from fastapi import HTTPException as _V1028HTTPException
-    from fastapi.responses import FileResponse as _V1028FileResponse
-    from pydantic import BaseModel as _V1028BaseModel
-
-    _V1028_STORAGE_ROOT = _V1028Path(_v10_28_os.environ.get("AI_VIDEO_STORAGE_ROOT", "/opt/ai-video/storage"))
-    _V1028_APPROVED_ROOT = _V1028_STORAGE_ROOT / "approved_raw_assets"
-    _V1028_REJECTED_ROOT = _V1028_STORAGE_ROOT / "rejected_raw_assets"
-    _V1028_SLICE_ROOT = _V1028_STORAGE_ROOT / "asset_slices"
-
-    def _v10_28_safe_asset_id(value: str) -> str:
-        value = str(value or "").strip()
-        value = _v10_28_re.sub(r"[^A-Za-z0-9_.-]+", "_", value)
-        value = value.strip("._-")
-        return value[:120] or ("asset_" + _v10_28_uuid.uuid4().hex[:16])
-
-    def _v10_28_json_load(path: _V1028Path) -> _V1028Dict[str, _V1028Any]:
-        try:
-            if path.exists() and path.stat().st_size > 0:
-                return _v10_28_json.loads(path.read_text())
-        except Exception:
-            return {}
-        return {}
-
-    def _v10_28_find_nested_url(data: _V1028Any, key: str) -> _V1028Optional[str]:
+@app.post('/api/video/v10-34/voice-preview')
+def api_v1034_voice_preview(req: _V1034VoicePreviewRequest) -> dict:
+    segments = req.segments or []
+    if not segments and req.script.strip():
+        segments = [{'text': req.script.strip(), 'emotion': '', 'speed_ratio': 1.0, 'volume_ratio': 1.0, 'pause_after_ms': 350}]
+    if not segments:
+        raise HTTPException(status_code=400, detail='没有可试听的口播句子。')
+    payload = {'segments': segments, 'voice': req.voice or 'default', 'overall_rate': '+0%'}
+    try:
+        data = _full_ai_post_json('/api/tts-segments', payload, timeout=300)
         if isinstance(data, dict):
-            val = data.get(key)
-            if isinstance(val, str) and val.strip():
-                return val.strip()
-            for child in data.values():
-                got = _v10_28_find_nested_url(child, key)
-                if got:
-                    return got
-        elif isinstance(data, list):
-            for child in data:
-                got = _v10_28_find_nested_url(child, key)
-                if got:
-                    return got
-        return None
+            data['ok'] = True
+            data['mode'] = req.mode
+            data['source'] = 'v10_34_voice_preview'
+        return data
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f'试听配音失败：{exc}') from exc
 
-    def _v10_28_get_job_payload(job_id: str) -> _V1028Dict[str, _V1028Any]:
-        job_id = _v10_28_safe_asset_id(job_id)
-        candidates = [
-            _V1028Path(f"/tmp/{job_id}_final_success.json"),
-            _V1028Path(f"/tmp/{job_id}_final.json"),
-            _V1028Path(f"/tmp/{job_id}_check.json"),
-        ]
-        for c in candidates:
-            payload = _v10_28_json_load(c)
-            if payload:
-                return payload
-        # Best-effort fallback: query the local backend. This endpoint is sync; keep timeout short.
-        try:
-            with _v10_28_urllib_request.urlopen(
-                f"http://127.0.0.1:8000/api/video/full-ai/tts-first/job/{job_id}",
-                timeout=15,
-            ) as r:
-                if getattr(r, "status", 200) == 200:
-                    return _v10_28_json.loads(r.read().decode("utf-8"))
-        except Exception:
-            return {}
-        return {}
+@app.post('/api/video/v10-34/voice-version/save')
+def api_v1034_voice_version_save(req: _V1034VoicePreviewRequest) -> dict:
+    return v1034_save_voice_version(req.model_dump())
 
-    def _v10_28_download_or_copy(src: str, dst: _V1028Path) -> None:
-        src = str(src or "").strip()
-        if not src:
-            raise ValueError("EMPTY_RAW_VIDEO_URL")
-        dst.parent.mkdir(parents=True, exist_ok=True)
-        if src.startswith("file://"):
-            local = _V1028Path(src[7:])
-            if not local.exists():
-                raise FileNotFoundError(str(local))
-            _v10_28_shutil.copy2(local, dst)
-            return
-        if src.startswith("/"):
-            local = _V1028Path(src)
-            if not local.exists():
-                raise FileNotFoundError(str(local))
-            _v10_28_shutil.copy2(local, dst)
-            return
-        req = _v10_28_urllib_request.Request(src, headers={"User-Agent": "ai-video-v10.28-raw-asset-saver"})
-        with _v10_28_urllib_request.urlopen(req, timeout=180) as r, open(dst, "wb") as f:
-            _v10_28_shutil.copyfileobj(r, f)
-        if not dst.exists() or dst.stat().st_size < 1024:
-            raise ValueError("DOWNLOADED_RAW_VIDEO_TOO_SMALL")
+@app.get('/api/collector/computer-use/status')
+def api_v1034_computer_use_status() -> dict:
+    return v1034_computer_use_status()
 
-    def _v10_28_ffprobe(path: _V1028Path) -> _V1028Dict[str, _V1028Any]:
-        cmd = [
-            "ffprobe", "-v", "error",
-            "-show_entries", "format=duration",
-            "-show_entries", "stream=width,height,r_frame_rate",
-            "-of", "json",
-            str(path),
-        ]
-        try:
-            out = _v10_28_subprocess.check_output(cmd, text=True, stderr=_v10_28_subprocess.STDOUT, timeout=30)
-            return _v10_28_json.loads(out or "{}")
-        except Exception as exc:
-            return {"ffprobe_error": repr(exc)}
+@app.post('/api/collector/computer-use/start')
+def api_v1034_computer_use_start(req: _V1034ComputerUseRequest) -> dict:
+    result = v1034_start_computer_use_run(req.model_dump())
+    if not result.get('ok'):
+        raise HTTPException(status_code=400, detail=result)
+    return result
 
-    class V1028ApproveRawRequest(_V1028BaseModel):
-        job_id: _V1028Optional[str] = None
-        asset_id: _V1028Optional[str] = None
-        raw_video_url: _V1028Optional[str] = None
-        subtitled_video_url: _V1028Optional[str] = None
-        video_url: _V1028Optional[str] = None
-        script_text: _V1028Optional[str] = None
-        quality_note: _V1028Optional[str] = None
-        approved_by: _V1028Optional[str] = None
-        job_result: _V1028Optional[_V1028Dict[str, _V1028Any]] = None
+@app.post('/api/video/full-ai/one-scene/start')
+async def api_v1034_one_scene_start_alias(req: Request) -> dict:
+    # 兼容 4df865 前端老路径：转成 /api/video/full-ai/start，并强制安全转场、raw shot 保存和 completed 拦截字段。
+    try:
+        payload = await req.json()
+    except Exception:
+        payload = {}
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail='请求体必须是 JSON object')
+    shots = payload.get('shots') or payload.get('shot_plan') or payload.get('manual_shot_plan') or []
+    safe_shots = v1034_sanitize_shots_for_fal(shots, payload.get('title') or payload.get('topic') or '')
+    if not safe_shots:
+        raise HTTPException(status_code=400, detail='没有 shots，不能启动 full-ai 生成。')
+    script_text = str(payload.get('script_text') or payload.get('script') or payload.get('copy') or '')
+    if not script_text.strip():
+        script_text = ' '.join(str(x.get('narration_segment') or x.get('narration') or x.get('text') or '') for x in safe_shots if isinstance(x, dict))
+    if not script_text.strip():
+        raise HTTPException(status_code=400, detail='没有口播文案，不能启动 full-ai 生成。')
+    full_payload = {
+        **payload,
+        'script_text': script_text,
+        'shots': safe_shots,
+        'max_shots': max(1, len(safe_shots)),
+        'fal_fill_shots': max(1, len(safe_shots)),
+        'dynamic_shot_count': max(1, len(safe_shots)),
+        'transition_policy': V1034_SAFE_TRANSITION,
+        'safe_crossfade': True,
+        'save_raw_shots': True,
+        'block_completed_on_quality_error': True,
+        'negative_prompt': V1034_NEGATIVE_PROMPT,
+    }
+    try:
+        model = _FullAIVideoRequest(**full_payload)
+        job = api_video_full_ai_start(model)
+        if isinstance(job, dict):
+            job['v10_34_alias'] = True
+            job['transition_policy'] = V1034_SAFE_TRANSITION
+        return job
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f'one-scene 兼容启动失败：{exc}') from exc
 
-    class V1028RejectRawRequest(_V1028BaseModel):
-        job_id: str
-        reason: _V1028Optional[str] = None
-        raw_video_url: _V1028Optional[str] = None
-        subtitled_video_url: _V1028Optional[str] = None
-        rejected_by: _V1028Optional[str] = None
-        job_result: _V1028Optional[_V1028Dict[str, _V1028Any]] = None
+@app.get('/api/video/full-ai/one-scene/job/{job_id}')
+def api_v1034_one_scene_job_alias(job_id: str) -> dict:
+    job = api_video_full_ai_job(job_id)
+    if isinstance(job, dict) and job.get('status') != 'not_found':
+        return job
+    # 兼容 TTS-first job_id
+    try:
+        return _full_ai_get_json(f'/api/video/full-ai/tts-first/job/{job_id}', timeout=60)
+    except Exception:
+        return job
 
-    class V1028SliceRequest(_V1028BaseModel):
-        start_seconds: float = 0.0
-        end_seconds: _V1028Optional[float] = None
-        duration_seconds: _V1028Optional[float] = None
-        filename: _V1028Optional[str] = None
-        note: _V1028Optional[str] = None
+@app.post('/api/video/material-library/upload', response_model=List[AssetItem])
+async def api_v1034_material_upload(
+    request: Request,
+    files: List[UploadFile] = File(...),
+    folder: str = Form('self'),
+    material_type: str = Form(''),
+    city: str = Form(''),
+    region: str = Form(''),
+    source: str = Form(''),
+    reusable: str = Form('true'),
+    remark: str = Form(''),
+    settings: Settings = Depends(get_settings),
+    memory: MemoryStore = Depends(get_memory),
+) -> List[AssetItem]:
+    missing = [name for name, value in {
+        '素材类型': material_type,
+        '城市': city,
+        '区域': region,
+        '来源': source,
+        '备注': remark,
+    }.items() if not str(value or '').strip()]
+    if missing:
+        raise HTTPException(status_code=400, detail='上传前必须补全：' + '、'.join(missing))
+    items = await api_upload_assets(request=request, files=files, folder=folder, usage_role='content', settings=settings, memory=memory)
+    meta = {
+        'material_type': material_type,
+        'city': city,
+        'region': region,
+        'source': source,
+        'reusable': str(reusable).lower() in {'1','true','yes','on'},
+        'remark': remark,
+    }
+    try:
+        v1034_append_obsidian('shot_rule', '\n'.join([f"- {x.original_name}：{material_type} / {city} / {region} / {source} / 可复用={meta['reusable']} / {remark}" for x in items]), {'source': 'material_upload', **meta})
+    except Exception:
+        pass
+    return items
 
-    @app.post("/api/video/assets/approve-raw")
-    def v10_28_approve_raw_asset(req: V1028ApproveRawRequest):
-        job_payload = req.job_result or {}
-        if not job_payload and req.job_id:
-            job_payload = _v10_28_get_job_payload(req.job_id)
+@app.get('/api/video/material-library/categories')
+def api_v1034_material_categories() -> dict:
+    return {
+        'ok': True,
+        'material_types': ['楼盘外景', '生活配套', '交通出勤', '教育留学', '人物口播', '客户案例', '其他'],
+        'cities': ['吉隆坡', '新山', '槟城', '森林城市'],
+        'sources': ['自拍', '业主提供', '同行授权', 'AI生成', '项目方素材'],
+    }
 
-        raw_url = (
-            req.raw_video_url
-            or _v10_28_find_nested_url(job_payload, "raw_video_url")
-        )
-        subtitled_url = (
-            req.subtitled_video_url
-            or req.video_url
-            or _v10_28_find_nested_url(job_payload, "subtitled_video_url")
-            or _v10_28_find_nested_url(job_payload, "video_url")
-        )
-        job_id = req.job_id or str(job_payload.get("job_id") or job_payload.get("id") or "")
-        asset_id = _v10_28_safe_asset_id(req.asset_id or job_id or ("asset_" + _v10_28_uuid.uuid4().hex[:16]))
+@app.post('/api/video/account-library/import')
+def api_v1034_account_import(req: _V1034AccountImportRequest) -> dict:
+    if not req.raw_text.strip():
+        raise HTTPException(status_code=400, detail='账号导入内容为空。')
+    return v1034_import_accounts(req.raw_text)
 
-        if not raw_url:
-            raise _V1028HTTPException(status_code=400, detail="RAW_VIDEO_URL_REQUIRED_OR_JOB_RESULT_MISSING")
+@app.post('/api/video/account-library/classify')
+def api_v1034_account_classify(req: _V1034AccountClassifyRequest) -> dict:
+    return v1034_classify_accounts(max(1, min(req.limit, 1000)))
 
-        asset_dir = _V1028_APPROVED_ROOT / asset_id
-        raw_path = asset_dir / "raw_no_subtitle.mp4"
-        meta_path = asset_dir / "asset_meta.json"
-        asset_dir.mkdir(parents=True, exist_ok=True)
+@app.get('/api/video/account-library/list')
+def api_v1034_account_list(limit: int = 200) -> dict:
+    return v1034_list_accounts(max(1, min(limit, 1000)))
 
-        try:
-            _v10_28_download_or_copy(raw_url, raw_path)
-        except Exception as exc:
-            raise _V1028HTTPException(status_code=502, detail=f"RAW_VIDEO_SAVE_FAILED: {exc!r}")
+@app.post('/api/video/obsidian/write')
+def api_v1034_obsidian_write(req: _V1034ObsidianWriteRequest) -> dict:
+    if not req.content.strip():
+        raise HTTPException(status_code=400, detail='写入内容为空。')
+    return v1034_append_obsidian(req.note_type, req.content, req.metadata)
 
-        probe = _v10_28_ffprobe(raw_path)
-        script_text = req.script_text or _v10_28_find_nested_url(job_payload.get("request") or {}, "script_text") or ((job_payload.get("request") or {}).get("script_text") if isinstance(job_payload.get("request"), dict) else None)
-        meta = {
-            "asset_id": asset_id,
-            "status": "approved_raw_saved",
-            "source_job_id": job_id,
-            "approved_at": int(_v10_28_time.time()),
-            "approved_by": req.approved_by,
-            "quality_note": req.quality_note,
-            "raw_video_url": raw_url,
-            "subtitled_video_url": subtitled_url,
-            "video_url": subtitled_url,
-            "raw_video_path": str(raw_path),
-            "script_text": script_text,
-            "ffprobe": probe,
-            "cost_policy": "future_slice_reuses_raw_no_subtitle_mp4_no_fal",
-            "must_not_use_for_slice": ["video_url", "subtitled_video_url"],
-            "slice_source": "raw_no_subtitle.mp4",
-        }
-        meta_path.write_text(_v10_28_json.dumps(meta, ensure_ascii=False, indent=2))
-        return {"ok": True, "asset": meta}
+@app.post('/api/video/ai-control/plan')
+def api_v1034_ai_control_plan(req: _V1034AIControlRequest) -> dict:
+    if not req.question.strip():
+        raise HTTPException(status_code=400, detail='请先输入要检查的问题。')
+    return v1034_create_repair_task(req.question, req.context)
 
-    @app.post("/api/video/assets/reject")
-    def v10_28_reject_raw_asset(req: V1028RejectRawRequest):
-        asset_id = _v10_28_safe_asset_id(req.job_id)
-        out = _V1028_REJECTED_ROOT / asset_id
-        out.mkdir(parents=True, exist_ok=True)
-        meta = {
-            "asset_id": asset_id,
-            "status": "rejected",
-            "source_job_id": req.job_id,
-            "rejected_at": int(_v10_28_time.time()),
-            "rejected_by": req.rejected_by,
-            "reason": req.reason,
-            "raw_video_url": req.raw_video_url or _v10_28_find_nested_url(req.job_result or {}, "raw_video_url"),
-            "subtitled_video_url": req.subtitled_video_url or _v10_28_find_nested_url(req.job_result or {}, "subtitled_video_url"),
-            "cost_policy": "rejected_assets_are_not_saved_for_reuse",
-        }
-        (out / "reject_meta.json").write_text(_v10_28_json.dumps(meta, ensure_ascii=False, indent=2))
-        return {"ok": True, "asset": meta}
+@app.post('/api/video/final/save')
+def api_v1034_final_save(req: _V1034FinalRequest) -> dict:
+    if not req.video.get('video_url'):
+        raise HTTPException(status_code=400, detail='没有 video_url，不能保存最终视频。')
+    return v10334_save_final_record(req.video, 'final') if False else v1034_save_final_record(req.video, 'final')
 
-    @app.get("/api/video/assets")
-    def v10_28_list_raw_assets():
-        assets = []
-        _V1028_APPROVED_ROOT.mkdir(parents=True, exist_ok=True)
-        for meta_path in sorted(_V1028_APPROVED_ROOT.glob("*/asset_meta.json"), key=lambda x: x.stat().st_mtime, reverse=True):
-            meta = _v10_28_json_load(meta_path)
-            if meta:
-                assets.append(meta)
-        return {"ok": True, "count": len(assets), "assets": assets}
+@app.post('/api/video/final/raw-segments/save')
+def api_v1034_raw_segments_save(req: _V1034FinalRequest) -> dict:
+    return v1034_save_final_record(req.video, 'raw_segments')
 
-    @app.get("/api/video/assets/{asset_id}")
-    def v10_28_get_raw_asset(asset_id: str):
-        asset_id = _v10_28_safe_asset_id(asset_id)
-        meta_path = _V1028_APPROVED_ROOT / asset_id / "asset_meta.json"
-        meta = _v10_28_json_load(meta_path)
-        if not meta:
-            raise _V1028HTTPException(status_code=404, detail="ASSET_NOT_FOUND")
-        return {"ok": True, "asset": meta}
-
-    @app.post("/api/video/assets/{asset_id}/slice")
-    def v10_28_slice_raw_asset(asset_id: str, req: V1028SliceRequest):
-        asset_id = _v10_28_safe_asset_id(asset_id)
-        meta_path = _V1028_APPROVED_ROOT / asset_id / "asset_meta.json"
-        meta = _v10_28_json_load(meta_path)
-        if not meta:
-            raise _V1028HTTPException(status_code=404, detail="ASSET_NOT_FOUND")
-        raw_path = _V1028Path(meta.get("raw_video_path") or (_V1028_APPROVED_ROOT / asset_id / "raw_no_subtitle.mp4"))
-        if not raw_path.exists():
-            raise _V1028HTTPException(status_code=404, detail="RAW_NO_SUBTITLE_FILE_NOT_FOUND")
-
-        start = max(0.0, float(req.start_seconds or 0.0))
-        if req.duration_seconds is not None:
-            duration = float(req.duration_seconds)
-        elif req.end_seconds is not None:
-            duration = float(req.end_seconds) - start
-        else:
-            duration = 5.0
-        if duration <= 0:
-            raise _V1028HTTPException(status_code=400, detail="SLICE_DURATION_MUST_BE_POSITIVE")
-        duration = min(duration, 120.0)
-
-        out_dir = _V1028_SLICE_ROOT / asset_id
-        out_dir.mkdir(parents=True, exist_ok=True)
-        filename = req.filename or f"slice_{int(start*1000)}_{int((start+duration)*1000)}_{_v10_28_uuid.uuid4().hex[:8]}.mp4"
-        filename = _v10_28_safe_asset_id(filename)
-        if not filename.endswith(".mp4"):
-            filename += ".mp4"
-        out_path = out_dir / filename
-
-        cmd = [
-            "ffmpeg", "-y",
-            "-ss", f"{start:.3f}",
-            "-i", str(raw_path),
-            "-t", f"{duration:.3f}",
-            "-c:v", "libx264",
-            "-preset", "veryfast",
-            "-crf", "20",
-            "-c:a", "aac",
-            "-movflags", "+faststart",
-            str(out_path),
-        ]
-        try:
-            proc = _v10_28_subprocess.run(cmd, stdout=_v10_28_subprocess.PIPE, stderr=_v10_28_subprocess.PIPE, text=True, timeout=300)
-        except Exception as exc:
-            raise _V1028HTTPException(status_code=500, detail=f"SLICE_FFMPEG_FAILED: {exc!r}")
-        if proc.returncode != 0 or not out_path.exists():
-            raise _V1028HTTPException(status_code=500, detail=("SLICE_FFMPEG_FAILED: " + (proc.stderr or "")[-2000:]))
-
-        slice_meta = {
-            "asset_id": asset_id,
-            "slice_id": filename,
-            "status": "completed",
-            "created_at": int(_v10_28_time.time()),
-            "source_raw_video_path": str(raw_path),
-            "output_path": str(out_path),
-            "download_url": f"/api/video/assets/{asset_id}/slices/{filename}",
-            "start_seconds": start,
-            "duration_seconds": duration,
-            "end_seconds": start + duration,
-            "uses_fal": False,
-            "note": req.note,
-        }
-        (out_dir / (filename + ".json")).write_text(_v10_28_json.dumps(slice_meta, ensure_ascii=False, indent=2))
-        return {"ok": True, "slice": slice_meta}
-
-    @app.get("/api/video/assets/{asset_id}/slices/{filename}")
-    def v10_28_get_raw_asset_slice(asset_id: str, filename: str):
-        asset_id = _v10_28_safe_asset_id(asset_id)
-        filename = _v10_28_safe_asset_id(filename)
-        path = _V1028_SLICE_ROOT / asset_id / filename
-        if not path.exists():
-            raise _V1028HTTPException(status_code=404, detail="SLICE_NOT_FOUND")
-        return _V1028FileResponse(str(path), media_type="video/mp4", filename=filename)
-
-    print("V10_28_REVIEW_RAW_ASSET_WORKFLOW_INSTALLED")
-except Exception as _v10_28_exc:
-    print("V10_28_REVIEW_RAW_ASSET_WORKFLOW_INSTALL_FAILED=" + repr(_v10_28_exc))
+@app.post('/api/video/final/discard')
+def api_v1034_final_discard(req: _V1034FinalRequest) -> dict:
+    video = dict(req.video or {})
+    video['discard_reason'] = req.reason or 'manual_discard'
+    return v1034_save_final_record(video, 'discarded')
+# ===== /V10.34 A-G PRODUCTION-SAFE ROUTES =====
 
 
-
-# === V10.34 A-G original UI complete extension ===
+# ===== V10.34 FINAL VIDEO SUBTITLE / SEMANTIC / CROSSFADE PROVIDER =====
 try:
-    from app.services.v10_34_complete_provider import install_v10_34_complete as _install_v10_34_complete
-    _install_v10_34_complete(app)
-except Exception as _v10_34_complete_exc:
-    print('V10_34_A_TO_G_ORIGINAL_UI_INSTALL_FAILED', _v10_34_complete_exc, flush=True)
+    from app.services.v10_34_final_video_provider import install_v10_34_final_video
+    install_v10_34_final_video(app)
+except Exception as _v1034_final_video_exc:
+    print("V10_34_FINAL_VIDEO_PROVIDER_LOAD_FAILED", _v1034_final_video_exc)
+# ===== /V10.34 FINAL VIDEO SUBTITLE / SEMANTIC / CROSSFADE PROVIDER =====
 
-# ===== AI_VIDEO_GRAPHIC_WINDOW_REPO_SYNC_V1_START =====
+# --- V10.34 final fix: subtitle style library endpoint ---
+# Frontend reads this before generation.  It must exist to avoid a 404 red error
+# and to keep subtitle rendering styles explicit instead of implicit fallback.
+@app.get("/api/video/subtitle-library/styles")
+async def _v1034_subtitle_library_styles():
+    from app.services.subtitle_style_library_provider import SUBTITLE_STYLES
+    return {
+        "ok": True,
+        "version": "v10.40.7-subtitle-style-library",
+        "styles": SUBTITLE_STYLES,
+        "default_style_id": "douyin_pop",
+        "policy": {
+            "subtitle_required": True,
+            "burn_in_backend": True,
+            "custom_font_size": True,
+            "custom_vertical_position": True,
+            "custom_outline": True,
+            "single_and_two_line_presets": True,
+            "no_completed_without_subtitle": True,
+        },
+    }
+
+# ===== V10.34 GRAPHIC WINDOW + SCRIPT LOCKED SUBTITLES =====
 try:
     from app.services.graphic_window_provider import install_graphic_window_provider
     install_graphic_window_provider(app)
 except Exception as exc:
-    print("AI_VIDEO_GRAPHIC_WINDOW_INSTALL_FAILED", repr(exc), flush=True)
-# ===== AI_VIDEO_GRAPHIC_WINDOW_REPO_SYNC_V1_END =====
+    print("V10_34_GRAPHIC_WINDOW_PROVIDER_LOAD_FAILED", repr(exc), flush=True)
+try:
+    from app.services.script_locked_subtitle_provider import health as script_locked_subtitle_health
+    @app.get("/api/video/script-locked-subtitles/health")
+    def api_script_locked_subtitle_health():
+        return script_locked_subtitle_health()
+except Exception as exc:
+    print("V10_34_SCRIPT_LOCKED_SUBTITLE_HEALTH_LOAD_FAILED", repr(exc), flush=True)
+# ===== /V10.34 GRAPHIC WINDOW + SCRIPT LOCKED SUBTITLES =====
+
+# ===== V10.34 GRAPHIC WINDOW STANDALONE PAGE =====
+try:
+    from app.services.graphic_window_provider import install_graphic_window_provider
+    install_graphic_window_provider(app)
+except Exception as exc:
+    print("V10_34_GRAPHIC_WINDOW_PROVIDER_LOAD_FAILED", repr(exc), flush=True)
+
+try:
+    from app.services.graphic_window_page_provider import install_graphic_window_page_provider
+    install_graphic_window_page_provider(app)
+except Exception as exc:
+    print("V10_34_GRAPHIC_WINDOW_PAGE_LOAD_FAILED", repr(exc), flush=True)
+
+try:
+    from app.services.script_locked_subtitle_provider import health as script_locked_subtitle_health
+    @app.get("/api/video/script-locked-subtitles/health")
+    def api_script_locked_subtitle_health():
+        return script_locked_subtitle_health()
+except Exception as exc:
+    print("V10_34_SCRIPT_LOCKED_SUBTITLE_HEALTH_LOAD_FAILED", repr(exc), flush=True)
+# ===== /V10.34 GRAPHIC WINDOW STANDALONE PAGE =====
 
 # ===== AI_VIDEO_REVIEW_GATE_V1_START =====
 try:

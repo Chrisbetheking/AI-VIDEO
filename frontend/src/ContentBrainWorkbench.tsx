@@ -45,6 +45,7 @@ export default function ContentBrainWorkbench({
   const [markdown, setMarkdown] = useState('')
   const [vaultPath, setVaultPath] = useState('')
   const [obsidian, setObsidian] = useState<any>(null)
+  const [migration, setMigration] = useState<any>(null)
   const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
@@ -71,12 +72,14 @@ export default function ContentBrainWorkbench({
     setBusy('刷新内容大脑')
     setError('')
     try {
-      const [cardData, obsidianData] = await Promise.all([
-        apiGet(`${API}/knowledge/cards?status=all&limit=1000`, 90000),
+      const [cardData, obsidianData, migrationData] = await Promise.all([
+        apiGet(`${API}/knowledge/cards?status=all&limit=2000`, 90000),
         apiGet(`${API}/obsidian/status`, 60000),
+        apiGet(`${API}/migration/status`, 60000),
       ])
       setCards(list(cardData))
       setObsidian(obsidianData)
+      setMigration(migrationData?.report || migrationData)
       if (obsidianData?.vault) setVaultPath(String(obsidianData.vault))
     } catch (err) {
       setError(detailToText(err))
@@ -88,6 +91,21 @@ export default function ContentBrainWorkbench({
   useEffect(() => {
     void refresh()
   }, [])
+
+  async function migrateLegacy() {
+    setBusy('迁移旧内容大脑')
+    setError('')
+    try {
+      const data = await apiPost(`${API}/migration/run`, { force: true, sync_vault: true }, 360000)
+      setMigration(data)
+      setNotice(`迁移完成：旧数据库 ${data?.old_sqlite_rows || 0} 条，Vault ${data?.vault_markdown_files || 0} 个 Markdown，新增 ${data?.added || 0} 条。`)
+      await refresh()
+    } catch (err) {
+      setError(detailToText(err))
+    } finally {
+      setBusy('')
+    }
+  }
 
   async function configureVault() {
     if (!vaultPath.trim()) {
@@ -241,6 +259,14 @@ export default function ContentBrainWorkbench({
         <div><b>{counts.openclaw}</b><span>OpenClaw</span></div>
       </div>
 
+      <div className="aiw-info aiw-migrationBanner">
+        <div>
+          <b>旧知识迁移</b>
+          <span>旧 SQLite：{migration?.old_sqlite_rows ?? migration?.legacy_sqlite_rows ?? 0} 条 · 已发现 Vault：{migration?.vault || obsidian?.vault || '等待发现'} · 新知识库共 {cards.length} 条</span>
+        </div>
+        <button className="aiw-primary" disabled={Boolean(busy)} onClick={() => void migrateLegacy()}>{busy === '迁移旧内容大脑' ? busy : '一键迁移旧内容和 Vault'}</button>
+      </div>
+
       <div className="aiw-twoCol">
         <div className="aiw-panel">
           <h3>Obsidian Vault 自动同步</h3>
@@ -284,11 +310,22 @@ export default function ContentBrainWorkbench({
           <button className="aiw-muted" disabled={Boolean(busy)} onClick={refresh}>{busy || '刷新'}</button>
         </div>
         <div className="aiw-chipRow">
-          {['pending', 'approved', 'rejected', 'all'].map((item) => (
-            <button key={item} className={statusFilter === item ? 'aiw-chip active' : 'aiw-chip'} onClick={() => setStatusFilter(item)}>{item}</button>
+          {[
+            ['pending', '待审核'],
+            ['approved', '已批准'],
+            ['rejected', '已拒绝'],
+            ['all', '全部状态'],
+          ].map(([value, label]) => (
+            <button key={value} className={statusFilter === value ? 'aiw-chip active' : 'aiw-chip'} onClick={() => setStatusFilter(value)}>{label}</button>
           ))}
-          {['all', 'video', 'reply', 'visual'].map((item) => (
-            <button key={`lane-${item}`} className={lane === item ? 'aiw-chip active' : 'aiw-chip'} onClick={() => setLane(item)}>{item}</button>
+          <span className="aiw-filterDivider">分区</span>
+          {[
+            ['all', '全部分区'],
+            ['video', '视频知识'],
+            ['reply', '回复话术'],
+            ['visual', '画面规则'],
+          ].map(([value, label]) => (
+            <button key={`lane-${value}`} className={lane === value ? 'aiw-chip active' : 'aiw-chip'} onClick={() => setLane(value)}>{label}</button>
           ))}
         </div>
         <div className="aiw-brainGrid">

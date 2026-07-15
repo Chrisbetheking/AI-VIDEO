@@ -4,6 +4,7 @@ import asyncio
 import base64
 import json
 import os
+import re
 import subprocess
 import tempfile
 import uuid
@@ -16,6 +17,17 @@ from app.config import Settings
 from app.services.volcengine_voice_clone import load_voice_type
 from app.schemas import TTSVoice, VoiceSegment
 
+
+def sanitize_tts_text(value: Any) -> str:
+    text = str(value or "")
+    text = re.sub(r"\\(?:N|n|r|t)", "，", text)
+    text = text.replace("\r", "，").replace("\n", "，").replace("\t", " ")
+    text = re.sub(r"[／/\\|｜]+", "，", text)
+    text = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", "", text)
+    text = re.sub(r"\s+", "", text)
+    text = re.sub(r"[，,]{2,}", "，", text)
+    text = re.sub(r"，([。！？；])", r"\1", text)
+    return text.strip("，。 ")
 
 def run_cmd(cmd: list[str], timeout: int = 120) -> subprocess.CompletedProcess[str]:
     return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, check=False)
@@ -94,6 +106,9 @@ def get_tts_voices(settings: Settings) -> list[TTSVoice]:
 
 
 async def synthesize_volcengine_v1(settings: Settings, text: str, voice: Optional[str], rate: Optional[str], speed_ratio: Optional[float] = None, volume_ratio: float = 1.0, pitch_ratio: float = 1.0) -> Path:
+    text = sanitize_tts_text(text)
+    if not text:
+        raise RuntimeError("清洗后没有可合成的口播文本")
     """
     火山新版 API Key 接入优先：
     - header: x-api-key
@@ -225,6 +240,7 @@ def parse_sapi_rate(rate: Optional[str]) -> int:
 
 
 def synthesize_sapi_to_wav(output_path: Path, text: str, voice: Optional[str], rate: Optional[str]) -> None:
+    text = sanitize_tts_text(text)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     sapi_rate = parse_sapi_rate(rate)
     with tempfile.TemporaryDirectory() as tmp:
@@ -300,9 +316,9 @@ async def synthesize_tts_segments(settings: Settings, segments: list[VoiceSegmen
     cursor = 0.0
 
     try:
-        usable_segments = [seg for seg in segments[:30] if seg.text.strip()]
+        usable_segments = [seg for seg in segments[:30] if sanitize_tts_text(seg.text)]
         for index, segment in enumerate(usable_segments, start=1):
-            text = segment.text.strip()
+            text = sanitize_tts_text(segment.text)
             try:
                 if provider in {'volcengine', 'doubao', 'bytedance'}:
                     raw = await synthesize_volcengine_v1(
@@ -375,6 +391,9 @@ async def synthesize_tts_segments(settings: Settings, segments: list[VoiceSegmen
             pass
 
 async def synthesize_tts(settings: Settings, text: str, voice: Optional[str] = None, rate: Optional[str] = None) -> Tuple[Path, float, Optional[str]]:
+    text = sanitize_tts_text(text)
+    if not text:
+        raise RuntimeError("清洗后没有可合成的口播文本")
     provider = settings.tts_provider.lower().strip()
     warning: Optional[str] = None
 

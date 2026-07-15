@@ -46,7 +46,7 @@ SUBTITLE_STYLES: list[dict[str, Any]] = [
         "ass_primary": "&H00FFFFFF",
         "ass_outline": "&H00000000",
         "ass_back": "&H00000000",
-        "font_size": 112,
+        "font_size": 124,
         "outline": 12,
         "shadow": 1,
         "margin_v": 330,
@@ -64,7 +64,7 @@ SUBTITLE_STYLES: list[dict[str, Any]] = [
         "ass_primary": "&H005CE4FF",
         "ass_outline": "&H00000000",
         "ass_back": "&H00000000",
-        "font_size": 116,
+        "font_size": 128,
         "outline": 13,
         "shadow": 1,
         "margin_v": 330,
@@ -82,7 +82,7 @@ SUBTITLE_STYLES: list[dict[str, Any]] = [
         "ass_primary": "&H00FFFFFF",
         "ass_outline": "&H00000000",
         "ass_back": "&H99000000",
-        "font_size": 98,
+        "font_size": 108,
         "outline": 1,
         "shadow": 0,
         "margin_v": 275,
@@ -100,7 +100,7 @@ SUBTITLE_STYLES: list[dict[str, Any]] = [
         "ass_primary": "&H00CCF7FF",
         "ass_outline": "&H00101010",
         "ass_back": "&HAA081014",
-        "font_size": 58,
+        "font_size": 104,
         "outline": 3,
         "shadow": 1,
         "margin_v": 150,
@@ -118,7 +118,7 @@ SUBTITLE_STYLES: list[dict[str, Any]] = [
         "ass_primary": "&H00FFFFFF",
         "ass_outline": "&H00000000",
         "ass_back": "&H00000000",
-        "font_size": 58,
+        "font_size": 96,
         "outline": 5,
         "shadow": 1,
         "margin_v": 170,
@@ -136,7 +136,7 @@ SUBTITLE_STYLES: list[dict[str, Any]] = [
         "ass_primary": "&H00FFFFFF",
         "ass_outline": "&H00000000",
         "ass_back": "&HAA000000",
-        "font_size": 52,
+        "font_size": 94,
         "outline": 1,
         "shadow": 0,
         "margin_v": 130,
@@ -144,13 +144,85 @@ SUBTITLE_STYLES: list[dict[str, Any]] = [
         "max_chars": 17,
         "ass_prefix": r"{\fad(80,80)}",
     },
+    {
+        "id": "clean_premium",
+        "name": "极简高级大字",
+        "description": "无底色大白字、柔和描边，适合高级感楼盘和人物画面。",
+        "primary": "#FFFFFF",
+        "background": "transparent",
+        "accent": "#C4B5FD",
+        "ass_primary": "&H00FFFFFF",
+        "ass_outline": "&H0020182F",
+        "ass_back": "&H00000000",
+        "font_size": 96,
+        "outline": 8,
+        "shadow": 2,
+        "margin_v": 300,
+        "border_style": 1,
+        "max_chars": 12,
+        "ass_prefix": r"{\fad(90,90)}",
+    },
+    {
+        "id": "xiaohongshu_alert",
+        "name": "小红书醒目款",
+        "description": "高饱和黄白大字，适合避坑、预算和清单类短视频。",
+        "primary": "#FFFFFF",
+        "background": "rgba(96,46,12,0.72)",
+        "accent": "#FDE047",
+        "ass_primary": "&H00FFFFFF",
+        "ass_outline": "&H00131313",
+        "ass_back": "&HAA0C2E60",
+        "font_size": 118,
+        "outline": 6,
+        "shadow": 1,
+        "margin_v": 315,
+        "border_style": 4,
+        "max_chars": 10,
+        "ass_prefix": r"{\fad(60,60)\t(0,130,\fscx106\fscy106)\t(130,220,\fscx100\fscy100)}",
+    },
+    {
+        "id": "professional_two_line",
+        "name": "专业解释双行款",
+        "description": "字号仍然醒目，但允许较长专业信息自然分两行。",
+        "primary": "#FFFFFF",
+        "background": "rgba(15,23,42,0.72)",
+        "accent": "#60A5FA",
+        "ass_primary": "&H00FFFFFF",
+        "ass_outline": "&H00000000",
+        "ass_back": "&HAA2A170F",
+        "font_size": 88,
+        "outline": 3,
+        "shadow": 0,
+        "margin_v": 250,
+        "border_style": 4,
+        "max_chars": 16,
+        "max_lines": 2,
+        "ass_prefix": r"{\fad(80,80)}",
+    },
 ]
 
-def _style(style_id: str) -> dict[str, Any]:
-    for item in SUBTITLE_STYLES:
-        if item["id"] == style_id:
-            return item
-    return SUBTITLE_STYLES[0]
+CUSTOM_STYLE_KEYS = {"font_size", "outline", "shadow", "margin_v", "border_style", "max_chars", "max_lines", "ass_primary", "ass_outline", "ass_back", "ass_prefix"}
+
+def _style(style_id: str, custom: Optional[dict[str, Any]] = None) -> dict[str, Any]:
+    base = next((dict(item) for item in SUBTITLE_STYLES if item["id"] == style_id), dict(SUBTITLE_STYLES[0]))
+    for key, value in (custom or {}).items():
+        if key not in CUSTOM_STYLE_KEYS:
+            continue
+        if key == "font_size":
+            base[key] = max(72, min(150, int(value)))
+        elif key == "outline":
+            base[key] = max(0, min(16, int(value)))
+        elif key == "shadow":
+            base[key] = max(0, min(8, int(value)))
+        elif key == "margin_v":
+            base[key] = max(120, min(520, int(value)))
+        elif key == "max_chars":
+            base[key] = max(7, min(20, int(value)))
+        elif key == "max_lines":
+            base[key] = max(1, min(2, int(value)))
+        else:
+            base[key] = value
+    return base
 
 
 def _ffmpeg_path(path: Path) -> str:
@@ -192,7 +264,8 @@ def _to_cn_digits(text: str) -> str:
 
 
 def _strip_subtitle_punctuation(text: str) -> str:
-    value = re.sub(r"\s+", "", _to_cn_digits(str(text or "")).strip())
+    value = str(text or "").replace("\\N", " ").replace("\\n", " ").replace("\\r", " ").replace("\n", " ").replace("\r", " ")
+    value = re.sub(r"\s+", "", _to_cn_digits(value).strip())
     # 纯文字字幕：去掉中英文标点，把 3/5/10 这种数字转成中文，避免口播字幕像 PPT。
     value = re.sub(r"[，。！？、；：,.!?;:\"'“”‘’（）()【】\[\]《》<>/\\|·•…—_-]+", "", value)
     return value.strip()
@@ -248,17 +321,18 @@ def _ass_escape(text: str, max_chars: int = 9, keywords: Optional[list[str]] = N
     style = style or {}
     value = _strip_subtitle_punctuation(str(text or ""))
     value = value.replace("{", "（").replace("}", "）")
-    max_chars = max(6, min(int(max_chars or 9), 12))
-    # V10.16: one screen = one short line. Do not split inside one cue with \N,
-    # because that caused ugly breaks like “生活还不 / 方便”.
-    if len(value) > max_chars:
+    max_chars = max(7, min(int(max_chars or 9), 20))
+    max_lines = max(1, min(2, int(style.get("max_lines") or 1)))
+    if max_lines == 2 and len(value) > max_chars:
+        value = value[:max_chars] + r"\N" + value[max_chars:max_chars * 2]
+    elif len(value) > max_chars:
         value = value[:max_chars]
     value = _apply_keyword_highlight(value, keywords=keywords, style=style)
     return value
 
-def _make_ass(cues: list[dict[str, Any]], style_id: str, prefix: str = "subtitle_style", keywords: Optional[list[str]] = None) -> Path:
+def _make_ass(cues: list[dict[str, Any]], style_id: str, prefix: str = "subtitle_style", keywords: Optional[list[str]] = None, subtitle_style: Optional[dict[str, Any]] = None) -> Path:
     _ensure_dirs()
-    style = _style(style_id)
+    style = _style(style_id, subtitle_style)
     ass_path = WORK_DIR / f"{prefix}_{time.strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}.ass"
     font = os.getenv("AI_VIDEO_SUBTITLE_FONT", "Noto Sans CJK SC")
     header = f"""[Script Info]
@@ -309,6 +383,7 @@ def burn_subtitles_with_style_and_upload(
     keywords: Optional[list[str]] = None,
     prefix: str = "wizard_subtitle",
     object_key: str = "",
+    subtitle_style: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
     _ensure_dirs()
     if not shutil.which("ffmpeg"):
@@ -319,7 +394,7 @@ def burn_subtitles_with_style_and_upload(
         raise FileNotFoundError(f"视频文件不存在: {input_path}")
     media_duration = float(duration or get_media_duration_seconds(input_path, default=12.0))
     cues = _make_cues(text=text, segments=segments, duration=media_duration)
-    ass_path = _make_ass(cues, style_id=style_id, prefix=prefix, keywords=keywords)
+    ass_path = _make_ass(cues, style_id=style_id, prefix=prefix, keywords=keywords, subtitle_style=subtitle_style)
     output_path = WORK_DIR / f"{prefix}_{time.strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}.mp4"
 
     cmd = [
@@ -342,7 +417,7 @@ def burn_subtitles_with_style_and_upload(
         "video_url": upload["url"],
         "url": upload["url"],
         "style_id": style_id,
-        "style": _style(style_id),
+        "style": _style(style_id, subtitle_style),
         "duration": media_duration,
         "cues": cues,
         "ass_path": str(ass_path),
@@ -381,12 +456,13 @@ class BurnRequest(BaseModel):
     style_id: str = "real_estate_gold"
     keywords: list[str] = []
     prefix: str = "wizard_subtitle_manual"
+    subtitle_style: dict[str, Any] = {}
 
 
 @router.get("/health")
 def health() -> dict[str, Any]:
     _ensure_dirs()
-    return {"ok": True, "provider": "subtitle_style_library_v10_16", "style_count": len(SUBTITLE_STYLES), "punctuation_free": True, "keyword_highlight_scale": True, "large_douyin_font": True, "larger_keyword_highlight": True, "one_line_no_punctuation": True, "digits_converted_to_chinese": True, "work_dir": str(WORK_DIR)}
+    return {"ok": True, "provider": "subtitle_style_library_v10_40_7", "style_count": len(SUBTITLE_STYLES), "punctuation_free": True, "keyword_highlight_scale": True, "large_douyin_font": True, "larger_keyword_highlight": True, "one_line_no_punctuation": True, "digits_converted_to_chinese": True, "work_dir": str(WORK_DIR)}
 
 
 @router.get("/styles")
@@ -411,6 +487,7 @@ def burn_upload(req: BurnRequest) -> dict[str, Any]:
         style_id=req.style_id,
         keywords=req.keywords,
         prefix=req.prefix,
+        subtitle_style=req.subtitle_style,
     )
 
 

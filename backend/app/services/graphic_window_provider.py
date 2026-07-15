@@ -37,8 +37,8 @@ from app.services.review_packaging_automation_provider import install_review_pac
 
 from app.services.main_workflow_provider import install_main_workflow_provider
 # AI_VIDEO_V10_40_1_REAL_MAIN_ADAPTER
-from app.services.integration_hub_v10_40_6 import install_integration_hub_v10_40_6
-# AI_VIDEO_V10_40_6_FULL_CHAIN_CLOSED_LOOP
+from app.services.integration_hub_v10_40_7 import install_integration_hub_v10_40_7
+# AI_VIDEO_V10_40_7_ENGINE_SOURCE_FIX
 
 def _font(size: int, bold: bool = True):
     candidates = [
@@ -603,14 +603,18 @@ def _draw_916_variant(path: Path, frame: Path | None, variant: Dict[str, Any]):
     img.convert("RGB").save(path, quality=95)
 
 def install_graphic_window_provider(app):
-    install_integration_hub_v10_40_6(app)
+    if getattr(app.state, "graphic_window_v10_40_7_installed", False):
+        return
+
+    app.state.graphic_window_v10_40_7_installed = True
+    install_integration_hub_v10_40_7(app)
     install_main_workflow_provider(app)
     install_review_packaging_automation(app)
     @app.get("/api/graphic-window/health")
     def health():
         return {
             "ok": True,
-            "mode": "graphic_window_v7_6_full_chain_closed_loop",
+            "mode": "graphic_window_v7_7_engine_source_fix",
             "rule": "cover_only_9_16_xhs_uses_info_cards_maps_tables_budget_checklist_cta",
             "storage": str(GRAPHIC_ROOT),
             "pillow": True,

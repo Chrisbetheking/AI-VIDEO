@@ -2528,3 +2528,86 @@
   }
 }
 /* ===== /V10.40.6 full-chain closed loop ===== */
+
+/* ===== V10.40.7 engine source fix ===== */
+.aiw-subtitlePresetGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin: 12px 0;
+}
+
+.aiw-subtitleControls {
+  margin-top: 14px;
+  background: linear-gradient(180deg, #ffffff, #fbfaff);
+}
+
+.aiw-subtitleControls h4 {
+  margin: 0 0 12px;
+}
+
+.aiw-subtitleLivePreview {
+  display: grid;
+  place-items: end center;
+  min-height: 230px;
+  padding: 24px;
+  border-radius: 18px;
+  background: linear-gradient(145deg, #172033, #344466);
+  overflow: hidden;
+}
+
+.aiw-subtitleLivePreview span {
+  display: inline-block;
+  max-width: 94%;
+  padding: 7px 14px;
+  border-radius: 10px;
+  font-weight: 950;
+  line-height: 1.25;
+  text-align: center;
+}
+
+.aiw-migrationBanner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  margin: 14px 0;
+  padding: 16px 18px;
+}
+
+.aiw-migrationBanner b,
+.aiw-migrationBanner span {
+  display: block;
+}
+
+.aiw-migrationBanner span {
+  margin-top: 5px;
+  line-height: 1.5;
+}
+
+.aiw-filterDivider {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 7px;
+  color: #94a3b8;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+@media (max-width: 1180px) {
+  .aiw-subtitlePresetGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 760px) {
+  .aiw-subtitlePresetGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .aiw-migrationBanner {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}
+/* ===== /V10.40.7 engine source fix ===== */

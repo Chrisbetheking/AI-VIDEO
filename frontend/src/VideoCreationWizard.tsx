@@ -81,6 +81,17 @@ type SubtitleStyle = {
   background?: string
   accent?: string
   placement?: string
+  font_size?: number
+  outline?: number
+  shadow?: number
+  margin_v?: number
+  border_style?: number
+  max_chars?: number
+  max_lines?: number
+  ass_primary?: string
+  ass_outline?: string
+  ass_back?: string
+  ass_prefix?: string
 }
 
 
@@ -338,7 +349,10 @@ const SUBTITLE_STYLE_FALLBACK: SubtitleStyle[] = [
   { id: 'douyin_black_bubble', name: '抖音黑底口播款', description: '黑底白字，画面复杂时最清楚。', primary: '#ffffff', background: 'rgba(0,0,0,0.62)', accent: '#fde047', placement: '底部黑条' },
   { id: 'real_estate_gold', name: '金色地产讲解', description: '适合专业讲房，黄底关键词感，手机端清晰。', primary: '#fff7cc', background: 'rgba(20, 16, 8, 0.72)', accent: '#f6c44f', placement: '底部双行' },
   { id: 'white_outline', name: '白字黑描边', description: '最稳妥，适合任何素材，不挡画面。', primary: '#ffffff', background: 'transparent', accent: '#111827', placement: '底部居中' },
-  { id: 'black_bar', name: '黑底信息条', description: '信息密度高，适合专业拆解和避坑内容。', primary: '#ffffff', background: 'rgba(0,0,0,0.68)', accent: '#60a5fa', placement: '底部黑条' },
+  { id: 'black_bar', name: '黑底信息条', description: '信息密度高，适合专业拆解和避坑内容。', primary: '#ffffff', background: 'rgba(0,0,0,0.68)', accent: '#60a5fa', placement: '底部黑条', font_size: 94, outline: 1, margin_v: 130, max_chars: 17, max_lines: 1 },
+  { id: 'clean_premium', name: '极简高级大字', description: '无底色大白字，适合高级感楼盘和人物画面。', primary: '#ffffff', background: 'transparent', accent: '#c4b5fd', placement: '中下方', font_size: 96, outline: 8, margin_v: 300, max_chars: 12, max_lines: 1 },
+  { id: 'xiaohongshu_alert', name: '小红书醒目款', description: '高饱和黄白大字，适合避坑、预算和清单。', primary: '#ffffff', background: 'rgba(96,46,12,0.72)', accent: '#fde047', placement: '中下方', font_size: 118, outline: 6, margin_v: 315, max_chars: 10, max_lines: 1 },
+  { id: 'professional_two_line', name: '专业解释双行款', description: '醒目但允许较长专业信息自然分两行。', primary: '#ffffff', background: 'rgba(15,23,42,0.72)', accent: '#60a5fa', placement: '底部双行', font_size: 88, outline: 3, margin_v: 250, max_chars: 16, max_lines: 2 },
 ]
 
 const CITY_OPTIONS = [
@@ -665,8 +679,12 @@ function buildPrompt(city: string, scene: string, _narration: string, index = 1)
   return `Premium 9:16 cinematic vertical video for Malaysia real-estate content.\nShot ${index} main scene: ${scene}.\n${klRule}\nVisual-only rule: never render narration, subtitles, captions, headlines, stickers, labels, UI, logos, watermarks, signs, letters, numbers or pseudo-text inside the generated image. The picture must contain zero readable or unreadable text. Single-scene rule: one full-screen continuous camera shot only, not a montage, not split screen and not a panel layout. Ultra realistic, natural lighting, clean composition, high detail, smooth camera movement, no black borders, no documents, no papers, no charts, no screenshots.`
 }
 
+function targetShotCount(duration: number) {
+  return Math.max(4, Math.min(12, Math.ceil(Number(duration || 20) / 4)))
+}
+
 function generateShotPlan(segments: ScriptSegment[], duration: number, city: string, project: ProjectDraft): ShotPlan[] {
-  const count = Math.max(4, Math.ceil(Number(duration || 20) / 4.5))
+  const count = targetShotCount(duration)
   const scenes = cityScenes(city)
   const each = Math.round((Number(duration || 20) / count) * 10) / 10
   const assetIds = asArray(project.selectedMaterialIds)
@@ -799,6 +817,10 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
   const [subtitleEnabled, setSubtitleEnabled] = useState(Boolean(initialDraft.subtitleEnabled ?? project.burn_subtitles ?? true))
   const [subtitleStyleId, setSubtitleStyleId] = useState(String(initialDraft.subtitleStyleId || project.subtitle_style_id || 'douyin_pop'))
   const [subtitleStyles, setSubtitleStyles] = useState<SubtitleStyle[]>(SUBTITLE_STYLE_FALLBACK)
+  const [subtitleStyleOverrides, setSubtitleStyleOverrides] = useState<Record<string, number>>({
+    ...(project.subtitle_style_overrides || {}),
+    ...(initialDraft.subtitleStyleOverrides || {}),
+  })
   const [generationStartedAt, setGenerationStartedAt] = useState(Number(initialDraft.generationStartedAt || 0))
   const [workflow, setWorkflow] = useState<Record<string, any> | null>((initialDraft.workflow || null) as Record<string, any> | null)
   const [workflowBusy, setWorkflowBusy] = useState('')
@@ -841,7 +863,11 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
   const selectedSetting = selectedSegment ? (voiceSettings[selectedSegment.id] || inferVoiceSetting(selectedSegment, Math.max(0, selectedSegment.index - 1), segments.length, scriptMode)) : null
   const selectedShot = shotPlan.find((shot) => shot.id === selectedShotId) || shotPlan[0]
   const videoUrl = extractVideoUrl(job)
-  const selectedSubtitleStyle = subtitleStyles.find((item) => item.id === subtitleStyleId) || subtitleStyles[0] || SUBTITLE_STYLE_FALLBACK[0]
+  const selectedSubtitleStyleBase = subtitleStyles.find((item) => item.id === subtitleStyleId) || subtitleStyles[0] || SUBTITLE_STYLE_FALLBACK[0]
+  const selectedSubtitleStyle: SubtitleStyle = {
+    ...selectedSubtitleStyleBase,
+    ...subtitleStyleOverrides,
+  }
   const selectedAssets = asArray(project.asset_context || project.selected_assets || project.r2_material_context)
   const avatarConfig = project.avatar_config || null
   const currentTaskLeads = asArray(project.current_task_leads).filter((item: any) => {
@@ -915,7 +941,21 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
       .then((res) => {
         if (!alive) return
         const list = Array.isArray(res?.styles) ? res.styles : []
-        if (list.length) setSubtitleStyles(list)
+        if (list.length) {
+          setSubtitleStyles(list)
+          if (!list.some((item: SubtitleStyle) => item.id === subtitleStyleId)) {
+            const fallbackId = String(res?.default_style_id || list[0]?.id || 'douyin_pop')
+            setSubtitleStyleId(fallbackId)
+            const fallback = list.find((item: SubtitleStyle) => item.id === fallbackId) || list[0]
+            setSubtitleStyleOverrides({
+              font_size: Number(fallback?.font_size || 104),
+              outline: Number(fallback?.outline ?? 6),
+              margin_v: Number(fallback?.margin_v || 280),
+              max_chars: Number(fallback?.max_chars || 11),
+              max_lines: Number(fallback?.max_lines || 1),
+            })
+          }
+        }
       })
       .catch(() => {
         if (alive) setSubtitleStyles(SUBTITLE_STYLE_FALLBACK)
@@ -1088,11 +1128,12 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
       buttonStatus,
       subtitleEnabled,
       subtitleStyleId,
+      subtitleStyleOverrides,
       generationStartedAt,
       workflow,
       savedAt: new Date().toISOString(),
     })
-  }, [step, sourceMode, topic, market, city, contentType, scriptMode, targetDuration, competitorSource, manualKeywords, script, selectedSegmentId, voiceSettings, shotPlan, selectedShotId, jobId, job, sourceResult, disabledKeywordValues, aiKeywordInsights, aiStatus, buttonStatus, subtitleEnabled, subtitleStyleId, generationStartedAt, workflow])
+  }, [step, sourceMode, topic, market, city, contentType, scriptMode, targetDuration, competitorSource, manualKeywords, script, selectedSegmentId, voiceSettings, shotPlan, selectedShotId, jobId, job, sourceResult, disabledKeywordValues, aiKeywordInsights, aiStatus, buttonStatus, subtitleEnabled, subtitleStyleId, subtitleStyleOverrides, generationStartedAt, workflow])
 
 
 
@@ -1194,6 +1235,7 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
       subtitle_required: subtitleEnabled,
       subtitle_style_id: subtitleStyleId || 'douyin_pop',
       subtitle_style: selectedSubtitleStyle,
+      subtitle_style_overrides: subtitleStyleOverrides,
       ai_status: aiStatus,
       content_brain_context: videoBrainCards.filter((card) => !selectedKnowledgeIds.length || selectedKnowledgeIds.includes(String(card.id || ""))),
       selected_knowledge_card_ids: selectedKnowledgeIds,
@@ -1772,7 +1814,8 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
       selected_assets: cleanAssets,
       r2_material_context: cleanAssets,
     })
-    const finalShots = shotPlan.length
+    const requiredShotCount = targetShotCount(targetDuration)
+    const baseShots = shotPlan.length
       ? shotPlan.map((shot, index) => {
           const segment = cleanSegments[index % Math.max(cleanSegments.length, 1)]
           return {
@@ -1785,12 +1828,20 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
             ])),
           }
         })
-      : generateShotPlan(cleanSegments, targetDuration, city, finalProject)
-
-    const renderShotCount = Math.max(
-      4,
-      Math.min(10, finalShots.length || Math.ceil(targetDuration / 4.5)),
-    )
+      : []
+    const generatedShots = generateShotPlan(cleanSegments, targetDuration, city, finalProject)
+    const finalShots = Array.from({ length: requiredShotCount }, (_, index) => {
+      const source = baseShots[index] || generatedShots[index]
+      const segment = cleanSegments[index % Math.max(cleanSegments.length, 1)]
+      return {
+        ...source,
+        id: source?.id || `shot_${index + 1}`,
+        index: index + 1,
+        narration: cleanSegmentText(segment?.text || source?.narration || ''),
+        prompt: buildPrompt(city, source?.scene || generatedShots[index]?.scene || '', '', index + 1),
+      }
+    })
+    const renderShotCount = requiredShotCount
 
     setScript(cleanScript)
     if (cleanAssets.length !== selectedAssets.length) {
@@ -1842,6 +1893,7 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
       subtitle_required: subtitleEnabled,
       subtitle_style_id: subtitleStyleId || 'douyin_pop',
       subtitle_style: selectedSubtitleStyle,
+      subtitle_style_overrides: subtitleStyleOverrides,
       subtitle_text_policy: 'clean_script_only_no_slash_no_literal_newline',
       subtitle_source: 'sanitized_script_segments',
       ai_status: aiStatus,
@@ -2295,26 +2347,68 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
   }
 
   function renderSubtitleLibrary() {
+    const setOverride = (key: string, value: number) => {
+      setSubtitleStyleOverrides((current) => ({ ...current, [key]: value }))
+    }
+    const selectPreset = (style: SubtitleStyle) => {
+      setSubtitleStyleId(style.id)
+      setSubtitleStyleOverrides({
+        font_size: Number(style.font_size || 104),
+        outline: Number(style.outline ?? 6),
+        margin_v: Number(style.margin_v || 280),
+        max_chars: Number(style.max_chars || 11),
+        max_lines: Number(style.max_lines || 1),
+      })
+    }
     return (
       <div className="aiw-subtitleLibrary">
-        <div className="aiw-inlineTitle"><b>字幕样式库</b><span>后端会烧录字幕并上传 R2；先选样式，再生成。</span></div>
+        <div className="aiw-inlineTitle"><b>字幕样式与真实输出参数</b><span>预设和自定义参数会直接传入后端 ASS 烧录，不再只是网页示意。</span></div>
         <label className="aiw-checkRow"><input type="checkbox" checked={subtitleEnabled} onChange={(e) => setSubtitleEnabled(e.target.checked)} /> 生成后自动烧录字幕</label>
-        <div style={{ display: 'grid', gap: 8 }}>
+        <div className="aiw-subtitlePresetGrid">
           {subtitleStyles.map((style) => (
             <button
               key={style.id}
               type="button"
-              onClick={() => setSubtitleStyleId(style.id)}
+              onClick={() => selectPreset(style)}
               className={subtitleStyleId === style.id ? 'active' : ''}
               style={{ textAlign: 'left', borderRadius: 14, padding: 10, border: subtitleStyleId === style.id ? '2px solid #7c3aed' : '1px solid #e5e7eb', background: '#fff' }}
             >
               <b>{style.name}</b>
-              <div style={{ margin: '8px 0', height: 54, borderRadius: 12, background: 'linear-gradient(135deg,#dbeafe,#f5d0fe)', display: 'flex', alignItems: 'end', justifyContent: 'center', padding: 8 }}>
-                <span style={{ color: style.primary || '#fff', background: style.background || 'rgba(0,0,0,.65)', borderRadius: 8, padding: '5px 10px', fontWeight: 800, textShadow: '0 1px 2px rgba(0,0,0,.7)', borderBottom: `3px solid ${style.accent || '#f59e0b'}` }}>吉隆坡买房，先看区域和用途</span>
+              <div style={{ margin: '8px 0', minHeight: 66, borderRadius: 12, background: 'linear-gradient(135deg,#dbeafe,#f5d0fe)', display: 'flex', alignItems: 'end', justifyContent: 'center', padding: 8 }}>
+                <span style={{ color: style.primary || '#fff', background: style.background || 'rgba(0,0,0,.65)', borderRadius: 8, padding: '5px 10px', fontWeight: 800, fontSize: `${Math.max(15, Math.min(24, Number(style.font_size || 100) / 5))}px`, textShadow: '0 1px 2px rgba(0,0,0,.7)', borderBottom: `3px solid ${style.accent || '#f59e0b'}` }}>吉隆坡买房 先看区域和用途</span>
               </div>
               <small>{style.description}</small>
             </button>
           ))}
+        </div>
+
+        <div className="aiw-panel aiw-subtitleControls">
+          <h4>当前预设：{selectedSubtitleStyleBase.name}</h4>
+          <div className="aiw-form two">
+            <label>字号 {Number(selectedSubtitleStyle.font_size || 104)}
+              <input type="range" min="72" max="150" step="2" value={Number(selectedSubtitleStyle.font_size || 104)} onChange={(e) => setOverride('font_size', Number(e.target.value))} />
+            </label>
+            <label>垂直位置 {Number(selectedSubtitleStyle.margin_v || 280)}
+              <input type="range" min="120" max="520" step="10" value={Number(selectedSubtitleStyle.margin_v || 280)} onChange={(e) => setOverride('margin_v', Number(e.target.value))} />
+            </label>
+            <label>描边 {Number(selectedSubtitleStyle.outline ?? 6)}
+              <input type="range" min="0" max="16" step="1" value={Number(selectedSubtitleStyle.outline ?? 6)} onChange={(e) => setOverride('outline', Number(e.target.value))} />
+            </label>
+            <label>每屏最多 {Number(selectedSubtitleStyle.max_chars || 11)} 字
+              <input type="range" min="7" max="20" step="1" value={Number(selectedSubtitleStyle.max_chars || 11)} onChange={(e) => setOverride('max_chars', Number(e.target.value))} />
+            </label>
+            <label>行数
+              <select value={Number(selectedSubtitleStyle.max_lines || 1)} onChange={(e) => setOverride('max_lines', Number(e.target.value))}>
+                <option value={1}>单行醒目</option>
+                <option value={2}>双行解释</option>
+              </select>
+            </label>
+          </div>
+          <div className="aiw-subtitleLivePreview">
+            <span style={{ fontSize: `${Math.max(22, Math.min(44, Number(selectedSubtitleStyle.font_size || 104) / 3))}px`, color: selectedSubtitleStyle.primary || '#fff', background: selectedSubtitleStyle.background || 'rgba(0,0,0,.5)', WebkitTextStroke: `${Math.max(0, Number(selectedSubtitleStyle.outline || 0) / 5)}px #000` }}>
+              预算不同 选房逻辑也不同
+            </span>
+          </div>
         </div>
       </div>
     )
