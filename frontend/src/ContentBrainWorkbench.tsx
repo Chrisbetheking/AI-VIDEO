@@ -41,7 +41,7 @@ export default function ContentBrainWorkbench({
   goTab,
 }: Props) {
   const [cards, setCards] = useState<BrainCard[]>([])
-  const [statusFilter, setStatusFilter] = useState('pending')
+  const [statusFilter, setStatusFilter] = useState('all')
   const [lane, setLane] = useState('all')
   const [collection, setCollection] = useState('all')
   const [importCollection, setImportCollection] = useState<'lead' | 'copy' | 'video' | 'visual' | 'research'>('copy')
@@ -76,6 +76,37 @@ export default function ContentBrainWorkbench({
     visual: cards.filter((card) => card.collection === 'visual').length,
     research: cards.filter((card) => card.collection === 'research').length,
   }), [cards])
+
+  const collectionLabels: Record<string, string> = {
+    all: '全部隔离区',
+    lead: '截流线索',
+    copy: '生产文案',
+    video: '视频知识',
+    visual: '画面规则',
+    research: '研究与历史',
+  }
+  const statusLabels: Record<string, string> = {
+    all: '全部状态',
+    pending: '待审核',
+    approved: '已批准',
+    rejected: '已拒绝',
+  }
+  const laneLabels: Record<string, string> = {
+    all: '全部分区',
+    video: '视频知识',
+    reply: '回复话术',
+    visual: '画面规则',
+  }
+  const selectedCollectionTotal = collection === 'all'
+    ? cards.length
+    : cards.filter((card) => card.collection === collection).length
+
+  function chooseCollection(value: string) {
+    setCollection(value)
+    // 点击上方隔离区时必须先展示该区全部数据，避免“上方有 65 条、下方却显示 0 条”的假矛盾。
+    setStatusFilter('all')
+    setLane('all')
+  }
 
   async function refresh() {
     setBusy('刷新内容大脑')
@@ -351,12 +382,12 @@ export default function ContentBrainWorkbench({
           <div><h3>知识隔离区</h3><span>截流客户、生产文案、视频知识、画面规则和历史研究分别存放，生产文案默认不会读取截流私信。</span></div>
         </div>
         <div className="aiw-isolationGrid">
-          <button className={collection === 'lead' ? 'active' : ''} onClick={() => setCollection('lead')}><b>{counts.lead}</b><span>截流线索</span></button>
-          <button className={collection === 'copy' ? 'active' : ''} onClick={() => setCollection('copy')}><b>{counts.copy}</b><span>生产文案</span></button>
-          <button className={collection === 'video' ? 'active' : ''} onClick={() => setCollection('video')}><b>{counts.video}</b><span>视频知识</span></button>
-          <button className={collection === 'visual' ? 'active' : ''} onClick={() => setCollection('visual')}><b>{counts.visual}</b><span>画面规则</span></button>
-          <button className={collection === 'research' ? 'active' : ''} onClick={() => setCollection('research')}><b>{counts.research}</b><span>研究与历史</span></button>
-          <button className={collection === 'all' ? 'active' : ''} onClick={() => setCollection('all')}><b>{cards.length}</b><span>全部</span></button>
+          <button className={collection === 'lead' ? 'active' : ''} onClick={() => chooseCollection('lead')}><b>{counts.lead}</b><span>截流线索</span></button>
+          <button className={collection === 'copy' ? 'active' : ''} onClick={() => chooseCollection('copy')}><b>{counts.copy}</b><span>生产文案</span></button>
+          <button className={collection === 'video' ? 'active' : ''} onClick={() => chooseCollection('video')}><b>{counts.video}</b><span>视频知识</span></button>
+          <button className={collection === 'visual' ? 'active' : ''} onClick={() => chooseCollection('visual')}><b>{counts.visual}</b><span>画面规则</span></button>
+          <button className={collection === 'research' ? 'active' : ''} onClick={() => chooseCollection('research')}><b>{counts.research}</b><span>研究与历史</span></button>
+          <button className={collection === 'all' ? 'active' : ''} onClick={() => chooseCollection('all')}><b>{cards.length}</b><span>全部</span></button>
         </div>
       </div>
 
@@ -384,6 +415,10 @@ export default function ContentBrainWorkbench({
             <button key={`lane-${value}`} className={lane === value ? 'aiw-chip active' : 'aiw-chip'} onClick={() => setLane(value)}>{label}</button>
           ))}
         </div>
+        <div className="aiw-filterTruth">
+          <b>当前显示 {visible.length} / {selectedCollectionTotal} 条</b>
+          <span>{collectionLabels[collection] || collection} · {statusLabels[statusFilter] || statusFilter} · {laneLabels[lane] || lane}</span>
+        </div>
         <div className="aiw-brainGrid">
           {visible.map((card) => (
             <article className="aiw-brainCard" key={card.id}>
@@ -403,7 +438,21 @@ export default function ContentBrainWorkbench({
               </div>
             </article>
           ))}
-          {!visible.length && <div className="aiw-empty">当前筛选下暂无知识卡。</div>}
+          {!visible.length && (
+            <div className="aiw-empty aiw-emptyTruth">
+              <b>当前筛选结果为 0 条</b>
+              <span>
+                {selectedCollectionTotal > 0
+                  ? `“${collectionLabels[collection] || collection}”共有 ${selectedCollectionTotal} 条，只是被“${statusLabels[statusFilter] || statusFilter} / ${laneLabels[lane] || lane}”筛掉了。`
+                  : `“${collectionLabels[collection] || collection}”目前确实没有数据。`}
+              </span>
+              {selectedCollectionTotal > 0 && (
+                <button className="aiw-muted" onClick={() => { setStatusFilter('all'); setLane('all') }}>
+                  显示该隔离区全部 {selectedCollectionTotal} 条
+                </button>
+              )}
+            </div>
+          )}
         </div>
       </div>
 

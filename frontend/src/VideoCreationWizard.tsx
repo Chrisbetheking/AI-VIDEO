@@ -844,6 +844,8 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
   const [segmentEditDraft, setSegmentEditDraft] = useState('')
   const segmentEditorRef = useRef<HTMLTextAreaElement | null>(null)
   const reviewLaunchRef = useRef('')
+  const pollFailureRef = useRef(0)
+  const pollInFlightRef = useRef(false)
 
   const approvedBrainCards = useMemo(() => {
     const merged = [...remoteBrainCards]
@@ -1037,13 +1039,19 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
   useEffect(() => {
     if (!jobId || !busy) return
     let alive = true
-    const timer = window.setInterval(async () => {
+    pollFailureRef.current = 0
+    pollInFlightRef.current = false
+
+    const queryCurrentJob = async () => {
+      if (!alive || pollInFlightRef.current) return
+      pollInFlightRef.current = true
       try {
         const data = await apiGet(`/api/video/full-ai/one-scene/job/${jobId}`, 180000)
         if (!alive) return
         if (String(data?.job_id || jobId) !== jobId) {
           throw new Error('后端返回了不同任务 ID，已阻止串任务。')
         }
+        pollFailureRef.current = 0
         setJob(data)
         const hasVideo = Boolean(extractVideoUrl(data))
         if (hasVideo && finalStatus(data)) {
@@ -1052,19 +1060,31 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
         } else if (!hasVideo && jobFailed(data)) {
           setBusy('')
           setError(`任务 ${jobId} 生成失败：${data?.message || data?.error?.detail || data?.status || '未知错误'}`)
-        } else if (!hasVideo && finalStatus(data)) {
-          // 某些上游会提前把父任务标记 completed，但子镜头仍在生成。
-          // 没有成片地址时继续轮询，不再错误提示“任务已结束”。
-          setError('')
+        } else {
+          // 只要任务仍在生成，单次网络抖动恢复后立即清除查询警告。
+          setError((current) => current.startsWith('网络查询暂时失败') || current.startsWith('连续查询失败') ? '' : current)
         }
       } catch (err: any) {
         if (!alive) return
-        setBusy('')
-        setError(`任务 ${jobId} 查询失败：${err?.message || String(err)}。系统不会使用其他任务替代。`)
+        pollFailureRef.current += 1
+        const failures = pollFailureRef.current
+        const detail = err?.message || String(err)
+        // 查询接口偶发失败不等于生成任务失败；保持 busy 并继续轮询，绝不拿其他任务替代。
+        if (failures < 5) {
+          setError(`网络查询暂时失败（${failures}/5），正在自动重试。任务 ${jobId} 仍可能在后台生成：${detail}`)
+        } else {
+          setError(`连续查询失败 ${failures} 次，但系统不会停止或替换任务 ${jobId}。请保持页面打开，或稍后刷新继续恢复：${detail}`)
+        }
+      } finally {
+        pollInFlightRef.current = false
       }
-    }, 4000)
+    }
+
+    void queryCurrentJob()
+    const timer = window.setInterval(() => void queryCurrentJob(), 5000)
     return () => {
       alive = false
+      pollInFlightRef.current = false
       window.clearInterval(timer)
     }
   }, [jobId, busy])

@@ -81,10 +81,38 @@ export default function OpenClawWorkbench({ project, setProject, goTab }: Props)
 
   const jobStatus = String(job?.status || job?.stage || '')
   const online = health?.online === true
+  const backendOnline = health?.backend_online === true || online
   const progress = Number(job?.progress || job?.raw?.progress || 0)
   const runCounts = job?.counts && typeof job.counts === 'object' ? job.counts : {}
   const workerOnline = health?.worker_online === true
   const loginOk = health?.login_ok === true
+  const taskQueued = /queued|pending|waiting/i.test(jobStatus)
+  const taskRunning = /claimed|running|collect|crawl|processing|working/i.test(jobStatus)
+  const readinessLabel = !backendOnline
+    ? 'OpenClaw 后端离线'
+    : !workerOnline
+      ? '后端在线 · Worker 待领取'
+      : !loginOk
+        ? 'Worker 在线 · 抖音待登录'
+        : 'OpenClaw 可采集'
+  const readinessClass = backendOnline && workerOnline && loginOk
+    ? 'aiw-badge ok'
+    : backendOnline
+      ? 'aiw-badge warn'
+      : 'aiw-badge'
+  const emptyLeadMessage = taskQueued
+    ? '任务已经进入服务器队列，正在等待 ECS Worker 领取；当前 0 条结果不代表 OpenClaw 离线。'
+    : taskRunning
+      ? '任务正在执行，暂时还没有产出线索；页面会继续轮询并保留任务缓存。'
+      : statusDone(jobStatus)
+        ? '任务已经结束，但本次没有产出可用线索。'
+        : !backendOnline
+          ? 'OpenClaw 后端离线，目前无法查询任务和线索。'
+          : !workerOnline
+            ? '后端在线，但 ECS Worker 尚未在线或没有领取任务。'
+            : !loginOk
+              ? 'Worker 已在线，但抖音账号尚未完成登录。'
+              : '当前账号还没有真实采集结果。'
   const stats = useMemo(() => ({
     total: leads.length,
     high: leads.filter((item) => Number(item.score || item.lead_score || 0) >= 70).length,
@@ -243,7 +271,12 @@ export default function OpenClawWorkbench({ project, setProject, goTab }: Props)
         openclaw_job: data,
         openclaw_target_accounts: targets,
       })
-      setNotice(`真实采集任务已启动并缓存到“${accountProfile}”：${id}`)
+      const queued = /queued|pending|waiting/i.test(String(data?.status || data?.stage || ''))
+      setNotice(
+        queued
+          ? `任务已进入服务器队列并缓存到“${accountProfile}”，正在等待 ECS Worker 领取：${id}`
+          : `真实采集任务已启动并缓存到“${accountProfile}”：${id}`,
+      )
       await refreshRunHistory(accountProfile)
     } catch (err) {
       setError(detailToText(err))
@@ -289,8 +322,8 @@ export default function OpenClawWorkbench({ project, setProject, goTab }: Props)
           <h2>OpenClaw 截流工作台</h2>
           <p>先确认 worker 在线，再启动真实采集、轮询进度、沉淀客户问题。没有 job_id 就不会显示成功。</p>
         </div>
-        <span className={online ? 'aiw-badge ok' : 'aiw-badge'}>
-          {online ? 'OpenClaw 在线' : 'OpenClaw 离线'}
+        <span className={readinessClass}>
+          {readinessLabel}
         </span>
       </div>
 
@@ -340,9 +373,11 @@ export default function OpenClawWorkbench({ project, setProject, goTab }: Props)
 
       <div className="aiw-actions">
         <button className="aiw-muted" disabled={Boolean(busy)} onClick={refreshHealth}>{busy === '检查 OpenClaw' ? busy : '检查服务与登录状态'}</button>
-        <button className="aiw-primary" disabled={Boolean(busy) || !online} onClick={start}>{busy === '启动真实采集' ? busy : '启动真实 OpenClaw 任务'}</button>
+        <button className="aiw-primary" disabled={Boolean(busy) || !backendOnline} onClick={start}>{busy === '启动真实采集' ? busy : workerOnline ? '启动真实 OpenClaw 任务' : '加入服务器任务队列'}</button>
         <button className="aiw-muted" disabled={Boolean(busy) || !jobId} onClick={() => void poll()}>{jobId ? '刷新当前任务' : '没有任务 ID'}</button>
-        <button className="aiw-purple" disabled={Boolean(busy) || !jobId} onClick={harvest}>沉淀到内容大脑</button>
+        <button className="aiw-purple" disabled={Boolean(busy) || !jobId || !statusDone(jobStatus)} onClick={harvest}>
+          {statusDone(jobStatus) ? '沉淀到内容大脑' : '任务完成后可沉淀'}
+        </button>
         <button className="aiw-muted" onClick={() => goTab('brain')}>去审核知识</button>
       </div>
 
@@ -354,6 +389,7 @@ export default function OpenClawWorkbench({ project, setProject, goTab }: Props)
           <div><span>状态</span><b>{jobStatus || '未启动'}</b></div>
           <div><span>当前阶段</span><b>{job?.stage || jobStatus || '-'}</b></div>
           <div><span>实际接口</span><b>{job?.endpoint || health?.endpoint || '-'}</b></div>
+          <div><span>队列说明</span><b>{job?.response?.message || job?.message || (taskQueued ? '等待 ECS Worker 领取' : '-')}</b></div>
           <div><span>最近进度</span><b>{progress || 0}%</b></div>
           <div><span>已采集</span><b>{runCounts.accounts || 0} 账号 / {runCounts.videos || 0} 视频 / {runCounts.comments || 0} 评论 / {runCounts.leads || 0} 线索</b></div>
           <div><span>最后更新</span><b>{job?.updated_at ? new Date(Number(job.updated_at) * 1000).toLocaleString() : '-'}</b></div>
@@ -388,7 +424,7 @@ export default function OpenClawWorkbench({ project, setProject, goTab }: Props)
               </article>
             )
           })}
-          {!leads.length && <div className="aiw-empty">暂无真实采集结果。OpenClaw 离线时不会创建假任务。</div>}
+          {!leads.length && <div className="aiw-empty aiw-emptyTruth"><b>当前线索：0 条</b><span>{emptyLeadMessage}</span></div>}
         </div>
       </div>
 

@@ -2676,3 +2676,61 @@
   .aiw-isolationGrid, .aiw-runHistory { grid-template-columns: 1fr; }
 }
 /* ===== /V10.40.8 ===== */
+
+/* ===== V10.40.8.1 state truth hotfix ===== */
+.aiw-filterTruth {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 10px 0 14px;
+  padding: 11px 13px;
+  border: 1px solid #ddd6fe;
+  border-radius: 14px;
+  background: #faf7ff;
+}
+
+.aiw-filterTruth b {
+  color: #5b21b6;
+}
+
+.aiw-filterTruth span {
+  color: #7c7487;
+  font-size: 12px;
+  font-weight: 800;
+  text-align: right;
+}
+
+.aiw-emptyTruth {
+  display: grid;
+  gap: 8px;
+  justify-items: start;
+  width: 100%;
+}
+
+.aiw-emptyTruth b {
+  color: #374151;
+}
+
+.aiw-emptyTruth span {
+  color: #7c7487;
+  line-height: 1.6;
+}
+
+.aiw-badge.warn {
+  background: #fff7ed;
+  color: #c2410c;
+  border-color: #fed7aa;
+}
+
+@media (max-width: 760px) {
+  .aiw-filterTruth {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .aiw-filterTruth span {
+    text-align: left;
+  }
+}
+/* ===== /V10.40.8.1 state truth hotfix ===== */
