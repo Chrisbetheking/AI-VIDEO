@@ -2734,3 +2734,80 @@
   }
 }
 /* ===== /V10.40.8.1 state truth hotfix ===== */
+
+/* V10.40.8.3：页面内抖音扫码登录，不改变现有工作台基准布局。 */
+.aiw-authModalBackdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(15, 23, 42, 0.62);
+  backdrop-filter: blur(6px);
+}
+
+.aiw-authModal {
+  width: min(680px, 94vw);
+  max-height: 92vh;
+  overflow: auto;
+  border: 1px solid rgba(124, 58, 237, 0.2);
+  border-radius: 24px;
+  padding: 22px;
+  background: #fff;
+  box-shadow: 0 30px 90px rgba(15, 23, 42, 0.28);
+}
+
+.aiw-authStatusLine {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 16px 0;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: #f7f2ff;
+  color: #5b21b6;
+}
+
+.aiw-authStatusLine span {
+  color: #64748b;
+  text-align: right;
+}
+
+.aiw-authQrImage {
+  display: block;
+  width: min(520px, 100%);
+  max-height: 580px;
+  object-fit: contain;
+  margin: 0 auto 16px;
+  border: 1px solid #e2e8f0;
+  border-radius: 18px;
+  background: #fff;
+}
+
+.aiw-authQrWaiting {
+  display: grid;
+  min-height: 300px;
+  place-items: center;
+  margin-bottom: 16px;
+  border: 1px dashed #c4b5fd;
+  border-radius: 18px;
+  background: #faf8ff;
+  color: #6d28d9;
+  font-weight: 700;
+}
+
+.aiw-authHint {
+  margin: 12px 0 0;
+  color: #64748b;
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+@media (max-width: 720px) {
+  .aiw-authModalBackdrop { padding: 10px; }
+  .aiw-authModal { padding: 16px; border-radius: 18px; }
+  .aiw-authStatusLine { flex-direction: column; }
+  .aiw-authStatusLine span { text-align: left; }
+}

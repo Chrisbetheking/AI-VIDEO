@@ -23,9 +23,10 @@ from app.services.collector_control import (
     collector_queue_mirror_status,
     collector_worker_heartbeat,
 )
+from app.services.douyin_auth_bridge_v10_40_8_3 import profile_status as douyin_profile_status
 
-VERSION = "10.40.8.2"
-MODE = "runtime_recovery_queue_bridge"
+VERSION = "10.40.8.3"
+MODE = "douyin_qr_subtitle_final"
 BASE = Path(os.getenv("AI_VIDEO_BASE", "/opt/ai-video"))
 STORAGE = BASE / "storage"
 ROOT = Path(os.getenv("AI_VIDEO_INTEGRATION_ROOT", str(STORAGE / "integration_hub_v10_40_7")))
@@ -831,7 +832,7 @@ def install_integration_hub_v10_40_7(app: FastAPI) -> None:
         return {"ok":True,"version":VERSION,"folder":str(root_folder),"written":written,"by_collection":by_collection,"folders":COLLECTION_FOLDERS}
 
     @app.get("/api/video/integration/openclaw/status")
-    async def openclaw_status():
+    async def openclaw_status(account_profile: str = Query("company_main")):
         attempts=[]
         fallback_online=False
         fallback_detail={}
@@ -847,11 +848,8 @@ def install_integration_hub_v10_40_7(app: FastAPI) -> None:
 
         heartbeat=collector_worker_heartbeat(max_age_seconds=20)
         collector_worker_online=bool(heartbeat.get("online"))
-        login_ok=bool(
-            fallback_detail.get("login_ok")
-            or fallback_detail.get("logged_in")
-            or fallback_detail.get("authenticated")
-        )
+        auth=douyin_profile_status(account_profile)
+        login_ok=bool(auth.get("login_ok"))
         backend_online=bool(fallback_online or collector_worker_online)
         return {
             "ok": True,
@@ -862,6 +860,8 @@ def install_integration_hub_v10_40_7(app: FastAPI) -> None:
             "collector_worker_online": collector_worker_online,
             "fallback_worker_online": fallback_online,
             "login_ok": login_ok,
+            "account_profile": auth.get("account_profile"),
+            "auth": auth,
             "endpoint": fallback_endpoint or "/api/collector/commands/next",
             "detail": fallback_detail,
             "collector_heartbeat": heartbeat,
@@ -889,19 +889,19 @@ def install_integration_hub_v10_40_7(app: FastAPI) -> None:
         return {"ok":True,"version":VERSION,"account_profile":account_profile,"run":active or (values[0] if values else None),"active":bool(active)}
 
     async def _start_real_openclaw(payload: Dict[str, Any], *, supersedes: str = "") -> Dict[str, Any]:
-        health=await openclaw_status()
+        account_profile=text(payload.get("account_profile") or "company_main")
+        health=await openclaw_status(account_profile)
         if not health.get("backend_online"):
             raise HTTPException(503,"OpenClaw 后端离线，无法开始采集。")
         if not health.get("collector_worker_online"):
             raise HTTPException(503,"ECS Collector Worker 没有真实心跳，已阻止继续堆积 queued 任务。")
         if text(payload.get("platform") or "douyin").lower()=="douyin" and not health.get("login_ok"):
-            raise HTTPException(409,"Worker 已在线，但抖音账号尚未登录。请登录对应隔离账号后再启动任务。")
+            raise HTTPException(409,f"Worker 已在线，但隔离账号 {account_profile} 尚未登录。请先扫码登录当前账号。")
 
-        account_profile=text(payload.get("account_profile") or "company_main")
         request={
             **payload,
             "account_profile": account_profile,
-            "source": text(payload.get("source") or "integration_hub_v10_40_8_2"),
+            "source": text(payload.get("source") or "integration_hub_v10_40_8_3"),
             "run_openclaw_analysis": True,
             "persist_results": True,
         }
@@ -917,7 +917,7 @@ def install_integration_hub_v10_40_7(app: FastAPI) -> None:
             legacy_payload={
                 "limit": limit,
                 "account": seed_accounts[0] if seed_accounts else keyword,
-                "headful": True,
+                "headful": False,
                 "no_delay": limit<=3,
                 "mode": text(request.get("mission_type") or "manual"),
                 "message": f"等待 ECS Worker 领取：{text(request.get('mission_type') or 'comments')} · {limit} 个账号",
@@ -1039,11 +1039,66 @@ def install_integration_hub_v10_40_7(app: FastAPI) -> None:
             "raw":data,
         }
 
+    def _full_ai_snapshot_candidates(limit: int = 100) -> List[Dict[str, Any]]:
+        root=STORAGE/"v10_34"/"final_jobs"
+        rows=[]
+        if not root.exists():
+            return rows
+        for path in sorted(root.glob("full_ai_*.json"), key=lambda item:item.stat().st_mtime, reverse=True)[:max(limit,100)]:
+            try:
+                item=as_dict(json.loads(path.read_text(encoding="utf-8")))
+            except Exception:
+                continue
+            status=text(item.get("status")).lower()
+            result=as_dict(item.get("result"))
+            subtitle_result=as_dict(item.get("subtitle_result"))
+            subtitled=text(
+                item.get("subtitled_video_url")
+                or result.get("subtitled_video_url")
+                or subtitle_result.get("video_url")
+                or subtitle_result.get("url")
+            )
+            raw=text(item.get("raw_final_video_url") or result.get("raw_final_video_url"))
+            subtitle_marked=bool(
+                item.get("subtitle_burned") is True
+                or result.get("subtitle_burned") is True
+                or subtitle_result.get("ok") is True
+                or "/subtitled/" in subtitled
+                or "subtitle" in subtitled.lower()
+            )
+            if status not in {"done","completed","success","finished"} or not subtitled or not subtitle_marked:
+                continue
+            rows.append({
+                **item,
+                "job_type":"full_ai",
+                "video_url":subtitled,
+                "subtitled_video_url":subtitled,
+                "raw_video_url":raw,
+                "has_subtitles":True,
+                "workflow_bound":True,
+                "recovery_mode":"latest_completed_subtitled_full_ai",
+                "_snapshot_path":str(path),
+            })
+        rows.sort(key=lambda item:float(item.get("updated_at") or item.get("created_at") or 0),reverse=True)
+        return rows
+
     @app.get("/api/video/wizard-video/latest-done")
     def wizard_video_latest_done(
         limit: int = Query(30, ge=1, le=100),
         strict_one_scene: int = Query(1),
     ):
+        snapshots=_full_ai_snapshot_candidates(limit)
+        if snapshots:
+            found=snapshots[0]
+            return {
+                "ok":True,
+                "version":VERSION,
+                "job":found,
+                "recovery_mode":"latest_completed_subtitled_full_ai",
+                "strict_one_scene_requested":bool(strict_one_scene),
+                "subtitle_priority":True,
+            }
+
         try:
             from app.services.job_persistence_provider import get_job, list_recent_jobs
             jobs=list_recent_jobs(max(limit,100))
@@ -1069,15 +1124,123 @@ def install_integration_hub_v10_40_7(app: FastAPI) -> None:
         found=candidates[0]
         detailed=get_job(text(found.get("job_id"))) or {}
         merged={**found,**as_dict(detailed)}
-        merged["video_url"]=text(merged.get("video_url") or found.get("video_url"))
+        merged["video_url"]=text(merged.get("subtitled_video_url") or merged.get("video_url") or found.get("video_url"))
+        merged["raw_video_url"]=text(merged.get("raw_final_video_url") or as_dict(merged.get("result")).get("raw_final_video_url"))
+        merged["has_subtitles"]=bool(merged.get("subtitled_video_url"))
         merged["recovery_job_type"]=text(found.get("job_type"))
         merged["workflow_bound"]=text(found.get("job_type")).lower() in {"full_ai","one_scene"}
         return {
             "ok":True,
             "version":VERSION,
             "job":merged,
-            "recovery_mode":"exact_full_ai" if merged["workflow_bound"] else "latest_completed_compose",
+            "recovery_mode":"exact_full_ai" if merged["workflow_bound"] else "latest_completed_compose_no_subtitle_fallback",
             "strict_one_scene_requested":bool(strict_one_scene),
+            "subtitle_priority":False,
+        }
+
+    @app.post("/api/video/wizard-video/retry-subtitle/{job_id}")
+    def wizard_video_retry_subtitle(job_id: str, payload: Dict[str, Any] = Body(default_factory=dict)):
+        if not re.fullmatch(r"full_ai_[A-Za-z0-9_-]+", job_id):
+            raise HTTPException(400,"仅支持绑定 full_ai 父任务重试字幕")
+        path=STORAGE/"v10_34"/"final_jobs"/f"{job_id}.json"
+        if not path.exists():
+            raise HTTPException(404,f"找不到 full_ai 任务快照：{job_id}")
+        try:
+            job=as_dict(json.loads(path.read_text(encoding="utf-8")))
+        except Exception as exc:
+            raise HTTPException(500,f"读取任务快照失败：{exc}")
+
+        result=as_dict(job.get("result")); request=as_dict(job.get("request")); compose=as_dict(job.get("compose_result")); compose_result=as_dict(compose.get("result"))
+        raw_url=text(
+            job.get("raw_final_video_url")
+            or result.get("raw_final_video_url")
+            or compose.get("video_url")
+            or compose_result.get("video_url")
+            or as_dict(compose_result.get("r2")).get("public_url")
+        )
+        if not raw_url:
+            raise HTTPException(409,"当前父任务没有无字幕原片地址，无法只重试字幕")
+        script=text(payload.get("text") or request.get("script_text") or request.get("text"))
+        tts=as_dict(job.get("tts_result"))
+        segments=payload.get("segments") if isinstance(payload.get("segments"),list) else tts.get("segments") if isinstance(tts.get("segments"),list) else None
+        if not script and not segments:
+            raise HTTPException(409,"当前任务没有口播文本或 TTS 分段，无法重试字幕")
+        duration=float(payload.get("duration") or job.get("audio_duration_seconds") or tts.get("duration_seconds") or job.get("video_duration_seconds") or 0)
+        style_id=text(payload.get("subtitle_style_id") or request.get("subtitle_style_id") or "douyin_pop")
+        subtitle_style=payload.get("subtitle_style") if isinstance(payload.get("subtitle_style"),dict) else request.get("subtitle_style") if isinstance(request.get("subtitle_style"),dict) else {}
+        keywords=[]
+        for source in [payload.get("keywords"),request.get("keywords"),request.get("manual_keywords")]:
+            if isinstance(source,list): keywords.extend([text(item) for item in source if text(item)])
+            elif text(source): keywords.extend([item for item in re.split(r"[，,\s]+",text(source)) if item])
+        if payload.get("dry_run"):
+            return {
+                "ok":True,
+                "version":VERSION,
+                "dry_run":True,
+                "job_id":job_id,
+                "raw_video_url":raw_url,
+                "text_length":len(script),
+                "segments_count":len(segments or []),
+                "subtitle_style_id":style_id,
+                "message":"dry_run 已通过：真实执行只重烧字幕，不会重新调用 FAL。",
+            }
+        try:
+            from app.services.subtitle_style_library_provider import burn_subtitles_with_style_and_upload
+            subtitle_result=burn_subtitles_with_style_and_upload(
+                video_url=raw_url,
+                video_path="",
+                text=script,
+                segments=segments,
+                duration=duration or None,
+                style_id=style_id,
+                keywords=list(dict.fromkeys(keywords)),
+                prefix="full_ai_v104083_retry_subtitle",
+                subtitle_style=subtitle_style,
+            )
+        except Exception as exc:
+            job["subtitle_error"]=str(exc)
+            job["subtitle_retry_at"]=time.time()
+            atomic_json(path,job)
+            raise HTTPException(500,f"字幕重试失败，但原片和 FAL 镜头均已保留：{exc}")
+        subtitled=text(subtitle_result.get("video_url") or subtitle_result.get("url"))
+        if not subtitle_result.get("ok") or not subtitled:
+            raise HTTPException(500,"字幕引擎没有返回字幕最终成片")
+        job.update({
+            "ok":True,
+            "status":"completed",
+            "stage":"completed",
+            "progress":100,
+            "message":"仅重试字幕烧录成功；没有重新调用 FAL 镜头生成",
+            "video_url":subtitled,
+            "subtitled_video_url":subtitled,
+            "output_url":subtitled,
+            "raw_final_video_url":raw_url,
+            "subtitle_result":subtitle_result,
+            "subtitle_error":"",
+            "subtitle_retry_at":time.time(),
+            "updated_at":time.time(),
+        })
+        result={**result,"ok":True,"video_url":subtitled,"subtitled_video_url":subtitled,"raw_final_video_url":raw_url,"subtitle_burned":True,"subtitle_style_id":style_id,"subtitle_retry_only":True}
+        job["result"]=result
+        atomic_json(path,job)
+        try:
+            from app.services.job_persistence_provider import save_job_response
+            save_job_response(job_id=job_id,job_type="full_ai",response_data=job,source_path=f"/api/video/wizard-video/retry-subtitle/{job_id}")
+        except Exception:
+            pass
+        return {
+            "ok":True,
+            "version":VERSION,
+            "job_id":job_id,
+            "status":"completed",
+            "stage":"subtitle_retry_completed",
+            "message":"字幕最终成片已重新生成；FAL 镜头未重复计费",
+            "video_url":subtitled,
+            "subtitled_video_url":subtitled,
+            "raw_video_url":raw_url,
+            "has_subtitles":True,
+            "subtitle_result":subtitle_result,
+            "workflow_bound":True,
         }
 
     @app.post("/api/video/integration/openclaw/harvest/{job_id}")

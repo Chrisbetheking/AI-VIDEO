@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react'
 import {
   apiGet,
   apiPost,
+  detailToText,
   ProjectDraft,
   WorkspaceTab,
 } from './aiVideoApi'
@@ -878,6 +879,12 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
   const selectedSetting = selectedSegment ? (voiceSettings[selectedSegment.id] || inferVoiceSetting(selectedSegment, Math.max(0, selectedSegment.index - 1), segments.length, scriptMode)) : null
   const selectedShot = shotPlan.find((shot) => shot.id === selectedShotId) || shotPlan[0]
   const videoUrl = extractVideoUrl(job)
+  const rawVideoUrl = String(
+    job?.raw_video_url ||
+    job?.raw_final_video_url ||
+    job?.result?.raw_final_video_url ||
+    '',
+  )
   const selectedSubtitleStyleBase = subtitleStyles.find((item) => item.id === subtitleStyleId) || subtitleStyles[0] || SUBTITLE_STYLE_FALLBACK[0]
   const selectedSubtitleStyle: SubtitleStyle = {
     ...selectedSubtitleStyleBase,
@@ -1230,8 +1237,9 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
 
     setSourceBusy('检查 OpenClaw 并启动真实采集')
     const sourcePayload = {
-      source: 'video_creation_wizard_v10_40_6',
+      source: 'video_creation_wizard_v10_40_8_3',
       platform: 'douyin',
+      account_profile: String(project.openclaw_account_profile || 'company_main'),
       mission_type: sourceMode === 'account' ? 'competitor' : 'comments',
       market,
       keyword: competitorSource,
@@ -1247,7 +1255,7 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
     }
 
     try {
-      const health = await apiGet('/api/video/integration/openclaw/status', 60000)
+      const health = await apiGet(`/api/video/integration/openclaw/status?account_profile=${encodeURIComponent(String(project.openclaw_account_profile || 'company_main'))}`, 60000)
       if (!health?.online) throw new Error('OpenClaw 离线，无法开始真实采集；系统不会再用“只保存账号”冒充采集成功。')
       const data = await apiPost('/api/video/integration/openclaw/start', sourcePayload, 240000)
       if (!data?.job_id) throw new Error('真实采集接口没有返回 job_id，已阻止假成功。')
@@ -1343,7 +1351,7 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
     try {
       const data = await apiGet('/api/video/wizard-video/latest-done?limit=100&strict_one_scene=1', 60000)
       const found = data?.job || data?.latest || null
-      const foundUrl = found?.video_url || found?.url || ''
+      const foundUrl = found?.subtitled_video_url || found?.final_video_url || found?.video_url || found?.url || ''
       if (foundUrl) {
         const recovered = {
           ok: true,
@@ -1352,6 +1360,9 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
           progress: 100,
           ...found,
           video_url: foundUrl,
+          subtitled_video_url: found?.subtitled_video_url || (found?.has_subtitles ? foundUrl : ''),
+          raw_video_url: found?.raw_video_url || found?.raw_final_video_url || found?.result?.raw_final_video_url || '',
+          has_subtitles: Boolean(found?.has_subtitles || found?.subtitled_video_url),
           recovery_mode: data?.recovery_mode || found?.recovery_mode || '',
           workflow_bound: Boolean(found?.workflow_bound ?? data?.workflow_bound),
         }
@@ -1361,9 +1372,11 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
         setError('')
         if (!silent) {
           noteButton(
-            recovered.workflow_bound
-              ? '已找回完整 full_ai 成片任务。'
-              : '已找回最新完成的 compose 成片；视频可预览，发布工作流需重新绑定原 full_ai 任务。',
+            recovered.has_subtitles
+              ? '已优先找回带字幕的 full_ai 最终成片。'
+              : recovered.workflow_bound
+                ? '已找回 full_ai 成片，但当前记录未标记字幕版。'
+                : '只找到无字幕 compose 原片；可预览，但应绑定 full_ai 父任务后仅重试字幕。',
           )
         }
         return recovered
@@ -1401,6 +1414,49 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
       setError('没有找到已完成且带 video_url 的 full_ai/compose 成片。请稍后重试，不会使用其他无关任务替代。')
     }
     return null
+  }
+
+  async function retrySubtitleOnly() {
+    if (!jobId || !String(jobId).startsWith('full_ai_')) {
+      setError('当前不是绑定的 full_ai 父任务，不能安全地只重试字幕。请先点“找回字幕最终成片”。')
+      return
+    }
+    setBusy('仅重试字幕烧录')
+    setError('')
+    try {
+      const data = await apiPost(
+        `/api/video/wizard-video/retry-subtitle/${encodeURIComponent(jobId)}`,
+        {
+          text: script,
+          subtitle_style_id: subtitleStyleId || 'douyin_pop',
+          subtitle_style: selectedSubtitleStyle,
+          keywords: keywords.map((item) => item.value),
+        },
+        600000,
+      )
+      if (!data?.subtitled_video_url && !data?.video_url) {
+        throw new Error('字幕引擎没有返回字幕最终成片地址。')
+      }
+      const recovered = {
+        ...job,
+        ...data,
+        status: 'completed',
+        stage: 'subtitle_retry_completed',
+        progress: 100,
+        video_url: data.subtitled_video_url || data.video_url,
+        subtitled_video_url: data.subtitled_video_url || data.video_url,
+        raw_video_url: data.raw_video_url || rawVideoUrl,
+        has_subtitles: true,
+      }
+      setJob(recovered)
+      setBusy('')
+      setError('')
+      noteButton('字幕烧录已单独重试成功，没有重新生成 FAL 镜头。')
+    } catch (err) {
+      setError(`仅重试字幕失败；原片和已生成镜头仍保留：${detailToText(err)}`)
+    } finally {
+      setBusy('')
+    }
   }
 
   function hardResetWizard() {
@@ -2683,8 +2739,28 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
                 void recoverLatestDoneVideo(false)
               }
             >
-              找回最新成片
+              找回字幕最终成片
             </button>
+
+            <button
+              className="aiw-muted"
+              type="button"
+              disabled={Boolean(busy) || !jobId || !String(jobId).startsWith('full_ai_')}
+              onClick={() => void retrySubtitleOnly()}
+            >
+              {busy === '仅重试字幕烧录' ? busy : '仅重试字幕烧录'}
+            </button>
+
+            {rawVideoUrl && (
+              <a
+                className="aiw-linkButton"
+                href={rawVideoUrl}
+                target="_blank"
+                rel="noreferrer"
+              >
+                查看无字幕原片
+              </a>
+            )}
           </div>
 
           {job?.subtitle_error && (
@@ -2767,7 +2843,7 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
               <span>字幕</span>
               <b>
                 {subtitleEnabled
-                  ? job?.subtitled_video_url
+                  ? (job?.subtitled_video_url || job?.has_subtitles)
                     ? '已烧录'
                     : job?.stage === 'subtitle_burn'
                       ? '烧录中'

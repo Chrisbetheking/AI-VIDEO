@@ -6102,3 +6102,10 @@ try:
 except Exception as exc:
     print("VIDEO_REVIEW_HUMAN_OVERRIDE_INSTALL_ERROR", repr(exc), flush=True)
 # AI_VIDEO_HUMAN_OVERRIDE_PROVIDER_END
+
+# ===== DOUYIN AUTH BRIDGE V10.40.8.3 =====
+from app.services.douyin_auth_bridge_v10_40_8_3 import (
+    install_douyin_auth_bridge_v10_40_8_3 as _install_douyin_auth_bridge_v10_40_8_3,
+)
+_install_douyin_auth_bridge_v10_40_8_3(app)
+# ===== /DOUYIN AUTH BRIDGE V10.40.8.3 =====

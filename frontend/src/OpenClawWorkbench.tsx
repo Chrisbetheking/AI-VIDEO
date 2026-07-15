@@ -77,7 +77,12 @@ export default function OpenClawWorkbench({ project, setProject, goTab }: Props)
   const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
+  const [authSession, setAuthSession] = useState<any>(null)
+  const [authToken, setAuthToken] = useState('')
+  const [authOpen, setAuthOpen] = useState(false)
+  const [authQrTick, setAuthQrTick] = useState(0)
   const polling = useRef<number | null>(null)
+  const authPolling = useRef<number | null>(null)
 
   const jobStatus = String(job?.status || job?.stage || '')
   const online = health?.online === true
@@ -159,7 +164,7 @@ export default function OpenClawWorkbench({ project, setProject, goTab }: Props)
     setBusy('检查 OpenClaw')
     setError('')
     try {
-      const data = await apiGet(`${API}/openclaw/status`, 60000)
+      const data = await apiGet(`${API}/openclaw/status?account_profile=${encodeURIComponent(accountProfile)}`, 60000)
       setHealth(data)
       return data
     } catch (err) {
@@ -213,6 +218,7 @@ export default function OpenClawWorkbench({ project, setProject, goTab }: Props)
     else void restoreLatest(accountProfile)
     return () => {
       if (polling.current) window.clearInterval(polling.current)
+      if (authPolling.current) window.clearInterval(authPolling.current)
     }
   }, [])
 
@@ -222,6 +228,11 @@ export default function OpenClawWorkbench({ project, setProject, goTab }: Props)
     setJobId(String(cached?.job_id || ''))
     setJob(cached || null)
     setProject({ ...project, openclaw_account_profile: accountProfile })
+    setAuthSession(null)
+    setAuthToken('')
+    setAuthOpen(false)
+    if (authPolling.current) window.clearInterval(authPolling.current)
+    void refreshHealth()
     void restoreLatest(accountProfile)
     void refreshRunHistory(accountProfile)
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -236,12 +247,82 @@ export default function OpenClawWorkbench({ project, setProject, goTab }: Props)
     }
   }, [jobId, jobStatus])
 
+  function stopAuthPolling() {
+    if (authPolling.current) window.clearInterval(authPolling.current)
+    authPolling.current = null
+  }
+
+  async function pollAuthSession(sessionId: string, token: string) {
+    try {
+      const data = await apiGet(
+        `${API}/douyin-auth/session/${encodeURIComponent(sessionId)}?token=${encodeURIComponent(token)}&t=${Date.now()}`,
+        60000,
+      )
+      setAuthSession(data)
+      setAuthQrTick((value) => value + 1)
+      if (data?.status === 'logged_in') {
+        stopAuthPolling()
+        setNotice(`“${data?.account_name || accountProfile}”扫码登录成功，Cookie 已按账号隔离保存。`)
+        await refreshHealth()
+      } else if (/failed|timeout|cancelled/i.test(String(data?.status || ''))) {
+        stopAuthPolling()
+        setError(data?.message || data?.error || '抖音登录失败，请重新发起。')
+      }
+    } catch (err) {
+      setError(`登录状态查询失败，二维码窗口仍保留：${detailToText(err)}`)
+    }
+  }
+
+  async function startDouyinLogin() {
+    setBusy('启动扫码登录')
+    setError('')
+    setNotice('')
+    try {
+      const data = await apiPost(
+        `${API}/douyin-auth/start`,
+        { account_profile: accountProfile },
+        90000,
+      )
+      const sessionId = String(data?.session_id || '')
+      const token = String(data?.access_token || '')
+      if (!sessionId || !token) throw new Error('登录桥接没有返回安全会话 ID 和凭证。')
+      setAuthSession(data)
+      setAuthToken(token)
+      setAuthOpen(true)
+      setAuthQrTick((value) => value + 1)
+      stopAuthPolling()
+      authPolling.current = window.setInterval(() => void pollAuthSession(sessionId, token), 2500)
+      await pollAuthSession(sessionId, token)
+    } catch (err) {
+      setError(detailToText(err))
+    } finally {
+      setBusy('')
+    }
+  }
+
+  async function cancelDouyinLogin() {
+    const sessionId = String(authSession?.session_id || '')
+    if (!sessionId || !authToken) {
+      setAuthOpen(false)
+      return
+    }
+    try {
+      await apiPost(
+        `${API}/douyin-auth/cancel/${encodeURIComponent(sessionId)}`,
+        { token: authToken },
+        60000,
+      )
+    } catch {}
+    stopAuthPolling()
+    setAuthOpen(false)
+  }
+
   async function start() {
     setBusy('启动真实采集')
     setError('')
     setNotice('')
     try {
-      const state = await apiGet(`${API}/openclaw/status`, 60000)
+      const state = await apiGet(`${API}/openclaw/status?account_profile=${encodeURIComponent(accountProfile)}`, 60000)
       setHealth(state)
       if (!state?.backend_online) throw new Error('OpenClaw 后端离线，无法开始采集。')
       if (!state?.collector_worker_online) throw new Error('Collector Worker 没有真实心跳，已阻止继续堆积 queued 任务。')
@@ -301,7 +382,7 @@ export default function OpenClawWorkbench({ project, setProject, goTab }: Props)
     setError('')
     setNotice('')
     try {
-      const state = await apiGet(`${API}/openclaw/status`, 60000)
+      const state = await apiGet(`${API}/openclaw/status?account_profile=${encodeURIComponent(accountProfile)}`, 60000)
       setHealth(state)
       if (!state?.collector_worker_online) throw new Error('Collector Worker 没有真实心跳，不能重新排队。')
       if (!state?.login_ok) throw new Error('请先完成当前隔离账号的抖音登录，再重新排队。')
@@ -392,7 +473,8 @@ export default function OpenClawWorkbench({ project, setProject, goTab }: Props)
           <label>
             登录准备
             <div className="aiw-loginState">
-              后端 {health?.backend_online ? '在线' : '离线'} · Collector {collectorWorkerOnline ? '在线' : '无心跳'} · Fallback {fallbackWorkerOnline ? '在线' : '离线'} · 抖音登录 {loginOk ? '有效' : '未登录'}
+              后端 {health?.backend_online ? '在线' : '离线'} · Collector {collectorWorkerOnline ? '在线' : '无心跳'} · Fallback {fallbackWorkerOnline ? '在线' : '离线'} · 当前账号登录 {loginOk ? '有效' : '未登录'}
+              {health?.auth?.logged_in_at_iso ? ` · ${health.auth.logged_in_at_iso}` : ''}
             </div>
           </label>
         </div>
@@ -417,6 +499,13 @@ export default function OpenClawWorkbench({ project, setProject, goTab }: Props)
       <div className="aiw-actions">
         <button className="aiw-muted" disabled={Boolean(busy)} onClick={refreshHealth}>{busy === '检查 OpenClaw' ? busy : '检查服务与登录状态'}</button>
         <button
+          className={loginOk ? 'aiw-muted' : 'aiw-primary'}
+          disabled={Boolean(busy) || !collectorWorkerOnline || loginOk}
+          onClick={startDouyinLogin}
+        >
+          {loginOk ? '当前账号已登录' : busy === '启动扫码登录' ? busy : '扫码登录当前账号'}
+        </button>
+        <button
           className="aiw-primary"
           disabled={Boolean(busy) || !backendOnline || !collectorWorkerOnline || !loginOk}
           onClick={start}
@@ -426,7 +515,7 @@ export default function OpenClawWorkbench({ project, setProject, goTab }: Props)
             : !collectorWorkerOnline
               ? 'Collector Worker 无心跳'
               : !loginOk
-                ? '先登录抖音账号'
+                ? '扫码登录后启动任务'
                 : '启动真实 OpenClaw 任务'}
         </button>
         <button className="aiw-muted" disabled={Boolean(busy) || !jobId} onClick={() => void poll()}>{jobId ? '刷新当前任务' : '没有任务 ID'}</button>
@@ -488,6 +577,39 @@ export default function OpenClawWorkbench({ project, setProject, goTab }: Props)
           {!leads.length && <div className="aiw-empty aiw-emptyTruth"><b>当前线索：0 条</b><span>{emptyLeadMessage}</span></div>}
         </div>
       </div>
+
+      {authOpen && authSession && (
+        <div className="aiw-authModalBackdrop" role="dialog" aria-modal="true">
+          <div className="aiw-authModal">
+            <div className="aiw-sectionTitleRow">
+              <div>
+                <h3>抖音扫码登录 · {authSession.account_name || accountProfile}</h3>
+                <span>{authSession.message || '正在准备二维码'}</span>
+              </div>
+              <button className="aiw-muted" onClick={() => void cancelDouyinLogin()}>关闭并取消</button>
+            </div>
+            <div className="aiw-authStatusLine">
+              <b>{authSession.status || 'starting'}</b>
+              <span>登录状态只写入当前隔离账号，不会与其他公司号混用。</span>
+            </div>
+            {authSession.qr_ready ? (
+              <img
+                className="aiw-authQrImage"
+                src={`${API}/douyin-auth/qr/${encodeURIComponent(String(authSession.session_id))}?token=${encodeURIComponent(authToken)}&t=${authQrTick}`}
+                alt="抖音登录二维码"
+                referrerPolicy="no-referrer"
+              />
+            ) : (
+              <div className="aiw-authQrWaiting">浏览器正在打开抖音登录页并生成二维码……</div>
+            )}
+            <div className="aiw-actions">
+              <button className="aiw-muted" onClick={() => setAuthQrTick((value) => value + 1)}>刷新二维码截图</button>
+              {authSession.status === 'logged_in' && <button className="aiw-primary" onClick={() => setAuthOpen(false)}>登录完成</button>}
+            </div>
+            <p className="aiw-authHint">使用手机抖音扫码确认。不要把此二维码截图转发给其他人；会话最多保留约 6 分钟。</p>
+          </div>
+        </div>
+      )}
 
       {notice && <div className="aiw-successPanel"><div><b>完成</b><span>{notice}</span></div></div>}
       {error && <div className="aiw-error">{error}</div>}
