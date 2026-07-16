@@ -317,16 +317,51 @@ def _apply_keyword_highlight(text: str, keywords: Optional[list[str]], style: di
             pass
     return value
 
+def _balanced_wrap_no_loss(value: str, max_chars: int) -> list[str]:
+    """Wrap a subtitle without ever discarding characters.
+
+    max_chars is a preferred per-line width, not a destructive hard limit.
+    The upstream director already emits short phrases, so at most two balanced
+    lines are enough for normal production cues.
+    """
+    if len(value) <= max_chars:
+        return [value]
+
+    # Prefer a natural semantic boundary near the visual midpoint.
+    midpoint = len(value) / 2.0
+    candidates: list[tuple[float, int]] = []
+    boundary_chars = set("，,。！？!?；;、的了和与但也还就再才是")
+    for pos in range(1, len(value)):
+        left = value[pos - 1]
+        right = value[pos] if pos < len(value) else ""
+        natural = left in boundary_chars or right in boundary_chars
+        # Keep both lines reasonably balanced and avoid 1-character tails.
+        if pos < 3 or len(value) - pos < 3:
+            continue
+        score = abs(pos - midpoint)
+        if natural:
+            score -= 2.0
+        if pos > max_chars:
+            score += (pos - max_chars) * 0.35
+        if len(value) - pos > max_chars:
+            score += (len(value) - pos - max_chars) * 0.35
+        candidates.append((score, pos))
+
+    split_at = min(candidates)[1] if candidates else max(1, len(value) // 2)
+    return [value[:split_at], value[split_at:]]
+
+
 def _ass_escape(text: str, max_chars: int = 9, keywords: Optional[list[str]] = None, style: Optional[dict[str, Any]] = None) -> str:
     style = style or {}
     value = _strip_subtitle_punctuation(str(text or ""))
     value = value.replace("{", "（").replace("}", "）")
     max_chars = max(7, min(int(max_chars or 9), 20))
-    max_lines = max(1, min(2, int(style.get("max_lines") or 1)))
-    if max_lines == 2 and len(value) > max_chars:
-        value = value[:max_chars] + r"\N" + value[max_chars:max_chars * 2]
-    elif len(value) > max_chars:
-        value = value[:max_chars]
+
+    # V10.40.8.3.2: max_chars 只控制换行，绝不能再切掉字幕尾部。
+    # 即使样式原来声明 max_lines=1，超长口播也自动安全换成两行。
+    wrapped = _balanced_wrap_no_loss(value, max_chars=max_chars)
+    value = r"\N".join(wrapped)
+
     value = _apply_keyword_highlight(value, keywords=keywords, style=style)
     return value
 
