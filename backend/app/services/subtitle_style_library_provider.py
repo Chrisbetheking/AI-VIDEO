@@ -356,8 +356,22 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         start = _ass_time(float(cue.get("start") or 0))
         end = _ass_time(float(cue.get("end") or 0))
         text = ass_prefix + _ass_escape(str(cue.get("text") or ""), max_chars=max_chars, keywords=keywords, style=style)
-        lines.append(f"Dialogue: 0,{start},{end},Default,0,0,0,{text}\n")
-    ass_path.write_text("".join(lines), encoding="utf-8")
+        # ASS Events 必须严格包含 10 个字段：
+        # Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text。
+        # 旧实现缺少 Effect/Text 前的占位字段，导致 \t / \fscx / \fscy 控制标签被当作普通文字烧进视频。
+        lines.append(f"Dialogue: 0,{start},{end},Default,,0,0,0,,{text}\n")
+
+    content = "".join(lines)
+    for line in content.splitlines():
+        if not line.startswith("Dialogue:"):
+            continue
+        fields = line.split(":", 1)[1].lstrip().split(",", 9)
+        if len(fields) != 10:
+            raise ValueError(f"ASS Dialogue 字段数量错误：{len(fields)}，必须为 10")
+        if not fields[9].strip():
+            raise ValueError("ASS Dialogue Text 字段为空")
+
+    ass_path.write_text(content, encoding="utf-8")
     return ass_path
 
 
