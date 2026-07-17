@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import VideoCreationWizard from './VideoCreationWizard'
 import DouyinAccountLibrary from './DouyinAccountLibrary'
 import OpenClawWorkbench from './OpenClawWorkbench'
@@ -10,7 +10,7 @@ import {
   ProjectDraft,
   WorkspaceTab,
 } from './aiVideoApi'
-import { API_BASE, apiGet, uploadAssets, deleteAsset, AssetItem } from './api'
+import { API_BASE, apiGet, uploadAssets, uploadAssetZip, getAssetZipImportJob, listAssetZipImportJobs, deleteAsset, AssetItem, AssetZipImportJob } from './api'
 
 const DRAFT_KEY = 'ai_video_engineering_project_draft_v16'
 const LEGACY_DRAFT_KEY = 'ai_video_engineering_project_draft_v15'
@@ -222,6 +222,9 @@ function AssetLibraryPanel({ project, setProject, goTab }: { project: ProjectDra
   const [folder, setFolder] = useState<AssetFolderKey>('all')
   const [uploadFolder, setUploadFolder] = useState<'self' | 'provided' | 'image' | 'collected' | 'ai'>('self')
   const [query, setQuery] = useState('')
+  const [zipJob, setZipJob] = useState<AssetZipImportJob | null>(null)
+  const [zipUploading, setZipUploading] = useState(false)
+  const zipFinishedRef = useRef('')
 
   const selectedAssets = assets.filter((asset) => selectedIds.includes(asset.id))
   const filtered = assets.filter((asset) => {
@@ -263,6 +266,55 @@ function AssetLibraryPanel({ project, setProject, goTab }: { project: ProjectDra
       setBusy('')
     }
   }
+
+  async function handleZipUpload(file: File | null) {
+    if (!file) return
+    setZipUploading(true)
+    setError('')
+    try {
+      const job = await uploadAssetZip(file, uploadFolder, 'content')
+      zipFinishedRef.current = ''
+      setZipJob(job)
+    } catch (err: any) {
+      setError(err?.message || String(err))
+    } finally {
+      setZipUploading(false)
+    }
+  }
+
+  useEffect(() => {
+    listAssetZipImportJobs(1)
+      .then((result) => {
+        const latest = Array.isArray(result?.jobs) ? result.jobs[0] : null
+        if (latest) setZipJob(latest)
+      })
+      .catch(() => null)
+  }, [])
+
+  useEffect(() => {
+    const jobId = zipJob?.job_id
+    if (!jobId || ['done', 'failed', 'cancelled'].includes(String(zipJob?.status || '').toLowerCase())) return
+    let cancelled = false
+    const poll = async () => {
+      try {
+        const next = await getAssetZipImportJob(jobId)
+        if (cancelled) return
+        setZipJob(next)
+        if (next.status === 'done' && zipFinishedRef.current !== next.job_id) {
+          zipFinishedRef.current = next.job_id
+          await refresh()
+        }
+      } catch (err: any) {
+        if (!cancelled) setError(err?.message || String(err))
+      }
+    }
+    void poll()
+    const timer = window.setInterval(() => void poll(), 1600)
+    return () => {
+      cancelled = true
+      window.clearInterval(timer)
+    }
+  }, [zipJob?.job_id, zipJob?.status])
 
   async function removeAsset(asset: AssetItem) {
     if (!window.confirm(`确认删除素材「${asset.original_name || asset.filename}」？`)) return
@@ -325,12 +377,41 @@ function AssetLibraryPanel({ project, setProject, goTab }: { project: ProjectDra
 
       <div className="aiw-actions">
         <label className="aiw-primary aiw-uploadButton">
-          {busy === '上传素材' ? '上传中...' : '上传到 R2 素材库'}
+          {busy === '上传素材' ? '上传中...' : '上传图片 / 视频'}
           <input type="file" multiple accept="image/*,video/*" onChange={(e) => { handleUpload(e.target.files); e.currentTarget.value = '' }} />
+        </label>
+        <label className="aiw-muted aiw-uploadButton aiw-zipUploadButton">
+          {zipUploading ? '正在上传 ZIP...' : zipJob && !['done', 'failed', 'cancelled'].includes(String(zipJob.status).toLowerCase()) ? `ZIP 导入 ${Math.round(Number(zipJob.progress || 0))}%` : '上传 ZIP 自动解压'}
+          <input type="file" accept=".zip,application/zip,application/x-zip-compressed" disabled={zipUploading || Boolean(zipJob && !['done', 'failed', 'cancelled'].includes(String(zipJob.status).toLowerCase()))} onChange={(e) => { handleZipUpload(e.target.files?.[0] || null); e.currentTarget.value = '' }} />
         </label>
         <button className="aiw-muted" onClick={refresh} disabled={!!busy}>{busy === '加载素材' ? '刷新中...' : '刷新素材'}</button>
         <button className="aiw-purple" onClick={() => goTab('pureai')} disabled={!selectedIds.length}>带入视频创作</button>
       </div>
+
+      {zipJob && <div className={`aiw-zipImportCard ${String(zipJob.status || '').toLowerCase()}`}>
+        <div className="aiw-zipImportTop">
+          <div>
+            <strong>{zipJob.zip_name || '素材压缩包'}</strong>
+            <span>{zipJob.message || '等待导入'}{zipJob.current_file ? ` · ${zipJob.current_file}` : ''}</span>
+          </div>
+          <b>{Math.max(0, Math.min(100, Math.round(Number(zipJob.progress || 0))))}%</b>
+        </div>
+        <div className="aiw-progressTrack"><i style={{ width: `${Math.max(0, Math.min(100, Number(zipJob.progress || 0)))}%` }} /></div>
+        <div className="aiw-zipStats">
+          <span><b>{zipJob.summary?.imported || 0}</b>成功导入</span>
+          <span><b>{zipJob.summary?.duplicates || 0}</b>重复跳过</span>
+          <span><b>{zipJob.summary?.ignored || 0}</b>格式忽略</span>
+          <span><b>{zipJob.summary?.failed || 0}</b>处理失败</span>
+          <span><b>{zipJob.summary?.images || 0}</b>图片</span>
+          <span><b>{zipJob.summary?.videos || 0}</b>视频</span>
+        </div>
+        {zipJob.error && <div className="aiw-error">{zipJob.error}</div>}
+        {zipJob.failures?.length > 0 && <details className="aiw-zipFailures"><summary>查看失败文件（{zipJob.failures.length}）</summary>{zipJob.failures.slice(0, 50).map((item, index) => <p key={`${item.file}-${index}`}><b>{item.file}</b><span>{item.reason}</span></p>)}</details>}
+        <div className="aiw-zipImportFoot">
+          <span>ZIP 仅作临时文件；导入结束后自动删除。素材按 SHA256 去重并存入当前文件夹。</span>
+          {['done', 'failed', 'cancelled'].includes(String(zipJob.status || '').toLowerCase()) && <button className="aiw-muted" onClick={() => setZipJob(null)}>关闭报告</button>}
+        </div>
+      </div>}
 
       <div className="aiw-metrics">
         <div><b>{assets.length}</b><span>素材总数</span></div>

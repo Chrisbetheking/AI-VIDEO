@@ -2735,79 +2735,137 @@
 }
 /* ===== /V10.40.8.1 state truth hotfix ===== */
 
-/* V10.40.8.3：页面内抖音扫码登录，不改变现有工作台基准布局。 */
-.aiw-authModalBackdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 9999;
+
+/* ===== V10.40.8.4 ZIP 素材批量导入 ===== */
+.aiw-zipUploadButton {
+  border: 1px solid #c4b5fd;
+  background: #f5f3ff;
+  color: #6d28d9;
+}
+
+.aiw-zipUploadButton:has(input:disabled) {
+  opacity: 0.72;
+  cursor: progress;
+}
+
+.aiw-zipImportCard {
+  margin: 16px 0;
+  padding: 16px;
+  border: 1px solid #ddd6fe;
+  border-radius: 18px;
+  background: linear-gradient(135deg, #faf7ff, #ffffff);
+  box-shadow: 0 14px 36px rgba(76, 29, 149, 0.07);
+}
+
+.aiw-zipImportCard.done {
+  border-color: #bbf7d0;
+  background: linear-gradient(135deg, #f0fdf4, #ffffff);
+}
+
+.aiw-zipImportCard.failed {
+  border-color: #fecaca;
+  background: linear-gradient(135deg, #fff1f2, #ffffff);
+}
+
+.aiw-zipImportTop,
+.aiw-zipImportFoot {
   display: flex;
   align-items: center;
-  justify-content: center;
-  padding: 24px;
-  background: rgba(15, 23, 42, 0.62);
-  backdrop-filter: blur(6px);
-}
-
-.aiw-authModal {
-  width: min(680px, 94vw);
-  max-height: 92vh;
-  overflow: auto;
-  border: 1px solid rgba(124, 58, 237, 0.2);
-  border-radius: 24px;
-  padding: 22px;
-  background: #fff;
-  box-shadow: 0 30px 90px rgba(15, 23, 42, 0.28);
-}
-
-.aiw-authStatusLine {
-  display: flex;
   justify-content: space-between;
-  gap: 16px;
-  margin: 16px 0;
-  padding: 12px 14px;
-  border-radius: 14px;
-  background: #f7f2ff;
-  color: #5b21b6;
+  gap: 14px;
 }
 
-.aiw-authStatusLine span {
-  color: #64748b;
-  text-align: right;
-}
-
-.aiw-authQrImage {
-  display: block;
-  width: min(520px, 100%);
-  max-height: 580px;
-  object-fit: contain;
-  margin: 0 auto 16px;
-  border: 1px solid #e2e8f0;
-  border-radius: 18px;
-  background: #fff;
-}
-
-.aiw-authQrWaiting {
+.aiw-zipImportTop > div {
+  min-width: 0;
   display: grid;
-  min-height: 300px;
-  place-items: center;
-  margin-bottom: 16px;
-  border: 1px dashed #c4b5fd;
-  border-radius: 18px;
-  background: #faf8ff;
-  color: #6d28d9;
-  font-weight: 700;
+  gap: 5px;
 }
 
-.aiw-authHint {
-  margin: 12px 0 0;
-  color: #64748b;
+.aiw-zipImportTop strong {
+  color: #24133f;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.aiw-zipImportTop span,
+.aiw-zipImportFoot span {
+  color: #6b7280;
   font-size: 13px;
-  line-height: 1.7;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
 }
 
-@media (max-width: 720px) {
-  .aiw-authModalBackdrop { padding: 10px; }
-  .aiw-authModal { padding: 16px; border-radius: 18px; }
-  .aiw-authStatusLine { flex-direction: column; }
-  .aiw-authStatusLine span { text-align: left; }
+.aiw-zipImportTop > b {
+  flex: 0 0 auto;
+  color: #7c3aed;
+  font-size: 22px;
 }
+
+.aiw-zipStats {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 9px;
+  margin-top: 14px;
+}
+
+.aiw-zipStats span {
+  display: grid;
+  gap: 3px;
+  min-height: 62px;
+  place-content: center;
+  text-align: center;
+  border: 1px solid #ede9fe;
+  border-radius: 13px;
+  background: rgba(255, 255, 255, 0.82);
+  color: #7b8192;
+  font-size: 12px;
+}
+
+.aiw-zipStats b {
+  color: #6d28d9;
+  font-size: 19px;
+}
+
+.aiw-zipFailures {
+  margin-top: 12px;
+  border-radius: 13px;
+  background: #fff7ed;
+  padding: 11px 13px;
+  color: #9a3412;
+}
+
+.aiw-zipFailures summary {
+  cursor: pointer;
+  font-weight: 900;
+}
+
+.aiw-zipFailures p {
+  display: grid;
+  grid-template-columns: minmax(120px, 0.7fr) minmax(180px, 1.3fr);
+  gap: 12px;
+  margin: 9px 0 0;
+  padding-top: 9px;
+  border-top: 1px dashed #fed7aa;
+  font-size: 12px;
+}
+
+.aiw-zipFailures span {
+  overflow-wrap: anywhere;
+}
+
+.aiw-zipImportFoot {
+  margin-top: 12px;
+}
+
+@media (max-width: 1100px) {
+  .aiw-zipStats { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+
+@media (max-width: 680px) {
+  .aiw-zipImportTop,
+  .aiw-zipImportFoot { align-items: stretch; flex-direction: column; }
+  .aiw-zipStats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .aiw-zipFailures p { grid-template-columns: 1fr; }
+}
+/* ===== /V10.40.8.4 ZIP 素材批量导入 ===== */

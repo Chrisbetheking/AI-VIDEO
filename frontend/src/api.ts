@@ -92,6 +92,60 @@ export async function uploadAssets(files: FileList, folder = 'self'): Promise<As
   return safeFetch<AssetItem[]>(url, { method: 'POST', body: form }, 180000)
 }
 
+export interface AssetZipImportSummary {
+  imported: number
+  duplicates: number
+  ignored: number
+  failed: number
+  images: number
+  videos: number
+  total_media: number
+}
+
+export interface AssetZipImportFailure {
+  file: string
+  reason: string
+}
+
+export interface AssetZipImportJob {
+  job_id: string
+  version: string
+  status: 'queued' | 'running' | 'done' | 'failed' | 'cancelled' | string
+  stage: string
+  progress: number
+  message: string
+  current_file?: string
+  zip_name: string
+  zip_size_bytes: number
+  folder: string
+  usage_role: string
+  processed?: number
+  summary: AssetZipImportSummary
+  failures: AssetZipImportFailure[]
+  imported_assets: AssetItem[]
+  error?: string
+  created_at: string
+  updated_at: string
+  finished_at?: string
+}
+
+export async function uploadAssetZip(file: File, folder = 'self', usageRole = 'content'): Promise<AssetZipImportJob> {
+  const form = new FormData()
+  form.append('file', file)
+  form.append('folder', folder)
+  form.append('usage_role', usageRole)
+  const url = `${API_BASE}/api/assets/import-zip`
+  return safeFetch<AssetZipImportJob>(url, { method: 'POST', body: form }, 900000)
+}
+
+export async function getAssetZipImportJob(jobId: string): Promise<AssetZipImportJob> {
+  return apiGet<AssetZipImportJob>(`/api/assets/import-zip/jobs/${encodeURIComponent(jobId)}`)
+}
+
+export async function listAssetZipImportJobs(limit = 10): Promise<{ok: boolean; version: string; jobs: AssetZipImportJob[]; total: number}> {
+  return apiGet(`/api/assets/import-zip/jobs?limit=${Math.max(1, Math.min(limit, 100))}`)
+}
+
 export async function deleteAsset(assetId: string): Promise<{ok: boolean; deleted: string[]; warnings: string[]}> {
   const url = `${API_BASE}/api/assets/${encodeURIComponent(assetId)}`
   return safeFetch<{ok: boolean; deleted: string[]; warnings: string[]}>(url, { method: 'DELETE' })

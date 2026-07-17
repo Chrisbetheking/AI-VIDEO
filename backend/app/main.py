@@ -6109,3 +6109,12 @@ from app.services.douyin_auth_bridge_v10_40_8_3 import (
 )
 _install_douyin_auth_bridge_v10_40_8_3(app)
 # ===== /DOUYIN AUTH BRIDGE V10.40.8.3 =====
+
+# ===== V10.40.8.4 ZIP ASSET IMPORT =====
+try:
+    from app.services.asset_zip_import_v10_40_8_4 import install_asset_zip_import
+    install_asset_zip_import(app, get_settings)
+except Exception as _asset_zip_import_exc:
+    print('ASSET_ZIP_IMPORT_V10_40_8_4_LOAD_FAILED', _asset_zip_import_exc)
+# ===== /V10.40.8.4 ZIP ASSET IMPORT =====
+
