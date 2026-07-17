@@ -16,14 +16,15 @@ from typing import Any, Callable, Optional
 from urllib.parse import quote
 
 from fastapi import BackgroundTasks, Depends, File, Form, HTTPException, Request, UploadFile
+from fastapi.responses import Response
 
 from app.services.assets_store import read_assets, upsert_asset
 from app.services.memory import MemoryStore
 from app.services.storage import maybe_upload_to_r2
 from app.services.video import IMAGE_EXTS, VIDEO_EXTS
 
-VERSION = "10.40.8.4"
-INSTALL_MARKER = "asset_zip_import_v10_40_8_4"
+VERSION = "10.40.8.4.1"
+INSTALL_MARKER = "asset_zip_import_v10_40_8_4_1_direct_upload"
 TERMINAL_STATUSES = {"done", "failed", "cancelled"}
 ALLOWED_EXTS = IMAGE_EXTS | VIDEO_EXTS
 DEFAULT_MAX_ZIP_MB = 1024
@@ -46,6 +47,67 @@ def _env_int(name: str, default: int, minimum: int, maximum: int) -> int:
         value = default
     return max(minimum, min(maximum, value))
 
+
+
+DEFAULT_DIRECT_UPLOAD_ORIGINS = {
+    "https://ai-video-s5v.pages.dev",
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+}
+
+
+def _direct_upload_origins() -> set[str]:
+    raw = os.getenv("ASSET_ZIP_CORS_ORIGINS", "").strip()
+    if not raw:
+        return set(DEFAULT_DIRECT_UPLOAD_ORIGINS)
+    return {
+        item.strip().rstrip("/")
+        for item in raw.split(",")
+        if item.strip()
+    }
+
+
+def _install_direct_upload_cors(app: Any) -> None:
+    """Expose only the ZIP-import route to the Pages frontend.
+
+    ZIP files bypass Cloudflare Pages and upload directly to the ECS HTTPS
+    endpoint. Other APIs continue to use the existing same-origin /api proxy.
+    """
+    marker = "asset_zip_direct_upload_cors_v10_40_8_4_1"
+    state = getattr(app, "state", None)
+    if state is not None and getattr(state, marker, False):
+        return
+
+    allowed_origins = _direct_upload_origins()
+
+    @app.middleware("http")
+    async def _asset_zip_direct_upload_cors(request: Request, call_next: Any) -> Any:
+        path = str(request.url.path or "")
+        if not path.startswith("/api/assets/import-zip"):
+            return await call_next(request)
+
+        origin = str(request.headers.get("origin") or "").rstrip("/")
+        allow_origin = ""
+        if "*" in allowed_origins:
+            allow_origin = "*"
+        elif origin and origin in allowed_origins:
+            allow_origin = origin
+
+        if request.method.upper() == "OPTIONS":
+            response: Any = Response(status_code=204)
+        else:
+            response = await call_next(request)
+
+        if allow_origin:
+            response.headers["Access-Control-Allow-Origin"] = allow_origin
+            response.headers["Vary"] = "Origin"
+            response.headers["Access-Control-Allow-Methods"] = "GET,POST,OPTIONS"
+            response.headers["Access-Control-Allow-Headers"] = "Accept,Content-Type,Origin"
+            response.headers["Access-Control-Max-Age"] = "86400"
+        return response
+
+    if state is not None:
+        setattr(state, marker, True)
 
 def _jobs_path(settings: Any) -> Path:
     path = settings.data_dir / "asset_zip_import_jobs.json"
@@ -608,6 +670,7 @@ async def _save_uploaded_zip(file: UploadFile, destination: Path, max_bytes: int
 
 def install_asset_zip_import(app: Any, get_settings: Callable[..., Any]) -> None:
     global _INSTALLED
+    _install_direct_upload_cors(app)
     if _INSTALLED:
         return
     if any(getattr(route, "path", "") == "/api/assets/import-zip/health" for route in getattr(app, "routes", [])):
@@ -625,6 +688,10 @@ def install_asset_zip_import(app: Any, get_settings: Callable[..., Any]) -> None
             "background_jobs": True,
             "safe_extract": True,
             "sha256_dedup": True,
+            "direct_upload": True,
+            "direct_upload_cors": True,
+            "direct_upload_origins": sorted(_direct_upload_origins()),
+            "streaming_upload": True,
         }
 
     @app.post("/api/assets/import-zip")

@@ -10,7 +10,7 @@ import {
   ProjectDraft,
   WorkspaceTab,
 } from './aiVideoApi'
-import { API_BASE, apiGet, uploadAssets, uploadAssetZip, getAssetZipImportJob, listAssetZipImportJobs, deleteAsset, AssetItem, AssetZipImportJob } from './api'
+import { API_BASE, ZIP_UPLOAD_API_BASE, apiGet, uploadAssets, uploadAssetZip, getAssetZipImportJob, listAssetZipImportJobs, deleteAsset, AssetItem, AssetZipImportJob } from './api'
 
 const DRAFT_KEY = 'ai_video_engineering_project_draft_v16'
 const LEGACY_DRAFT_KEY = 'ai_video_engineering_project_draft_v15'
@@ -224,6 +224,7 @@ function AssetLibraryPanel({ project, setProject, goTab }: { project: ProjectDra
   const [query, setQuery] = useState('')
   const [zipJob, setZipJob] = useState<AssetZipImportJob | null>(null)
   const [zipUploading, setZipUploading] = useState(false)
+  const [zipUploadProgress, setZipUploadProgress] = useState(0)
   const zipFinishedRef = useRef('')
 
   const selectedAssets = assets.filter((asset) => selectedIds.includes(asset.id))
@@ -270,15 +271,19 @@ function AssetLibraryPanel({ project, setProject, goTab }: { project: ProjectDra
   async function handleZipUpload(file: File | null) {
     if (!file) return
     setZipUploading(true)
+    setZipUploadProgress(0)
     setError('')
     try {
-      const job = await uploadAssetZip(file, uploadFolder, 'content')
+      const job = await uploadAssetZip(file, uploadFolder, 'content', (progress) => {
+        setZipUploadProgress(progress.percent)
+      })
       zipFinishedRef.current = ''
       setZipJob(job)
     } catch (err: any) {
       setError(err?.message || String(err))
     } finally {
       setZipUploading(false)
+      setZipUploadProgress(0)
     }
   }
 
@@ -371,7 +376,7 @@ function AssetLibraryPanel({ project, setProject, goTab }: { project: ProjectDra
         </label>
         <label>
           连接状态
-          <input value={`${API_BASE} · ${busy || 'ready'}`} readOnly />
+          <input value={`${API_BASE || 'Pages 同源 API'} · ZIP 直传 ${ZIP_UPLOAD_API_BASE} · ${busy || 'ready'}`} readOnly />
         </label>
       </div>
 
@@ -381,7 +386,7 @@ function AssetLibraryPanel({ project, setProject, goTab }: { project: ProjectDra
           <input type="file" multiple accept="image/*,video/*" onChange={(e) => { handleUpload(e.target.files); e.currentTarget.value = '' }} />
         </label>
         <label className="aiw-muted aiw-uploadButton aiw-zipUploadButton">
-          {zipUploading ? '正在上传 ZIP...' : zipJob && !['done', 'failed', 'cancelled'].includes(String(zipJob.status).toLowerCase()) ? `ZIP 导入 ${Math.round(Number(zipJob.progress || 0))}%` : '上传 ZIP 自动解压'}
+          {zipUploading ? `ZIP 直传 ${zipUploadProgress}%` : zipJob && !['done', 'failed', 'cancelled'].includes(String(zipJob.status).toLowerCase()) ? `ZIP 导入 ${Math.round(Number(zipJob.progress || 0))}%` : '上传 ZIP 自动解压'}
           <input type="file" accept=".zip,application/zip,application/x-zip-compressed" disabled={zipUploading || Boolean(zipJob && !['done', 'failed', 'cancelled'].includes(String(zipJob.status).toLowerCase()))} onChange={(e) => { handleZipUpload(e.target.files?.[0] || null); e.currentTarget.value = '' }} />
         </label>
         <button className="aiw-muted" onClick={refresh} disabled={!!busy}>{busy === '加载素材' ? '刷新中...' : '刷新素材'}</button>
@@ -408,7 +413,7 @@ function AssetLibraryPanel({ project, setProject, goTab }: { project: ProjectDra
         {zipJob.error && <div className="aiw-error">{zipJob.error}</div>}
         {zipJob.failures?.length > 0 && <details className="aiw-zipFailures"><summary>查看失败文件（{zipJob.failures.length}）</summary>{zipJob.failures.slice(0, 50).map((item, index) => <p key={`${item.file}-${index}`}><b>{item.file}</b><span>{item.reason}</span></p>)}</details>}
         <div className="aiw-zipImportFoot">
-          <span>ZIP 仅作临时文件；导入结束后自动删除。素材按 SHA256 去重并存入当前文件夹。</span>
+          <span>ZIP 经 ECS HTTPS 直传，绕过 Cloudflare 请求体限制；导入结束后自动删除临时文件，素材按 SHA256 去重。</span>
           {['done', 'failed', 'cancelled'].includes(String(zipJob.status || '').toLowerCase()) && <button className="aiw-muted" onClick={() => setZipJob(null)}>关闭报告</button>}
         </div>
       </div>}

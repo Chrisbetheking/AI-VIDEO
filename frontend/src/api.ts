@@ -6,6 +6,11 @@ export const API_BASE = isLocal
   ? (envApiBase || 'http://localhost:8000')
   : ''
 
+const envZipUploadBase = (import.meta.env.VITE_ZIP_UPLOAD_API_BASE || '').replace(/\/$/, '')
+export const ZIP_UPLOAD_API_BASE = isLocal
+  ? API_BASE
+  : (envZipUploadBase || 'https://ai-video.47-76-143-158.sslip.io')
+
 function withTimeout(ms = 90000) {
   const controller = new AbortController()
   const timer = window.setTimeout(() => controller.abort(), ms)
@@ -129,13 +134,74 @@ export interface AssetZipImportJob {
   finished_at?: string
 }
 
-export async function uploadAssetZip(file: File, folder = 'self', usageRole = 'content'): Promise<AssetZipImportJob> {
+export interface AssetZipUploadProgress {
+  loaded: number
+  total: number
+  percent: number
+}
+
+function parseZipUploadError(xhr: XMLHttpRequest, url: string): string {
+  const responseText = String(xhr.responseText || '')
+  let detail = ''
+  try {
+    const data = JSON.parse(responseText)
+    detail = formatApiDetail(data?.detail ?? data)
+  } catch {
+    // Do not dump Cloudflare/Nginx HTML into the UI.
+    if (responseText && !/<html[\s>]/i.test(responseText)) detail = responseText.slice(0, 500)
+  }
+
+  if (xhr.status === 413) {
+    return `ZIP 压缩包超过上传通道允许大小。当前请求已经走 ECS 直传；请检查 ECS Nginx 的 client_max_body_size。`
+  }
+  if (xhr.status === 0) {
+    return `ZIP 直传连接失败：${url}\n请检查 ECS HTTPS、CORS 和 Nginx。`
+  }
+  return `${detail || `${xhr.status} ${xhr.statusText}`}\nZIP 直传地址：${url}`
+}
+
+export async function uploadAssetZip(
+  file: File,
+  folder = 'self',
+  usageRole = 'content',
+  onProgress?: (progress: AssetZipUploadProgress) => void,
+): Promise<AssetZipImportJob> {
   const form = new FormData()
   form.append('file', file)
   form.append('folder', folder)
   form.append('usage_role', usageRole)
-  const url = `${API_BASE}/api/assets/import-zip`
-  return safeFetch<AssetZipImportJob>(url, { method: 'POST', body: form }, 900000)
+  const url = `${ZIP_UPLOAD_API_BASE}/api/assets/import-zip`
+
+  return new Promise<AssetZipImportJob>((resolve, reject) => {
+    const xhr = new XMLHttpRequest()
+    xhr.open('POST', url, true)
+    xhr.timeout = 0
+
+    xhr.upload.onprogress = (event) => {
+      const total = event.lengthComputable ? event.total : file.size
+      const loaded = Math.min(event.loaded, total || event.loaded)
+      const percent = total > 0 ? Math.max(0, Math.min(100, Math.round((loaded / total) * 100))) : 0
+      onProgress?.({ loaded, total, percent })
+    }
+
+    xhr.onerror = () => reject(new Error(parseZipUploadError(xhr, url)))
+    xhr.onabort = () => reject(new Error('ZIP 上传已取消'))
+    xhr.onload = () => {
+      if (xhr.status < 200 || xhr.status >= 300) {
+        reject(new Error(parseZipUploadError(xhr, url)))
+        return
+      }
+      try {
+        const data = JSON.parse(String(xhr.responseText || '{}'))
+        onProgress?.({ loaded: file.size, total: file.size, percent: 100 })
+        resolve(data as AssetZipImportJob)
+      } catch {
+        reject(new Error(`ECS ZIP 直传接口没有返回 JSON。\nZIP 直传地址：${url}`))
+      }
+    }
+
+    xhr.send(form)
+  })
 }
 
 export async function getAssetZipImportJob(jobId: string): Promise<AssetZipImportJob> {
