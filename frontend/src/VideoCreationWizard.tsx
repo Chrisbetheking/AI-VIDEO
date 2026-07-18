@@ -122,21 +122,47 @@ type ContentBrainCard = {
   usedCount?: number
 }
 
-const WIZARD_DRAFT_KEY = 'ai_video_wizard_draft_v10_13'
-const CLEAN_ONCE_KEY = 'ai_video_wizard_v10_10_cleaned_once'
+const WIZARD_DRAFT_KEY = 'ai_video_wizard_draft_v10_40_8_5_1'
+const LEGACY_WIZARD_DRAFT_KEYS = [
+  'ai_video_wizard_draft_v10_13',
+  'ai_video_wizard_draft_v10_12',
+  'ai_video_wizard_draft_v10_10',
+  'ai_video_wizard_draft_v10_9',
+  'ai_video_wizard_draft_v10_8',
+  'ai_video_wizard_draft_v10_7',
+  'ai_video_wizard_draft_v10_6',
+  'ai_video_wizard_draft_v10_5',
+]
+const CLEAN_ONCE_KEY = 'ai_video_wizard_v10_40_8_5_1_explicit_reset'
 
+function parseWizardDraft(raw: string | null): Record<string, any> {
+  if (!raw) return {}
+  try {
+    const parsed = JSON.parse(raw)
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {}
+  } catch {
+    return {}
+  }
+}
 
 function loadWizardDraft(): Record<string, any> {
   try {
-    clearOldWizardDrafts()
-    const raw = window.localStorage.getItem(WIZARD_DRAFT_KEY)
-    const parsed = raw ? JSON.parse(raw) : {}
-    if (!parsed || typeof parsed !== 'object') return {}
-    if (draftLooksPolluted(parsed)) {
-      window.localStorage.removeItem(WIZARD_DRAFT_KEY)
-      return {}
+    const current = parseWizardDraft(window.localStorage.getItem(WIZARD_DRAFT_KEY))
+    if (Object.keys(current).length) return current
+
+    for (const key of LEGACY_WIZARD_DRAFT_KEYS) {
+      const legacy = parseWizardDraft(window.localStorage.getItem(key))
+      if (!Object.keys(legacy).length) continue
+      const migrated = {
+        ...legacy,
+        draftVersion: '10.40.8.5.1',
+        migratedFrom: key,
+        updatedAt: Date.now(),
+      }
+      window.localStorage.setItem(WIZARD_DRAFT_KEY, JSON.stringify(migrated))
+      return migrated
     }
-    return parsed
+    return {}
   } catch {
     return {}
   }
@@ -144,34 +170,35 @@ function loadWizardDraft(): Record<string, any> {
 
 function saveWizardDraft(value: Record<string, any>) {
   try {
-    window.localStorage.setItem(WIZARD_DRAFT_KEY, JSON.stringify(value))
+    const previous = parseWizardDraft(window.localStorage.getItem(WIZARD_DRAFT_KEY))
+    const merged = {
+      ...previous,
+      ...value,
+      draftVersion: '10.40.8.5.1',
+      updatedAt: Date.now(),
+    }
+    window.localStorage.setItem(WIZARD_DRAFT_KEY, JSON.stringify(merged))
   } catch {}
 }
-
 
 function forceCleanEntryOnce() {
   try {
     const params = new URLSearchParams(window.location.search || '')
-    const force = params.get('force') || ''
-    const reset = params.get('reset') === '1' || params.get('clean') === '1'
-    if (!reset && !force.includes('v10-10')) return false
-    if (!reset && window.localStorage.getItem(CLEAN_ONCE_KEY) === '1') return false
-    ;[
-      'ai_video_wizard_draft_v10_5', 'ai_video_wizard_draft_v10_6', 'ai_video_wizard_draft_v10_7',
-      'ai_video_wizard_draft_v10_8', 'ai_video_wizard_draft_v10_9', 'ai_video_wizard_draft_v10_10', 'ai_video_wizard_draft_v10_12', WIZARD_DRAFT_KEY,
-      'ai_video_engineering_project_draft_v16', 'ai_video_engineering_project_draft_v15',
-    ].forEach((key) => window.localStorage.removeItem(key))
-    window.localStorage.setItem(CLEAN_ONCE_KEY, '1')
+    const explicitReset = params.get('reset') === 'wizard' || params.get('clean') === 'wizard'
+    if (!explicitReset) return false
+    window.localStorage.removeItem(WIZARD_DRAFT_KEY)
+    LEGACY_WIZARD_DRAFT_KEYS.forEach((key) => window.localStorage.removeItem(key))
+    window.localStorage.setItem(CLEAN_ONCE_KEY, String(Date.now()))
     return true
-  } catch { return false }
+  } catch {
+    return false
+  }
 }
 
 function clearOldWizardDrafts() {
   try {
-    forceCleanEntryOnce()
-    Object.keys(window.localStorage).forEach((key) => {
-      if (key.startsWith('ai_video_wizard_draft_') && key !== WIZARD_DRAFT_KEY) window.localStorage.removeItem(key)
-    })
+    if (!window.localStorage.getItem(WIZARD_DRAFT_KEY)) return
+    LEGACY_WIZARD_DRAFT_KEYS.forEach((key) => window.localStorage.removeItem(key))
   } catch {}
 }
 
@@ -816,16 +843,16 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
   const [existingVoiceMode, setExistingVoiceMode] = useState<ExistingVoiceMode>(String(initialDraft.existingVoiceMode || project.existing_voice_mode || 'tts_with_ambient') as ExistingVoiceMode)
   const [outputRatio, setOutputRatio] = useState<OutputRatio>(String(initialDraft.outputRatio || project.output_ratio || '9:16') as OutputRatio)
   const [editPace, setEditPace] = useState<EditPace>(String(initialDraft.editPace || project.edit_pace || 'normal') as EditPace)
-  const [topic, setTopic] = useState(String(project.topic || initialDraft.topic || DEFAULT_TOPIC))
-  const [market, setMarket] = useState(String(project.market || initialDraft.market || DEFAULT_MARKET))
-  const [city, setCity] = useState(String(project.city || initialDraft.city || inferCity(`${project.topic || initialDraft.topic} ${project.script || initialDraft.script}`)))
-  const [contentType, setContentType] = useState<ContentType>(String(project.contentType || initialDraft.contentType || 'investment') as ContentType)
-  const [scriptMode, setScriptMode] = useState<ScriptMode>(String(project.scriptMode || project.script_mode || initialDraft.scriptMode || 'professional') as ScriptMode)
-  const [targetDuration, setTargetDuration] = useState(Number(project.targetDuration || initialDraft.targetDuration || 30))
-  const [competitorSource, setCompetitorSource] = useState(String(project.competitorSource || initialDraft.competitorSource || ''))
-  const [manualKeywords, setManualKeywords] = useState('')
-  const [manualKeywordDraft, setManualKeywordDraft] = useState('')
-  const [script, setScript] = useState(() => { const raw = String(initialDraft.script || ''); return scriptLooksPolluted(raw) ? '' : raw })
+  const [topic, setTopic] = useState(String(initialDraft.topic || project.topic || DEFAULT_TOPIC))
+  const [market, setMarket] = useState(String(initialDraft.market || project.market || DEFAULT_MARKET))
+  const [city, setCity] = useState(String(initialDraft.city || project.city || inferCity(`${initialDraft.topic || project.topic} ${initialDraft.script || project.script}`)))
+  const [contentType, setContentType] = useState<ContentType>(String(initialDraft.contentType || project.contentType || 'investment') as ContentType)
+  const [scriptMode, setScriptMode] = useState<ScriptMode>(String(initialDraft.scriptMode || project.scriptMode || project.script_mode || 'professional') as ScriptMode)
+  const [targetDuration, setTargetDuration] = useState(Number(initialDraft.targetDuration || project.targetDuration || 30))
+  const [competitorSource, setCompetitorSource] = useState(String(initialDraft.competitorSource || project.competitorSource || ''))
+  const [manualKeywords, setManualKeywords] = useState(String(initialDraft.manualKeywords || ''))
+  const [manualKeywordDraft, setManualKeywordDraft] = useState(String(initialDraft.manualKeywordDraft || ''))
+  const [script, setScript] = useState(() => { const raw = String(initialDraft.script || project.script || ''); return scriptLooksPolluted(raw) ? '' : raw })
   const [selectedSegmentId, setSelectedSegmentId] = useState(String(initialDraft.selectedSegmentId || 'seg_1'))
   const [voiceSettings, setVoiceSettings] = useState<Record<string, SegmentVoiceSetting>>((initialDraft.voiceSettings || project.segment_voice_settings || {}) as Record<string, SegmentVoiceSetting>)
   const [shotPlan, setShotPlan] = useState<ShotPlan[]>(Array.isArray(initialDraft.shotPlan) ? initialDraft.shotPlan : [])
@@ -839,10 +866,10 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
   const [sourceResult, setSourceResult] = useState<any>(initialDraft.sourceResult || null)
   const [remoteBrainCards, setRemoteBrainCards] = useState<ContentBrainCard[]>([])
   const [knowledgeContext, setKnowledgeContext] = useState<any>(null)
-  const [selectedKnowledgeIds, setSelectedKnowledgeIds] = useState<string[]>(Array.isArray(project.selected_knowledge_card_ids) ? project.selected_knowledge_card_ids : [])
+  const [selectedKnowledgeIds, setSelectedKnowledgeIds] = useState<string[]>(Array.isArray(initialDraft.selectedKnowledgeIds) ? initialDraft.selectedKnowledgeIds : (Array.isArray(project.selected_knowledge_card_ids) ? project.selected_knowledge_card_ids : []))
   const [assetGateResult, setAssetGateResult] = useState<any>(null)
   const [disabledKeywordValues, setDisabledKeywordValues] = useState<string[]>(Array.isArray(initialDraft.disabledKeywordValues) ? initialDraft.disabledKeywordValues : [])
-  const [aiKeywordInsights, setAiKeywordInsights] = useState<KeywordInsight[]>([])
+  const [aiKeywordInsights, setAiKeywordInsights] = useState<KeywordInsight[]>(Array.isArray(initialDraft.aiKeywordInsights) ? initialDraft.aiKeywordInsights : [])
   const [aiBusy, setAiBusy] = useState('')
   const [aiStatus, setAiStatus] = useState(String(initialDraft.aiStatus || ''))
   const [buttonStatus, setButtonStatus] = useState(String(initialDraft.buttonStatus || ''))
@@ -865,6 +892,51 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
   const reviewLaunchRef = useRef('')
   const pollFailureRef = useRef(0)
   const pollInFlightRef = useRef(false)
+
+  // V10_40_8_5_1_DRAFT_SNAPSHOT
+  const latestWizardDraftRef = useRef<Record<string, any>>({})
+  const wizardDraftSnapshot = useMemo(() => ({
+    step, sourceMode, creationMode, existingVoiceMode, outputRatio, editPace,
+    topic, market, city, contentType, scriptMode, targetDuration,
+    competitorSource, manualKeywords, manualKeywordDraft, script,
+    selectedSegmentId, voiceSettings, shotPlan, selectedShotId,
+    jobId, job, sourceResult, selectedKnowledgeIds, disabledKeywordValues,
+    aiKeywordInsights, aiStatus, buttonStatus, subtitleEnabled,
+    subtitleStyleId, subtitleStyleOverrides, generationStartedAt, workflow,
+  }), [
+    step, sourceMode, creationMode, existingVoiceMode, outputRatio, editPace,
+    topic, market, city, contentType, scriptMode, targetDuration,
+    competitorSource, manualKeywords, manualKeywordDraft, script,
+    selectedSegmentId, voiceSettings, shotPlan, selectedShotId,
+    jobId, job, sourceResult, selectedKnowledgeIds, disabledKeywordValues,
+    aiKeywordInsights, aiStatus, buttonStatus, subtitleEnabled,
+    subtitleStyleId, subtitleStyleOverrides, generationStartedAt, workflow,
+  ])
+
+  useEffect(() => {
+    latestWizardDraftRef.current = wizardDraftSnapshot
+    const timer = window.setTimeout(() => saveWizardDraft(wizardDraftSnapshot), 80)
+    return () => {
+      window.clearTimeout(timer)
+      saveWizardDraft(latestWizardDraftRef.current)
+    }
+  }, [wizardDraftSnapshot])
+
+  useEffect(() => {
+    const flushWizardDraft = () => saveWizardDraft(latestWizardDraftRef.current)
+    const flushWhenHidden = () => {
+      if (document.visibilityState === 'hidden') flushWizardDraft()
+    }
+    window.addEventListener('pagehide', flushWizardDraft)
+    window.addEventListener('beforeunload', flushWizardDraft)
+    document.addEventListener('visibilitychange', flushWhenHidden)
+    return () => {
+      flushWizardDraft()
+      window.removeEventListener('pagehide', flushWizardDraft)
+      window.removeEventListener('beforeunload', flushWizardDraft)
+      document.removeEventListener('visibilitychange', flushWhenHidden)
+    }
+  }, [])
 
   const approvedBrainCards = useMemo(() => {
     const merged = [...remoteBrainCards]
@@ -2368,9 +2440,9 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
             {creationMode === 'existing_edit' && <span className="aiw-badge ok">不调用 FAL</span>}
           </div>
           <div className="aiw-creationModeGrid">
-            <button type="button" className={creationMode === 'ai_generate' ? 'active' : ''} onClick={() => applyCreationMode('ai_generate')}><b>AI 生成镜头</b><span>沿用当前 TTS-first 与 AI 镜头链路</span></button>
-            <button type="button" className={creationMode === 'existing_edit' ? 'active' : ''} onClick={() => applyCreationMode('existing_edit')}><b>现有视频智能剪辑</b><span>素材库视频 → 后端切片 → 配音/混音 → 字幕</span></button>
-            <button type="button" className={creationMode === 'hybrid' ? 'active' : ''} onClick={() => applyCreationMode('hybrid')}><b>AI + 现有素材混合</b><span>现有素材优先，缺失镜头才由 AI 补足</span></button>
+            <button className={`aiw-creationModeCard ${creationMode === 'ai_generate' ? 'active' : ''}`}  type="button" onClick={() => applyCreationMode('ai_generate')}><b>AI 生成镜头</b><span>沿用当前 TTS-first 与 AI 镜头链路</span></button>
+            <button className={`aiw-creationModeCard ${creationMode === 'existing_edit' ? 'active' : ''}`}  type="button" onClick={() => applyCreationMode('existing_edit')}><b>现有视频智能剪辑</b><span>素材库视频 → 后端切片 → 配音/混音 → 字幕</span></button>
+            <button className={`aiw-creationModeCard ${creationMode === 'hybrid' ? 'active' : ''}`}  type="button" onClick={() => applyCreationMode('hybrid')}><b>AI + 现有素材混合</b><span>现有素材优先，缺失镜头才由 AI 补足</span></button>
           </div>
           {creationMode === 'existing_edit' && <div className="aiw-existingEditOptions">
             <label>声音方式<select value={existingVoiceMode} onChange={(e) => setExistingVoiceMode(e.target.value as ExistingVoiceMode)}><option value="tts_only">纯 TTS 配音</option><option value="tts_with_ambient">TTS + 低音量环境声</option><option value="retain_original">保留原视频声音</option></select></label>
@@ -3685,3 +3757,5 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
     </section>
   )
 }
+
+// V10.40.8.5.1 CACHE + UI COMPLETION
