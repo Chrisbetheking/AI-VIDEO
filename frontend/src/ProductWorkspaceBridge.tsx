@@ -225,6 +225,7 @@ function AssetLibraryPanel({ project, setProject, goTab }: { project: ProjectDra
   const [zipJob, setZipJob] = useState<AssetZipImportJob | null>(null)
   const [zipUploading, setZipUploading] = useState(false)
   const [zipUploadProgress, setZipUploadProgress] = useState(0)
+  const [zipError, setZipError] = useState('')
   const zipFinishedRef = useRef('')
 
   const selectedAssets = assets.filter((asset) => selectedIds.includes(asset.id))
@@ -272,6 +273,7 @@ function AssetLibraryPanel({ project, setProject, goTab }: { project: ProjectDra
     if (!file) return
     setZipUploading(true)
     setZipUploadProgress(0)
+    setZipError('')
     setError('')
     try {
       const job = await uploadAssetZip(file, uploadFolder, 'content', (progress) => {
@@ -279,8 +281,32 @@ function AssetLibraryPanel({ project, setProject, goTab }: { project: ProjectDra
       })
       zipFinishedRef.current = ''
       setZipJob(job)
+      setZipError('')
     } catch (err: any) {
-      setError(err?.message || String(err))
+      // 大 ZIP 偶尔会在浏览器端丢失最终响应，但服务器已经接收并开始处理。
+      // 先核对最近任务，匹配到同名 ZIP 就恢复真实任务，避免出现“导入成功 + 红色连接失败”。
+      let recovered: AssetZipImportJob | null = null
+      try {
+        await new Promise((resolve) => window.setTimeout(resolve, 900))
+        const recent = await listAssetZipImportJobs(5)
+        recovered = (Array.isArray(recent?.jobs) ? recent.jobs : []).find((item) => {
+          const sameName = String(item?.zip_name || '') === file.name
+          const status = String(item?.status || '').toLowerCase()
+          const updatedAt = Date.parse(String(item?.updated_at || item?.created_at || ''))
+          const recentEnough = Number.isFinite(updatedAt) ? Date.now() - updatedAt < 15 * 60 * 1000 : true
+          return sameName && recentEnough && !['failed', 'cancelled'].includes(status)
+        }) || null
+      } catch {
+        recovered = null
+      }
+
+      if (recovered) {
+        zipFinishedRef.current = ''
+        setZipJob(recovered)
+        setZipError('')
+      } else {
+        setZipError(err?.message || String(err))
+      }
     } finally {
       setZipUploading(false)
       setZipUploadProgress(0)
@@ -291,7 +317,10 @@ function AssetLibraryPanel({ project, setProject, goTab }: { project: ProjectDra
     listAssetZipImportJobs(1)
       .then((result) => {
         const latest = Array.isArray(result?.jobs) ? result.jobs[0] : null
-        if (latest) setZipJob(latest)
+        if (latest) {
+          setZipJob(latest)
+          if (String(latest.status || '').toLowerCase() === 'done') setZipError('')
+        }
       })
       .catch(() => null)
   }, [])
@@ -307,10 +336,12 @@ function AssetLibraryPanel({ project, setProject, goTab }: { project: ProjectDra
         setZipJob(next)
         if (next.status === 'done' && zipFinishedRef.current !== next.job_id) {
           zipFinishedRef.current = next.job_id
+          setZipError('')
+          setError('')
           await refresh()
         }
       } catch (err: any) {
-        if (!cancelled) setError(err?.message || String(err))
+        if (!cancelled) setZipError(err?.message || String(err))
       }
     }
     void poll()
@@ -414,7 +445,7 @@ function AssetLibraryPanel({ project, setProject, goTab }: { project: ProjectDra
         {zipJob.failures?.length > 0 && <details className="aiw-zipFailures"><summary>查看失败文件（{zipJob.failures.length}）</summary>{zipJob.failures.slice(0, 50).map((item, index) => <p key={`${item.file}-${index}`}><b>{item.file}</b><span>{item.reason}</span></p>)}</details>}
         <div className="aiw-zipImportFoot">
           <span>ZIP 经 ECS HTTPS 直传，绕过 Cloudflare 请求体限制；导入结束后自动删除临时文件，素材按 SHA256 去重。</span>
-          {['done', 'failed', 'cancelled'].includes(String(zipJob.status || '').toLowerCase()) && <button className="aiw-muted" onClick={() => setZipJob(null)}>关闭报告</button>}
+          {['done', 'failed', 'cancelled'].includes(String(zipJob.status || '').toLowerCase()) && <button className="aiw-muted" onClick={() => { setZipJob(null); setZipError('') }}>关闭报告</button>}
         </div>
       </div>}
 
@@ -425,6 +456,7 @@ function AssetLibraryPanel({ project, setProject, goTab }: { project: ProjectDra
         <div><b>{selectedAssets.filter((a) => a.kind === 'image').length}</b><span>图片素材</span></div>
       </div>
 
+      {zipError && <div className="aiw-error aiw-zipTransportError">{zipError}</div>}
       {error && <div className="aiw-error">{error}</div>}
 
       <div className="aiw-twoCol">
@@ -452,18 +484,48 @@ function AssetLibraryPanel({ project, setProject, goTab }: { project: ProjectDra
           </div>
         </div>
 
-        <div className="aiw-panel">
-          <h3>本次视频素材上下文</h3>
-          <p className="aiw-mutedText">这些会进入项目草稿，并传给视频生成链路做真实素材优先、R2 素材引用和镜头绑定。</p>
-          <div className="aiw-segmentList">
+        <div className="aiw-panel aiw-selectedAssetsPanel">
+          <div className="aiw-selectedAssetsHeader">
+            <div>
+              <h3>本次已选素材</h3>
+              <p className="aiw-mutedText">直接查看实际图片或视频。移出只影响本次视频；删除会从素材库和 R2 记录中删除。</p>
+            </div>
+            <button
+              className="aiw-muted"
+              disabled={selectedAssets.length === 0}
+              onClick={() => syncSelection([])}
+            >
+              全部移出本次视频
+            </button>
+          </div>
+
+          <div className="aiw-selectedAssetGrid">
             {selectedAssets.length === 0 && <div className="aiw-info">还没选择素材。可以先上传，或从左边素材卡片点击“带入视频”。</div>}
             {selectedAssets.map((asset, index) => (
-              <div className="aiw-segment" key={asset.id}>
-                <b>{index + 1}. {asset.original_name || asset.filename}</b>
-                <em>{folderLabel(asset.folder, asset.kind)} · {asset.kind}</em>
-                <p>{asset.url}</p>
-                <span>已写入 asset_context / r2_material_context</span>
-              </div>
+              <article className="aiw-selectedAssetCard" key={asset.id}>
+                <div className="aiw-selectedAssetMedia">
+                  <span className="aiw-selectedAssetIndex">{index + 1}</span>
+                  <span className={`aiw-selectedAssetKind ${asset.kind}`}>{asset.kind === 'video' ? '视频' : '图片'}</span>
+                  {asset.kind === 'video'
+                    ? <video src={asset.url} controls muted playsInline preload="metadata" />
+                    : <a href={asset.url} target="_blank" rel="noreferrer"><img src={asset.url} alt={asset.original_name || asset.filename} loading="lazy" /></a>}
+                </div>
+                <div className="aiw-selectedAssetBody">
+                  <strong title={asset.original_name || asset.filename}>{asset.original_name || asset.filename}</strong>
+                  <span>{folderLabel(asset.folder, asset.kind)} · {formatBytes(asset.size_bytes)}</span>
+                  <div className="aiw-actions small aiw-selectedAssetActions">
+                    <button
+                      className="aiw-muted"
+                      onClick={() => syncSelection(selectedIds.filter((id) => id !== asset.id))}
+                    >
+                      移出本次视频
+                    </button>
+                    <button className="aiw-danger" onClick={() => removeAsset(asset)}>
+                      删除素材库
+                    </button>
+                  </div>
+                </div>
+              </article>
             ))}
           </div>
         </div>

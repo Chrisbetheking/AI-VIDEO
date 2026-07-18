@@ -2869,3 +2869,149 @@
   .aiw-zipFailures p { grid-template-columns: 1fr; }
 }
 /* ===== /V10.40.8.4 ZIP 素材批量导入 ===== */
+
+
+/* V10.40.8.4.2 — selected asset visual manager */
+.aiw-selectedAssetsPanel {
+  min-width: 0;
+}
+
+.aiw-selectedAssetsHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+
+.aiw-selectedAssetsHeader h3 {
+  margin: 0 0 6px;
+}
+
+.aiw-selectedAssetsHeader .aiw-mutedText {
+  margin: 0;
+}
+
+.aiw-selectedAssetGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: 14px;
+  max-height: 690px;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.aiw-selectedAssetGrid > .aiw-info {
+  grid-column: 1 / -1;
+}
+
+.aiw-selectedAssetCard {
+  overflow: hidden;
+  border: 1px solid #ddd6fe;
+  border-radius: 18px;
+  background: #fff;
+  box-shadow: 0 8px 24px rgba(76, 29, 149, 0.07);
+}
+
+.aiw-selectedAssetMedia {
+  position: relative;
+  aspect-ratio: 16 / 10;
+  overflow: hidden;
+  background:
+    linear-gradient(135deg, rgba(124, 58, 237, 0.08), rgba(37, 99, 235, 0.08)),
+    #eef2ff;
+}
+
+.aiw-selectedAssetMedia > a {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.aiw-selectedAssetMedia img,
+.aiw-selectedAssetMedia video {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  background: #0f172a;
+}
+
+.aiw-selectedAssetIndex,
+.aiw-selectedAssetKind {
+  position: absolute;
+  z-index: 2;
+  top: 10px;
+  border-radius: 999px;
+  padding: 5px 9px;
+  font-size: 12px;
+  line-height: 1;
+  font-weight: 900;
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.16);
+}
+
+.aiw-selectedAssetIndex {
+  left: 10px;
+  background: rgba(255, 255, 255, 0.94);
+  color: #5b21b6;
+}
+
+.aiw-selectedAssetKind {
+  right: 10px;
+  color: #fff;
+  background: rgba(37, 99, 235, 0.92);
+}
+
+.aiw-selectedAssetKind.image {
+  background: rgba(22, 163, 74, 0.92);
+}
+
+.aiw-selectedAssetBody {
+  display: grid;
+  gap: 7px;
+  padding: 12px;
+}
+
+.aiw-selectedAssetBody strong {
+  overflow: hidden;
+  color: #111827;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.aiw-selectedAssetBody > span {
+  color: #7b8192;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.aiw-selectedAssetActions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+}
+
+.aiw-selectedAssetActions button {
+  width: 100%;
+}
+
+.aiw-zipTransportError {
+  margin-top: 12px;
+}
+
+@media (max-width: 900px) {
+  .aiw-selectedAssetsHeader {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .aiw-selectedAssetGrid {
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    max-height: none;
+  }
+}
+
+@media (max-width: 520px) {
+  .aiw-selectedAssetGrid {
+    grid-template-columns: 1fr;
+  }
+}
