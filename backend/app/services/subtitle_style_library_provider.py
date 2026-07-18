@@ -410,15 +410,102 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     return ass_path
 
 
-def _make_cues(text: str = "", segments: Optional[list[dict[str, Any]]] = None, duration: float = 12.0) -> list[dict[str, Any]]:
+# V10.40.8.5.3 EXACT TTS SUBTITLE
+def _make_cues(
+    text: str = "",
+    segments: Optional[list[dict[str, Any]]] = None,
+    duration: float = 12.0,
+) -> list[dict[str, Any]]:
+    cues: list[dict[str, Any]] = []
+    cursor = 0.0
+
     if segments:
-        cues = segments_to_cues(segments, duration=duration)
-    else:
-        cues = []
+        for item in segments:
+            if not isinstance(item, dict):
+                continue
+
+            raw_text = str(item.get("text") or "").strip()
+
+            if not raw_text:
+                continue
+
+            start_value = (
+                item.get("start")
+                if item.get("start") is not None
+                else item.get("start_time")
+            )
+
+            end_value = (
+                item.get("end")
+                if item.get("end") is not None
+                else item.get("end_time")
+            )
+
+            duration_value = item.get("duration")
+
+            try:
+                if start_value is None:
+                    start_time = cursor
+                else:
+                    start_time = float(start_value)
+
+                if end_value is not None:
+                    end_time = float(end_value)
+                elif duration_value is not None:
+                    end_time = start_time + float(duration_value)
+                else:
+                    continue
+            except (TypeError, ValueError):
+                continue
+
+            if item.get("start_ms") is not None:
+                start_time = float(item["start_ms"]) / 1000.0
+
+            if item.get("end_ms") is not None:
+                end_time = float(item["end_ms"]) / 1000.0
+
+            start_time = max(0.0, start_time)
+            end_time = min(float(duration), end_time)
+
+            if end_time <= start_time:
+                continue
+
+            clean_text = re.sub(r"\s+", "", raw_text)
+
+            clean_text = re.sub(
+                r"[，。！？、；：,.!?;:\"'“”‘’（）()〖〗\[\]《》<>/\\|·•…—_-]+",
+                "",
+                clean_text,
+            ).strip()
+
+            if not clean_text:
+                continue
+
+            cues.append(
+                {
+                    "index": len(cues) + 1,
+                    "text": clean_text,
+                    "start": round(start_time, 3),
+                    "end": round(end_time, 3),
+                    "duration": round(end_time - start_time, 3),
+                    "exact_tts": True,
+                }
+            )
+
+            cursor = end_time
+
     if not cues:
-        cues = text_to_cues(text, duration=duration, max_chars=18)
+        cues = text_to_cues(
+            text,
+            duration=duration,
+            max_chars=18,
+        )
+
     if not cues:
-        raise ValueError("没有可生成字幕的文案或 script_segments")
+        raise ValueError(
+            "没有可生成字幕的文案或 script_segments"
+        )
+
     return cues
 
 
