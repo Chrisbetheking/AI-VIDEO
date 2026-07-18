@@ -22,12 +22,7 @@ const ENTRY_CLEAN_KEY = 'ai_video_bridge_v10_10_cleaned_once'
 function entryShouldClean() {
   try {
     const params = new URLSearchParams(window.location.search || '')
-    const force = params.get('force') || ''
-    const reset = params.get('reset') === '1' || params.get('clean') === '1'
-    if (!reset && !force.includes('v10-10')) return false
-    if (!reset && localStorage.getItem(ENTRY_CLEAN_KEY) === '1') return false
-    localStorage.setItem(ENTRY_CLEAN_KEY, '1')
-    return true
+    return params.get('reset') === 'workspace' || params.get('clean') === 'workspace'
   } catch {
     return false
   }
@@ -39,19 +34,19 @@ function draftIsPolluted(draft: any) {
 }
 
 function cleanProjectDraft(draft: ProjectDraft): ProjectDraft {
+  const base = { ...emptyProjectDraft(), ...(draft || {}) } as ProjectDraft
   return {
-    ...emptyProjectDraft(),
-    ...draft,
-    manualKeywords: '',
-    manual_keywords: '',
-    ai_keyword_insights: [],
-    keyword_insights: [],
-    script: draftIsPolluted(draft) ? '' : String(draft.script || ''),
-    segments: draftIsPolluted(draft) ? [] : (Array.isArray(draft.segments) ? draft.segments : []),
-    script_segments: [],
-    segment_voice_settings: {},
-    manual_shot_plan: [],
-    shot_overrides: [],
+    ...base,
+    manualKeywords: String((base as any).manualKeywords || (base as any).manual_keywords || ''),
+    manual_keywords: String((base as any).manual_keywords || (base as any).manualKeywords || ''),
+    ai_keyword_insights: Array.isArray((base as any).ai_keyword_insights) ? (base as any).ai_keyword_insights : [],
+    keyword_insights: Array.isArray((base as any).keyword_insights) ? (base as any).keyword_insights : [],
+    script: String((base as any).script || ''),
+    segments: Array.isArray((base as any).segments) ? (base as any).segments : [],
+    script_segments: Array.isArray((base as any).script_segments) ? (base as any).script_segments : [],
+    segment_voice_settings: (base as any).segment_voice_settings && typeof (base as any).segment_voice_settings === 'object' ? (base as any).segment_voice_settings : {},
+    manual_shot_plan: Array.isArray((base as any).manual_shot_plan) ? (base as any).manual_shot_plan : [],
+    shot_overrides: Array.isArray((base as any).shot_overrides) ? (base as any).shot_overrides : [],
   }
 }
 
@@ -76,9 +71,6 @@ const NAV_ITEMS: NavItem[] = [
 
 function loadDraft(): ProjectDraft {
   try {
-    Object.keys(localStorage).forEach((key) => {
-      if (key.startsWith('ai_video_wizard_draft_')) localStorage.removeItem(key)
-    })
     if (entryShouldClean()) {
       localStorage.removeItem(DRAFT_KEY)
       localStorage.removeItem(LEGACY_DRAFT_KEY)
@@ -87,11 +79,6 @@ function loadDraft(): ProjectDraft {
     const raw = localStorage.getItem(DRAFT_KEY) || localStorage.getItem(LEGACY_DRAFT_KEY)
     if (!raw) return emptyProjectDraft()
     const parsed = { ...emptyProjectDraft(), ...JSON.parse(raw) }
-    if (draftIsPolluted(parsed)) {
-      localStorage.removeItem(DRAFT_KEY)
-      localStorage.removeItem(LEGACY_DRAFT_KEY)
-      return emptyProjectDraft()
-    }
     return cleanProjectDraft(parsed)
   } catch {
     return emptyProjectDraft()
@@ -99,7 +86,14 @@ function loadDraft(): ProjectDraft {
 }
 
 function saveDraft(draft: ProjectDraft) {
-  localStorage.setItem(DRAFT_KEY, JSON.stringify(cleanProjectDraft(draft)))
+  try {
+    const raw = localStorage.getItem(DRAFT_KEY)
+    const previous = raw ? JSON.parse(raw) : {}
+    const merged = cleanProjectDraft({ ...previous, ...draft } as ProjectDraft)
+    localStorage.setItem(DRAFT_KEY, JSON.stringify(merged))
+  } catch {
+    localStorage.setItem(DRAFT_KEY, JSON.stringify(cleanProjectDraft(draft)))
+  }
 }
 
 function tabFromHash(hash: string): WorkspaceTab | null {
@@ -167,20 +161,19 @@ function formatBytes(value?: number) {
 function assetToContext(asset: AssetItem) {
   return {
     id: asset.id,
+    asset_id: asset.id,
     name: asset.original_name || asset.filename,
+    original_name: asset.original_name,
     filename: asset.filename,
     kind: asset.kind,
     url: asset.url,
     r2_url: asset.url,
     folder: asset.folder,
     source_type: asset.source_type || 'asset_library',
-    ai_title: asset.intelligence?.title || '',
-    ai_description: asset.intelligence?.description || '',
-    ai_primary_category: asset.intelligence?.primary_category || '',
-    ai_secondary_category: asset.intelligence?.secondary_category || '',
-    ai_keywords: asset.intelligence?.keywords || [],
-    ai_quality_score: asset.intelligence?.quality_score || 0,
-    ai_cleanliness: asset.intelligence?.cleanliness || null,
+    selection_source: 'manual',
+    selected_by: 'human',
+    locked: true,
+    duration: Number((asset as any).duration || (asset as any).duration_seconds || 0),
   }
 }
 
@@ -1078,3 +1071,5 @@ export default function ProductWorkspaceBridge() {
     </div>
   )
 }
+
+// V10.40.8.5.2 TTS ASSET AUTOFILL

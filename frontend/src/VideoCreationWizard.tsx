@@ -122,8 +122,9 @@ type ContentBrainCard = {
   usedCount?: number
 }
 
-const WIZARD_DRAFT_KEY = 'ai_video_wizard_draft_v10_40_8_5_1'
+const WIZARD_DRAFT_KEY = 'ai_video_wizard_draft_v10_40_8_5_2'
 const LEGACY_WIZARD_DRAFT_KEYS = [
+  'ai_video_wizard_draft_v10_40_8_5_2',
   'ai_video_wizard_draft_v10_13',
   'ai_video_wizard_draft_v10_12',
   'ai_video_wizard_draft_v10_10',
@@ -133,7 +134,7 @@ const LEGACY_WIZARD_DRAFT_KEYS = [
   'ai_video_wizard_draft_v10_6',
   'ai_video_wizard_draft_v10_5',
 ]
-const CLEAN_ONCE_KEY = 'ai_video_wizard_v10_40_8_5_1_explicit_reset'
+const CLEAN_ONCE_KEY = 'ai_video_wizard_v10_40_8_5_2_explicit_reset'
 
 function parseWizardDraft(raw: string | null): Record<string, any> {
   if (!raw) return {}
@@ -155,7 +156,7 @@ function loadWizardDraft(): Record<string, any> {
       if (!Object.keys(legacy).length) continue
       const migrated = {
         ...legacy,
-        draftVersion: '10.40.8.5.1',
+        draftVersion: '10.40.8.5.2',
         migratedFrom: key,
         updatedAt: Date.now(),
       }
@@ -174,7 +175,7 @@ function saveWizardDraft(value: Record<string, any>) {
     const merged = {
       ...previous,
       ...value,
-      draftVersion: '10.40.8.5.1',
+      draftVersion: '10.40.8.5.2',
       updatedAt: Date.now(),
     }
     window.localStorage.setItem(WIZARD_DRAFT_KEY, JSON.stringify(merged))
@@ -893,7 +894,7 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
   const pollFailureRef = useRef(0)
   const pollInFlightRef = useRef(false)
 
-  // V10_40_8_5_1_DRAFT_SNAPSHOT
+  // V10_40_8_5_2_DRAFT_SNAPSHOT
   const latestWizardDraftRef = useRef<Record<string, any>>({})
   const wizardDraftSnapshot = useMemo(() => ({
     step, sourceMode, creationMode, existingVoiceMode, outputRatio, editPace,
@@ -982,6 +983,48 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
   }
   const selectedAssets = asArray(project.asset_context || project.selected_assets || project.r2_material_context)
   const selectedVideos = selectedAssets.filter((asset: any) => String(asset?.kind || '').toLowerCase() === 'video' && String(asset?.url || asset?.r2_url || '').trim())
+
+  // V10_40_8_5_2_EXISTING_COVERAGE_STATE
+  const existingCoverage = useMemo(() => {
+    const currentJob: any = job || {}
+    const plan: any = currentJob.edit_plan || currentJob.result?.edit_plan || {}
+    const coverage: any = currentJob.coverage || plan.coverage || {}
+    const estimatedManualSeconds = selectedVideos.reduce((total: number, asset: any) => {
+      const duration = Number(asset?.duration || asset?.duration_seconds || asset?.asset_intelligence?.technical?.duration || 0)
+      return total + (duration > 0 ? Math.max(2.4, Math.min(7, duration * 0.72)) : 4)
+    }, 0)
+    const actualTtsSeconds = Number(
+      currentJob.audio_duration_seconds
+      || coverage.actual_tts_seconds
+      || plan.target_duration_seconds
+      || targetDuration
+      || 0,
+    )
+    const manualCount = Number(coverage.manual_selected_count || selectedVideos.length || 0)
+    const autoCount = Number(
+      coverage.auto_selected_count
+      || currentJob.auto_selected_assets?.length
+      || plan.auto_selected_assets?.length
+      || 0,
+    )
+    const uniqueSourceSeconds = Number(
+      coverage.estimated_unique_source_seconds
+      || coverage.manual_estimated_seconds
+      || estimatedManualSeconds,
+    )
+    return {
+      manualCount,
+      autoCount,
+      actualTtsSeconds,
+      uniqueSourceSeconds,
+      shortageSeconds: Number(
+        coverage.estimated_shortage_seconds
+        || Math.max(0, actualTtsSeconds * 1.08 - uniqueSourceSeconds),
+      ),
+      realTtsReplanned: Boolean(coverage.real_tts_replanned),
+      status: String(coverage.status || (uniqueSourceSeconds >= actualTtsSeconds ? 'covered' : 'waiting_tts')),
+    }
+  }, [job, selectedVideos, targetDuration])
   const avatarConfig = project.avatar_config || null
   const currentTaskLeads = asArray(project.current_task_leads).filter((item: any) => {
     const bound = String(item?.job_id || item?.run_id || item?.video_job_id || '')
@@ -2439,17 +2482,38 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
             <div><h3>选择创作方式</h3><p>现有视频模式只用素材库视频，由 ECS 完成切片、配音、混音与字幕。</p></div>
             {creationMode === 'existing_edit' && <span className="aiw-badge ok">不调用 FAL</span>}
           </div>
-          <div className="aiw-creationModeGrid">
-            <button className={`aiw-creationModeCard ${creationMode === 'ai_generate' ? 'active' : ''}`}  type="button" onClick={() => applyCreationMode('ai_generate')}><b>AI 生成镜头</b><span>沿用当前 TTS-first 与 AI 镜头链路</span></button>
-            <button className={`aiw-creationModeCard ${creationMode === 'existing_edit' ? 'active' : ''}`}  type="button" onClick={() => applyCreationMode('existing_edit')}><b>现有视频智能剪辑</b><span>素材库视频 → 后端切片 → 配音/混音 → 字幕</span></button>
-            <button className={`aiw-creationModeCard ${creationMode === 'hybrid' ? 'active' : ''}`}  type="button" onClick={() => applyCreationMode('hybrid')}><b>AI + 现有素材混合</b><span>现有素材优先，缺失镜头才由 AI 补足</span></button>
+          <div className="aiw-creationModeGrid" data-existing-edit-options="true">
+            <button className={`aiw-creationModeCard ${creationMode === 'ai_generate' ? 'active' : ''}`}  type="button" onClick={() => applyCreationMode('ai_generate')} data-creation-mode="ai_generate" data-selected={creationMode === 'ai_generate' ? 'true' : 'false'}><b>AI 生成镜头</b><span>沿用当前 TTS-first 与 AI 镜头链路</span></button>
+            <button className={`aiw-creationModeCard ${creationMode === 'existing_edit' ? 'active' : ''}`}  type="button" onClick={() => applyCreationMode('existing_edit')} data-creation-mode="existing_edit" data-selected={creationMode === 'existing_edit' ? 'true' : 'false'}><b>现有视频智能剪辑</b><span>素材库视频 → 后端切片 → 配音/混音 → 字幕</span></button>
+            <button className={`aiw-creationModeCard ${creationMode === 'hybrid' ? 'active' : ''}`}  type="button" onClick={() => applyCreationMode('hybrid')} data-creation-mode="hybrid" data-selected={creationMode === 'hybrid' ? 'true' : 'false'}><b>AI + 现有素材混合</b><span>现有素材优先，缺失镜头才由 AI 补足</span></button>
           </div>
           {creationMode === 'existing_edit' && <div className="aiw-existingEditOptions">
             <label>声音方式<select value={existingVoiceMode} onChange={(e) => setExistingVoiceMode(e.target.value as ExistingVoiceMode)}><option value="tts_only">纯 TTS 配音</option><option value="tts_with_ambient">TTS + 低音量环境声</option><option value="retain_original">保留原视频声音</option></select></label>
             <label>输出比例<select value={outputRatio} onChange={(e) => setOutputRatio(e.target.value as OutputRatio)}><option value="9:16">9:16 竖屏</option><option value="16:9">16:9 横屏</option><option value="1:1">1:1 方形</option></select></label>
             <label>剪辑节奏<select value={editPace} onChange={(e) => setEditPace(e.target.value as EditPace)}><option value="fast">快节奏</option><option value="normal">正常</option><option value="calm">舒缓</option></select></label>
             <div className="aiw-existingVideoCount"><b>{selectedVideos.length}</b><span>个视频已带入</span><button type="button" className="aiw-muted" onClick={() => openWorkspaceTab('assets')}>去素材库选视频</button></div>
-          </div>}
+
+            {/* V10_40_8_5_2_EXISTING_COVERAGE_UI */}
+            <div className="aiw-coverageCard">
+              <div className="aiw-coverageTitle">
+                <strong>素材覆盖与自动补选</strong>
+                <span>{existingCoverage.realTtsReplanned ? '已按真实 TTS 重算' : '配音后自动重算'}</span>
+              </div>
+              <div className="aiw-coverageMetrics">
+                <div><b>{existingCoverage.manualCount}</b><span>人工锁定</span></div>
+                <div><b>{existingCoverage.autoCount}</b><span>系统补充</span></div>
+                <div><b>{existingCoverage.uniqueSourceSeconds.toFixed(1)}s</b><span>预计可用素材</span></div>
+                <div><b>{existingCoverage.actualTtsSeconds.toFixed(1)}s</b><span>口播时长</span></div>
+              </div>
+              <p>
+                你选择的素材始终优先且不会被替换；TTS 完成后，ECS 会按真实时长和逐句语义从素材库补足。
+                现有视频模式全程禁止调用 FAL。
+              </p>
+              {existingCoverage.shortageSeconds > 0 && existingCoverage.autoCount === 0 && (
+                <small>当前预估仍缺 {existingCoverage.shortageSeconds.toFixed(1)} 秒，生成配音后自动补选。</small>
+              )}
+            </div>
+</div>}
         </section>
         <section className="aiw-stepCard">
           <h3>第一步：搞定内容</h3>
@@ -3758,4 +3822,6 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
   )
 }
 
-// V10.40.8.5.1 CACHE + UI COMPLETION
+// V10.40.8.5.2 CACHE + UI COMPLETION
+
+// V10.40.8.5.2 TTS ASSET AUTOFILL

@@ -2,6 +2,7 @@ import React from 'react'
 import { createRoot } from 'react-dom/client'
 import ProductWorkspaceBridge from './ProductWorkspaceBridge'
 import './styles.css'
+import './video-creation-wizard.css'
 import './product-ux-fixes.css'
 
 const root = document.getElementById('root')
