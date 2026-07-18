@@ -217,6 +217,45 @@ export async function deleteAsset(assetId: string): Promise<{ok: boolean; delete
   return safeFetch<{ok: boolean; deleted: string[]; warnings: string[]}>(url, { method: 'DELETE' })
 }
 
+
+export async function getAssetIntelligence(limit = 3000): Promise<AssetIntelligenceListResponse> {
+  return apiGet<AssetIntelligenceListResponse>(`/api/assets/intelligence?limit=${Math.max(1, Math.min(limit, 5000))}`)
+}
+
+export async function getAssetIntelligenceHealth(): Promise<any> {
+  return apiGet('/api/assets/intelligence/health')
+}
+
+export async function startAssetIntelligenceAnalysis(options: {
+  asset_ids?: string[]
+  force?: boolean
+  limit?: number
+  include_avatar_assets?: boolean
+} = {}): Promise<AssetIntelligenceJob | {ok: boolean; status: string; message: string}> {
+  return apiPost('/api/assets/intelligence/analyze', options)
+}
+
+export async function getAssetIntelligenceJob(jobId: string): Promise<AssetIntelligenceJob> {
+  return apiGet<AssetIntelligenceJob>(`/api/assets/intelligence/jobs/${encodeURIComponent(jobId)}`)
+}
+
+export async function updateAssetIntelligenceControl(patch: Partial<AssetIntelligenceControl>): Promise<{ok: boolean; version: string; control: AssetIntelligenceControl}> {
+  return apiPost('/api/assets/intelligence/control', patch)
+}
+
+export async function updateAssetIntelligence(assetId: string, patch: Partial<AssetIntelligence>): Promise<{ok: boolean; version: string; item: AssetIntelligence}> {
+  const url = `${API_BASE}/api/assets/intelligence/${encodeURIComponent(assetId)}`
+  return safeFetch(url, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(patch),
+  })
+}
+
+export async function searchAssetIntelligence(query: string, limit = 30): Promise<{ok: boolean; version: string; query: string; items: AssetIntelligence[]}> {
+  return apiGet(`/api/assets/intelligence/search?q=${encodeURIComponent(query)}&limit=${Math.max(1, Math.min(limit, 100))}`)
+}
+
 export interface GeneratedCopy {
   title: string
   hook: string
@@ -230,7 +269,85 @@ export interface GeneratedCopy {
 export interface TTSVoice { id: string; name: string; provider: string; language: string; note?: string }
 export interface AudioSegmentTiming { index: number; text: string; start: number; end: number; duration: number }
 export interface TTSResponse { file_url: string; file_name: string; duration_seconds: number; warning?: string; segments?: AudioSegmentTiming[] }
-export interface AssetItem { id: string; filename: string; original_name: string; kind: 'image' | 'video'; url: string; size_bytes: number; created_at: string; folder?: string; source_type?: string }
+export interface AssetCleanliness {
+  status: 'passed' | 'failed' | 'uncertain' | string
+  watermark?: boolean
+  subtitle?: boolean
+  qr_code?: boolean
+  large_face?: boolean
+  advertising_text?: boolean
+  blur?: boolean
+  too_dark?: boolean
+  severe_shake?: boolean
+  reasons?: string[]
+}
+
+export interface AssetIntelligence {
+  asset_id: string
+  filename?: string
+  original_name?: string
+  kind?: 'image' | 'video' | string
+  analysis_status: 'pending' | 'processing' | 'completed' | 'failed' | 'need_config' | 'manual' | string
+  title?: string
+  description?: string
+  primary_category?: string
+  secondary_category?: string
+  location?: string
+  scene?: string
+  subjects?: string[]
+  camera_motion?: string
+  orientation?: string
+  keywords?: string[]
+  cleanliness?: AssetCleanliness
+  quality_score?: number
+  recommended_topics?: string[]
+  visible_text?: string[]
+  confidence?: number
+  technical?: { width?: number; height?: number; duration?: number; frame_count?: number }
+  provider?: string
+  model?: string
+  error?: string
+  updated_at?: string
+}
+
+export interface AssetIntelligenceJob {
+  job_id: string
+  version: string
+  status: 'queued' | 'running' | 'done' | 'failed' | 'cancelled' | string
+  stage: string
+  progress: number
+  message?: string
+  current_asset_id?: string
+  current_file?: string
+  processed?: number
+  summary?: { success: number; failed: number; skipped: number; total: number }
+  error?: string
+  source?: string
+  created_at?: string
+  updated_at?: string
+  finished_at?: string
+  reused?: boolean
+}
+
+export interface AssetIntelligenceControl {
+  auto_enabled: boolean
+  auto_batch_size: number
+  poll_seconds: number
+  include_avatar_assets: boolean
+  updated_at?: string
+}
+
+export interface AssetIntelligenceListResponse {
+  ok: boolean
+  version: string
+  items: AssetIntelligence[]
+  summary: Record<string, number>
+  control: AssetIntelligenceControl
+  active_job?: AssetIntelligenceJob | null
+  categories: string[]
+}
+
+export interface AssetItem { id: string; filename: string; original_name: string; kind: 'image' | 'video'; url: string; size_bytes: number; created_at: string; folder?: string; source_type?: string; intelligence?: AssetIntelligence }
 
 
 export interface CollectorCookieStatus {

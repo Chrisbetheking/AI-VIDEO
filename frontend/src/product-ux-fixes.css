@@ -3015,3 +3015,199 @@
     grid-template-columns: 1fr;
   }
 }
+
+
+/* V10.40.8.4.3 — Doubao asset intelligence */
+.aiw-intelligenceFilters {
+  margin-top: 12px;
+}
+
+.aiw-assetIntelligencePanel {
+  margin: 14px 0;
+  padding: 18px;
+  border: 1px solid #ddd6fe;
+  border-radius: 20px;
+  background: linear-gradient(135deg, rgba(124, 58, 237, 0.07), rgba(37, 99, 235, 0.04)), #fff;
+}
+
+.aiw-assetIntelligenceHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.aiw-assetIntelligenceHeader h3 {
+  margin: 4px 0 6px;
+}
+
+.aiw-assetIntelligenceHeader p:not(.aiw-eyebrow) {
+  margin: 0;
+  color: #667085;
+  line-height: 1.65;
+}
+
+.aiw-intelligenceMetrics {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 10px;
+  margin: 14px 0;
+}
+
+.aiw-intelligenceMetrics span {
+  display: grid;
+  gap: 4px;
+  padding: 12px;
+  border: 1px solid #e9e5ff;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.88);
+  color: #7b8192;
+  font-size: 12px;
+}
+
+.aiw-intelligenceMetrics b {
+  color: #6d28d9;
+  font-size: 22px;
+}
+
+.aiw-aiJob {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px 16px;
+  margin-bottom: 12px;
+  padding: 12px 14px;
+  border: 1px solid #c7d2fe;
+  border-radius: 14px;
+  background: #eef2ff;
+}
+
+.aiw-aiJob > div:first-child {
+  display: grid;
+  gap: 4px;
+}
+
+.aiw-aiJob span {
+  color: #697386;
+  font-size: 12px;
+}
+
+.aiw-aiJob > strong {
+  color: #6d28d9;
+  font-size: 20px;
+}
+
+.aiw-aiJob .aiw-progressTrack {
+  grid-column: 1 / -1;
+}
+
+.aiw-assetCard {
+  align-content: start;
+}
+
+.aiw-assetOriginalName {
+  overflow: hidden;
+  color: #98a2b3 !important;
+  font-size: 11px !important;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.aiw-intelligenceChips,
+.aiw-assetKeywords {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.aiw-intelligenceChips em,
+.aiw-assetKeywords i {
+  border-radius: 999px;
+  padding: 4px 7px;
+  background: #f2efff;
+  color: #6d28d9;
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 800;
+}
+
+.aiw-intelligenceChips em.status.pending,
+.aiw-intelligenceChips em.status.need_config {
+  background: #fff7ed;
+  color: #c2410c;
+}
+
+.aiw-intelligenceChips em.status.processing {
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+.aiw-intelligenceChips em.status.failed,
+.aiw-intelligenceChips em.clean.failed {
+  background: #fef2f2;
+  color: #dc2626;
+}
+
+.aiw-intelligenceChips em.clean.passed {
+  background: #ecfdf3;
+  color: #15803d;
+}
+
+.aiw-intelligenceChips em.clean.uncertain {
+  background: #fff7ed;
+  color: #c2410c;
+}
+
+.aiw-assetDescription,
+.aiw-selectedAssetDescription {
+  display: -webkit-box;
+  overflow: hidden;
+  margin: 2px 0 0;
+  color: #4b5563;
+  font-size: 12px;
+  line-height: 1.55;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+.aiw-selectedAssetDescription {
+  -webkit-line-clamp: 2;
+}
+
+.aiw-assetKeywords i {
+  background: #f8fafc;
+  color: #475569;
+  font-weight: 700;
+}
+
+.aiw-assetAiError {
+  display: -webkit-box;
+  overflow: hidden;
+  color: #dc2626;
+  line-height: 1.4;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.aiw-assetCardActions {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.aiw-assetCardActions > * {
+  width: 100%;
+}
+
+@media (max-width: 1200px) {
+  .aiw-intelligenceMetrics {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 720px) {
+  .aiw-assetIntelligenceHeader {
+    flex-direction: column;
+  }
+
+  .aiw-intelligenceMetrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

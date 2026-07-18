@@ -6118,3 +6118,11 @@ except Exception as _asset_zip_import_exc:
     print('ASSET_ZIP_IMPORT_V10_40_8_4_LOAD_FAILED', _asset_zip_import_exc)
 # ===== /V10.40.8.4 ZIP ASSET IMPORT =====
 
+# ===== V10.40.8.4.3 DOUBAO ASSET INTELLIGENCE =====
+try:
+    from app.services.asset_intelligence_v10_40_8_4_3 import install_asset_intelligence
+    install_asset_intelligence(app, get_settings)
+except Exception as _asset_intelligence_exc:
+    print('ASSET_INTELLIGENCE_V10_40_8_4_3_LOAD_FAILED', _asset_intelligence_exc)
+# ===== /V10.40.8.4.3 DOUBAO ASSET INTELLIGENCE =====
+

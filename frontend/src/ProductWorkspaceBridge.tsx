@@ -10,7 +10,7 @@ import {
   ProjectDraft,
   WorkspaceTab,
 } from './aiVideoApi'
-import { API_BASE, ZIP_UPLOAD_API_BASE, apiGet, uploadAssets, uploadAssetZip, getAssetZipImportJob, listAssetZipImportJobs, deleteAsset, AssetItem, AssetZipImportJob } from './api'
+import { API_BASE, ZIP_UPLOAD_API_BASE, apiGet, uploadAssets, uploadAssetZip, getAssetZipImportJob, listAssetZipImportJobs, deleteAsset, getAssetIntelligence, getAssetIntelligenceHealth, startAssetIntelligenceAnalysis, getAssetIntelligenceJob, updateAssetIntelligenceControl, updateAssetIntelligence, AssetItem, AssetZipImportJob, AssetIntelligence, AssetIntelligenceJob, AssetIntelligenceListResponse } from './api'
 
 const DRAFT_KEY = 'ai_video_engineering_project_draft_v16'
 const LEGACY_DRAFT_KEY = 'ai_video_engineering_project_draft_v15'
@@ -174,6 +174,13 @@ function assetToContext(asset: AssetItem) {
     r2_url: asset.url,
     folder: asset.folder,
     source_type: asset.source_type || 'asset_library',
+    ai_title: asset.intelligence?.title || '',
+    ai_description: asset.intelligence?.description || '',
+    ai_primary_category: asset.intelligence?.primary_category || '',
+    ai_secondary_category: asset.intelligence?.secondary_category || '',
+    ai_keywords: asset.intelligence?.keywords || [],
+    ai_quality_score: asset.intelligence?.quality_score || 0,
+    ai_cleanliness: asset.intelligence?.cleanliness || null,
   }
 }
 
@@ -195,17 +202,33 @@ function useAssets() {
   const [assets, setAssets] = useState<AssetItem[]>([])
   const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
+  const [intelligenceState, setIntelligenceState] = useState<AssetIntelligenceListResponse | null>(null)
 
-  async function refresh() {
-    setBusy('加载素材')
+  async function refresh(showBusy = true) {
+    if (showBusy) setBusy('加载素材')
     setError('')
     try {
-      const data = await apiGet<AssetItem[]>('/api/assets?limit=160&include_r2=true')
-      setAssets(Array.isArray(data) ? data : [])
+      const [assetData, intelligenceData] = await Promise.all([
+        apiGet<AssetItem[]>('/api/assets?limit=300&include_r2=true'),
+        getAssetIntelligence(3000).catch(() => null),
+      ])
+      const list = Array.isArray(assetData) ? assetData : []
+      const intelligenceMap = new Map<string, AssetIntelligence>()
+      if (intelligenceData?.items) {
+        intelligenceData.items.forEach((item) => {
+          if (item.asset_id) intelligenceMap.set(item.asset_id, item)
+          if (item.filename) intelligenceMap.set(item.filename, item)
+        })
+        setIntelligenceState(intelligenceData)
+      }
+      setAssets(list.map((asset) => ({
+        ...asset,
+        intelligence: intelligenceMap.get(asset.id) || intelligenceMap.get(asset.filename),
+      })))
     } catch (err: any) {
       setError(err?.message || String(err))
     } finally {
-      setBusy('')
+      if (showBusy) setBusy('')
     }
   }
 
@@ -213,11 +236,11 @@ function useAssets() {
     refresh()
   }, [])
 
-  return { assets, setAssets, busy, setBusy, error, setError, refresh }
+  return { assets, setAssets, busy, setBusy, error, setError, refresh, intelligenceState, setIntelligenceState }
 }
 
 function AssetLibraryPanel({ project, setProject, goTab }: { project: ProjectDraft; setProject: (p: ProjectDraft) => void; goTab: (tab: WorkspaceTab) => void }) {
-  const { assets, setAssets, busy, setBusy, error, setError, refresh } = useAssets()
+  const { assets, setAssets, busy, setBusy, error, setError, refresh, intelligenceState, setIntelligenceState } = useAssets()
   const [selectedIds, setSelectedIds] = useState<string[]>(loadSelectedAssetIds)
   const [folder, setFolder] = useState<AssetFolderKey>('all')
   const [uploadFolder, setUploadFolder] = useState<'self' | 'provided' | 'image' | 'collected' | 'ai'>('self')
@@ -226,16 +249,30 @@ function AssetLibraryPanel({ project, setProject, goTab }: { project: ProjectDra
   const [zipUploading, setZipUploading] = useState(false)
   const [zipUploadProgress, setZipUploadProgress] = useState(0)
   const [zipError, setZipError] = useState('')
+  const [aiJob, setAiJob] = useState<AssetIntelligenceJob | null>(null)
+  const [aiBusy, setAiBusy] = useState('')
+  const [aiError, setAiError] = useState('')
+  const [aiHealth, setAiHealth] = useState<any>(null)
+  const [categoryFilter, setCategoryFilter] = useState('all')
+  const [analysisFilter, setAnalysisFilter] = useState('all')
+  const [cleanFilter, setCleanFilter] = useState('all')
   const zipFinishedRef = useRef('')
 
   const selectedAssets = assets.filter((asset) => selectedIds.includes(asset.id))
   const filtered = assets.filter((asset) => {
     const f = (asset.folder || '').toLowerCase()
-    const text = `${asset.original_name || ''} ${asset.filename || ''} ${asset.url || ''} ${asset.folder || ''}`.toLowerCase()
+    const intelligence = asset.intelligence
+    const text = `${asset.original_name || ''} ${asset.filename || ''} ${asset.url || ''} ${asset.folder || ''} ${intelligence?.title || ''} ${intelligence?.description || ''} ${intelligence?.primary_category || ''} ${intelligence?.secondary_category || ''} ${(intelligence?.keywords || []).join(' ')}`.toLowerCase()
     if (folder !== 'all' && f !== folder) return false
+    if (categoryFilter !== 'all' && intelligence?.primary_category !== categoryFilter) return false
+    if (analysisFilter !== 'all' && String(intelligence?.analysis_status || 'pending') !== analysisFilter) return false
+    if (cleanFilter !== 'all' && String(intelligence?.cleanliness?.status || 'uncertain') !== cleanFilter) return false
     if (query.trim() && !text.includes(query.trim().toLowerCase())) return false
     return true
   })
+  const intelligenceSummary = intelligenceState?.summary || {}
+  const intelligenceCategories = intelligenceState?.categories || []
+  const autoEnabled = Boolean(intelligenceState?.control?.auto_enabled)
 
   function syncSelection(ids: string[], list = assets) {
     const unique = Array.from(new Set(ids.filter(Boolean)))
@@ -352,6 +389,102 @@ function AssetLibraryPanel({ project, setProject, goTab }: { project: ProjectDra
     }
   }, [zipJob?.job_id, zipJob?.status])
 
+  async function refreshIntelligence() {
+    try {
+      const state = await getAssetIntelligence(3000)
+      setIntelligenceState(state)
+      setAiJob(state.active_job || null)
+      const map = new Map<string, AssetIntelligence>()
+      state.items.forEach((item) => {
+        if (item.asset_id) map.set(item.asset_id, item)
+        if (item.filename) map.set(item.filename, item)
+      })
+      setAssets((current) => current.map((asset) => ({
+        ...asset,
+        intelligence: map.get(asset.id) || map.get(asset.filename),
+      })))
+    } catch (err: any) {
+      setAiError(err?.message || String(err))
+    }
+  }
+
+  async function startIntelligence(assetIds: string[] = [], force = false) {
+    setAiBusy(force ? '重新分析' : '分析未处理')
+    setAiError('')
+    try {
+      const result: any = await startAssetIntelligenceAnalysis({
+        asset_ids: assetIds,
+        force,
+        limit: assetIds.length || 300,
+      })
+      if (result?.job_id) setAiJob(result)
+      await refreshIntelligence()
+    } catch (err: any) {
+      setAiError(err?.message || String(err))
+    } finally {
+      setAiBusy('')
+    }
+  }
+
+  async function toggleAutoAnalysis() {
+    setAiBusy('更新自动分析')
+    setAiError('')
+    try {
+      const result = await updateAssetIntelligenceControl({ auto_enabled: !autoEnabled })
+      setIntelligenceState((current) => current ? { ...current, control: result.control } : current)
+      await refreshIntelligence()
+    } catch (err: any) {
+      setAiError(err?.message || String(err))
+    } finally {
+      setAiBusy('')
+    }
+  }
+
+  async function editIntelligence(asset: AssetItem) {
+    const current = asset.intelligence
+    const title = window.prompt('素材标题', current?.title || asset.original_name || asset.filename)
+    if (title === null) return
+    const description = window.prompt('素材描述', current?.description || '')
+    if (description === null) return
+    const category = window.prompt(`一级分类（可选：${intelligenceCategories.join('、')}）`, current?.primary_category || '其他')
+    if (category === null) return
+    const keywords = window.prompt('关键词，用逗号分隔', (current?.keywords || []).join('，'))
+    if (keywords === null) return
+    setAiBusy('保存人工修改')
+    setAiError('')
+    try {
+      await updateAssetIntelligence(asset.id, {
+        title,
+        description,
+        primary_category: category,
+        keywords: keywords.split(/[,，、;；]+/).map((item) => item.trim()).filter(Boolean),
+      })
+      await refreshIntelligence()
+    } catch (err: any) {
+      setAiError(err?.message || String(err))
+    } finally {
+      setAiBusy('')
+    }
+  }
+
+  useEffect(() => {
+    getAssetIntelligenceHealth().then(setAiHealth).catch(() => null)
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    const poll = async () => {
+      if (cancelled) return
+      await refreshIntelligence()
+    }
+    const active = aiJob && !['done', 'failed', 'cancelled'].includes(String(aiJob.status || '').toLowerCase())
+    const timer = window.setInterval(() => void poll(), active || autoEnabled ? 5000 : 20000)
+    return () => {
+      cancelled = true
+      window.clearInterval(timer)
+    }
+  }, [aiJob?.job_id, aiJob?.status, autoEnabled])
+
   async function removeAsset(asset: AssetItem) {
     if (!window.confirm(`确认删除素材「${asset.original_name || asset.filename}」？`)) return
     setBusy('删除素材')
@@ -411,6 +544,37 @@ function AssetLibraryPanel({ project, setProject, goTab }: { project: ProjectDra
         </label>
       </div>
 
+      <div className="aiw-form three aiw-intelligenceFilters">
+        <label>
+          AI 分类
+          <select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)}>
+            <option value="all">全部分类</option>
+            {intelligenceCategories.map((category) => <option key={category} value={category}>{category}</option>)}
+          </select>
+        </label>
+        <label>
+          分析状态
+          <select value={analysisFilter} onChange={(e) => setAnalysisFilter(e.target.value)}>
+            <option value="all">全部状态</option>
+            <option value="pending">待分析</option>
+            <option value="processing">分析中</option>
+            <option value="completed">分析完成</option>
+            <option value="manual">人工修改</option>
+            <option value="failed">分析失败</option>
+            <option value="need_config">待配置豆包</option>
+          </select>
+        </label>
+        <label>
+          净素材状态
+          <select value={cleanFilter} onChange={(e) => setCleanFilter(e.target.value)}>
+            <option value="all">全部净素材状态</option>
+            <option value="passed">通过</option>
+            <option value="uncertain">待确认</option>
+            <option value="failed">不通过</option>
+          </select>
+        </label>
+      </div>
+
       <div className="aiw-actions">
         <label className="aiw-primary aiw-uploadButton">
           {busy === '上传素材' ? '上传中...' : '上传图片 / 视频'}
@@ -420,7 +584,7 @@ function AssetLibraryPanel({ project, setProject, goTab }: { project: ProjectDra
           {zipUploading ? `ZIP 直传 ${zipUploadProgress}%` : zipJob && !['done', 'failed', 'cancelled'].includes(String(zipJob.status).toLowerCase()) ? `ZIP 导入 ${Math.round(Number(zipJob.progress || 0))}%` : '上传 ZIP 自动解压'}
           <input type="file" accept=".zip,application/zip,application/x-zip-compressed" disabled={zipUploading || Boolean(zipJob && !['done', 'failed', 'cancelled'].includes(String(zipJob.status).toLowerCase()))} onChange={(e) => { handleZipUpload(e.target.files?.[0] || null); e.currentTarget.value = '' }} />
         </label>
-        <button className="aiw-muted" onClick={refresh} disabled={!!busy}>{busy === '加载素材' ? '刷新中...' : '刷新素材'}</button>
+        <button className="aiw-muted" onClick={() => { void refresh(true) }} disabled={!!busy}>{busy === '加载素材' ? '刷新中...' : '刷新素材'}</button>
         <button className="aiw-purple" onClick={() => goTab('pureai')} disabled={!selectedIds.length}>带入视频创作</button>
       </div>
 
@@ -449,6 +613,37 @@ function AssetLibraryPanel({ project, setProject, goTab }: { project: ProjectDra
         </div>
       </div>}
 
+      <div className="aiw-assetIntelligencePanel">
+        <div className="aiw-assetIntelligenceHeader">
+          <div>
+            <p className="aiw-eyebrow">DOUBAO ASSET UNDERSTANDING</p>
+            <h3>豆包素材理解与智能分类</h3>
+            <p>图片直接理解；视频自动抽取 3-5 张关键帧。后台写入标题、描述、分类、关键词、质量和净素材结果。</p>
+          </div>
+          <span className={`aiw-badge ${aiHealth?.configured ? 'ok' : ''}`}>{aiHealth?.configured ? `豆包已配置 · ${aiHealth?.model || ''}` : '等待 ARK 配置'}</span>
+        </div>
+        <div className="aiw-intelligenceMetrics">
+          <span><b>{intelligenceSummary.completed || 0}</b>分析完成</span>
+          <span><b>{intelligenceSummary.pending || 0}</b>待分析</span>
+          <span><b>{intelligenceSummary.processing || 0}</b>分析中</span>
+          <span><b>{intelligenceSummary.failed || 0}</b>分析失败</span>
+          <span><b>{intelligenceSummary.clean_passed || 0}</b>净素材通过</span>
+          <span><b>{intelligenceSummary.clean_failed || 0}</b>明确不通过</span>
+        </div>
+        {aiJob && <div className={`aiw-aiJob ${String(aiJob.status || '').toLowerCase()}`}>
+          <div><b>{aiJob.message || '豆包正在分析素材'}</b><span>{aiJob.current_file || ''}</span></div>
+          <strong>{Math.round(Number(aiJob.progress || 0))}%</strong>
+          <div className="aiw-progressTrack"><i style={{ width: `${Math.max(0, Math.min(100, Number(aiJob.progress || 0)))}%` }} /></div>
+        </div>}
+        <div className="aiw-actions">
+          <button className="aiw-purple" disabled={!!aiBusy || Boolean(aiJob && !['done', 'failed', 'cancelled'].includes(String(aiJob.status || '').toLowerCase()))} onClick={() => startIntelligence([], false)}>{aiBusy === '分析未处理' ? '正在启动...' : '豆包分析未处理素材'}</button>
+          <button className="aiw-muted" disabled={!!aiBusy} onClick={toggleAutoAnalysis}>{autoEnabled ? '暂停后台自动分析' : '开启后台自动分析'}</button>
+          <button className="aiw-muted" disabled={selectedIds.length === 0 || !!aiBusy} onClick={() => startIntelligence(selectedIds, true)}>重新分析本次已选</button>
+          <button className="aiw-muted" disabled={!!aiBusy} onClick={refreshIntelligence}>刷新分析结果</button>
+        </div>
+        {aiError && <div className="aiw-error">{aiError}</div>}
+      </div>
+
       <div className="aiw-metrics">
         <div><b>{assets.length}</b><span>素材总数</span></div>
         <div><b>{selectedIds.length}</b><span>本次已选</span></div>
@@ -471,11 +666,24 @@ function AssetLibraryPanel({ project, setProject, goTab }: { project: ProjectDra
                   <button className="aiw-assetPreview" onClick={() => window.open(asset.url, '_blank')}>
                     {asset.kind === 'video' ? <video src={asset.url} muted /> : <img src={asset.url} alt={asset.original_name || asset.filename} />}
                   </button>
-                  <strong title={asset.original_name || asset.filename}>{asset.original_name || asset.filename}</strong>
+                  <strong title={asset.intelligence?.title || asset.original_name || asset.filename}>{asset.intelligence?.title || asset.original_name || asset.filename}</strong>
+                  <span className="aiw-assetOriginalName">{asset.original_name || asset.filename}</span>
                   <span>{folderLabel(asset.folder, asset.kind)} · {asset.kind} · {formatBytes(asset.size_bytes)}</span>
-                  <div className="aiw-actions small">
+                  <div className="aiw-intelligenceChips">
+                    <em className={`status ${asset.intelligence?.analysis_status || 'pending'}`}>{asset.intelligence?.analysis_status === 'completed' ? '已分析' : asset.intelligence?.analysis_status === 'processing' ? '分析中' : asset.intelligence?.analysis_status === 'manual' ? '人工修改' : asset.intelligence?.analysis_status === 'failed' ? '分析失败' : asset.intelligence?.analysis_status === 'need_config' ? '待配置' : '待分析'}</em>
+                    {asset.intelligence?.primary_category && <em>{asset.intelligence.primary_category}</em>}
+                    {asset.intelligence?.secondary_category && <em>{asset.intelligence.secondary_category}</em>}
+                    {asset.intelligence?.quality_score !== undefined && <em>质量 {asset.intelligence.quality_score}</em>}
+                    {asset.intelligence?.cleanliness?.status && <em className={`clean ${asset.intelligence.cleanliness.status}`}>{asset.intelligence.cleanliness.status === 'passed' ? '净素材通过' : asset.intelligence.cleanliness.status === 'failed' ? '净素材不通过' : '待确认'}</em>}
+                  </div>
+                  {asset.intelligence?.description && <p className="aiw-assetDescription">{asset.intelligence.description}</p>}
+                  {asset.intelligence?.keywords?.length ? <div className="aiw-assetKeywords">{asset.intelligence.keywords.slice(0, 6).map((item) => <i key={item}>{item}</i>)}</div> : null}
+                  {asset.intelligence?.error && <small className="aiw-assetAiError">{asset.intelligence.error}</small>}
+                  <div className="aiw-actions small aiw-assetCardActions">
                     <button className={selected ? 'aiw-purple' : 'aiw-muted'} onClick={() => syncSelection(selected ? selectedIds.filter((id) => id !== asset.id) : [...selectedIds, asset.id])}>{selected ? '已带入' : '带入视频'}</button>
                     <a className="aiw-linkButton" href={asset.url} target="_blank" rel="noreferrer">预览</a>
+                    <button className="aiw-muted" onClick={() => startIntelligence([asset.id], true)}>AI分析</button>
+                    <button className="aiw-muted" onClick={() => editIntelligence(asset)}>编辑</button>
                     <button className="aiw-danger" onClick={() => removeAsset(asset)}>删除</button>
                   </div>
                 </div>
@@ -511,8 +719,10 @@ function AssetLibraryPanel({ project, setProject, goTab }: { project: ProjectDra
                     : <a href={asset.url} target="_blank" rel="noreferrer"><img src={asset.url} alt={asset.original_name || asset.filename} loading="lazy" /></a>}
                 </div>
                 <div className="aiw-selectedAssetBody">
-                  <strong title={asset.original_name || asset.filename}>{asset.original_name || asset.filename}</strong>
+                  <strong title={asset.intelligence?.title || asset.original_name || asset.filename}>{asset.intelligence?.title || asset.original_name || asset.filename}</strong>
                   <span>{folderLabel(asset.folder, asset.kind)} · {formatBytes(asset.size_bytes)}</span>
+                  {asset.intelligence?.description && <p className="aiw-selectedAssetDescription">{asset.intelligence.description}</p>}
+                  {asset.intelligence?.primary_category && <div className="aiw-intelligenceChips"><em>{asset.intelligence.primary_category}</em>{asset.intelligence.secondary_category && <em>{asset.intelligence.secondary_category}</em>}</div>}
                   <div className="aiw-actions small aiw-selectedAssetActions">
                     <button
                       className="aiw-muted"
@@ -669,7 +879,7 @@ function DigitalHumanLibraryPanel({ project, setProject, goTab }: { project: Pro
       </div>
 
       <div className="aiw-actions">
-        <button className="aiw-muted" onClick={refresh}>刷新素材库</button>
+        <button className="aiw-muted" onClick={() => { void refresh(true) }}>刷新素材库</button>
         <button className="aiw-muted" onClick={() => void refreshProviders()} disabled={!!providerBusy}>{providerBusy || '刷新引擎状态'}</button>
         <button className="aiw-purple" onClick={() => { applyAvatar(); goTab('pureai') }} disabled={!selectedAvatar}>用于当前视频</button>
         <button className="aiw-muted" onClick={() => goTab('assets')}>先去上传照片/视频</button>
