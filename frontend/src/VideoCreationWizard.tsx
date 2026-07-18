@@ -9,6 +9,10 @@ import {
 
 type WizardStep = 1 | 2 | 3 | 4
 type SourceMode = 'account' | 'viral' | 'custom'
+type CreationMode = 'ai_generate' | 'existing_edit' | 'hybrid'
+type ExistingVoiceMode = 'tts_only' | 'retain_original' | 'tts_with_ambient'
+type OutputRatio = '9:16' | '16:9' | '1:1'
+type EditPace = 'fast' | 'normal' | 'calm'
 type MaterialSource = 'r2' | 'real' | 'ai' | 'mixed'
 type ContentType = 'investment' | 'own_stay' | 'second_home' | 'rental' | 'education'
 type ScriptMode = 'lead' | 'professional' | 'life' | 'sales'
@@ -53,6 +57,16 @@ type ShotPlan = {
   prompt: string
   avoid: string[]
   assetIds: string[]
+  assetId?: string
+  assetUrl?: string
+  assetName?: string
+  startTime?: number
+  endTime?: number
+  preserveAudio?: boolean
+  speed?: number
+  matchScore?: number
+  analysisDescription?: string
+  autoStart?: boolean
 }
 
 type JobPayload = {
@@ -798,6 +812,10 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
   const initialDraft = useMemo(() => loadWizardDraft(), [])
   const [step, setStep] = useState<WizardStep>((Number(initialDraft.step || 1) as WizardStep) || 1)
   const [sourceMode, setSourceMode] = useState<SourceMode>((initialDraft.sourceMode || 'custom') as SourceMode)
+  const [creationMode, setCreationMode] = useState<CreationMode>(String(initialDraft.creationMode || project.creation_mode || 'ai_generate') as CreationMode)
+  const [existingVoiceMode, setExistingVoiceMode] = useState<ExistingVoiceMode>(String(initialDraft.existingVoiceMode || project.existing_voice_mode || 'tts_with_ambient') as ExistingVoiceMode)
+  const [outputRatio, setOutputRatio] = useState<OutputRatio>(String(initialDraft.outputRatio || project.output_ratio || '9:16') as OutputRatio)
+  const [editPace, setEditPace] = useState<EditPace>(String(initialDraft.editPace || project.edit_pace || 'normal') as EditPace)
   const [topic, setTopic] = useState(String(project.topic || initialDraft.topic || DEFAULT_TOPIC))
   const [market, setMarket] = useState(String(project.market || initialDraft.market || DEFAULT_MARKET))
   const [city, setCity] = useState(String(project.city || initialDraft.city || inferCity(`${project.topic || initialDraft.topic} ${project.script || initialDraft.script}`)))
@@ -891,6 +909,7 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
     ...subtitleStyleOverrides,
   }
   const selectedAssets = asArray(project.asset_context || project.selected_assets || project.r2_material_context)
+  const selectedVideos = selectedAssets.filter((asset: any) => String(asset?.kind || '').toLowerCase() === 'video' && String(asset?.url || asset?.r2_url || '').trim())
   const avatarConfig = project.avatar_config || null
   const currentTaskLeads = asArray(project.current_task_leads).filter((item: any) => {
     const bound = String(item?.job_id || item?.run_id || item?.video_job_id || '')
@@ -1035,13 +1054,14 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
   }, [segments.length, script, scriptMode])
 
   useEffect(() => {
+    if (creationMode === 'existing_edit') return
     if (!shotPlan.length && segments.length) {
       const plan = generateShotPlan(segments, targetDuration, city, project)
       setShotPlan(plan)
       setSelectedShotId(plan[0]?.id || 'shot_1')
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [segments.length])
+  }, [segments.length, creationMode])
 
   useEffect(() => {
     if (!jobId) return
@@ -1069,7 +1089,11 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
       if (!alive || pollInFlightRef.current) return
       pollInFlightRef.current = true
       try {
-        const data = await apiGet(`/api/video/full-ai/one-scene/job/${jobId}`, 180000)
+        const existingTask = creationMode === 'existing_edit' || jobId.startsWith('existing_edit_')
+        const endpoint = existingTask
+          ? `/api/video/existing-edit/jobs/${jobId}`
+          : `/api/video/full-ai/one-scene/job/${jobId}`
+        const data = await apiGet(endpoint, 180000)
         if (!alive) return
         if (String(data?.job_id || jobId) !== jobId) {
           throw new Error('后端返回了不同任务 ID，已阻止串任务。')
@@ -1116,11 +1140,11 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
     return stopPolling
     // 任务 ID 是唯一绑定；页面刷新后即使 busy 没有恢复，也会继续轮询同一任务。
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [jobId])
+  }, [jobId, creationMode])
 
 
   useEffect(() => {
-    if (!jobId || !videoUrl || !finalStatus(job)) return
+    if (!jobId || !videoUrl || !finalStatus(job) || jobId.startsWith('existing_edit_')) return
     let alive = true
 
     const loadWorkflow = async () => {
@@ -1172,6 +1196,10 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
     saveWizardDraft({
       step,
       sourceMode,
+      creationMode,
+      existingVoiceMode,
+      outputRatio,
+      editPace,
       topic,
       market,
       city,
@@ -1199,7 +1227,7 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
       workflow,
       savedAt: new Date().toISOString(),
     })
-  }, [step, sourceMode, topic, market, city, contentType, scriptMode, targetDuration, competitorSource, manualKeywords, script, selectedSegmentId, voiceSettings, shotPlan, selectedShotId, jobId, job, sourceResult, disabledKeywordValues, aiKeywordInsights, aiStatus, buttonStatus, subtitleEnabled, subtitleStyleId, subtitleStyleOverrides, generationStartedAt, workflow])
+  }, [step, sourceMode, creationMode, existingVoiceMode, outputRatio, editPace, topic, market, city, contentType, scriptMode, targetDuration, competitorSource, manualKeywords, script, selectedSegmentId, voiceSettings, shotPlan, selectedShotId, jobId, job, sourceResult, disabledKeywordValues, aiKeywordInsights, aiStatus, buttonStatus, subtitleEnabled, subtitleStyleId, subtitleStyleOverrides, generationStartedAt, workflow])
 
 
 
@@ -1296,6 +1324,10 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
       manualKeywords: cleanManualKeywords,
       competitorSource,
       sourceMode,
+      creation_mode: creationMode,
+      existing_voice_mode: existingVoiceMode,
+      output_ratio: outputRatio,
+      edit_pace: editPace,
       keyword_insights: keywords,
       ai_keyword_insights: aiKeywordInsights,
       burn_subtitles: subtitleEnabled,
@@ -1348,6 +1380,23 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
   }
 
   async function recoverLatestDoneVideo(silent = false) {
+    if (creationMode === 'existing_edit' || jobId.startsWith('existing_edit_')) {
+      try {
+        const data = await apiGet('/api/video/existing-edit/jobs/latest?done_only=false', 60000)
+        const found = data?.job || null
+        if (found) {
+          setJob(found)
+          setJobId(String(found.job_id || jobId || 'existing_edit_recovered'))
+          setBusy(finalStatus(found) ? '' : '恢复现有视频剪辑任务')
+          setError('')
+          if (!silent) noteButton(extractVideoUrl(found) ? '已找回最近的现有视频剪辑成片。' : '已找回最近的现有视频剪辑任务。')
+          return found
+        }
+      } catch (err: any) {
+        if (!silent) setError(`找回现有视频剪辑任务失败：${err?.message || String(err)}`)
+      }
+      return null
+    }
     try {
       const data = await apiGet('/api/video/wizard-video/latest-done?limit=100&strict_one_scene=1', 60000)
       const found = data?.job || data?.latest || null
@@ -1470,6 +1519,10 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
     } catch {}
     setStep(1)
     setSourceMode('custom')
+    setCreationMode('ai_generate')
+    setExistingVoiceMode('tts_with_ambient')
+    setOutputRatio('9:16')
+    setEditPace('normal')
     setTopic(DEFAULT_TOPIC)
     setMarket(DEFAULT_MARKET)
     setCity('kuala_lumpur')
@@ -1495,7 +1548,7 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
     setSourceError('')
     setAiStatus('已清空旧草稿和脏关键词。请点「AI 生成主题/关键词」，再生成文案。')
     setButtonStatus('已重置入口；不会再恢复 62、模板名、OpenClaw 等旧数据。')
-    setProject({ ...project, topic: DEFAULT_TOPIC, market: DEFAULT_MARKET, city: 'kuala_lumpur', contentType: 'investment', scriptMode: 'professional', targetDuration: 15, script: '', manualKeywords: '', manual_keywords: '', ai_keyword_insights: [], keyword_insights: [], segments: [], script_segments: [], segment_voice_settings: {}, manual_shot_plan: [], shot_overrides: [], job_id: '', lastOutput: null })
+    setProject({ ...project, topic: DEFAULT_TOPIC, market: DEFAULT_MARKET, city: 'kuala_lumpur', contentType: 'investment', scriptMode: 'professional', targetDuration: 15, creation_mode: 'ai_generate', existing_voice_mode: 'tts_with_ambient', output_ratio: '9:16', edit_pace: 'normal', script: '', manualKeywords: '', manual_keywords: '', ai_keyword_insights: [], keyword_insights: [], segments: [], script_segments: [], segment_voice_settings: {}, manual_shot_plan: [], shot_overrides: [], job_id: '', lastOutput: null })
     saveWizardDraft({ step: 1 })
   }
 
@@ -1548,6 +1601,137 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
     }
   }
 
+  // ===== V10.40.8.5 EXISTING VIDEO SMART EDIT =====
+  function applyCreationMode(nextMode: CreationMode) {
+    if (creationMode === nextMode) return
+    setCreationMode(nextMode)
+    setShotPlan([])
+    setSelectedShotId('shot_1')
+    setJobId('')
+    setJob(null)
+    setBusy('')
+    setError('')
+    noteButton(nextMode === 'existing_edit'
+      ? '已切换到现有视频智能剪辑：只使用素材库视频，不调用 FAL。'
+      : nextMode === 'hybrid'
+        ? '已切换到混合模式：优先使用现有素材，缺失画面才允许 AI 补足。'
+        : '已切换到 AI 镜头生成模式。')
+  }
+
+  function existingEditPayload(editPlan: ShotPlan[] = shotPlan) {
+    return {
+      title: topic,
+      topic,
+      market,
+      city,
+      creation_mode: 'existing_edit',
+      script_text: script,
+      script,
+      target_duration_seconds: targetDuration,
+      duration_seconds: targetDuration,
+      output_ratio: outputRatio,
+      edit_pace: editPace,
+      voice_mode: existingVoiceMode,
+      script_segments: segments,
+      segment_voice_settings: voiceSettings,
+      keyword_insights: keywords,
+      burn_subtitles: subtitleEnabled,
+      subtitle_required: subtitleEnabled,
+      subtitle_style_id: subtitleStyleId || 'douyin_pop',
+      subtitle_style: selectedSubtitleStyle,
+      selected_assets: selectedVideos,
+      asset_context: selectedVideos,
+      r2_material_context: selectedVideos,
+      edit_plan: editPlan.length ? {
+        mode: 'existing_edit',
+        clips: editPlan.map((shot) => ({
+          id: shot.id,
+          index: shot.index,
+          title: shot.title,
+          scene: shot.scene,
+          description: shot.analysisDescription || shot.scene,
+          narration: shot.narration,
+          duration: shot.duration,
+          duration_seconds: shot.duration,
+          source: 'r2',
+          asset_id: shot.assetId || shot.assetIds[0] || '',
+          asset_ids: shot.assetIds,
+          asset_url: shot.assetUrl || '',
+          asset_name: shot.assetName || shot.title,
+          start_time: Number(shot.startTime || 0),
+          end_time: Number(shot.endTime || shot.duration),
+          auto_start: shot.autoStart !== false,
+          preserve_audio: shot.preserveAudio !== false,
+          speed: Number(shot.speed || 1),
+          transition: shot.transition,
+          camera: shot.camera,
+          match_score: Number(shot.matchScore || 0),
+        })),
+      } : null,
+      extra: {
+        source: 'existing_video_smart_edit_v10_40_8_5',
+        fal_allowed: false,
+        selected_video_count: selectedVideos.length,
+      },
+    }
+  }
+
+  async function buildExistingEditPlan() {
+    if (!script.trim()) {
+      setError('还没有口播文案，无法按语义匹配现有视频。')
+      setStep(1)
+      return [] as ShotPlan[]
+    }
+    if (!selectedVideos.length) {
+      setError('没有选择视频素材。请先去素材库把视频带入当前视频。')
+      setStep(3)
+      return [] as ShotPlan[]
+    }
+    setBusy('语义匹配现有视频')
+    setError('')
+    try {
+      const data = await apiPost('/api/video/existing-edit/plan', existingEditPayload([]), 180000)
+      const clips = Array.isArray(data?.clips) ? data.clips : []
+      if (!clips.length) throw new Error('后端没有返回可用剪辑计划。')
+      const nextShots: ShotPlan[] = clips.map((clip: any, index: number) => ({
+        id: String(clip.id || `existing_clip_${index + 1}`),
+        index: Number(clip.index || index + 1),
+        title: String(clip.title || clip.asset_name || `现有素材 ${index + 1}`),
+        scene: String(clip.scene || clip.description || clip.title || ''),
+        narration: String(clip.narration || ''),
+        duration: Number(clip.duration || clip.duration_seconds || 3),
+        source: 'r2',
+        camera: String(clip.camera || '保留原片运镜'),
+        transition: String(clip.transition || '轻柔淡化'),
+        prompt: '',
+        avoid: [],
+        assetIds: Array.isArray(clip.asset_ids) ? clip.asset_ids : [String(clip.asset_id || '')].filter(Boolean),
+        assetId: String(clip.asset_id || ''),
+        assetUrl: String(clip.asset_url || ''),
+        assetName: String(clip.asset_name || clip.title || ''),
+        startTime: Number(clip.start_time || 0),
+        endTime: Number(clip.end_time || clip.duration || 3),
+        preserveAudio: clip.preserve_audio !== false,
+        speed: Number(clip.speed || 1),
+        matchScore: Number(clip.match_score || 0),
+        analysisDescription: String(clip.analysis_description || clip.description || ''),
+        autoStart: clip.auto_start !== false,
+      }))
+      setShotPlan(nextShots)
+      setSelectedShotId(nextShots[0]?.id || 'shot_1')
+      syncProject({ manual_shot_plan: nextShots, shot_overrides: nextShots, existing_edit_plan: data })
+      noteButton(`后端已用 ${selectedVideos.length} 个现有视频匹配 ${nextShots.length} 个剪辑片段；不会调用 FAL。`)
+      return nextShots
+    } catch (err: any) {
+      setError(err?.message || String(err))
+      return [] as ShotPlan[]
+    } finally {
+      setBusy('')
+    }
+  }
+
+  // ===== /V10.40.8.5 EXISTING VIDEO SMART EDIT =====
+
   async function runFlowAction(action: 'topic' | 'script' | 'voice' | 'shots' | 'video' | 'collect') {
     setError('')
     setSourceError('')
@@ -1580,6 +1764,11 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
       return
     }
     if (action === 'shots') {
+      if (creationMode === 'existing_edit') {
+        await buildExistingEditPlan()
+        setStep(3)
+        return
+      }
       if (!script.trim()) {
         setError('还没有口播文案，不能生成镜头。请先点「生成文案」。')
         noteButton('镜头按钮已拦截：没有文案不能假生成镜头。')
@@ -1609,7 +1798,9 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
         setStep(3)
         return
       }
-      noteButton('开始调用 单场景动态 TTS-first：生成后会自动烧录字幕，并用任务恢复接口捞成片。')
+      noteButton(creationMode === 'existing_edit'
+        ? '开始 ECS 后端智能剪辑现有视频：切片、配音、环境声混音和字幕；不会调用 FAL。'
+        : '开始调用 单场景动态 TTS-first：生成后会自动烧录字幕，并用任务恢复接口捞成片。')
       await startGenerate()
       return
     }
@@ -1929,6 +2120,34 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
   }
 
   async function startGenerate() {
+    if (creationMode === 'existing_edit') {
+      setError('')
+      if (!script.trim()) { setError('没有口播文案，不能剪辑现有视频。'); setStep(1); return }
+      if (!selectedVideos.length) { setError('没有选择任何视频素材。请先在素材库把视频带入当前视频。'); setStep(3); return }
+      let finalPlan = shotPlan
+      if (!finalPlan.length || !finalPlan.some((shot) => shot.assetUrl)) {
+        finalPlan = await buildExistingEditPlan()
+        if (!finalPlan.length) return
+      }
+      setBusy('ECS 后端智能剪辑中')
+      setGenerationStartedAt(Date.now())
+      setWorkflow(null)
+      setWorkflowError('')
+      setStep(4)
+      try {
+        const data = await apiPost('/api/video/existing-edit/start', existingEditPayload(finalPlan), 240000)
+        if (!data?.job_id) throw new Error('后端没有返回现有视频剪辑 job_id')
+        setJob(data)
+        setJobId(String(data.job_id))
+        syncProject({ currentJobId: String(data.job_id), job_id: String(data.job_id), workflow_job_id: '', existing_edit_job_id: String(data.job_id), existing_edit_plan: finalPlan })
+        setBusy('现有视频切片与配音中')
+        noteButton('现有视频剪辑任务已启动，billing_guard=existing_edit_no_fal。')
+      } catch (err: any) {
+        setBusy('')
+        setError(err?.message || String(err))
+      }
+      return
+    }
     setError('')
     setBusy('启动生成')
     setGenerationStartedAt(Date.now())
@@ -2116,15 +2335,23 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
         noteButton('没有逐句配音设置，先调用 DeepSeek 判断语气情绪。')
         await aiTuneVoiceAll()
       }
-      if (!shotPlan.length) setShotPlan(generateShotPlan(segments, targetDuration, city, project))
+      if (!shotPlan.length) {
+        if (creationMode === 'existing_edit') await buildExistingEditPlan()
+        else setShotPlan(generateShotPlan(segments, targetDuration, city, project))
+      }
       setStep(3)
     } else if (step === 3) {
       syncProject()
       if (!shotPlan.length) {
-        const plan = generateShotPlan(segments, targetDuration, city, project)
-        setShotPlan(plan)
-        setSelectedShotId(plan[0]?.id || 'shot_1')
-        noteButton(`已自动补齐 ${plan.length} 个镜头，请确认后再生成。`)
+        if (creationMode === 'existing_edit') {
+          const plan = await buildExistingEditPlan()
+          if (!plan.length) return
+        } else {
+          const plan = generateShotPlan(segments, targetDuration, city, project)
+          setShotPlan(plan)
+          setSelectedShotId(plan[0]?.id || 'shot_1')
+          noteButton(`已自动补齐 ${plan.length} 个镜头，请确认后再生成。`)
+        }
       }
       setStep(4)
     } else {
@@ -2135,6 +2362,23 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
   function renderStepOne() {
     return (
       <div className="aiw-stepGrid two">
+        <section className="aiw-stepCard aiw-creationModePanel">
+          <div className="aiw-inlineTitle">
+            <div><h3>选择创作方式</h3><p>现有视频模式只用素材库视频，由 ECS 完成切片、配音、混音与字幕。</p></div>
+            {creationMode === 'existing_edit' && <span className="aiw-badge ok">不调用 FAL</span>}
+          </div>
+          <div className="aiw-creationModeGrid">
+            <button type="button" className={creationMode === 'ai_generate' ? 'active' : ''} onClick={() => applyCreationMode('ai_generate')}><b>AI 生成镜头</b><span>沿用当前 TTS-first 与 AI 镜头链路</span></button>
+            <button type="button" className={creationMode === 'existing_edit' ? 'active' : ''} onClick={() => applyCreationMode('existing_edit')}><b>现有视频智能剪辑</b><span>素材库视频 → 后端切片 → 配音/混音 → 字幕</span></button>
+            <button type="button" className={creationMode === 'hybrid' ? 'active' : ''} onClick={() => applyCreationMode('hybrid')}><b>AI + 现有素材混合</b><span>现有素材优先，缺失镜头才由 AI 补足</span></button>
+          </div>
+          {creationMode === 'existing_edit' && <div className="aiw-existingEditOptions">
+            <label>声音方式<select value={existingVoiceMode} onChange={(e) => setExistingVoiceMode(e.target.value as ExistingVoiceMode)}><option value="tts_only">纯 TTS 配音</option><option value="tts_with_ambient">TTS + 低音量环境声</option><option value="retain_original">保留原视频声音</option></select></label>
+            <label>输出比例<select value={outputRatio} onChange={(e) => setOutputRatio(e.target.value as OutputRatio)}><option value="9:16">9:16 竖屏</option><option value="16:9">16:9 横屏</option><option value="1:1">1:1 方形</option></select></label>
+            <label>剪辑节奏<select value={editPace} onChange={(e) => setEditPace(e.target.value as EditPace)}><option value="fast">快节奏</option><option value="normal">正常</option><option value="calm">舒缓</option></select></label>
+            <div className="aiw-existingVideoCount"><b>{selectedVideos.length}</b><span>个视频已带入</span><button type="button" className="aiw-muted" onClick={() => openWorkspaceTab('assets')}>去素材库选视频</button></div>
+          </div>}
+        </section>
         <section className="aiw-stepCard">
           <h3>第一步：搞定内容</h3>
           <p>先选真实来源：抖音主页会下发账号采集，爆款链接会下发评论采集，自定义主题不调用采集。</p>
@@ -2563,12 +2807,12 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
     return (
       <div className="aiw-stepGrid three">
         <section className="aiw-stepCard">
-          <h3>镜头计划</h3>
-          <p>每个镜头都能自己上手改。已选 R2 素材：{selectedAssets.length} 个；数字人：{avatarConfig?.enabled ? '已启用' : '未启用'}。</p>
+          <h3>{creationMode === 'existing_edit' ? '素材剪辑计划' : '镜头计划'}</h3>
+          <p>{creationMode === 'existing_edit' ? `后端按口播语义从 ${selectedVideos.length} 个已选视频中匹配片段；不会调用 FAL。` : `每个镜头都能自己上手改。已选 R2 素材：${selectedAssets.length} 个；数字人：${avatarConfig?.enabled ? '已启用' : '未启用'}。`}</p>
           <div className="aiw-actions">
             <button className="aiw-muted" onClick={() => openWorkspaceTab('assets')}>去素材库选择 R2/真实素材</button>
-            <button className="aiw-muted" onClick={() => openWorkspaceTab('digital')}>去数字人库选谁出镜</button>
-            <button type="button" className="aiw-primary" onClick={() => void runFlowAction('shots')}>按文案重建镜头</button>
+            {creationMode !== 'existing_edit' && <button className="aiw-muted" onClick={() => openWorkspaceTab('digital')}>去数字人库选谁出镜</button>}
+            <button type="button" className="aiw-primary" onClick={() => void runFlowAction('shots')}>{creationMode === 'existing_edit' ? '按文案智能匹配切片' : '按文案重建镜头'}</button>
           </div>
           <div className="aiw-shotPicker">
             {shotPlan.map((shot) => (
@@ -2591,12 +2835,22 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
               <label>素材来源<select value={selectedShot.source} onChange={(e) => updateShot(selectedShot.id, { source: e.target.value as MaterialSource })}><option value="r2">R2 素材</option><option value="real">真实素材</option><option value="ai">AI 补足</option><option value="mixed">混合</option></select></label>
               <label>运镜<input value={selectedShot.camera} onChange={(e) => updateShot(selectedShot.id, { camera: e.target.value })} /></label>
               <label>转场<input value={selectedShot.transition} onChange={(e) => updateShot(selectedShot.id, { transition: e.target.value })} /></label>
+              {creationMode === 'existing_edit' && <>
+                <label>匹配素材<input value={selectedShot.assetName || selectedShot.title} readOnly /></label>
+                <label>素材起点秒<input type="number" min="0" step="0.1" value={selectedShot.startTime || 0} onChange={(e) => updateShot(selectedShot.id, { startTime: Number(e.target.value), autoStart: false })} /></label>
+                <label>播放速度<input type="number" min="0.75" max="1.5" step="0.05" value={selectedShot.speed || 1} onChange={(e) => updateShot(selectedShot.id, { speed: Number(e.target.value) })} /></label>
+                <label className="aiw-checkRow"><input type="checkbox" checked={selectedShot.preserveAudio !== false} onChange={(e) => updateShot(selectedShot.id, { preserveAudio: e.target.checked })} />保留该片段环境声</label>
+                <div className="aiw-existingMatchNote"><b>语义匹配分：{Number(selectedShot.matchScore || 0).toFixed(1)}</b><span>{selectedShot.analysisDescription || '等待豆包素材描述'}</span></div>
+              </>}
             </div>
           )}
         </section>
         <aside className="aiw-stepCard">
-          <h3>Prompt / 禁用画面</h3>
-          {selectedShot && <>
+          <h3>{creationMode === 'existing_edit' ? '素材预览 / 匹配依据' : 'Prompt / 禁用画面'}</h3>
+          {selectedShot && creationMode === 'existing_edit' ? <>
+            {selectedShot.assetUrl ? <video className="aiw-existingSourcePreview" src={selectedShot.assetUrl} controls muted playsInline preload="metadata" /> : <div className="aiw-info">该片段暂未绑定视频 URL，请重新匹配。</div>}
+            <div className="aiw-existingEvidence"><b>{selectedShot.assetName || selectedShot.title}</b><p>{selectedShot.analysisDescription || selectedShot.scene}</p><span>对应口播：{selectedShot.narration}</span></div>
+          </> : selectedShot && <>
             <textarea className="aiw-promptBox" value={selectedShot.prompt} onChange={(e) => updateShot(selectedShot.id, { prompt: e.target.value })} />
             <div className="aiw-chipRow">{selectedShot.avoid.map((item) => <span className="aiw-badPill" key={item}>{item}</span>)}</div>
           </>}
@@ -2718,7 +2972,7 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
               onClick={() => void runFlowAction('video')}
               disabled={Boolean(busy)}
             >
-              {busy || (videoUrl ? '重新生成 AI 视频' : '生成完整 AI 视频')}
+              {busy || (creationMode === 'existing_edit' ? (videoUrl ? '重新剪辑现有视频' : '剪辑现有视频（不调用 FAL）') : (videoUrl ? '重新生成 AI 视频' : '生成完整 AI 视频'))}
             </button>
 
             {finalPreviewUrl && (
@@ -3401,7 +3655,7 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
         <div>
           <p className="aiw-eyebrow">STEP BY STEP / ORIGINAL BACKEND LINKED</p>
           <h2>四步视频创作向导</h2>
-          <p>不是旧的一页铺满，也不是假页面；这条链路接 V10.13 单场景动态 TTS-first、抖音大字字幕烧录、R2 素材、数字人素材和 OpenClaw。</p>
+          <p>支持 AI 生成镜头、现有视频智能剪辑和混合模式；现有视频模式由 ECS 完成切片、配音、混音与字幕，明确禁止调用 FAL。</p>
         </div>
         <span className="aiw-badge ok">第 {step} 步 / 共 4 步</span>
       </div>
@@ -3425,7 +3679,7 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
         <div><span>创作进度</span><b>{step}/4</b><i><strong style={{ width: `${(step / 4) * 100}%` }} /></i></div>
         <div className="aiw-actions">
           <button type="button" className="aiw-muted" disabled={step === 1 || !!busy} onClick={() => setStep((Math.max(1, step - 1) as WizardStep))}>上一步</button>
-          <button type="button" className="aiw-primary" disabled={!!busy && step === 4} onClick={() => void nextStep()}>{step === 4 ? (busy || '生成成片') : '下一步'}</button>
+          <button type="button" className="aiw-primary" disabled={!!busy && step === 4} onClick={() => void nextStep()}>{step === 4 ? (busy || (creationMode === 'existing_edit' ? '开始剪辑现有视频' : '生成成片')) : '下一步'}</button>
         </div>
       </footer>
     </section>

@@ -825,3 +825,24 @@ mark {
   .vcw-footer nav { width: 100%; }
   .vcw-footer nav button { flex: 1; }
 }
+
+
+/* V10.40.8.5 EXISTING VIDEO SMART EDIT */
+.aiw-creationModePanel { grid-column: 1 / -1; }
+.aiw-creationModePanel .aiw-inlineTitle { display:flex; align-items:flex-start; justify-content:space-between; gap:18px; }
+.aiw-creationModeGrid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; }
+.aiw-creationModeGrid > button { display:grid; gap:7px; min-height:94px; padding:15px; text-align:left; border:1px solid #ddd6fe; border-radius:16px; background:#fff; }
+.aiw-creationModeGrid > button b { color:#1f2937; font-size:15px; }
+.aiw-creationModeGrid > button span { color:#7b8192; font-size:12px; line-height:1.6; }
+.aiw-creationModeGrid > button.active { border-color:#7c3aed; background:linear-gradient(135deg,#f5f3ff,#eff6ff); box-shadow:0 8px 24px rgba(124,58,237,.12); }
+.aiw-existingEditOptions { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)) minmax(180px,.8fr); gap:12px; margin-top:14px; padding:14px; border:1px solid #dbeafe; border-radius:16px; background:#f8fbff; }
+.aiw-existingEditOptions label { display:grid; gap:6px; color:#374151; font-size:12px; font-weight:800; }
+.aiw-existingVideoCount { display:grid; grid-template-columns:auto 1fr; align-items:center; gap:4px 9px; padding:10px 12px; border-radius:14px; background:#fff; }
+.aiw-existingVideoCount b { color:#6d28d9; font-size:25px; }
+.aiw-existingVideoCount span { color:#6b7280; font-size:12px; }
+.aiw-existingVideoCount button { grid-column:1 / -1; }
+.aiw-existingSourcePreview { width:100%; max-height:360px; border-radius:16px; background:#0f172a; object-fit:contain; }
+.aiw-existingEvidence,.aiw-existingMatchNote { display:grid; gap:6px; margin-top:10px; padding:12px; border:1px solid #e0e7ff; border-radius:14px; background:#f8faff; }
+.aiw-existingEvidence p,.aiw-existingEvidence span,.aiw-existingMatchNote span { margin:0; color:#697084; font-size:12px; line-height:1.65; }
+.aiw-existingMatchNote { grid-column:1 / -1; }
+@media (max-width:1000px) { .aiw-creationModeGrid,.aiw-existingEditOptions { grid-template-columns:1fr; } }

@@ -6126,3 +6126,10 @@ except Exception as _asset_intelligence_exc:
     print('ASSET_INTELLIGENCE_V10_40_8_4_3_LOAD_FAILED', _asset_intelligence_exc)
 # ===== /V10.40.8.4.3 DOUBAO ASSET INTELLIGENCE =====
 
+# ===== V10.40.8.5 EXISTING VIDEO SMART EDIT =====
+try:
+    from app.services.existing_video_editor_v10_40_8_5 import install_existing_video_editor
+    install_existing_video_editor(app, get_settings)
+except Exception as _existing_video_edit_exc:
+    print("EXISTING_VIDEO_EDITOR_V10_40_8_5_LOAD_FAILED", _existing_video_edit_exc)
+# ===== /V10.40.8.5 EXISTING VIDEO SMART EDIT =====
