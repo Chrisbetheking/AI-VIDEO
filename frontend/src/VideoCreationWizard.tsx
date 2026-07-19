@@ -1837,8 +1837,16 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
       setStep(1)
       return [] as ShotPlan[]
     }
-    if (!selectedVideos.length) {
-      setError('没有选择视频素材。请先去素材库把视频带入当前视频。')
+    // V10_40_8_6_A7_AUTO_R2_START_GATE_FIX
+    if (
+      String(
+        (project as any).material_selection_mode || 'auto',
+      ).toLowerCase() === 'manual'
+      && (
+        !selectedVideos.length
+      )
+    ) {
+      setError('手动素材模式下需要先选择视频素材。')
       setStep(3)
       return [] as ShotPlan[]
     }
@@ -3111,7 +3119,7 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
                 </div>
               </div>
             )}
-          <p>{creationMode === 'existing_edit' ? `后端按口播语义从 ${selectedVideos.length} 个已选视频中匹配片段；不会调用 FAL。` : `每个镜头都能自己上手改。已选 R2 素材：${selectedAssets.length} 个；数字人：${avatarConfig?.enabled ? '已启用' : '未启用'}。`}</p>
+          <p>{creationMode === 'existing_edit' ? `全自动模式会按口播语义从整个 R2 素材库 ${selectedVideos.length} 匹配真实片段；手选素材仅用于人工锁定，不会调用 FAL。` : `每个镜头都能自己上手改。已选 R2 素材：${selectedAssets.length} 个；数字人：${avatarConfig?.enabled ? '已启用' : '未启用'}。`}</p>
           <div className="aiw-actions">
             <button className="aiw-muted" onClick={() => openWorkspaceTab('assets')}>去素材库选择 R2/真实素材</button>
             {creationMode !== 'existing_edit' && <button className="aiw-muted" onClick={() => openWorkspaceTab('digital')}>去数字人库选谁出镜</button>}
@@ -3993,7 +4001,7 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
             一键清除所有视频进度
           </button>
           <button type="button" className="aiw-muted" disabled={step === 1 || !!busy} onClick={() => setStep((Math.max(1, step - 1) as WizardStep))}>上一步</button>
-          <button type="button" className="aiw-primary" disabled={!!busy && step === 4} onClick={() => void nextStep()}>{step === 4 ? (busy || (creationMode === 'existing_edit' ? '开始剪辑现有视频' : '生成成片')) : '下一步'}</button>
+          <button type="button" className="aiw-primary" disabled={!!busy && step === 4} onClick={() => void nextStep()}>{step === 4 ? (busy || (creationMode === 'existing_edit' ? '自动匹配 R2 并开始剪辑' : '生成成片')) : '下一步'}</button>
         </div>
       </footer>
     </section>
