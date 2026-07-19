@@ -668,3 +668,2118 @@ def burn_directed_subtitles_with_upload(
     if not url:
         raise RuntimeError("A9 字幕成片上传 R2 后没有返回 URL")
     return {"ok": True, "version": VERSION, "video_url": url, "url": url, "style_id": style_id, "style": style, "duration": duration, "cues": list(segments), "ass_path": str(ass_path), "output_path": str(output_path), "r2": upload, "director_marker": DIRECTOR_MARKER}
+
+# =====================================================================
+# V10.40.8.8 A10 KEYWORD BURST + EDIT QUALITY DIRECTOR
+# =====================================================================
+
+_A9_DIRECT_EXISTING_VIDEO = direct_existing_video
+_A9_BUILD_ASS = _build_ass
+
+VERSION = "10.40.8.8-a10-a1"
+DIRECTOR_MARKER = "keyword_burst_edit_quality_v10_40_8_8_a10_a1"
+
+_A10_BURST_PHRASES = (
+    "第一句就问价格",
+    "只看价格",
+    "别只看价格",
+    "区域成熟度",
+    "开发商是否靠谱",
+    "开发商靠不靠谱",
+    "自住还是投资",
+    "二手市场流动性",
+    "真实持有成本",
+    "物业维护成本",
+    "交付周期",
+    "转手难度",
+    "风险也大",
+    "容易买错",
+    "很容易买错",
+    "先想清楚",
+    "再去看房",
+    "价格",
+    "开发商",
+    "用途",
+    "流动性",
+    "持有成本",
+    "风险",
+)
+_A10_RISK_WORDS = (
+    "风险",
+    "买错",
+    "不稳",
+    "烂尾",
+    "空置",
+    "转手难",
+    "维护成本",
+)
+_A10_ACTION_WORDS = (
+    "别只看",
+    "不要只看",
+    "先想清楚",
+    "再去看房",
+    "一定要",
+)
+
+
+def _a10_character_boundaries(
+    text: str,
+    start: float,
+    end: float,
+) -> list[float]:
+    value = _display(text)
+    if not value:
+        return [round(start, 3), round(end, 3)]
+    duration = max(0.04, end - start)
+    weights: list[float] = []
+    for char in value:
+        if char.isdigit():
+            weight = 1.08
+        elif char.isascii():
+            weight = 0.86
+        else:
+            weight = 1.0
+        weights.append(weight)
+    total = sum(weights) or 1.0
+    result = [start]
+    cursor = start
+    for weight in weights:
+        cursor += duration * weight / total
+        result.append(cursor)
+    result[-1] = end
+    return [round(item, 3) for item in result]
+
+
+def _a10_native_word_items(
+    timing: dict[str, Any],
+) -> list[dict[str, Any]]:
+    raw = (
+        timing.get("word_timings")
+        or timing.get("words")
+        or timing.get("word_timestamps")
+        or timing.get("char_timings")
+        or []
+    )
+    output: list[dict[str, Any]] = []
+    if not isinstance(raw, list):
+        return output
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        word = _display(
+            item.get("word")
+            or item.get("text")
+            or item.get("char")
+            or ""
+        )
+        if not word:
+            continue
+        start = (
+            _float(item.get("start_ms")) / 1000.0
+            if item.get("start_ms") is not None
+            else _float(
+                item.get("start")
+                if item.get("start") is not None
+                else item.get("start_time")
+            )
+        )
+        end = (
+            _float(item.get("end_ms")) / 1000.0
+            if item.get("end_ms") is not None
+            else _float(
+                item.get("end")
+                if item.get("end") is not None
+                else item.get("end_time"),
+                start,
+            )
+        )
+        if end <= start:
+            continue
+        output.append(
+            {
+                "word": word,
+                "start": round(start, 3),
+                "end": round(end, 3),
+                "source": "tts_native",
+            }
+        )
+    return output
+
+
+def _a10_timeline_for_cue(
+    cue: dict[str, Any],
+    original_timings: Sequence[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    text = _display(
+        cue.get("text")
+        or cue.get("subtitle_text")
+        or ""
+    )
+    start = _float(cue.get("start"))
+    end = _float(cue.get("end"), start)
+    if not text or end <= start:
+        return []
+
+    segment_index = int(
+        _float(cue.get("segment_index"), 0)
+    )
+    if 1 <= segment_index <= len(original_timings):
+        source_timing = original_timings[
+            segment_index - 1
+        ]
+        if isinstance(source_timing, dict):
+            native = _a10_native_word_items(
+                source_timing
+            )
+            if native:
+                selected = [
+                    item
+                    for item in native
+                    if item["end"] >= start - 0.04
+                    and item["start"] <= end + 0.04
+                ]
+                if selected:
+                    return selected
+
+    boundaries = _a10_character_boundaries(
+        text,
+        start,
+        end,
+    )
+    return [
+        {
+            "word": char,
+            "start": boundaries[index],
+            "end": boundaries[index + 1],
+            "source": "tts_segment_forced",
+        }
+        for index, char in enumerate(text)
+    ]
+
+
+def _a10_keyword_timing(
+    cue: dict[str, Any],
+    keyword: str,
+) -> tuple[float, float, str]:
+    text = _display(
+        cue.get("text")
+        or cue.get("subtitle_text")
+        or ""
+    )
+    word = _display(keyword)
+    cue_start = _float(
+        cue.get("start")
+    )
+    cue_end = _float(
+        cue.get("end"),
+        cue_start,
+    )
+    position = text.find(word)
+
+    timeline = [
+        item
+        for item in (
+            cue.get("word_timeline")
+            or []
+        )
+        if isinstance(item, dict)
+        and _display(
+            item.get("word")
+            or item.get("text")
+            or ""
+        )
+    ]
+
+    if (
+        position >= 0
+        and word
+        and timeline
+    ):
+        assembled = ""
+        spans: list[
+            tuple[
+                int,
+                int,
+                dict[str, Any],
+            ]
+        ] = []
+
+        for item in timeline:
+            token = _display(
+                item.get("word")
+                or item.get("text")
+                or ""
+            )
+            token_start = len(
+                assembled
+            )
+            assembled += token
+            spans.append(
+                (
+                    token_start,
+                    len(assembled),
+                    item,
+                )
+            )
+
+        end_position = (
+            position + len(word)
+        )
+        matched = [
+            item
+            for token_start, token_end, item
+            in spans
+            if (
+                token_end > position
+                and token_start < end_position
+            )
+        ]
+
+        if matched:
+            word_start = _float(
+                matched[0].get(
+                    "start"
+                ),
+                cue_start,
+            )
+            spoken_end = _float(
+                matched[-1].get(
+                    "end"
+                ),
+                word_start,
+            )
+            visual_duration = max(
+                0.58,
+                min(
+                    1.05,
+                    spoken_end
+                    - word_start
+                    + 0.16,
+                ),
+            )
+            visual_end = min(
+                cue_end,
+                word_start
+                + visual_duration,
+            )
+            source = (
+                "tts_native"
+                if all(
+                    item.get("source")
+                    == "tts_native"
+                    for item in matched
+                )
+                else "tts_segment_forced"
+            )
+            return (
+                round(
+                    word_start,
+                    3,
+                ),
+                round(
+                    visual_end,
+                    3,
+                ),
+                source,
+            )
+
+    if position < 0 or not word:
+        midpoint = (
+            cue_start
+            + (
+                cue_end - cue_start
+            )
+            * 0.5
+        )
+        return (
+            round(
+                midpoint,
+                3,
+            ),
+            round(
+                min(
+                    cue_end,
+                    midpoint + 0.62,
+                ),
+                3,
+            ),
+            "cue_midpoint_fallback",
+        )
+
+    boundaries = (
+        _a10_character_boundaries(
+            text,
+            cue_start,
+            cue_end,
+        )
+    )
+    word_start = boundaries[
+        position
+    ]
+    spoken_end = boundaries[
+        min(
+            len(text),
+            position + len(word),
+        )
+    ]
+    visual_duration = max(
+        0.58,
+        min(
+            1.05,
+            spoken_end
+            - word_start
+            + 0.16,
+        ),
+    )
+    return (
+        round(
+            word_start,
+            3,
+        ),
+        round(
+            min(
+                cue_end,
+                word_start
+                + visual_duration,
+            ),
+            3,
+        ),
+        "tts_segment_forced",
+    )
+
+
+def _a10_burst_category(word: str) -> str:
+    value = _display(word)
+    if re.search(r"\d", value):
+        return "number"
+    if any(
+        item in value
+        for item in _A10_RISK_WORDS
+    ):
+        return "risk"
+    if any(
+        item in value
+        for item in _A10_ACTION_WORDS
+    ):
+        return "action"
+    return "decision"
+
+
+def _a10_candidate_score(
+    word: str,
+    cue: dict[str, Any],
+    cue_index: int,
+) -> int:
+    value = _display(word)
+    score = min(14, len(value)) * 4
+    if value in _A10_BURST_PHRASES:
+        score += 60
+    if re.search(r"\d", value):
+        score += 45
+    if any(
+        item in value
+        for item in _A10_RISK_WORDS
+    ):
+        score += 40
+    if any(
+        item in value
+        for item in _A10_ACTION_WORDS
+    ):
+        score += 34
+    if cue_index <= 2:
+        score += 18
+    if cue.get("strong_keyword") == value:
+        score += 30
+    return score
+
+
+def _a10_build_keyword_bursts(
+    cues: Sequence[dict[str, Any]],
+    original_timings: Sequence[dict[str, Any]],
+    target_duration: float,
+    payload: dict[str, Any],
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    requested = int(
+        _float(
+            payload.get("keyword_burst_count"),
+            round(
+                max(
+                    1.0,
+                    target_duration,
+                )
+                / 5.0
+            ),
+        )
+    )
+    target_count = max(
+        4,
+        min(10, requested),
+    )
+    candidates: list[dict[str, Any]] = []
+
+    for cue_index, cue in enumerate(
+        cues,
+        start=1,
+    ):
+        text = _display(
+            cue.get("text")
+            or ""
+        )
+        if not text:
+            continue
+        words: list[str] = []
+        strong = _display(
+            cue.get("strong_keyword")
+            or ""
+        )
+        if strong:
+            words.append(strong)
+        words.extend(
+            _display(item)
+            for item in (
+                cue.get("keywords")
+                or []
+            )
+            if _display(item)
+        )
+        for phrase in _A10_BURST_PHRASES:
+            if phrase in text:
+                words.append(phrase)
+        for match in re.finditer(
+            r"(?:RM|人民币|美元|马币)?"
+            r"\d+(?:\.\d+)?"
+            r"(?:万|千|亿|%|年|个月|套|层)?",
+            text,
+            re.I,
+        ):
+            words.append(
+                match.group(0)
+            )
+
+        seen: set[str] = set()
+        for word in words:
+            clean = _display(word)
+            if (
+                not clean
+                or clean in seen
+                or clean not in text
+                or len(clean) > 12
+            ):
+                continue
+            seen.add(clean)
+            (
+                burst_start,
+                burst_end,
+                timing_source,
+            ) = _a10_keyword_timing(
+                cue,
+                clean,
+            )
+            candidates.append(
+                {
+                    "text": clean,
+                    "start": burst_start,
+                    "end": burst_end,
+                    "cue_index": int(
+                        cue.get("index")
+                        or cue_index
+                    ),
+                    "segment_index": int(
+                        cue.get("segment_index")
+                        or 0
+                    ),
+                    "category": (
+                        _a10_burst_category(
+                            clean
+                        )
+                    ),
+                    "score": (
+                        _a10_candidate_score(
+                            clean,
+                            cue,
+                            cue_index,
+                        )
+                    ),
+                    "timing_source": (
+                        timing_source
+                    ),
+                    "director_version": VERSION,
+                }
+            )
+
+    selected: list[dict[str, Any]] = []
+    for candidate in sorted(
+        candidates,
+        key=lambda item: (
+            -int(item["score"]),
+            float(item["start"]),
+            -len(str(item["text"])),
+        ),
+    ):
+        if any(
+            candidate["text"]
+            == item["text"]
+            or abs(
+                candidate["start"]
+                - item["start"]
+            )
+            < 2.35
+            for item in selected
+        ):
+            continue
+        selected.append(candidate)
+        if len(selected) >= target_count:
+            break
+
+    early = [
+        item
+        for item in candidates
+        if float(item["start"]) <= 4.0
+    ]
+    if (
+        early
+        and not any(
+            float(item["start"]) <= 4.0
+            for item in selected
+        )
+    ):
+        hook = max(
+            early,
+            key=lambda item: int(
+                item["score"]
+            ),
+        )
+        if selected:
+            selected[-1] = hook
+        else:
+            selected.append(hook)
+
+    selected.sort(
+        key=lambda item: float(
+            item["start"]
+        )
+    )
+    for index, item in enumerate(
+        selected,
+        start=1,
+    ):
+        item["index"] = index
+        item["duration"] = round(
+            max(
+                0.0,
+                float(item["end"])
+                - float(item["start"]),
+            ),
+            3,
+        )
+        item["animation"] = (
+            "pop_overshoot_settle"
+        )
+        item["scale_in"] = 0.62
+        item["scale_peak"] = 1.42
+        item["scale_settle"] = 1.12
+
+    report = {
+        "version": VERSION,
+        "enabled": _bool(
+            payload.get(
+                "keyword_burst_enabled"
+            ),
+            True,
+        ),
+        "target_count": target_count,
+        "burst_count": len(selected),
+        "first_burst_seconds": (
+            round(
+                float(
+                    selected[0]["start"]
+                ),
+                3,
+            )
+            if selected
+            else None
+        ),
+        "minimum_spacing_seconds": (
+            round(
+                min(
+                    float(
+                        current["start"]
+                    )
+                    - float(
+                        previous["start"]
+                    )
+                    for previous, current
+                    in zip(
+                        selected,
+                        selected[1:],
+                    )
+                ),
+                3,
+            )
+            if len(selected) > 1
+            else None
+        ),
+        "categories": {
+            category: sum(
+                1
+                for item in selected
+                if item["category"]
+                == category
+            )
+            for category in (
+                "decision",
+                "risk",
+                "number",
+                "action",
+            )
+        },
+        "independent_ass_layer": True,
+        "cut_sync_requested": True,
+    }
+    return selected, report
+
+
+def _a10_quality_score(
+    candidate: dict[str, Any],
+) -> float:
+    score = _float(
+        candidate.get("quality_score"),
+        70.0,
+    )
+    blur = _float(
+        candidate.get("blur_score"),
+        0.0,
+    )
+    shake = _float(
+        candidate.get("shake_score"),
+        0.0,
+    )
+    exposure = _float(
+        candidate.get("exposure_score"),
+        70.0,
+    )
+    score += max(
+        -20.0,
+        min(
+            15.0,
+            (exposure - 60.0) * 0.25,
+        ),
+    )
+    score -= max(
+        0.0,
+        blur,
+    ) * 0.35
+    score -= max(
+        0.0,
+        shake,
+    ) * 0.45
+    if candidate.get("low_quality") is True:
+        score -= 35.0
+    return score
+
+
+def _a10_unique_candidates(
+    clips: Sequence[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    output: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for item in clips:
+        if not isinstance(item, dict):
+            continue
+        if (
+            str(
+                item.get("source")
+                or ""
+            ).lower()
+            != "r2"
+        ):
+            continue
+        if not _asset_url(item):
+            continue
+        key = (
+            _asset_id(item)
+            or _asset_url(item)
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        output.append(
+            dict(item)
+        )
+    return output
+
+
+def _a10_boundaries(
+    target_duration: float,
+    desired_count: int,
+    cues: Sequence[dict[str, Any]],
+    bursts: Sequence[dict[str, Any]],
+) -> list[float]:
+    target = max(
+        1.0,
+        float(target_duration),
+    )
+    min_shot = 0.72
+    max_shot = 2.75
+    desired = max(
+        1,
+        min(28, desired_count),
+    )
+    hard = [
+        float(item["start"])
+        for item in bursts
+        if (
+            min_shot
+            <= float(item["start"])
+            <= target - min_shot
+        )
+    ]
+    soft = [
+        _float(item.get("start"))
+        for item in cues
+        if (
+            min_shot
+            <= _float(
+                item.get("start")
+            )
+            <= target - min_shot
+        )
+    ]
+    boundaries = [0.0, target]
+
+    def can_add(value: float) -> bool:
+        ordered = sorted(
+            boundaries + [value]
+        )
+        return all(
+            current - previous
+            >= min_shot - 1e-6
+            for previous, current
+            in zip(
+                ordered,
+                ordered[1:],
+            )
+        )
+
+    for value in sorted(
+        set(
+            round(item, 3)
+            for item in hard
+        )
+    ):
+        if can_add(value):
+            boundaries.append(value)
+
+    for value in sorted(
+        set(
+            round(item, 3)
+            for item in soft
+        )
+    ):
+        if len(boundaries) - 1 >= desired:
+            break
+        if can_add(value):
+            boundaries.append(value)
+
+    while True:
+        boundaries.sort()
+        gaps = [
+            (
+                boundaries[index + 1]
+                - boundaries[index],
+                index,
+            )
+            for index in range(
+                len(boundaries) - 1
+            )
+        ]
+        largest, index = max(gaps)
+        if (
+            (
+                len(boundaries) - 1
+                >= desired
+                and largest <= max_shot
+            )
+            or largest < 2 * min_shot
+        ):
+            break
+        left = boundaries[index]
+        split = round(
+            left
+            + largest
+            * (
+                0.48
+                if index % 2 == 0
+                else 0.52
+            ),
+            3,
+        )
+        if not can_add(split):
+            break
+        boundaries.append(split)
+        if len(boundaries) - 1 >= 28:
+            break
+
+    boundaries = sorted(
+        round(item, 3)
+        for item in boundaries
+    )
+    boundaries[-1] = round(
+        target,
+        3,
+    )
+    return boundaries
+
+
+def _a10_select_asset(
+    candidates: Sequence[dict[str, Any]],
+    cue_text: str,
+    previous_asset: str,
+    reuse: dict[str, int],
+    interval_index: int,
+) -> dict[str, Any]:
+    cue_tokens = _tokens(cue_text)
+    ranked: list[
+        tuple[float, dict[str, Any]]
+    ] = []
+    for candidate in candidates:
+        asset_id = (
+            _asset_id(candidate)
+            or _asset_url(candidate)
+        )
+        candidate_text = _clip_text(
+            candidate
+        ).lower()
+        overlap = len(
+            cue_tokens
+            & _tokens(candidate_text)
+        )
+        contains = sum(
+            1
+            for token in cue_tokens
+            if (
+                token
+                and token
+                in candidate_text
+            )
+        )
+        score = (
+            overlap * 12.0
+            + contains * 4.0
+            + _float(
+                candidate.get(
+                    "match_score"
+                )
+            )
+            * 0.18
+            + _a10_quality_score(
+                candidate
+            )
+            * 0.25
+            - reuse.get(
+                asset_id,
+                0,
+            )
+            * 18.0
+        )
+        if (
+            asset_id == previous_asset
+            and len(candidates) > 1
+        ):
+            score -= 180.0
+        if (
+            candidate.get(
+                "manual_locked"
+            )
+            and reuse.get(
+                asset_id,
+                0,
+            )
+            == 0
+        ):
+            score += 32.0
+        stable = (
+            sum(
+                ord(char)
+                for char in asset_id
+            )
+            % 101
+        )
+        score += (
+            (
+                stable
+                + interval_index * 17
+            )
+            % 101
+        ) * 0.001
+        ranked.append(
+            (
+                score,
+                candidate,
+            )
+        )
+    ranked.sort(
+        key=lambda item: item[0],
+        reverse=True,
+    )
+    return dict(
+        ranked[0][1]
+    )
+
+
+def _a10_edit_timeline(
+    input_clips: Sequence[dict[str, Any]],
+    base_clips: Sequence[dict[str, Any]],
+    cues: Sequence[dict[str, Any]],
+    bursts: Sequence[dict[str, Any]],
+    target_duration: float,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    candidates = _a10_unique_candidates(
+        input_clips
+    )
+    if not candidates:
+        candidates = _a10_unique_candidates(
+            base_clips
+        )
+    if not candidates:
+        raise ValueError(
+            "A10 剪辑导演没有可用的 R2 候选素材"
+        )
+
+    desired = max(
+        len(base_clips),
+        min(
+            26,
+            int(
+                round(
+                    max(
+                        1.0,
+                        target_duration,
+                    )
+                    / 1.72
+                )
+            ),
+        ),
+    )
+    boundaries = _a10_boundaries(
+        target_duration,
+        desired,
+        cues,
+        bursts,
+    )
+    output: list[
+        dict[str, Any]
+    ] = []
+    reuse: dict[str, int] = {}
+    previous_asset = ""
+    burst_starts = [
+        float(item["start"])
+        for item in bursts
+    ]
+
+    for index, (left, right) in enumerate(
+        zip(
+            boundaries,
+            boundaries[1:],
+        ),
+        start=1,
+    ):
+        duration = round(
+            right - left,
+            3,
+        )
+        midpoint = (
+            left + duration / 2
+        )
+        cue = _cue_at(
+            cues,
+            midpoint,
+        )
+        cue_text = str(
+            cue.get("text")
+            or ""
+        )
+        selected = _a10_select_asset(
+            candidates,
+            cue_text,
+            previous_asset,
+            reuse,
+            index,
+        )
+        asset_id = (
+            _asset_id(selected)
+            or _asset_url(selected)
+        )
+        use_index = reuse.get(
+            asset_id,
+            0,
+        )
+        reuse[asset_id] = (
+            use_index + 1
+        )
+        source_base = max(
+            0.12,
+            _float(
+                selected.get(
+                    "start_time"
+                ),
+                0.0,
+            ),
+        )
+        source_start = (
+            source_base
+            + use_index
+            * (
+                duration * 1.43
+                + 0.61
+            )
+        )
+        source_duration = _float(
+            selected.get(
+                "source_duration"
+            )
+            or selected.get(
+                "media_duration"
+            )
+            or selected.get(
+                "asset_duration"
+            ),
+            0.0,
+        )
+        if (
+            source_duration
+            > duration + 0.3
+        ):
+            max_start = max(
+                0.1,
+                source_duration
+                - duration
+                - 0.15,
+            )
+            source_start = min(
+                source_start,
+                max_start,
+            )
+
+        burst = next(
+            (
+                item
+                for item in bursts
+                if abs(
+                    float(
+                        item["start"]
+                    )
+                    - left
+                )
+                <= 0.035
+            ),
+            None,
+        )
+        if left < 3.0:
+            role = "hook"
+        elif (
+            right
+            >= target_duration - 2.5
+        ):
+            role = "conclusion"
+        elif burst:
+            role = "keyword_impact"
+        else:
+            role = "body"
+
+        output.append(
+            {
+                **selected,
+                "id": (
+                    f"a10_clip_"
+                    f"{index:02d}"
+                ),
+                "index": index,
+                "source": "r2",
+                "asset_id": asset_id,
+                "asset_ids": [
+                    asset_id
+                ],
+                "asset_url": _asset_url(
+                    selected
+                ),
+                "duration": duration,
+                "duration_seconds": (
+                    duration
+                ),
+                "timeline_start": round(
+                    left,
+                    3,
+                ),
+                "timeline_end": round(
+                    right,
+                    3,
+                ),
+                "start_time": round(
+                    source_start,
+                    3,
+                ),
+                "end_time": round(
+                    source_start
+                    + duration,
+                    3,
+                ),
+                "narration": cue_text,
+                "cue_index": int(
+                    cue.get("index")
+                    or 0
+                ),
+                "pace_role": role,
+                "transition": (
+                    "关键词冲击硬切"
+                    if burst
+                    else "直接切"
+                ),
+                "camera": (
+                    "关键词同步轻推"
+                    if burst
+                    else "保留原片运镜"
+                ),
+                "keyword_burst": (
+                    dict(burst)
+                    if burst
+                    else None
+                ),
+                "cut_reason": (
+                    (
+                        f"爆词「"
+                        f"{burst['text']}」"
+                        "同步切点"
+                    )
+                    if burst
+                    else (
+                        f"口播语义「"
+                        f"{cue_text[:18]}」"
+                    )
+                ),
+                "quality_score": round(
+                    _a10_quality_score(
+                        selected
+                    ),
+                    2,
+                ),
+                "director_version": VERSION,
+            }
+        )
+        previous_asset = asset_id
+
+    duration_sum = round(
+        sum(
+            float(
+                item["duration"]
+            )
+            for item in output
+        ),
+        3,
+    )
+    consecutive = sum(
+        1
+        for previous, current
+        in zip(
+            output,
+            output[1:],
+        )
+        if (
+            previous["asset_id"]
+            == current["asset_id"]
+        )
+    )
+    selected_assets = {
+        item["asset_id"]
+        for item in output
+    }
+    alignment_errors = []
+    timeline_boundaries = [
+        float(
+            item["timeline_start"]
+        )
+        for item in output
+    ]
+    for burst_start in burst_starts:
+        alignment_errors.append(
+            min(
+                abs(
+                    boundary
+                    - burst_start
+                )
+                for boundary
+                in timeline_boundaries
+            )
+        )
+    max_alignment = max(
+        alignment_errors,
+        default=0.0,
+    )
+    low_quality = sum(
+        1
+        for item in output
+        if float(
+            item.get(
+                "quality_score"
+            )
+            or 0.0
+        )
+        < 42.0
+    )
+    hard_failures: list[str] = []
+    if (
+        abs(
+            duration_sum
+            - target_duration
+        )
+        > 0.03
+    ):
+        hard_failures.append(
+            "timeline_duration_mismatch"
+        )
+    if any(
+        not item.get("asset_url")
+        for item in output
+    ):
+        hard_failures.append(
+            "missing_r2_url"
+        )
+    if (
+        consecutive
+        and len(candidates) > 1
+    ):
+        hard_failures.append(
+            "consecutive_same_asset"
+        )
+    if max_alignment > 0.08:
+        hard_failures.append(
+            "keyword_cut_alignment"
+        )
+
+    quality_gate = {
+        "version": VERSION,
+        "passed": not hard_failures,
+        "hard_failures": hard_failures,
+        "warnings": (
+            ["asset_diversity_low"]
+            if (
+                len(selected_assets)
+                < min(
+                    4,
+                    len(candidates),
+                )
+            )
+            else []
+        )
+        + (
+            ["low_quality_clip_selected"]
+            if low_quality
+            else []
+        ),
+        "shot_count": len(output),
+        "timeline_duration_seconds": (
+            duration_sum
+        ),
+        "minimum_shot_seconds": round(
+            min(
+                float(
+                    item["duration"]
+                )
+                for item in output
+            ),
+            3,
+        ),
+        "maximum_shot_seconds": round(
+            max(
+                float(
+                    item["duration"]
+                )
+                for item in output
+            ),
+            3,
+        ),
+        "average_shot_seconds": round(
+            target_duration
+            / max(
+                1,
+                len(output),
+            ),
+            3,
+        ),
+        "unique_asset_count": len(
+            selected_assets
+        ),
+        "candidate_asset_count": len(
+            candidates
+        ),
+        "consecutive_same_asset_count": (
+            consecutive
+        ),
+        "low_quality_selected_count": (
+            low_quality
+        ),
+        "keyword_cut_max_error_seconds": round(
+            max_alignment,
+            3,
+        ),
+        "keyword_cut_sync_count": sum(
+            1
+            for item in output
+            if item.get(
+                "keyword_burst"
+            )
+        ),
+        "hook_shot_count": sum(
+            1
+            for item in output
+            if item.get(
+                "pace_role"
+            )
+            == "hook"
+        ),
+        "universal_fade_removed": True,
+    }
+    if hard_failures:
+        raise ValueError(
+            "A10 剪辑质量门禁失败："
+            + "、".join(
+                hard_failures
+            )
+        )
+    return output, quality_gate
+
+
+async def direct_existing_video(
+    *,
+    settings: Any,
+    payload: dict[str, Any],
+    timings: Sequence[dict[str, Any]],
+    clips: Sequence[dict[str, Any]],
+    target_duration: float,
+) -> dict[str, Any]:
+    base = await _A9_DIRECT_EXISTING_VIDEO(
+        settings=settings,
+        payload=payload,
+        timings=timings,
+        clips=clips,
+        target_duration=target_duration,
+    )
+    cues = [
+        dict(item)
+        for item in (
+            base.get(
+                "subtitle_segments"
+            )
+            or []
+        )
+    ]
+    for cue in cues:
+        cue["word_timeline"] = (
+            _a10_timeline_for_cue(
+                cue,
+                timings,
+            )
+        )
+
+    enabled = _bool(
+        payload.get(
+            "keyword_burst_enabled"
+        ),
+        True,
+    )
+    if enabled:
+        bursts, burst_report = (
+            _a10_build_keyword_bursts(
+                cues,
+                timings,
+                target_duration,
+                payload,
+            )
+        )
+    else:
+        bursts, burst_report = [], {
+            "version": VERSION,
+            "enabled": False,
+            "burst_count": 0,
+            "independent_ass_layer": False,
+            "cut_sync_requested": False,
+        }
+
+    for cue in cues:
+        cue["keyword_bursts"] = [
+            dict(item)
+            for item in bursts
+            if int(
+                item.get(
+                    "cue_index"
+                )
+                or 0
+            )
+            == int(
+                cue.get("index")
+                or 0
+            )
+        ]
+
+    directed_clips, quality_gate = (
+        _a10_edit_timeline(
+            clips,
+            base.get("clips")
+            or [],
+            cues,
+            bursts,
+            target_duration,
+        )
+    )
+    burst_report = {
+        **burst_report,
+        "cut_sync_actual": (
+            quality_gate[
+                "keyword_cut_sync_count"
+            ]
+        ),
+        "cut_sync_max_error_seconds": (
+            quality_gate[
+                "keyword_cut_max_error_seconds"
+            ]
+        ),
+    }
+    edit_report = {
+        **(
+            base.get(
+                "edit_report"
+            )
+            or {}
+        ),
+        "version": VERSION,
+        "output_clip_count": len(
+            directed_clips
+        ),
+        "timeline_duration_seconds": (
+            quality_gate[
+                "timeline_duration_seconds"
+            ]
+        ),
+        "average_clip_seconds": (
+            quality_gate[
+                "average_shot_seconds"
+            ]
+        ),
+        "minimum_clip_seconds": (
+            quality_gate[
+                "minimum_shot_seconds"
+            ]
+        ),
+        "maximum_clip_seconds": (
+            quality_gate[
+                "maximum_shot_seconds"
+            ]
+        ),
+        "consecutive_same_asset_count": (
+            quality_gate[
+                "consecutive_same_asset_count"
+            ]
+        ),
+        "keyword_cut_sync": True,
+        "semantic_role_match": True,
+        "quality_gate_passed": (
+            quality_gate[
+                "passed"
+            ]
+        ),
+    }
+    subtitle_report = {
+        **(
+            base.get(
+                "subtitle_report"
+            )
+            or {}
+        ),
+        "version": VERSION,
+        "word_timeline": True,
+        "word_timeline_source": (
+            "tts_native_or_"
+            "forced_segment_alignment"
+        ),
+        "keyword_burst_count": len(
+            bursts
+        ),
+        "independent_keyword_layer": True,
+    }
+    style = {
+        **(
+            base.get(
+                "subtitle_style"
+            )
+            or {}
+        ),
+        "keyword_burst_enabled": (
+            enabled
+        ),
+        "keyword_burst_font_size": max(
+            132,
+            int(
+                _float(
+                    payload.get(
+                        "keyword_burst_"
+                        "font_size"
+                    ),
+                    146,
+                )
+            ),
+        ),
+        "keyword_burst_y": max(
+            700,
+            min(
+                1250,
+                int(
+                    _float(
+                        payload.get(
+                            "keyword_burst_y"
+                        ),
+                        980,
+                    )
+                ),
+            ),
+        ),
+        "keyword_burst_outline": max(
+            10,
+            int(
+                _float(
+                    payload.get(
+                        "keyword_burst_"
+                        "outline"
+                    ),
+                    12,
+                )
+            ),
+        ),
+    }
+    report = {
+        "version": VERSION,
+        "ai": (
+            (
+                base.get("report")
+                or {}
+            ).get("ai")
+            or {}
+        ),
+        "subtitle": subtitle_report,
+        "keyword_burst": (
+            burst_report
+        ),
+        "edit": edit_report,
+        "quality_gate": quality_gate,
+    }
+    return {
+        **base,
+        "version": VERSION,
+        "director_marker": (
+            DIRECTOR_MARKER
+        ),
+        "subtitle_segments": cues,
+        "subtitle_style": style,
+        "keyword_bursts": bursts,
+        "keyword_burst_report": (
+            burst_report
+        ),
+        "clips": directed_clips,
+        "subtitle_report": (
+            subtitle_report
+        ),
+        "edit_report": edit_report,
+        "edit_quality_gate": (
+            quality_gate
+        ),
+        "report": report,
+    }
+
+
+def _a10_burst_color(
+    category: str,
+) -> str:
+    return {
+        "risk": "&H003C4CFF&",
+        "number": "&H00FF76D8&",
+        "action": "&H005CE4FF&",
+        "decision": "&H005CE4FF&",
+    }.get(
+        str(category),
+        "&H005CE4FF&",
+    )
+
+
+def _a10_ass_escape(
+    value: Any,
+) -> str:
+    return (
+        _display(value)
+        .replace(
+            "{",
+            "（",
+        )
+        .replace(
+            "}",
+            "）",
+        )
+        .replace(
+            "\\",
+            "＼",
+        )
+    )
+
+
+def _a10_burst_dialogue(
+    event: dict[str, Any],
+    *,
+    font_size: int,
+    y: int,
+    outline: int,
+) -> str:
+    start = max(
+        0.0,
+        _float(
+            event.get("start")
+        )
+        - 0.055,
+    )
+    end = max(
+        start + 0.42,
+        _float(
+            event.get("end"),
+            start + 0.7,
+        ),
+    )
+    duration_ms = max(
+        420,
+        int(
+            round(
+                (end - start)
+                * 1000
+            )
+        ),
+    )
+    peak_end = min(
+        115,
+        max(
+            75,
+            int(
+                duration_ms * 0.16
+            ),
+        ),
+    )
+    settle_end = min(
+        230,
+        max(
+            150,
+            int(
+                duration_ms * 0.32
+            ),
+        ),
+    )
+    fade_start = max(
+        settle_end + 80,
+        duration_ms - 105,
+    )
+    color = _a10_burst_color(
+        str(
+            event.get("category")
+            or "decision"
+        )
+    )
+    word = _a10_ass_escape(
+        event.get("text")
+        or ""
+    )
+    if not word:
+        return ""
+    tag = (
+        r"{\an5\pos(540,"
+        + str(y)
+        + r")"
+        + r"\b1\fs"
+        + str(font_size)
+        + r"\1c"
+        + color
+        + r"\3c&H00101010&"
+        + r"\bord"
+        + str(outline)
+        + r"\shad4\4c&H70000000&"
+        + r"\blur0.7"
+        + r"\fscx62\fscy62"
+        + r"\alpha&HFF&\frz-2"
+        + r"\t(0,"
+        + str(peak_end)
+        + r",\alpha&H00&"
+        + r"\fscx142\fscy142"
+        + r"\frz0)"
+        + r"\t("
+        + str(peak_end)
+        + r","
+        + str(settle_end)
+        + r",\fscx112\fscy112)"
+        + r"\t("
+        + str(settle_end)
+        + r","
+        + str(fade_start)
+        + r",\fscx106\fscy106)"
+        + r"\t("
+        + str(fade_start)
+        + r","
+        + str(duration_ms)
+        + r",\alpha&HFF&"
+        + r"\fscx96\fscy96)"
+        + r"}"
+    )
+    return (
+        f"Dialogue: 5,"
+        f"{_ass_time(start)},"
+        f"{_ass_time(end)},"
+        f"Burst,,0,0,0,,"
+        f"{tag}{word}\n"
+    )
+
+
+def _build_ass(
+    segments: Sequence[dict[str, Any]],
+    subtitle_style: dict[str, Any],
+    keywords: Sequence[str],
+    prefix: str,
+) -> Path:
+    backend_dir = Path(
+        os.getenv(
+            "AI_VIDEO_BACKEND_DIR",
+            "/opt/ai-video/backend",
+        )
+    )
+    work_dir = (
+        backend_dir
+        / "data"
+        / "subtitle-edit-director"
+    )
+    work_dir.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+    ass_path = work_dir / (
+        f"{prefix}_"
+        f"{time.strftime('%Y%m%d_%H%M%S')}_"
+        f"{uuid.uuid4().hex[:8]}.ass"
+    )
+    font = os.getenv(
+        "AI_VIDEO_SUBTITLE_FONT",
+        "Noto Sans CJK SC",
+    )
+    base_size = max(
+        84,
+        min(
+            128,
+            int(
+                _float(
+                    subtitle_style.get(
+                        "font_size"
+                    ),
+                    100,
+                )
+            ),
+        ),
+    )
+    outline = max(
+        5,
+        min(
+            14,
+            int(
+                _float(
+                    subtitle_style.get(
+                        "outline"
+                    ),
+                    8,
+                )
+            ),
+        ),
+    )
+    shadow = max(
+        0,
+        min(
+            6,
+            int(
+                _float(
+                    subtitle_style.get(
+                        "shadow"
+                    ),
+                    2,
+                )
+            ),
+        ),
+    )
+    margin_v = max(
+        180,
+        min(
+            480,
+            int(
+                _float(
+                    subtitle_style.get(
+                        "margin_v"
+                    ),
+                    300,
+                )
+            ),
+        ),
+    )
+    primary = _ass_color(
+        subtitle_style.get(
+            "ass_primary"
+        )
+        or subtitle_style.get(
+            "primary"
+        ),
+        "&H00FFFFFF&",
+    )
+    outline_color = _ass_color(
+        subtitle_style.get(
+            "ass_outline"
+        )
+        or "#000000",
+        "&H00000000&",
+    )
+    back = _ass_color(
+        subtitle_style.get(
+            "ass_back"
+        )
+        or "&H00000000",
+        "&H00000000&",
+    )
+    accent = _ass_color(
+        subtitle_style.get(
+            "accent"
+        )
+        or "#FFE45C",
+        "&H005CE4FF&",
+    )
+    burst_size = max(
+        120,
+        min(
+            190,
+            int(
+                _float(
+                    subtitle_style.get(
+                        "keyword_burst_"
+                        "font_size"
+                    ),
+                    146,
+                )
+            ),
+        ),
+    )
+    burst_y = max(
+        700,
+        min(
+            1250,
+            int(
+                _float(
+                    subtitle_style.get(
+                        "keyword_burst_y"
+                    ),
+                    980,
+                )
+            ),
+        ),
+    )
+    burst_outline = max(
+        9,
+        min(
+            18,
+            int(
+                _float(
+                    subtitle_style.get(
+                        "keyword_burst_"
+                        "outline"
+                    ),
+                    12,
+                )
+            ),
+        ),
+    )
+    header = (
+        "[Script Info]\n"
+        "ScriptType: v4.00+\n"
+        "WrapStyle: 0\n"
+        "ScaledBorderAndShadow: yes\n"
+        "PlayResX: 1080\n"
+        "PlayResY: 1920\n\n"
+        "[V4+ Styles]\n"
+        "Format: Name, Fontname, Fontsize, "
+        "PrimaryColour, SecondaryColour, "
+        "OutlineColour, BackColour, Bold, "
+        "Italic, Underline, StrikeOut, "
+        "ScaleX, ScaleY, Spacing, Angle, "
+        "BorderStyle, Outline, Shadow, "
+        "Alignment, MarginL, MarginR, "
+        "MarginV, Encoding\n"
+        f"Style: Default,{font},{base_size},"
+        f"{primary},&H00FFFFFF&,"
+        f"{outline_color},{back},-1,0,0,0,"
+        f"100,100,0,0,1,{outline},{shadow},"
+        f"2,72,72,{margin_v},1\n"
+        f"Style: Burst,{font},{burst_size},"
+        "&H005CE4FF&,&H00FFFFFF&,"
+        "&H00101010&,&H70000000&,-1,0,0,0,"
+        f"100,100,1,0,1,{burst_outline},4,"
+        "5,40,40,0,1\n\n"
+        "[Events]\n"
+        "Format: Layer, Start, End, Style, "
+        "Name, MarginL, MarginR, MarginV, "
+        "Effect, Text\n"
+    )
+    lines = [header]
+    all_bursts: list[
+        dict[str, Any]
+    ] = []
+
+    for segment in segments:
+        if not isinstance(
+            segment,
+            dict,
+        ):
+            continue
+        start = _float(
+            segment.get("start")
+        )
+        end = _float(
+            segment.get("end"),
+            start,
+        )
+        if end <= start:
+            continue
+        cue_size = max(
+            84,
+            min(
+                118,
+                int(
+                    _float(
+                        segment.get(
+                            "font_size"
+                        ),
+                        base_size,
+                    )
+                ),
+            ),
+        )
+        cue_keywords = [
+            _display(item)
+            for item in (
+                segment.get(
+                    "keywords"
+                )
+                or keywords
+            )
+            if _display(item)
+        ]
+        strong = _display(
+            segment.get(
+                "strong_keyword"
+            )
+            or ""
+        )
+        display_lines = [
+            _display(item)
+            for item in (
+                segment.get(
+                    "display_lines"
+                )
+                or [
+                    segment.get(
+                        "text"
+                    )
+                    or ""
+                ]
+            )
+            if _display(item)
+        ][:2]
+        if not display_lines:
+            continue
+        rendered = [
+            _highlight(
+                line,
+                cue_keywords,
+                strong,
+                cue_size,
+                primary,
+                accent,
+            )
+            for line in display_lines
+        ]
+        prefix_tag = (
+            r"{\an2\b1\fs"
+            + str(cue_size)
+            + r"\1c"
+            + primary
+            + r"\bord"
+            + str(outline)
+            + r"\shad"
+            + str(shadow)
+            + r"\fad(35,45)}"
+        )
+        rendered_text = r"\N".join(
+            rendered
+        )
+        lines.append(
+            f"Dialogue: 0,"
+            f"{_ass_time(start)},"
+            f"{_ass_time(end)},"
+            f"Default,,0,0,0,,"
+            f"{prefix_tag}"
+            f"{rendered_text}\n"
+        )
+        for event in (
+            segment.get(
+                "keyword_bursts"
+            )
+            or []
+        ):
+            if isinstance(
+                event,
+                dict,
+            ):
+                all_bursts.append(
+                    dict(event)
+                )
+
+    seen_events: set[
+        tuple[str, float]
+    ] = set()
+    for event in sorted(
+        all_bursts,
+        key=lambda item: _float(
+            item.get("start")
+        ),
+    ):
+        key = (
+            _display(
+                event.get("text")
+                or ""
+            ),
+            round(
+                _float(
+                    event.get("start")
+                ),
+                2,
+            ),
+        )
+        if key in seen_events:
+            continue
+        seen_events.add(key)
+        dialogue = _a10_burst_dialogue(
+            event,
+            font_size=burst_size,
+            y=burst_y,
+            outline=burst_outline,
+        )
+        if dialogue:
+            lines.append(dialogue)
+
+    ass_path.write_text(
+        "".join(lines),
+        encoding="utf-8",
+    )
+    return ass_path

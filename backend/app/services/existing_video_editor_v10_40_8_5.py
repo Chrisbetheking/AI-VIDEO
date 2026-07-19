@@ -27,7 +27,8 @@ from app.services.subtitle_edit_director_v10_40_8_7 import (
     direct_existing_video,
 )
 
-VERSION = "10.40.8.7-a9-r3"
+VERSION = "10.40.8.8-a10-a1"
+# V10_40_8_8_A10_KEYWORD_BURST_EDIT_QUALITY_A1: A10 reports and health
 INSTALL_MARKER = "existing_video_smart_edit_v10_40_8_5_2"
 _LOCK = threading.RLock()
 _INSTALLED = False
@@ -1194,6 +1195,9 @@ async def _render(
             edit_director=director_result.get("edit_report"),
             director_report=director_result.get("report"),
             director_version=director_result.get("version"),
+            keyword_bursts=director_result.get("keyword_bursts"),
+            keyword_burst_report=director_result.get("keyword_burst_report"),
+            edit_quality_gate=director_result.get("edit_quality_gate"),
             tts_warning=warning,
             fal_used=False,
             billing_guard="existing_edit_no_fal",
@@ -1342,6 +1346,13 @@ def install_existing_video_editor(
                 "dynamic_edit_rhythm": True,
                 "consecutive_asset_guard": True,
                 "hard_cut_default": True,
+                "word_level_timeline": True,
+                "keyword_burst_layer": True,
+                "keyword_burst_pop_animation": True,
+                "keyword_burst_cut_sync": True,
+                "semantic_role_match": True,
+                "edit_quality_gate": True,
+                "source_range_reuse_guard": True,
                 "job_persistence": True,
                 "fal_forbidden": True,
             },
