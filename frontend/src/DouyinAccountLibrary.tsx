@@ -53,6 +53,20 @@ export default function DouyinAccountLibrary({
   const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
   const [result, setResult] = useState<any>(null)
+  // DOUYIN_REMOTE_BROWSER_V10_40_8_6
+  const [authProfile, setAuthProfile] = useState('company_main')
+  const [authSession, setAuthSession] = useState<any>(null)
+  const [authToken, setAuthToken] = useState('')
+  const [authBusy, setAuthBusy] = useState('')
+  const [authError, setAuthError] = useState('')
+  const [remoteVisible, setRemoteVisible] = useState(false)
+
+  const remoteUrl = authSession?.session_id && authToken
+    ? `/api/video/integration/douyin-auth/remote/view/${encodeURIComponent(
+        String(authSession.session_id),
+      )}?token=${encodeURIComponent(authToken)}`
+    : ''
+
   const [heatAccounts, setHeatAccounts] = useState<any[]>([])
   const [heatItems, setHeatItems] = useState<any[]>([])
   const [selectedItem, setSelectedItem] = useState<any>(null)
@@ -158,6 +172,88 @@ export default function DouyinAccountLibrary({
     })
     goTab('pureai')
   }
+
+  async function startDouyinLogin() {
+    setAuthBusy('start')
+    setAuthError('')
+    try {
+      const data: any = await apiPost(
+        '/api/video/integration/douyin-auth/start',
+        { account_profile: authProfile },
+        120000,
+      )
+      setAuthSession(data)
+      setAuthToken(String(data?.access_token || ''))
+      setRemoteVisible(true)
+    } catch (err) {
+      setAuthError(detailToText(err))
+    } finally {
+      setAuthBusy('')
+    }
+  }
+
+  async function refreshDouyinLogin() {
+    if (!authSession?.session_id || !authToken) return
+    setAuthBusy('refresh')
+    setAuthError('')
+    try {
+      const data: any = await apiGet(
+        `/api/video/integration/douyin-auth/session/${encodeURIComponent(
+          String(authSession.session_id),
+        )}?token=${encodeURIComponent(authToken)}`,
+        60000,
+      )
+      setAuthSession((current: any) => ({
+        ...current,
+        ...data,
+      }))
+    } catch (err) {
+      setAuthError(detailToText(err))
+    } finally {
+      setAuthBusy('')
+    }
+  }
+
+  async function cancelDouyinLogin() {
+    setAuthBusy('cancel')
+    setAuthError('')
+    try {
+      const data: any = await apiPost(
+        '/api/video/integration/douyin-auth/remote/cancel-active',
+        { account_profile: authProfile },
+        60000,
+      )
+      setAuthSession(data)
+      setAuthToken('')
+      setRemoteVisible(false)
+    } catch (err) {
+      setAuthError(detailToText(err))
+    } finally {
+      setAuthBusy('')
+    }
+  }
+
+  useEffect(() => {
+    if (!authSession?.session_id || !authToken) return
+    const status = String(authSession?.status || '')
+    if (
+      ['logged_in', 'failed', 'timeout', 'cancelled'].includes(
+        status,
+      )
+    ) {
+      return
+    }
+
+    const timer = window.setInterval(() => {
+      void refreshDouyinLogin()
+    }, 2500)
+
+    return () => window.clearInterval(timer)
+  }, [
+    authSession?.session_id,
+    authSession?.status,
+    authToken,
+  ])
 
   async function createMission() {
     setBusy('检查并启动真实采集')
@@ -644,6 +740,105 @@ export default function DouyinAccountLibrary({
               </div>
             )
           })}
+        </div>
+      </div>
+
+      <div className="douyin-remote-auth">
+        <div className="douyin-remote-head">
+          <div>
+            <b>抖音真机登录 · 网页内操作</b>
+            <span>
+              这里不是二维码截图，而是 ECS 上真实 Chromium。
+              可直接扫码、拖动验证码和确认登录。
+            </span>
+          </div>
+          <span
+            className={`douyin-remote-state state-${String(
+              authSession?.status || 'idle',
+            )}`}
+          >
+            {authSession?.message ||
+              authSession?.status ||
+              '等待启动'}
+          </span>
+        </div>
+
+        <div className="douyin-remote-actions">
+          <select
+            value={authProfile}
+            onChange={(event) =>
+              setAuthProfile(event.target.value)
+            }
+          >
+            <option value="company_main">公司主号</option>
+            <option value="company_backup">公司备用号</option>
+            <option value="personal_test">个人测试号</option>
+          </select>
+
+          <button
+            className="aiw-primary"
+            disabled={Boolean(authBusy)}
+            onClick={() => void startDouyinLogin()}
+          >
+            {authBusy === 'start'
+              ? '启动中...'
+              : '打开真机登录窗口'}
+          </button>
+
+          <button
+            className="aiw-muted"
+            disabled={
+              !authSession?.session_id ||
+              !authToken ||
+              Boolean(authBusy)
+            }
+            onClick={() => void refreshDouyinLogin()}
+          >
+            检查登录状态
+          </button>
+
+          <button
+            className="aiw-muted"
+            disabled={
+              !remoteUrl ||
+              Boolean(authBusy)
+            }
+            onClick={() =>
+              setRemoteVisible((value) => !value)
+            }
+          >
+            {remoteVisible ? '收起真机' : '显示真机'}
+          </button>
+
+          <button
+            className="aiw-muted"
+            disabled={Boolean(authBusy)}
+            onClick={() => void cancelDouyinLogin()}
+          >
+            {authBusy === 'cancel'
+              ? '取消中...'
+              : '取消旧登录会话'}
+          </button>
+        </div>
+
+        {authError && (
+          <div className="aiw-error">{authError}</div>
+        )}
+
+        {remoteVisible && remoteUrl && (
+          <div className="douyin-remote-frame-wrap">
+            <iframe
+              className="douyin-remote-frame"
+              src={remoteUrl}
+              title="抖音真机验证窗口"
+              allow="clipboard-read; clipboard-write; fullscreen"
+            />
+          </div>
+        )}
+
+        <div className="douyin-remote-note">
+          验证码只允许人工完成；浏览器 Profile 和 Cookie
+          按公司主号、备用号、测试号隔离保存。
         </div>
       </div>
 

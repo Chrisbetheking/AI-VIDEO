@@ -2944,6 +2944,68 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
       <div className="aiw-stepGrid three">
         <section className="aiw-stepCard">
           <h3>{creationMode === 'existing_edit' ? '素材剪辑计划' : '镜头计划'}</h3>
+            {/* MATERIAL_SELECTION_MODE_V10_40_8_6 */}
+            {creationMode === 'existing_edit' && (
+              <div className="aiw-materialModePanel">
+                <div>
+                  <b>素材选择方式</b>
+                  <span>
+                    默认无需手选；系统按文案语义和真实 TTS
+                    时长从 R2 全库自动匹配，并记录每次使用。
+                  </span>
+                </div>
+
+                <div className="aiw-materialModeButtons">
+                  <button
+                    type="button"
+                    className={
+                      String(
+                        (project as any)
+                          .material_selection_mode ||
+                          'auto',
+                      ) === 'auto'
+                        ? 'active'
+                        : ''
+                    }
+                    onClick={() =>
+                      setProject({
+                        ...project,
+                        material_selection_mode: 'auto',
+                        selected_assets: [],
+                        asset_context: [],
+                        r2_material_context: [],
+                        selectedMaterialIds: [],
+                      } as any)
+                    }
+                  >
+                    全自动选材
+                    <small>不需要提前选择素材</small>
+                  </button>
+
+                  <button
+                    type="button"
+                    className={
+                      String(
+                        (project as any)
+                          .material_selection_mode ||
+                          'auto',
+                      ) === 'hybrid'
+                        ? 'active'
+                        : ''
+                    }
+                    onClick={() =>
+                      setProject({
+                        ...project,
+                        material_selection_mode: 'hybrid',
+                      } as any)
+                    }
+                  >
+                    人工锁定 + AI 补齐
+                    <small>已选素材优先，其余自动补</small>
+                  </button>
+                </div>
+              </div>
+            )}
           <p>{creationMode === 'existing_edit' ? `后端按口播语义从 ${selectedVideos.length} 个已选视频中匹配片段；不会调用 FAL。` : `每个镜头都能自己上手改。已选 R2 素材：${selectedAssets.length} 个；数字人：${avatarConfig?.enabled ? '已启用' : '未启用'}。`}</p>
           <div className="aiw-actions">
             <button className="aiw-muted" onClick={() => openWorkspaceTab('assets')}>去素材库选择 R2/真实素材</button>

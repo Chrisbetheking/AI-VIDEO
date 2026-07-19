@@ -6133,3 +6133,27 @@ try:
 except Exception as _existing_video_edit_exc:
     print("EXISTING_VIDEO_EDITOR_V10_40_8_5_LOAD_FAILED", _existing_video_edit_exc)
 # ===== /V10.40.8.5 EXISTING VIDEO SMART EDIT =====
+
+# ===== V10.40.8.6 A1 REMOTE BROWSER + PRODUCTION MEMORY =====
+try:
+    from app.services.douyin_remote_browser_v10_40_8_6 import (
+        install_douyin_remote_browser_v10_40_8_6,
+    )
+    install_douyin_remote_browser_v10_40_8_6(app)
+except Exception as _remote_browser_exc:
+    print(
+        "DOUYIN_REMOTE_BROWSER_V10_40_8_6_LOAD_FAILED",
+        _remote_browser_exc,
+    )
+
+try:
+    from app.services.production_memory_v10_40_8_6 import (
+        install_production_memory_v10_40_8_6,
+    )
+    install_production_memory_v10_40_8_6(app)
+except Exception as _production_memory_exc:
+    print(
+        "PRODUCTION_MEMORY_V10_40_8_6_LOAD_FAILED",
+        _production_memory_exc,
+    )
+# ===== /V10.40.8.6 A1 REMOTE BROWSER + PRODUCTION MEMORY =====
