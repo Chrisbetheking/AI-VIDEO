@@ -135,6 +135,8 @@ const LEGACY_WIZARD_DRAFT_KEYS = [
   'ai_video_wizard_draft_v10_5',
 ]
 const CLEAN_ONCE_KEY = 'ai_video_wizard_v10_40_8_5_2_explicit_reset'
+const VIDEO_PROGRESS_RESET_GUARD_KEY = 'ai_video_video_progress_reset_guard_v10_40_8_6'
+const VIDEO_PROGRESS_BUILD_MARKER = 'AI_VIDEO_V10_40_8_6_A5_R3_BUNDLE_CONTRACT_FIX'
 
 function parseWizardDraft(raw: string | null): Record<string, any> {
   if (!raw) return {}
@@ -171,7 +173,9 @@ function loadWizardDraft(): Record<string, any> {
 
 function saveWizardDraft(value: Record<string, any>) {
   try {
-    const previous = parseWizardDraft(window.localStorage.getItem(WIZARD_DRAFT_KEY))
+    
+  if (window.sessionStorage.getItem(VIDEO_PROGRESS_RESET_GUARD_KEY) === '1') return
+const previous = parseWizardDraft(window.localStorage.getItem(WIZARD_DRAFT_KEY))
     const merged = {
       ...previous,
       ...value,
@@ -837,6 +841,41 @@ function workflowResultParts(workflow: Record<string, any> | null) {
 }
 
 export default function VideoCreationWizard({ project, setProject, goTab }: Props) {
+  // V10_40_8_6_A5_R3_BUNDLE_CONTRACT_FIX
+  function clearAllVideoProgress() {
+    if (!window.confirm(
+      '确认清除当前视频的文案、配音、镜头、任务、成片和工作流进度？R2 素材库、API Token 和系统设置不会被删除。',
+    )) return
+
+    const progressPrefixes = [
+      'ai_video_wizard_',
+      'ai_video_engineering_project_draft_',
+      'ai_video_selected_asset_ids_',
+      'ai_video_selected_avatar_asset_',
+      'ai_video_video_progress_',
+      'ai_video_existing_edit_',
+      'ai_video_generation_',
+      'ai_video_workflow_',
+    ]
+    const shouldRemove = (key: string) =>
+      progressPrefixes.some((prefix) => key.startsWith(prefix))
+
+    Object.keys(window.localStorage).forEach((key) => {
+      if (shouldRemove(key)) window.localStorage.removeItem(key)
+    })
+    Object.keys(window.sessionStorage).forEach((key) => {
+      if (shouldRemove(key)) window.sessionStorage.removeItem(key)
+    })
+
+    window.sessionStorage.setItem(VIDEO_PROGRESS_RESET_GUARD_KEY, '1')
+    const url = new URL(window.location.href)
+    url.searchParams.set('reset', 'workspace')
+    url.searchParams.set('clean', 'wizard')
+    url.searchParams.set('resetTs', String(Date.now()))
+    url.hash = 'video-create'
+    window.location.replace(`${url.pathname}${url.search}${url.hash}`)
+  }
+
   const initialDraft = useMemo(() => loadWizardDraft(), [])
   const [step, setStep] = useState<WizardStep>((Number(initialDraft.step || 1) as WizardStep) || 1)
   const [sourceMode, setSourceMode] = useState<SourceMode>((initialDraft.sourceMode || 'custom') as SourceMode)
@@ -3094,7 +3133,10 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
           <div className="aiw-actions">
             <button className="aiw-muted" onClick={() => openWorkspaceTab('assets')}>去素材库选择 R2/真实素材</button>
             {creationMode !== 'existing_edit' && <button className="aiw-muted" onClick={() => openWorkspaceTab('digital')}>去数字人库选谁出镜</button>}
-            <button type="button" className="aiw-primary" onClick={() => void runFlowAction('shots')}>{creationMode === 'existing_edit' ? '按文案智能匹配切片' : '按文案重建镜头'}</button>
+            <button className="aiw-primary"
+                type="button"
+                onClick={() => void buildExistingEditPlan()}
+              >{creationMode === 'existing_edit' ? '按文案智能匹配切片' : '按文案重建镜头'}</button>
           </div>
           <div className="aiw-shotPicker">
             {shotPlan.map((shot) => (
@@ -3960,6 +4002,14 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
       <footer className="aiw-stepFooter">
         <div><span>创作进度</span><b>{step}/4</b><i><strong style={{ width: `${(step / 4) * 100}%` }} /></i></div>
         <div className="aiw-actions">
+          <button
+            type="button"
+            className="aiw-clear-video-progress"
+            data-build={VIDEO_PROGRESS_BUILD_MARKER}
+            onClick={clearAllVideoProgress}
+          >
+            一键清除所有视频进度
+          </button>
           <button type="button" className="aiw-muted" disabled={step === 1 || !!busy} onClick={() => setStep((Math.max(1, step - 1) as WizardStep))}>上一步</button>
           <button type="button" className="aiw-primary" disabled={!!busy && step === 4} onClick={() => void nextStep()}>{step === 4 ? (busy || (creationMode === 'existing_edit' ? '开始剪辑现有视频' : '生成成片')) : '下一步'}</button>
         </div>

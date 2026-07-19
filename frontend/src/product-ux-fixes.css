@@ -3344,3 +3344,29 @@
     grid-template-columns: 1fr;
   }
 }
+
+/* V10_40_8_6_A5_CLEAR_VIDEO_PROGRESS */
+.aiw-clear-video-progress {
+  min-height: 44px;
+  padding: 0 18px;
+  border: 1px solid rgba(220, 38, 38, 0.34);
+  border-radius: 14px;
+  background: rgba(254, 242, 242, 0.96);
+  color: #b91c1c;
+  font-weight: 760;
+  cursor: pointer;
+  white-space: nowrap;
+  box-shadow: 0 8px 22px rgba(185, 28, 28, 0.08);
+}
+
+.aiw-clear-video-progress:hover {
+  border-color: rgba(220, 38, 38, 0.62);
+  background: #fee2e2;
+  transform: translateY(-1px);
+}
+
+.aiw-clear-video-progress:focus-visible {
+  outline: 3px solid rgba(239, 68, 68, 0.22);
+  outline-offset: 2px;
+}
+

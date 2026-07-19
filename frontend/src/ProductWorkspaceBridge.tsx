@@ -18,6 +18,7 @@ const SELECTED_ASSET_KEY = 'ai_video_selected_asset_ids_v16'
 const SELECTED_AVATAR_KEY = 'ai_video_selected_avatar_asset_v16'
 
 const ENTRY_CLEAN_KEY = 'ai_video_bridge_v10_10_cleaned_once'
+const VIDEO_PROGRESS_RESET_GUARD_KEY = 'ai_video_video_progress_reset_guard_v10_40_8_6'
 
 function entryShouldClean() {
   try {
@@ -74,6 +75,20 @@ function loadDraft(): ProjectDraft {
     if (entryShouldClean()) {
       localStorage.removeItem(DRAFT_KEY)
       localStorage.removeItem(LEGACY_DRAFT_KEY)
+            window.sessionStorage.removeItem(
+        VIDEO_PROGRESS_RESET_GUARD_KEY,
+      )
+
+      const cleanUrl = new URL(window.location.href)
+      cleanUrl.searchParams.delete('reset')
+      cleanUrl.searchParams.delete('clean')
+      cleanUrl.searchParams.delete('resetTs')
+      window.history.replaceState(
+        {},
+        '',
+        `${cleanUrl.pathname}${cleanUrl.search}${cleanUrl.hash}`,
+      )
+
       return emptyProjectDraft()
     }
     const raw = localStorage.getItem(DRAFT_KEY) || localStorage.getItem(LEGACY_DRAFT_KEY)
@@ -86,7 +101,9 @@ function loadDraft(): ProjectDraft {
 }
 
 function saveDraft(draft: ProjectDraft) {
-  try {
+  
+  if (window.sessionStorage.getItem(VIDEO_PROGRESS_RESET_GUARD_KEY) === '1') return
+try {
     const raw = localStorage.getItem(DRAFT_KEY)
     const previous = raw ? JSON.parse(raw) : {}
     const merged = cleanProjectDraft({ ...previous, ...draft } as ProjectDraft)
