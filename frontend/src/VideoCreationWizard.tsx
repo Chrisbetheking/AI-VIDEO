@@ -7,6 +7,7 @@ import {
   WorkspaceTab,
 } from './aiVideoApi'
 
+import { mapExistingR2ClipsToShots } from './existingEditR2Mapper'
 type WizardStep = 1 | 2 | 3 | 4
 type SourceMode = 'account' | 'viral' | 'custom'
 type CreationMode = 'ai_generate' | 'existing_edit' | 'hybrid'
@@ -1894,30 +1895,11 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
       }
       const clips = Array.isArray(data?.clips) ? data.clips : []
       if (!clips.length) throw new Error('后端没有返回可用剪辑计划。')
-      const nextShots: ShotPlan[] = clips.map((clip: any, index: number) => ({
-        id: String(clip.id || `existing_clip_${index + 1}`),
-        index: Number(clip.index || index + 1),
-        title: String(clip.title || clip.asset_name || `现有素材 ${index + 1}`),
-        scene: String(clip.scene || clip.description || clip.title || ''),
-        narration: String(clip.narration || ''),
-        duration: Number(clip.duration || clip.duration_seconds || 3),
-        source: 'r2',
-        camera: String(clip.camera || '保留原片运镜'),
-        transition: String(clip.transition || '轻柔淡化'),
-        prompt: '',
-        avoid: [],
-        assetIds: Array.isArray(clip.asset_ids) ? clip.asset_ids : [String(clip.asset_id || '')].filter(Boolean),
-        assetId: String(clip.asset_id || ''),
-        assetUrl: String(clip.asset_url || ''),
-        assetName: String(clip.asset_name || clip.title || ''),
-        startTime: Number(clip.start_time || 0),
-        endTime: Number(clip.end_time || clip.duration || 3),
-        preserveAudio: clip.preserve_audio !== false,
-        speed: Number(clip.speed || 1),
-        matchScore: Number(clip.match_score || 0),
-        analysisDescription: String(clip.analysis_description || clip.description || ''),
-        autoStart: clip.auto_start !== false,
-      }))
+      // V10_40_8_6_A6_R3_MINIMAL_R2_MAPPING
+      const nextShots: ShotPlan[] = mapExistingR2ClipsToShots(
+        clips,
+        segments.map((segment) => segment.text),
+      );
       setShotPlan(nextShots)
       setSelectedShotId(nextShots[0]?.id || 'shot_1')
       syncProject({ manual_shot_plan: nextShots, shot_overrides: nextShots, existing_edit_plan: data })
