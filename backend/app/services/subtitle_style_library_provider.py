@@ -46,13 +46,14 @@ SUBTITLE_STYLES: list[dict[str, Any]] = [
         "ass_primary": "&H00FFFFFF",
         "ass_outline": "&H00000000",
         "ass_back": "&H00000000",
-        "font_size": 124,
-        "outline": 12,
-        "shadow": 1,
-        "margin_v": 330,
+        "font_size": 82,
+        "outline": 5,
+        "shadow": 0,
+        "margin_v": 250,
         "border_style": 1,
-        "max_chars": 9,
-        "ass_prefix": r"{\fad(60,60)\blur0.35\t(0,120,\fscx108\fscy108)\t(120,220,\fscx100\fscy100)}",
+        "max_chars": 8,
+        "max_lines": 2,
+        "ass_prefix": r"{ad(70,70)}",
     },
     {
         "id": "douyin_yellow_pop",
@@ -64,13 +65,14 @@ SUBTITLE_STYLES: list[dict[str, Any]] = [
         "ass_primary": "&H005CE4FF",
         "ass_outline": "&H00000000",
         "ass_back": "&H00000000",
-        "font_size": 128,
-        "outline": 13,
-        "shadow": 1,
-        "margin_v": 330,
+        "font_size": 84,
+        "outline": 5,
+        "shadow": 0,
+        "margin_v": 250,
         "border_style": 1,
-        "max_chars": 9,
-        "ass_prefix": r"{\fad(60,60)\blur0.35\t(0,120,\fscx108\fscy108)\t(120,220,\fscx100\fscy100)}",
+        "max_chars": 8,
+        "max_lines": 2,
+        "ass_prefix": r"{ad(70,70)}",
     },
     {
         "id": "douyin_black_bubble",
@@ -82,13 +84,14 @@ SUBTITLE_STYLES: list[dict[str, Any]] = [
         "ass_primary": "&H00FFFFFF",
         "ass_outline": "&H00000000",
         "ass_back": "&H99000000",
-        "font_size": 108,
+        "font_size": 78,
         "outline": 1,
         "shadow": 0,
-        "margin_v": 275,
+        "margin_v": 235,
         "border_style": 4,
-        "max_chars": 10,
-        "ass_prefix": r"{\fad(70,70)}",
+        "max_chars": 9,
+        "max_lines": 2,
+        "ass_prefix": r"{ad(70,70)}",
     },
     {
         "id": "real_estate_gold",
@@ -100,13 +103,14 @@ SUBTITLE_STYLES: list[dict[str, Any]] = [
         "ass_primary": "&H00CCF7FF",
         "ass_outline": "&H00101010",
         "ass_back": "&HAA081014",
-        "font_size": 104,
-        "outline": 3,
-        "shadow": 1,
-        "margin_v": 150,
+        "font_size": 78,
+        "outline": 2,
+        "shadow": 0,
+        "margin_v": 235,
         "border_style": 4,
-        "max_chars": 16,
-        "ass_prefix": r"{\fad(80,80)}",
+        "max_chars": 9,
+        "max_lines": 2,
+        "ass_prefix": r"{ad(70,70)}",
     },
     {
         "id": "white_outline",
@@ -118,13 +122,14 @@ SUBTITLE_STYLES: list[dict[str, Any]] = [
         "ass_primary": "&H00FFFFFF",
         "ass_outline": "&H00000000",
         "ass_back": "&H00000000",
-        "font_size": 96,
-        "outline": 5,
-        "shadow": 1,
-        "margin_v": 170,
+        "font_size": 78,
+        "outline": 4,
+        "shadow": 0,
+        "margin_v": 235,
         "border_style": 1,
-        "max_chars": 15,
-        "ass_prefix": r"{\fad(70,70)}",
+        "max_chars": 9,
+        "max_lines": 2,
+        "ass_prefix": r"{ad(70,70)}",
     },
     {
         "id": "black_bar",
@@ -136,13 +141,14 @@ SUBTITLE_STYLES: list[dict[str, Any]] = [
         "ass_primary": "&H00FFFFFF",
         "ass_outline": "&H00000000",
         "ass_back": "&HAA000000",
-        "font_size": 94,
+        "font_size": 74,
         "outline": 1,
         "shadow": 0,
-        "margin_v": 130,
+        "margin_v": 220,
         "border_style": 4,
-        "max_chars": 17,
-        "ass_prefix": r"{\fad(80,80)}",
+        "max_chars": 10,
+        "max_lines": 2,
+        "ass_prefix": r"{ad(70,70)}",
     },
     {
         "id": "clean_premium",
@@ -154,13 +160,14 @@ SUBTITLE_STYLES: list[dict[str, Any]] = [
         "ass_primary": "&H00FFFFFF",
         "ass_outline": "&H0020182F",
         "ass_back": "&H00000000",
-        "font_size": 96,
-        "outline": 8,
-        "shadow": 2,
-        "margin_v": 300,
+        "font_size": 78,
+        "outline": 5,
+        "shadow": 1,
+        "margin_v": 250,
         "border_style": 1,
-        "max_chars": 12,
-        "ass_prefix": r"{\fad(90,90)}",
+        "max_chars": 9,
+        "max_lines": 2,
+        "ass_prefix": r"{ad(70,70)}",
     },
     {
         "id": "xiaohongshu_alert",
@@ -172,13 +179,14 @@ SUBTITLE_STYLES: list[dict[str, Any]] = [
         "ass_primary": "&H00FFFFFF",
         "ass_outline": "&H00131313",
         "ass_back": "&HAA0C2E60",
-        "font_size": 118,
-        "outline": 6,
-        "shadow": 1,
-        "margin_v": 315,
+        "font_size": 82,
+        "outline": 4,
+        "shadow": 0,
+        "margin_v": 250,
         "border_style": 4,
-        "max_chars": 10,
-        "ass_prefix": r"{\fad(60,60)\t(0,130,\fscx106\fscy106)\t(130,220,\fscx100\fscy100)}",
+        "max_chars": 8,
+        "max_lines": 2,
+        "ass_prefix": r"{ad(70,70)}",
     },
     {
         "id": "professional_two_line",
@@ -190,14 +198,14 @@ SUBTITLE_STYLES: list[dict[str, Any]] = [
         "ass_primary": "&H00FFFFFF",
         "ass_outline": "&H00000000",
         "ass_back": "&HAA2A170F",
-        "font_size": 88,
-        "outline": 3,
+        "font_size": 74,
+        "outline": 2,
         "shadow": 0,
-        "margin_v": 250,
+        "margin_v": 230,
         "border_style": 4,
-        "max_chars": 16,
+        "max_chars": 10,
         "max_lines": 2,
-        "ass_prefix": r"{\fad(80,80)}",
+        "ass_prefix": r"{ad(70,70)}",
     },
 ]
 
@@ -284,18 +292,14 @@ def _clean_keyword(value: str) -> str:
 
 
 def _ass_tag_for_highlight(style: dict[str, Any]) -> str:
-    # ASS 使用 BGR 十六进制。这里用醒目的黄橙色，字体放大约 1.25 倍。
-    base_size = int(style.get("font_size") or 90)
-    return r"{\1c&H003FE8FF&\fs" + str(int(base_size * 1.36)) + r"\fscx130\fscy130}"
-
+    # V10.40.8.6-A4: color + bold only. Never enlarge glyph width.
+    return r"{\1c&H003FE8FF&\b1}"
 
 def _ass_tag_reset(style: dict[str, Any]) -> str:
-    base_size = int(style.get("font_size") or 90)
     primary = str(style.get("ass_primary") or "&H00FFFFFF")
     if not primary.endswith("&"):
-        primary = primary + "&"
-    return r"{\1c" + primary + r"\fs" + str(base_size) + r"\fscx100\fscy100}"
-
+        primary += "&"
+    return r"{\1c" + primary + r"\b0\fscx100\fscy100}"
 
 def _apply_keyword_highlight(text: str, keywords: Optional[list[str]], style: dict[str, Any]) -> str:
     value = text
@@ -317,39 +321,120 @@ def _apply_keyword_highlight(text: str, keywords: Optional[list[str]], style: di
             pass
     return value
 
-def _balanced_wrap_no_loss(value: str, max_chars: int) -> list[str]:
-    """Wrap a subtitle without ever discarding characters.
+def _balanced_wrap_no_loss(
+    value: str,
+    max_chars: int,
+) -> list[str]:
+    value = str(value or "")
+    max_chars = max(6, min(int(max_chars or 8), 12))
 
-    max_chars is a preferred per-line width, not a destructive hard limit.
-    The upstream director already emits short phrases, so at most two balanced
-    lines are enough for normal production cues.
-    """
     if len(value) <= max_chars:
         return [value]
 
-    # Prefer a natural semantic boundary near the visual midpoint.
+    if len(value) > max_chars * 2:
+        raise ValueError("字幕卡超过双行安全长度")
+
+    lower = max(1, len(value) - max_chars)
+    upper = min(max_chars, len(value) - 1)
     midpoint = len(value) / 2.0
+    boundaries = set("的了和与但也还就再才是把在对按先每要会可")
+
     candidates: list[tuple[float, int]] = []
-    boundary_chars = set("，,。！？!?；;、的了和与但也还就再才是")
-    for pos in range(1, len(value)):
+    for pos in range(lower, upper + 1):
         left = value[pos - 1]
         right = value[pos] if pos < len(value) else ""
-        natural = left in boundary_chars or right in boundary_chars
-        # Keep both lines reasonably balanced and avoid 1-character tails.
-        if pos < 3 or len(value) - pos < 3:
-            continue
         score = abs(pos - midpoint)
-        if natural:
-            score -= 2.0
-        if pos > max_chars:
-            score += (pos - max_chars) * 0.35
-        if len(value) - pos > max_chars:
-            score += (len(value) - pos - max_chars) * 0.35
+        if left in boundaries or right in boundaries:
+            score -= 1.5
         candidates.append((score, pos))
 
-    split_at = min(candidates)[1] if candidates else max(1, len(value) // 2)
-    return [value[:split_at], value[split_at:]]
+    split_at = min(candidates)[1]
+    lines = [value[:split_at], value[split_at:]]
 
+    if any(len(line) > max_chars for line in lines):
+        raise ValueError("字幕换行后仍然超出安全字符数")
+
+    return lines
+
+
+def _safe_subtitle_cards(text: str, max_chars: int) -> list[str]:
+    value = _strip_subtitle_punctuation(str(text or ""))
+    if not value:
+        return []
+
+    max_chars = max(6, min(int(max_chars or 8), 12))
+    card_limit = max_chars * 2
+    boundaries = set("的了和与但也还就再才是把在对按先每要会可")
+    cards: list[str] = []
+    remaining = value
+
+    while len(remaining) > card_limit:
+        split_at = card_limit
+
+        for pos in range(
+            card_limit,
+            max(max_chars, card_limit - 5) - 1,
+            -1,
+        ):
+            left = remaining[pos - 1]
+            right = remaining[pos] if pos < len(remaining) else ""
+            if left in boundaries or right in boundaries:
+                split_at = pos
+                break
+
+        cards.append(remaining[:split_at])
+        remaining = remaining[split_at:]
+
+    if remaining:
+        cards.append(remaining)
+
+    if any(len(card) > card_limit for card in cards):
+        raise ValueError("字幕拆卡后仍超出安全长度")
+
+    return cards
+
+
+def _expand_cues_for_safe_layout(
+    cues: list[dict[str, Any]],
+    style: dict[str, Any],
+) -> list[dict[str, Any]]:
+    max_chars = int(style.get("max_chars") or 8)
+    result: list[dict[str, Any]] = []
+
+    for cue in cues:
+        start = max(0.0, float(cue.get("start") or 0))
+        end = max(start + 0.05, float(cue.get("end") or start + 0.05))
+        cards = _safe_subtitle_cards(
+            str(cue.get("text") or ""),
+            max_chars=max_chars,
+        )
+
+        if not cards:
+            continue
+
+        total_chars = max(1, sum(len(card) for card in cards))
+        cursor = start
+        consumed = 0
+
+        for index, card in enumerate(cards):
+            consumed += len(card)
+
+            if index == len(cards) - 1:
+                card_end = end
+            else:
+                card_end = start + (end - start) * consumed / total_chars
+
+            result.append(
+                {
+                    **cue,
+                    "text": card,
+                    "start": round(cursor, 3),
+                    "end": round(max(cursor + 0.05, card_end), 3),
+                }
+            )
+            cursor = card_end
+
+    return result
 
 def _ass_escape(text: str, max_chars: int = 9, keywords: Optional[list[str]] = None, style: Optional[dict[str, Any]] = None) -> str:
     style = style or {}
@@ -367,7 +452,9 @@ def _ass_escape(text: str, max_chars: int = 9, keywords: Optional[list[str]] = N
 
 def _make_ass(cues: list[dict[str, Any]], style_id: str, prefix: str = "subtitle_style", keywords: Optional[list[str]] = None, subtitle_style: Optional[dict[str, Any]] = None) -> Path:
     _ensure_dirs()
+    # V10_40_8_6_A4_SUBTITLE_SAFE_LAYOUT
     style = _style(style_id, subtitle_style)
+    cues = _expand_cues_for_safe_layout(cues, style)
     ass_path = WORK_DIR / f"{prefix}_{time.strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}.ass"
     font = os.getenv("AI_VIDEO_SUBTITLE_FONT", "Noto Sans CJK SC")
     header = f"""[Script Info]
@@ -379,7 +466,7 @@ PlayResY: 1920
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,{font},{style['font_size']},{style['ass_primary']},&H00FFFFFF,{style['ass_outline']},{style['ass_back']},-1,0,0,0,100,100,0,0,{style['border_style']},{style['outline']},{style['shadow']},2,70,70,{style['margin_v']},1
+Style: Default,{font},{style['font_size']},{style['ass_primary']},&H00FFFFFF,{style['ass_outline']},{style['ass_back']},-1,0,0,0,100,100,0,0,{style['border_style']},{style['outline']},{style['shadow']},2,96,96,{style['margin_v']},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
