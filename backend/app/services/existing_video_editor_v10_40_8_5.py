@@ -376,9 +376,42 @@ def build_edit_plan(
         )
         if isinstance(item, dict)
     ]
-    manual, auto_pool = _merge_candidates(selected, _load_library_assets(settings))
-    if not manual:
-        raise ValueError("没有选择视频素材。请先在素材库把视频带入当前视频")
+    # V10_40_8_6_A2_R2_AUTO_MATERIAL_SEMANTIC
+    library_assets = _load_library_assets(settings)
+    manual, auto_pool = _merge_candidates(
+        selected,
+        library_assets,
+    )
+    material_mode = str(
+        payload.get("material_selection_mode")
+        or ("hybrid" if manual else "auto")
+    ).strip().lower()
+
+    if material_mode not in {"auto", "hybrid", "manual"}:
+        material_mode = (
+            "hybrid"
+            if manual
+            else "auto"
+        )
+
+    if material_mode == "auto":
+        manual, auto_pool = _merge_candidates(
+            [],
+            library_assets,
+        )
+    elif material_mode == "manual":
+        auto_pool = []
+
+    if material_mode == "manual" and not manual:
+        raise ValueError(
+            "纯人工模式没有锁定视频素材。请先从素材库带入视频"
+        )
+
+    if not manual and not auto_pool:
+        raise ValueError(
+            "R2 素材库没有可用视频。请确认素材已经上传、"
+            "具有可访问 URL，并且素材分析没有失败"
+        )
 
     target = float(
         target_duration_override
@@ -387,7 +420,7 @@ def build_edit_plan(
         or 30
     )
     target = max(1.0, target)
-    auto_fill = bool(payload.get("auto_fill_assets", True))
+    auto_fill = material_mode in {"auto", "hybrid"}
     clip_count = _desired_clip_count(
         parts,
         len(manual),
@@ -402,6 +435,8 @@ def build_edit_plan(
     reuse: dict[str, int] = {}
     unused_manual = {_asset_id(item) for item in manual}
     candidates = [*manual, *(auto_pool if auto_fill else [])]
+    if not candidates:
+        raise ValueError("没有满足条件的 R2 视频素材，无法生成剪辑计划")
     clips: list[dict[str, Any]] = []
     auto_used: dict[str, dict[str, Any]] = {}
     manual_used: dict[str, dict[str, Any]] = {}
@@ -487,6 +522,19 @@ def build_edit_plan(
     for item in manual:
         manual_used.setdefault(_asset_id(item), item)
 
+    invalid_r2_clips = [
+        item
+        for item in clips
+        if str(item.get("source") or "").lower() != "r2"
+        or not str(item.get("asset_url") or "").strip()
+    ]
+
+    if invalid_r2_clips:
+        raise ValueError(
+            "R2 自动匹配返回了未绑定视频 URL 的片段，"
+            "已阻止进入剪辑"
+        )
+
     manual_seconds = round(
         sum(_usable_seconds(item) for item in manual_used.values()), 3
     )
@@ -521,6 +569,7 @@ def build_edit_plan(
         "ok": True,
         "version": VERSION,
         "mode": "existing_edit",
+        "material_selection_mode": material_mode,
         "fal_used": False,
         "billing_guard": "existing_edit_no_fal",
         "message": (
@@ -891,12 +940,34 @@ async def _render(
 
         # Rebuild after TTS. This is the core guard against short material and
         # repeated tail footage when the actual narration is longer than target.
+        incoming_plan = (
+            payload.get("edit_plan")
+            if isinstance(payload.get("edit_plan"), dict)
+            else {}
+        )
+        incoming_clips = (
+            incoming_plan.get("clips")
+            if isinstance(incoming_plan.get("clips"), list)
+            else []
+        )
+        run_material_mode = str(
+            payload.get("material_selection_mode")
+            or ("hybrid" if payload.get("selected_assets") else "auto")
+        ).strip().lower()
+        valid_incoming_plan = bool(incoming_clips) and all(
+            isinstance(item, dict)
+            and str(item.get("source") or "").lower() == "r2"
+            and bool(str(item.get("asset_url") or "").strip())
+            for item in incoming_clips
+        )
         locked_plan = bool(payload.get("lock_edit_plan"))
-        if (
+        use_locked_plan = (
             locked_plan
-            and isinstance(payload.get("edit_plan"), dict)
-            and payload["edit_plan"].get("clips")
-        ):
+            and run_material_mode != "auto"
+            and valid_incoming_plan
+        )
+
+        if use_locked_plan:
             plan = dict(payload["edit_plan"])
             clips = [dict(item) for item in plan["clips"]]
             original = max(
@@ -1123,11 +1194,20 @@ def _thread(settings: Any, job_id: str, payload: dict[str, Any]) -> None:
 
 
 def _start(settings: Any, payload: dict[str, Any]) -> dict[str, Any]:
-    preliminary = build_edit_plan(payload, settings=settings)
+    preliminary = build_edit_plan(
+        payload,
+        settings=settings,
+    )
+    resolved_material_mode = str(
+        preliminary.get("material_selection_mode")
+        or payload.get("material_selection_mode")
+        or "auto"
+    ).strip().lower()
     payload = {
         **payload,
+        "material_selection_mode": resolved_material_mode,
         "edit_plan": preliminary,
-        "auto_fill_assets": bool(payload.get("auto_fill_assets", True)),
+        "auto_fill_assets": resolved_material_mode != "manual",
     }
     job_id = (
         f"existing_edit_{datetime.now().strftime('%Y%m%d_%H%M%S')}_"
@@ -1142,6 +1222,7 @@ def _start(settings: Any, payload: dict[str, Any]) -> dict[str, Any]:
         "progress": 0,
         "message": "等待 ECS 后端生成 TTS，并按真实时长自动补选素材",
         "mode": "existing_edit",
+        "material_selection_mode": resolved_material_mode,
         "fal_used": False,
         "billing_guard": "existing_edit_no_fal",
         "edit_plan": preliminary,

@@ -1805,7 +1805,54 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
     setBusy('语义匹配现有视频')
     setError('')
     try {
-      const data = await apiPost('/api/video/existing-edit/plan', existingEditPayload([]), 180000)
+      const data = await apiPost(
+        '/api/video/existing-edit/plan',
+        (() => {
+          const base: any = existingEditPayload([])
+          const materialMode = String(
+            (project as any).material_selection_mode || 'auto',
+          ).toLowerCase()
+          const selectedAssets = asArray(base.selected_assets)
+          const assetContext = asArray(base.asset_context)
+          const r2Context = asArray(base.r2_material_context)
+          const selected = materialMode === 'auto'
+            ? []
+            : (
+                selectedAssets.length
+                  ? selectedAssets
+                  : assetContext.length
+                    ? assetContext
+                    : r2Context
+              )
+          return {
+            ...base,
+            material_selection_mode: materialMode,
+            auto_fill_assets: materialMode !== 'manual',
+            selected_assets: selected,
+            asset_context: selected,
+            r2_material_context: selected,
+          }
+        })(),
+        180000,
+      )
+      // V10_40_8_6_A2_R2_AUTO_MATERIAL_SEMANTIC
+      const r2PlanClips = Array.isArray((data as any)?.clips)
+        ? (data as any).clips
+        : []
+      if (
+        !r2PlanClips.length ||
+        r2PlanClips.some(
+          (item: any) =>
+            String(item?.source || '').toLowerCase() !== 'r2' ||
+            !String(
+              item?.asset_url || item?.url || item?.r2_url || '',
+            ).trim(),
+        )
+      ) {
+        throw new Error(
+          'R2 自动匹配没有返回可预览的视频 URL，已阻止使用 AI 占位镜头。',
+        )
+      }
       const clips = Array.isArray(data?.clips) ? data.clips : []
       if (!clips.length) throw new Error('后端没有返回可用剪辑计划。')
       const nextShots: ShotPlan[] = clips.map((clip: any, index: number) => ({
@@ -2250,7 +2297,44 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
       setWorkflowError('')
       setStep(4)
       try {
-        const data = await apiPost('/api/video/existing-edit/start', existingEditPayload(finalPlan), 240000)
+        const data = await apiPost(
+          '/api/video/existing-edit/start',
+          (() => {
+            const base: any = existingEditPayload(finalPlan)
+            const materialMode = String(
+              (project as any).material_selection_mode || 'auto',
+            ).toLowerCase()
+            const selectedAssets = asArray(base.selected_assets)
+            const assetContext = asArray(base.asset_context)
+            const r2Context = asArray(base.r2_material_context)
+            const selected = materialMode === 'auto'
+              ? []
+              : (
+                  selectedAssets.length
+                    ? selectedAssets
+                    : assetContext.length
+                      ? assetContext
+                      : r2Context
+                )
+            return {
+              ...base,
+              material_selection_mode: materialMode,
+              auto_fill_assets: materialMode !== 'manual',
+              selected_assets: selected,
+              asset_context: selected,
+              r2_material_context: selected,
+              lock_edit_plan:
+                materialMode === 'auto'
+                  ? false
+                  : Boolean(base.lock_edit_plan),
+              edit_plan:
+                materialMode === 'auto'
+                  ? undefined
+                  : base.edit_plan,
+            }
+          })(),
+          240000,
+        )
         if (!data?.job_id) throw new Error('后端没有返回现有视频剪辑 job_id')
         setJob(data)
         setJobId(String(data.job_id))
@@ -3000,8 +3084,8 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
                       } as any)
                     }
                   >
-                    人工锁定 + AI 补齐
-                    <small>已选素材优先，其余自动补</small>
+                    人工锁定 + R2 自动补齐
+                    <small>已选素材优先，其余从 R2 自动补</small>
                   </button>
                 </div>
               </div>
