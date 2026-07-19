@@ -1838,18 +1838,8 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
       return [] as ShotPlan[]
     }
     // V10_40_8_6_A7_AUTO_R2_START_GATE_FIX
-    if (
-      String(
-        (project as any).material_selection_mode || 'auto',
-      ).toLowerCase() === 'manual'
-      && (
-        !selectedVideos.length
-      )
-    ) {
-      setError('手动素材模式下需要先选择视频素材。')
-      setStep(3)
-      return [] as ShotPlan[]
-    }
+    // V10_40_8_6_A8_R2_REMOVE_GATES_ONLY: 全自动与人工锁定+R2补齐均允许零个手选视频
+
     setBusy('语义匹配现有视频')
     setError('')
     try {
@@ -2314,7 +2304,8 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
     if (creationMode === 'existing_edit') {
       setError('')
       if (!script.trim()) { setError('没有口播文案，不能剪辑现有视频。'); setStep(1); return }
-      if (!selectedVideos.length) { setError('没有选择任何视频素材。请先在素材库把视频带入当前视频。'); setStep(3); return }
+      // V10_40_8_6_A8_R2_REMOVE_GATES_ONLY: 全自动与人工锁定+R2补齐均允许零个手选视频
+
       let finalPlan = shotPlan
       if (!finalPlan.length || !finalPlan.some((shot) => shot.assetUrl)) {
         finalPlan = await buildExistingEditPlan()
