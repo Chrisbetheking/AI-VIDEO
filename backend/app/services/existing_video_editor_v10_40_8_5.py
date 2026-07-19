@@ -22,8 +22,12 @@ from app.services.subtitle_style_library_provider import (
     burn_subtitles_with_style_and_upload,
 )
 from app.services.tts import synthesize_tts_segments
+from app.services.subtitle_edit_director_v10_40_8_7 import (
+    burn_directed_subtitles_with_upload,
+    direct_existing_video,
+)
 
-VERSION = "10.40.8.5.2"
+VERSION = "10.40.8.7-a9-r3"
 INSTALL_MARKER = "existing_video_smart_edit_v10_40_8_5_2"
 _LOCK = threading.RLock()
 _INSTALLED = False
@@ -684,7 +688,7 @@ def _normalize_clip(
 ) -> None:
     info = _probe(source)
     speed = max(0.75, min(1.5, float(speed or 1)))
-    duration = max(1.0, float(duration))
+    duration = max(0.65, float(duration))
     needed = duration * speed
     start = max(
         0.0,
@@ -713,9 +717,9 @@ def _normalize_clip(
         f"[0:v]scale={width}:{height}:force_original_aspect_ratio=increase,"
         f"crop={width}:{height},setsar=1,fps=30,setpts=PTS/{speed:.5f},"
         f"tpad=stop_mode=clone:stop_duration={duration:.3f},"
-        f"trim=duration={duration:.3f},"
-        "fade=t=in:st=0:d=0.12,"
-        f"fade=t=out:st={max(0, duration - 0.12):.3f}:d=0.12[v]"
+        f"trim=duration={duration:.3f}[v]"
+        ""
+        ""
     )
     if keep_audio and info["has_audio"]:
         audio_filter = (
@@ -1002,6 +1006,26 @@ async def _render(
             )
             clips = [dict(item) for item in plan["clips"]]
 
+        # V10_40_8_7_A9_R3_SPLIT_SOURCE_CONTRACT: runtime director
+        director_result = await direct_existing_video(
+            settings=settings,
+            payload=payload,
+            timings=timings,
+            clips=clips,
+            target_duration=target,
+        )
+        clips = [dict(item) for item in director_result["clips"]]
+        timings = [dict(item) for item in director_result["subtitle_segments"]]
+        plan = {**plan, "clips": clips, "director": director_result["report"]}
+        payload = {
+            **payload,
+            "subtitle_style": director_result["subtitle_style"],
+            "keyword_insights": [
+                {"value": value}
+                for value in director_result["subtitle_keywords"]
+            ],
+        }
+
         _update_job(
             settings,
             job_id,
@@ -1111,7 +1135,7 @@ async def _render(
                 if isinstance(item, dict) and item.get("value")
             ]
             subtitle_result = await asyncio.to_thread(
-                burn_subtitles_with_style_and_upload,
+                burn_directed_subtitles_with_upload,
                 video_path=str(mixed),
                 text=str(payload.get("script_text") or ""),
                 segments=timings,
@@ -1166,6 +1190,10 @@ async def _render(
             manual_selected_assets=final_plan.get("manual_selected_assets"),
             auto_selected_assets=final_plan.get("auto_selected_assets"),
             timings=timings,
+            subtitle_director=director_result.get("subtitle_report"),
+            edit_director=director_result.get("edit_report"),
+            director_report=director_result.get("report"),
+            director_version=director_result.get("version"),
             tts_warning=warning,
             fal_used=False,
             billing_guard="existing_edit_no_fal",
@@ -1305,6 +1333,15 @@ def install_existing_video_editor(
                 "tts": True,
                 "ambient_mix": True,
                 "subtitle_burn": True,
+                "ai_subtitle_director": True,
+                "semantic_sentence_breaking": True,
+                "tts_aligned_subtitle_cues": True,
+                "dynamic_subtitle_font": True,
+                "strong_keyword_emphasis": True,
+                "ai_edit_director": True,
+                "dynamic_edit_rhythm": True,
+                "consecutive_asset_guard": True,
+                "hard_cut_default": True,
                 "job_persistence": True,
                 "fal_forbidden": True,
             },
