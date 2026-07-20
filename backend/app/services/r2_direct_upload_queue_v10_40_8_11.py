@@ -23,7 +23,7 @@ from app.services.assets_store import now_iso, upsert_asset
 from app.services.memory import MemoryStore
 from app.services.storage import public_r2_url
 
-VERSION = "10.40.8.11-r2-direct-upload-queue"
+VERSION = "10.40.8.11.1-r2-direct-upload-finalize-hotfix"
 ROUTER_PREFIX = "/api/assets/direct-upload"
 DEFAULT_PREFIX = "incoming/landscape"
 DEFAULT_PART_SIZE = 64 * 1024 * 1024
@@ -261,16 +261,89 @@ def _asset_payload(settings: Settings, file_item: dict[str, Any]) -> dict[str, A
     }
 
 
-def _register_asset(settings: Settings, file_item: dict[str, Any]) -> dict[str, Any]:
+def _register_asset(
+    settings: Settings,
+    file_item: dict[str, Any],
+) -> dict[str, Any]:
+    """
+    R2 上传完成不能因为素材数据库暂时写入失败而返回 500。
+
+    处理顺序：
+    1. 优先写 Supabase/Memory；
+    2. 数据表不接受扩展字段时，使用兼容字段写入；
+    3. Supabase 临时不可用时，回退本地 manifest；
+    4. 即使素材登记暂时失败，也保留 R2 上传完成状态。
+    """
+    payload = _asset_payload(settings, file_item)
+
+    # 这两个字段用于本地任务追踪，但旧 Supabase assets 表
+    # 未必已经有对应列，不能让未知字段阻断上传完成。
+    database_payload = dict(payload)
+    database_payload.pop("upload_batch_id", None)
+    database_payload.pop("direct_upload", None)
+
+    saved: dict[str, Any] = {}
+    warnings: list[str] = []
+
     try:
         memory = MemoryStore(settings)
-    except Exception:
-        memory = None
-    payload = _asset_payload(settings, file_item)
-    saved = upsert_asset(settings, payload, memory, require_supabase=False)
-    file_item["asset_id"] = str(saved.get("id") or payload["id"])
-    file_item["asset_url"] = str(saved.get("url") or payload["url"])
-    return saved
+        result = upsert_asset(
+            settings,
+            database_payload,
+            memory,
+            require_supabase=False,
+        )
+        if isinstance(result, dict):
+            saved = result
+    except Exception as exc:
+        warning = f"supabase:{type(exc).__name__}:{exc}"[:1000]
+        warnings.append(warning)
+        print(
+            f"[r2-direct-upload] asset register fallback: {warning}",
+            flush=True,
+        )
+
+        try:
+            result = upsert_asset(
+                settings,
+                payload,
+                None,
+                require_supabase=False,
+            )
+            if isinstance(result, dict):
+                saved = result
+        except Exception as fallback_exc:
+            fallback_warning = (
+                f"manifest:{type(fallback_exc).__name__}:{fallback_exc}"
+            )[:1000]
+            warnings.append(fallback_warning)
+            print(
+                "[r2-direct-upload] local asset register deferred: "
+                f"{fallback_warning}",
+                flush=True,
+            )
+
+            # 文件已经成功进入 R2。素材索引可稍后补偿，
+            # 绝不能把完成接口重新变成 500。
+            saved = dict(payload)
+
+    merged = {**payload, **saved}
+
+    file_item["asset_id"] = str(
+        merged.get("id") or payload["id"]
+    )
+    file_item["asset_url"] = str(
+        merged.get("url") or payload["url"]
+    )
+
+    if warnings:
+        file_item["asset_register_warning"] = " | ".join(warnings)[:1800]
+        file_item["asset_registration_deferred"] = not bool(saved)
+    else:
+        file_item.pop("asset_register_warning", None)
+        file_item.pop("asset_registration_deferred", None)
+
+    return merged
 
 
 def _summary(batch: dict[str, Any]) -> dict[str, int]:
