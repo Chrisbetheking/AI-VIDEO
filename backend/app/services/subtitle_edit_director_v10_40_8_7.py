@@ -2836,3 +2836,737 @@ def _build_ass(
         encoding="utf-8",
     )
     return ass_path
+
+# =====================================================================
+# V10.40.8.8 A10-R3 GLOBAL VISUAL DEDUP DIRECTOR
+# =====================================================================
+
+_A10_R2_DIRECT_EXISTING_VIDEO = direct_existing_video
+_A10_R2_EDIT_TIMELINE = _a10_edit_timeline
+
+VERSION = "10.40.8.8-a10-r3"
+DIRECTOR_MARKER = "global_visual_dedup_v10_40_8_8_a10_r3"
+
+_A10_R3_FAMILY_KEYWORDS = {
+    "risk_detail": (
+        "风险", "施工", "空置", "裂缝", "漏水", "老旧", "维护",
+        "物业", "问题", "缺陷", "烂尾", "工地", "维修", "细节",
+    ),
+    "people_transaction": (
+        "人物", "客户", "经纪", "讲解", "看房", "签约", "交易",
+        "女士", "男士", "顾问", "销售", "访谈", "人像",
+    ),
+    "residential_interior": (
+        "室内", "客厅", "卧室", "厨房", "公寓", "户型", "阳台",
+        "装修", "样板间", "书房", "卫生间", "餐厅内景", "家居",
+    ),
+    "lifestyle_commercial": (
+        "商场", "餐厅", "咖啡", "超市", "商圈", "生活配套",
+        "泳池", "健身房", "会所", "便利店", "商业", "学校",
+    ),
+    "street_transport": (
+        "街景", "道路", "交通", "地铁", "车流", "停车", "广场",
+        "公交", "通勤", "步行", "街道", "路口", "车站",
+    ),
+    "aerial_city": (
+        "航拍", "高空", "天际线", "城市全景", "cityscape", "skyline",
+        "楼群", "城市建筑", "建筑外观", "远景", "俯瞰",
+    ),
+}
+
+
+def _a10_r3_text(candidate: dict[str, Any]) -> str:
+    values: list[str] = []
+    for key in (
+        "title", "scene", "description", "summary", "caption",
+        "category", "type", "shot_type", "visual_role",
+    ):
+        value = candidate.get(key)
+        if value is not None:
+            values.append(str(value))
+    tags = candidate.get("tags") or candidate.get("labels") or []
+    if isinstance(tags, (list, tuple, set)):
+        values.extend(str(item) for item in tags)
+    elif tags:
+        values.append(str(tags))
+    return " ".join(values).lower()
+
+
+def _a10_r3_scene_family(candidate: dict[str, Any]) -> str:
+    explicit = str(
+        candidate.get("scene_family")
+        or candidate.get("visual_family")
+        or ""
+    ).strip().lower()
+    allowed = set(_A10_R3_FAMILY_KEYWORDS) | {"generic"}
+    if explicit in allowed:
+        return explicit
+    text = _a10_r3_text(candidate)
+    for family in (
+        "risk_detail",
+        "people_transaction",
+        "residential_interior",
+        "lifestyle_commercial",
+        "street_transport",
+        "aerial_city",
+    ):
+        if any(keyword.lower() in text for keyword in _A10_R3_FAMILY_KEYWORDS[family]):
+            return family
+    return "generic"
+
+
+def _a10_r3_hash_value(candidate: dict[str, Any]) -> str:
+    for key in (
+        "perceptual_hash", "phash", "dhash", "frame_hash",
+        "visual_hash", "thumbnail_phash",
+    ):
+        value = str(candidate.get(key) or "").strip().lower()
+        value = value.removeprefix("0x")
+        if value and all(char in "0123456789abcdef" for char in value):
+            return value
+    return ""
+
+
+def _a10_r3_hamming_hex(left: str, right: str) -> int:
+    if not left or not right or len(left) != len(right):
+        return 10_000
+    try:
+        return (int(left, 16) ^ int(right, 16)).bit_count()
+    except ValueError:
+        return 10_000
+
+
+def _a10_r3_assign_visual_clusters(
+    candidates: Sequence[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], dict[str, str], dict[str, str]]:
+    output: list[dict[str, Any]] = []
+    cluster_by_asset: dict[str, str] = {}
+    family_by_asset: dict[str, str] = {}
+    hash_representatives: list[tuple[str, str]] = []
+
+    for candidate in candidates:
+        item = dict(candidate)
+        asset_id = _asset_id(item) or _asset_url(item)
+        family = _a10_r3_scene_family(item)
+        explicit = str(
+            item.get("visual_cluster_id")
+            or item.get("perceptual_cluster_id")
+            or item.get("scene_cluster_id")
+            or ""
+        ).strip()
+        hash_value = _a10_r3_hash_value(item)
+
+        if explicit:
+            cluster = f"explicit:{explicit}"
+        elif hash_value:
+            cluster = ""
+            for representative_hash, representative_cluster in hash_representatives:
+                if _a10_r3_hamming_hex(hash_value, representative_hash) <= 8:
+                    cluster = representative_cluster
+                    break
+            if not cluster:
+                cluster = f"hash:{len(hash_representatives) + 1}"
+                hash_representatives.append((hash_value, cluster))
+        else:
+            cluster = f"asset:{asset_id}"
+
+        item["scene_family"] = family
+        item["visual_cluster_id"] = cluster
+        item["director_version"] = VERSION
+        output.append(item)
+        cluster_by_asset[asset_id] = cluster
+        family_by_asset[asset_id] = family
+
+    return output, cluster_by_asset, family_by_asset
+
+
+def _a10_r3_shot_count(
+    target_duration: float,
+    candidate_count: int,
+    visual_cluster_count: int,
+) -> tuple[int, int]:
+    duration = max(1.0, float(target_duration))
+    pace_target = max(3, int(round(duration / 2.4)))
+    if candidate_count <= 1:
+        return min(8, max(3, int(round(duration / 3.4)))), pace_target
+    diversity_capacity = max(
+        4,
+        min(candidate_count * 2, visual_cluster_count * 2),
+    )
+    desired = min(18, pace_target, diversity_capacity)
+    return max(4, desired), pace_target
+
+
+def _a10_r3_boundaries(
+    target_duration: float,
+    desired_count: int,
+    cues: Sequence[dict[str, Any]],
+    bursts: Sequence[dict[str, Any]],
+) -> tuple[list[float], list[float], list[float]]:
+    target = max(1.0, float(target_duration))
+    desired = max(1, int(desired_count))
+    min_shot = 0.85
+    boundaries = [0.0, round(target, 3)]
+
+    def can_add(value: float) -> bool:
+        ordered = sorted(boundaries + [value])
+        return all(
+            current - previous >= min_shot - 1e-6
+            for previous, current in zip(ordered, ordered[1:])
+        )
+
+    eligible_bursts = [
+        item for item in bursts
+        if min_shot <= _float(item.get("start")) <= target - min_shot
+    ]
+    max_burst_cuts = min(
+        len(eligible_bursts),
+        max(2, desired // 2),
+    )
+    accepted: list[float] = []
+    skipped: list[float] = []
+
+    ranked_bursts = sorted(
+        eligible_bursts,
+        key=lambda item: (
+            -int(_float(item.get("score"), 0)),
+            _float(item.get("start")),
+        ),
+    )
+    for item in ranked_bursts:
+        value = round(_float(item.get("start")), 3)
+        if len(accepted) < max_burst_cuts and can_add(value):
+            boundaries.append(value)
+            accepted.append(value)
+        else:
+            skipped.append(value)
+
+    cue_starts = sorted({
+        round(_float(item.get("start")), 3)
+        for item in cues
+        if min_shot <= _float(item.get("start")) <= target - min_shot
+    })
+    used_cues: set[float] = set()
+
+    while len(boundaries) - 1 < desired:
+        boundaries.sort()
+        gaps = sorted(
+            (
+                boundaries[index + 1] - boundaries[index],
+                boundaries[index],
+                boundaries[index + 1],
+                index,
+            )
+            for index in range(len(boundaries) - 1)
+        )
+        largest, left, right, index = gaps[-1]
+        if largest < 2 * min_shot:
+            break
+
+        midpoint = left + largest / 2
+        cue_options = [
+            value for value in cue_starts
+            if value not in used_cues
+            and left + min_shot <= value <= right - min_shot
+        ]
+        if cue_options:
+            split = min(cue_options, key=lambda value: abs(value - midpoint))
+            used_cues.add(split)
+        else:
+            split = round(
+                left + largest * (0.48 if index % 2 == 0 else 0.52),
+                3,
+            )
+        if not can_add(split):
+            break
+        boundaries.append(split)
+
+    boundaries = sorted(set(round(item, 3) for item in boundaries))
+    boundaries[0] = 0.0
+    boundaries[-1] = round(target, 3)
+    accepted = sorted(set(accepted))
+    skipped.extend(
+        round(_float(item.get("start")), 3)
+        for item in eligible_bursts
+        if round(_float(item.get("start")), 3) not in accepted
+        and round(_float(item.get("start")), 3) not in skipped
+    )
+    return boundaries, accepted, sorted(set(skipped))
+
+
+def _a10_r3_family_policy(
+    shot_count: int,
+    candidates: Sequence[dict[str, Any]],
+) -> tuple[dict[str, int], dict[str, int]]:
+    present = {_a10_r3_scene_family(item) for item in candidates}
+    maximums = {
+        "aerial_city": max(1, int(math.ceil(shot_count * 0.20))),
+        "street_transport": max(1, int(math.ceil(shot_count * 0.20))),
+        "people_transaction": max(1, int(math.ceil(shot_count * 0.15))),
+    }
+    minimums: dict[str, int] = {}
+    requested = {
+        "residential_interior": max(1, int(math.ceil(shot_count * 0.20))),
+        "lifestyle_commercial": max(1, int(math.ceil(shot_count * 0.15))),
+        "risk_detail": max(1, int(math.ceil(shot_count * 0.10))),
+    }
+    for family, value in requested.items():
+        if family in present:
+            minimums[family] = value
+    return maximums, minimums
+
+
+def _a10_r3_select_asset(
+    candidates: Sequence[dict[str, Any]],
+    cue_text: str,
+    previous_asset: str,
+    use_counts: dict[str, int],
+    last_use: dict[str, float],
+    cluster_counts: dict[str, int],
+    family_counts: dict[str, int],
+    cluster_by_asset: dict[str, str],
+    family_by_asset: dict[str, str],
+    family_maximums: dict[str, int],
+    family_minimums: dict[str, int],
+    timeline_start: float,
+    min_reuse_gap: float,
+    interval_index: int,
+) -> tuple[dict[str, Any], list[str]]:
+    cue_tokens = _tokens(cue_text)
+    cluster_total = len(set(cluster_by_asset.values()))
+    max_asset_uses = 999 if len(candidates) == 1 else 2
+    relaxations: list[str] = []
+
+    def ranked(stage: int) -> list[tuple[float, dict[str, Any]]]:
+        values: list[tuple[float, dict[str, Any]]] = []
+        for candidate in candidates:
+            asset_id = _asset_id(candidate) or _asset_url(candidate)
+            cluster = cluster_by_asset[asset_id]
+            family = family_by_asset[asset_id]
+            uses = use_counts.get(asset_id, 0)
+            gap = timeline_start - last_use.get(asset_id, -1_000_000.0)
+
+            if len(candidates) > 1 and asset_id == previous_asset:
+                continue
+            if stage <= 3 and uses >= max_asset_uses:
+                continue
+            if stage <= 2 and uses > 0 and gap < min_reuse_gap:
+                continue
+            if stage <= 1 and cluster_total > 1 and cluster_counts.get(cluster, 0) >= 2:
+                continue
+            if stage == 0 and family in family_maximums and family_counts.get(family, 0) >= family_maximums[family]:
+                continue
+
+            candidate_text = _clip_text(candidate).lower()
+            overlap = len(cue_tokens & _tokens(candidate_text))
+            contains = sum(
+                1 for token in cue_tokens
+                if token and token in candidate_text
+            )
+            deficit = max(
+                0,
+                family_minimums.get(family, 0) - family_counts.get(family, 0),
+            )
+            score = (
+                overlap * 12.0
+                + contains * 4.0
+                + _float(candidate.get("match_score")) * 0.18
+                + _a10_quality_score(candidate) * 0.25
+                + deficit * 24.0
+                - uses * 38.0
+                - cluster_counts.get(cluster, 0) * 14.0
+                - family_counts.get(family, 0) * 3.0
+            )
+            if candidate.get("manual_locked") and uses == 0:
+                score += 28.0
+            stable = (sum(ord(char) for char in asset_id) + interval_index * 17) % 101
+            score += stable * 0.001
+            values.append((score, candidate))
+        values.sort(key=lambda item: item[0], reverse=True)
+        return values
+
+    for stage, warning in (
+        (0, ""),
+        (1, "scene_family_quota_relaxed"),
+        (2, "visual_cluster_cap_relaxed"),
+        (3, "same_asset_gap_relaxed"),
+        (4, "asset_reuse_cap_relaxed"),
+    ):
+        values = ranked(stage)
+        if values:
+            if warning:
+                relaxations.append(warning)
+            return dict(values[0][1]), relaxations
+
+    raise ValueError("A10-R3 无法从候选池选择可用镜头")
+
+
+def _a10_r3_choose_source_start(
+    candidate: dict[str, Any],
+    duration: float,
+    asset_id: str,
+    source_history: dict[str, list[tuple[float, float]]],
+) -> tuple[float, bool]:
+    base = max(0.12, _float(candidate.get("start_time"), 0.0))
+    source_duration = _float(
+        candidate.get("source_duration")
+        or candidate.get("media_duration")
+        or candidate.get("asset_duration"),
+        0.0,
+    )
+    history = source_history.get(asset_id, [])
+    separation = max(4.0, duration + 1.5)
+    options = [base]
+    if source_duration > duration + 0.4:
+        max_start = max(0.12, source_duration - duration - 0.15)
+        options.extend([
+            min(max_start, base + separation),
+            min(max_start, base + separation * 2),
+            min(max_start, source_duration * 0.25),
+            min(max_start, source_duration * 0.50),
+            min(max_start, source_duration * 0.75),
+        ])
+    else:
+        options.extend([
+            base + separation,
+            base + separation * 2,
+        ])
+
+    unique_options: list[float] = []
+    for value in options:
+        rounded = round(max(0.0, value), 3)
+        if rounded not in unique_options:
+            unique_options.append(rounded)
+
+    def overlaps(start: float) -> bool:
+        end = start + duration
+        for old_start, old_end in history:
+            intersection = max(0.0, min(end, old_end) - max(start, old_start))
+            if intersection / max(0.001, min(duration, old_end - old_start)) > 0.10:
+                return True
+        return False
+
+    for start in unique_options:
+        if not overlaps(start):
+            return start, False
+
+    if not history:
+        return base, False
+    farthest = max(
+        unique_options,
+        key=lambda start: min(abs(start - old_start) for old_start, _ in history),
+    )
+    return farthest, True
+
+
+def _a10_edit_timeline(
+    input_clips: Sequence[dict[str, Any]],
+    base_clips: Sequence[dict[str, Any]],
+    cues: Sequence[dict[str, Any]],
+    bursts: Sequence[dict[str, Any]],
+    target_duration: float,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    merged = _a10_merge_candidates(input_clips, base_clips)
+    if not merged:
+        raise ValueError("A10-R3 剪辑导演没有可用的 R2 候选素材")
+
+    (
+        candidates,
+        cluster_by_asset,
+        family_by_asset,
+    ) = _a10_r3_assign_visual_clusters(merged)
+    candidate_count = len(candidates)
+    visual_cluster_count = len(set(cluster_by_asset.values()))
+    desired, pace_target = _a10_r3_shot_count(
+        target_duration,
+        candidate_count,
+        visual_cluster_count,
+    )
+    boundaries, synchronized_burst_starts, overlay_only_burst_starts = (
+        _a10_r3_boundaries(target_duration, desired, cues, bursts)
+    )
+    shot_count = len(boundaries) - 1
+    family_maximums, family_minimums = _a10_r3_family_policy(
+        shot_count,
+        candidates,
+    )
+
+    min_reuse_gap = min(8.0, max(3.2, float(target_duration) / 3.4))
+    synchronized_start_set = {round(item, 3) for item in synchronized_burst_starts}
+    output: list[dict[str, Any]] = []
+    use_counts: dict[str, int] = {}
+    last_use: dict[str, float] = {}
+    cluster_counts: dict[str, int] = {}
+    family_counts: dict[str, int] = {}
+    source_history: dict[str, list[tuple[float, float]]] = {}
+    relaxation_counts: dict[str, int] = {}
+    source_overlap_count = 0
+    previous_asset = ""
+
+    for index, (left, right) in enumerate(zip(boundaries, boundaries[1:]), start=1):
+        duration = round(right - left, 3)
+        midpoint = left + duration / 2
+        cue = _cue_at(cues, midpoint)
+        cue_text = str(cue.get("text") or "")
+        selected, relaxations = _a10_r3_select_asset(
+            candidates,
+            cue_text,
+            previous_asset,
+            use_counts,
+            last_use,
+            cluster_counts,
+            family_counts,
+            cluster_by_asset,
+            family_by_asset,
+            family_maximums,
+            family_minimums,
+            left,
+            min_reuse_gap,
+            index,
+        )
+        for warning in relaxations:
+            relaxation_counts[warning] = relaxation_counts.get(warning, 0) + 1
+
+        asset_id = _asset_id(selected) or _asset_url(selected)
+        cluster = cluster_by_asset[asset_id]
+        family = family_by_asset[asset_id]
+        source_start, source_overlap = _a10_r3_choose_source_start(
+            selected,
+            duration,
+            asset_id,
+            source_history,
+        )
+        if source_overlap:
+            source_overlap_count += 1
+        source_end = round(source_start + duration, 3)
+        source_history.setdefault(asset_id, []).append((source_start, source_end))
+        use_counts[asset_id] = use_counts.get(asset_id, 0) + 1
+        last_use[asset_id] = left
+        cluster_counts[cluster] = cluster_counts.get(cluster, 0) + 1
+        family_counts[family] = family_counts.get(family, 0) + 1
+
+        burst = next(
+            (
+                item for item in bursts
+                if round(float(item["start"]), 3) in synchronized_start_set
+                and abs(float(item["start"]) - left) <= 0.035
+            ),
+            None,
+        )
+        if left < 3.0:
+            role = "hook"
+        elif right >= target_duration - 2.5:
+            role = "conclusion"
+        elif burst:
+            role = "keyword_impact"
+        else:
+            role = "body"
+
+        output.append({
+            **selected,
+            "id": f"a10_r3_clip_{index:02d}",
+            "index": index,
+            "source": "r2",
+            "asset_id": asset_id,
+            "asset_ids": [asset_id],
+            "asset_url": _asset_url(selected),
+            "duration": duration,
+            "duration_seconds": duration,
+            "timeline_start": round(left, 3),
+            "timeline_end": round(right, 3),
+            "start_time": round(source_start, 3),
+            "end_time": source_end,
+            "narration": cue_text,
+            "cue_index": int(cue.get("index") or 0),
+            "pace_role": role,
+            "scene_family": family,
+            "visual_cluster_id": cluster,
+            "transition": "关键词冲击硬切" if burst else "直接切",
+            "camera": "关键词同步轻推" if burst else "保留原片运镜",
+            "keyword_burst": dict(burst) if burst else None,
+            "cut_reason": (
+                f"爆词「{burst['text']}」同步切点"
+                if burst
+                else f"口播语义「{cue_text[:18]}」"
+            ),
+            "quality_score": round(_a10_quality_score(selected), 2),
+            "asset_use_index": use_counts[asset_id],
+            "source_interval_overlap": source_overlap,
+            "director_version": VERSION,
+        })
+        previous_asset = asset_id
+
+    duration_sum = round(sum(float(item["duration"]) for item in output), 3)
+    consecutive = sum(
+        1 for previous, current in zip(output, output[1:])
+        if previous["asset_id"] == current["asset_id"]
+    )
+    same_asset_gaps: list[float] = []
+    positions: dict[str, list[float]] = {}
+    for item in output:
+        positions.setdefault(item["asset_id"], []).append(float(item["timeline_start"]))
+    for starts in positions.values():
+        same_asset_gaps.extend(
+            current - previous for previous, current in zip(starts, starts[1:])
+        )
+
+    timeline_boundaries = [float(item["timeline_start"]) for item in output]
+    alignment_errors = [
+        min(abs(boundary - burst_start) for boundary in timeline_boundaries)
+        for burst_start in synchronized_burst_starts
+    ]
+    max_alignment = max(alignment_errors, default=0.0)
+    max_asset_reuse = max(use_counts.values(), default=0)
+    max_cluster_reuse = max(cluster_counts.values(), default=0)
+    min_same_asset_gap = min(same_asset_gaps) if same_asset_gaps else None
+    family_shares = {
+        family: round(count / max(1, len(output)), 3)
+        for family, count in sorted(family_counts.items())
+    }
+    quota_violations = [
+        family for family, maximum in family_maximums.items()
+        if family_counts.get(family, 0) > maximum
+    ]
+    low_quality = sum(
+        1 for item in output
+        if float(item.get("quality_score") or 0.0) < 42.0
+    )
+
+    hard_failures: list[str] = []
+    if abs(duration_sum - target_duration) > 0.03:
+        hard_failures.append("timeline_duration_mismatch")
+    if any(not item.get("asset_url") for item in output):
+        hard_failures.append("missing_r2_url")
+    if candidate_count > 1 and consecutive:
+        hard_failures.append("consecutive_same_asset")
+    if candidate_count > 1 and max_asset_reuse > 2:
+        hard_failures.append("global_asset_reuse_cap")
+    if visual_cluster_count > 1 and max_cluster_reuse > 2:
+        hard_failures.append("visual_cluster_reuse_cap")
+    if (
+        candidate_count > 1
+        and min_same_asset_gap is not None
+        and min_same_asset_gap < min_reuse_gap - 0.05
+    ):
+        hard_failures.append("same_asset_reuse_gap")
+    if candidate_count > 1 and source_overlap_count:
+        hard_failures.append("source_interval_overlap")
+    if max_alignment > 0.08:
+        hard_failures.append("keyword_cut_alignment")
+
+    warnings: list[str] = []
+    if candidate_count == 1:
+        warnings.append("single_asset_pool_reused")
+    if desired < pace_target:
+        warnings.append("shot_count_reduced_for_diversity")
+    if overlay_only_burst_starts:
+        warnings.append("keyword_overlay_without_cut")
+    if quota_violations:
+        warnings.append("scene_family_quota_relaxed")
+    if low_quality:
+        warnings.append("low_quality_clip_selected")
+    warnings.extend(sorted(relaxation_counts))
+    warnings = list(dict.fromkeys(warnings))
+
+    gate = {
+        "version": VERSION,
+        "passed": not hard_failures,
+        "hard_failures": hard_failures,
+        "warnings": warnings,
+        "shot_count": len(output),
+        "pace_target_shot_count": pace_target,
+        "diversity_limited_shot_count": desired,
+        "shot_count_reduced_for_diversity": desired < pace_target,
+        "timeline_duration_seconds": duration_sum,
+        "minimum_shot_seconds": round(min(float(item["duration"]) for item in output), 3),
+        "maximum_shot_seconds": round(max(float(item["duration"]) for item in output), 3),
+        "average_shot_seconds": round(target_duration / max(1, len(output)), 3),
+        "candidate_asset_count": candidate_count,
+        "unique_asset_count": len(use_counts),
+        "visual_cluster_count": visual_cluster_count,
+        "asset_use_counts": dict(sorted(use_counts.items())),
+        "visual_cluster_use_counts": dict(sorted(cluster_counts.items())),
+        "scene_family_counts": dict(sorted(family_counts.items())),
+        "scene_family_shares": family_shares,
+        "scene_family_maximums": family_maximums,
+        "scene_family_minimums": family_minimums,
+        "scene_family_quota_violations": quota_violations,
+        "max_asset_reuse_count": max_asset_reuse,
+        "max_visual_cluster_reuse_count": max_cluster_reuse,
+        "same_asset_minimum_gap_required_seconds": round(min_reuse_gap, 3),
+        "same_asset_minimum_gap_actual_seconds": (
+            round(min_same_asset_gap, 3) if min_same_asset_gap is not None else None
+        ),
+        "consecutive_same_asset_count": consecutive,
+        "source_interval_overlap_count": source_overlap_count,
+        "low_quality_selected_count": low_quality,
+        "keyword_cut_max_error_seconds": round(max_alignment, 3),
+        "keyword_cut_requested_count": len(bursts),
+        "keyword_cut_sync_count": sum(1 for item in output if item.get("keyword_burst")),
+        "keyword_overlay_only_count": len(overlay_only_burst_starts),
+        "candidate_pool_merged": True,
+        "single_asset_graceful_fallback": candidate_count == 1,
+        "forced_no_repeat": candidate_count > 1,
+        "adaptive_cut_policy": True,
+        "global_asset_reuse_cap": 2 if candidate_count > 1 else None,
+        "perceptual_cluster_guard": True,
+        "scene_family_quota": True,
+        "source_interval_overlap_guard": True,
+        "whole_video_repeat_guard_passed": not any(
+            name in hard_failures for name in (
+                "global_asset_reuse_cap",
+                "visual_cluster_reuse_cap",
+                "same_asset_reuse_gap",
+                "source_interval_overlap",
+                "consecutive_same_asset",
+            )
+        ),
+        "relaxation_counts": relaxation_counts,
+        "hook_shot_count": sum(1 for item in output if item.get("pace_role") == "hook"),
+        "universal_fade_removed": True,
+    }
+    if hard_failures:
+        raise ValueError("A10-R3 全片重复质量门禁失败：" + "、".join(hard_failures))
+    return output, gate
+
+
+async def direct_existing_video(
+    *,
+    settings: Any,
+    payload: dict[str, Any],
+    timings: Sequence[dict[str, Any]],
+    clips: Sequence[dict[str, Any]],
+    target_duration: float,
+) -> dict[str, Any]:
+    result = await _A10_R2_DIRECT_EXISTING_VIDEO(
+        settings=settings,
+        payload=payload,
+        timings=timings,
+        clips=clips,
+        target_duration=target_duration,
+    )
+    gate = dict(result.get("edit_quality_gate") or {})
+    global_report = {
+        "version": VERSION,
+        "passed": gate.get("whole_video_repeat_guard_passed") is True,
+        "shot_count": gate.get("shot_count"),
+        "pace_target_shot_count": gate.get("pace_target_shot_count"),
+        "diversity_limited_shot_count": gate.get("diversity_limited_shot_count"),
+        "asset_use_counts": gate.get("asset_use_counts") or {},
+        "visual_cluster_use_counts": gate.get("visual_cluster_use_counts") or {},
+        "scene_family_counts": gate.get("scene_family_counts") or {},
+        "max_asset_reuse_count": gate.get("max_asset_reuse_count"),
+        "max_visual_cluster_reuse_count": gate.get("max_visual_cluster_reuse_count"),
+        "same_asset_minimum_gap_seconds": gate.get("same_asset_minimum_gap_actual_seconds"),
+        "source_interval_overlap_count": gate.get("source_interval_overlap_count"),
+        "perceptual_cluster_guard": True,
+        "scene_family_quota": True,
+    }
+    result["version"] = VERSION
+    result["director_marker"] = DIRECTOR_MARKER
+    result["global_repeat_report"] = global_report
+    report = dict(result.get("report") or {})
+    report["version"] = VERSION
+    report["global_repeat"] = global_report
+    result["report"] = report
+    return result

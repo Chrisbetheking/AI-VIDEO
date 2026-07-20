@@ -27,7 +27,8 @@ from app.services.subtitle_edit_director_v10_40_8_7 import (
     direct_existing_video,
 )
 
-VERSION = "10.40.8.8-a10-r2"
+VERSION = "10.40.8.8-a10-r3"
+# V10_40_8_8_A10_R3_GLOBAL_VISUAL_DEDUP: whole-video repetition guard
 # V10_40_8_8_A10_R2_ADAPTIVE_QUALITY_GATE_FIX: adaptive quality gate
 # V10_40_8_8_A10_KEYWORD_BURST_EDIT_QUALITY_A1: A10 reports and health
 INSTALL_MARKER = "existing_video_smart_edit_v10_40_8_5_2"
@@ -1199,6 +1200,7 @@ async def _render(
             keyword_bursts=director_result.get("keyword_bursts"),
             keyword_burst_report=director_result.get("keyword_burst_report"),
             edit_quality_gate=director_result.get("edit_quality_gate"),
+            global_repeat_report=director_result.get("global_repeat_report"),
             tts_warning=warning,
             fal_used=False,
             billing_guard="existing_edit_no_fal",
@@ -1359,6 +1361,13 @@ def install_existing_video_editor(
                 "single_asset_graceful_fallback": True,
                 "adaptive_burst_cut_policy": True,
                 "overlay_only_burst_fallback": True,
+                "global_asset_reuse_cap": True,
+                "same_asset_min_gap": True,
+                "perceptual_cluster_guard": True,
+                "scene_family_quota": True,
+                "diversity_aware_shot_count": True,
+                "source_interval_overlap_guard": True,
+                "whole_video_repeat_report": True,
                 "job_persistence": True,
                 "fal_forbidden": True,
             },
