@@ -1,0 +1,243 @@
+/* V10.40.8.10 — simplified asset library + landscape ZIP pipeline */
+.aiw-landscapeWorkbench {
+  margin: 18px 0;
+  padding: 20px;
+  border: 1px solid rgba(124, 58, 237, .18);
+  border-radius: 22px;
+  background:
+    radial-gradient(circle at 100% 0%, rgba(124, 58, 237, .14), transparent 34%),
+    linear-gradient(135deg, rgba(247, 245, 255, .98), rgba(255, 255, 255, .98));
+  box-shadow: 0 14px 34px rgba(71, 38, 151, .08);
+}
+.aiw-landscapeWorkbenchTop {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+}
+.aiw-landscapeWorkbenchTop h3 {
+  margin: 4px 0 8px;
+  font-size: 22px;
+  color: #17192a;
+}
+.aiw-landscapeWorkbenchTop p {
+  margin: 0;
+  color: #667085;
+  line-height: 1.7;
+}
+.aiw-landscapeBadge {
+  flex: 0 0 auto;
+  padding: 9px 14px;
+  border-radius: 999px;
+  background: #efe7ff;
+  color: #6938ef;
+  font-weight: 800;
+  white-space: nowrap;
+}
+.aiw-landscapeFlow {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin: 16px 0;
+}
+.aiw-landscapeFlow span {
+  padding: 11px 12px;
+  border: 1px solid #e8e2f5;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, .86);
+  color: #667085;
+  font-size: 13px;
+  text-align: center;
+}
+.aiw-landscapeFlow span.active {
+  border-color: #8b5cf6;
+  background: #f0e9ff;
+  color: #6d28d9;
+  font-weight: 800;
+}
+.aiw-landscapeControls {
+  display: grid;
+  grid-template-columns: minmax(230px, .85fr) minmax(260px, 1.15fr) auto;
+  gap: 12px;
+  align-items: end;
+}
+.aiw-landscapeControls label {
+  display: grid;
+  gap: 7px;
+  color: #475467;
+  font-size: 13px;
+  font-weight: 700;
+}
+.aiw-landscapeControls select {
+  width: 100%;
+  min-height: 42px;
+  border: 1px solid #d7dce8;
+  border-radius: 12px;
+  background: #fff;
+  padding: 0 12px;
+  color: #1d2939;
+}
+.aiw-landscapeUploadButton {
+  min-height: 42px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 18px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #7c3aed, #5b67f1);
+  color: #fff;
+  font-weight: 900;
+  cursor: pointer;
+  box-shadow: 0 10px 22px rgba(99, 72, 218, .22);
+}
+.aiw-landscapeUploadButton.busy {
+  opacity: .72;
+  cursor: wait;
+}
+.aiw-landscapeUploadButton input { display: none; }
+.aiw-landscapeProgressCard {
+  margin-top: 14px;
+  padding: 14px;
+  border-radius: 16px;
+  border: 1px solid #e6e9f2;
+  background: rgba(255, 255, 255, .92);
+}
+.aiw-landscapeProgressTop {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 9px;
+}
+.aiw-landscapeProgressTop div {
+  display: grid;
+  gap: 3px;
+}
+.aiw-landscapeProgressTop strong { color: #1d2939; }
+.aiw-landscapeProgressTop span { color: #667085; font-size: 13px; }
+.aiw-landscapeProgressTop b { color: #6d28d9; font-size: 18px; }
+.aiw-landscapeResultStats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+.aiw-landscapeResultStats span {
+  padding: 7px 10px;
+  border-radius: 10px;
+  background: #f7f5fb;
+  color: #475467;
+  font-size: 12px;
+}
+.aiw-landscapeResultStats b { color: #6d28d9; margin-right: 4px; }
+.aiw-assetFilterShell {
+  margin: 16px 0 12px;
+  padding: 16px;
+  border: 1px solid #e7e9f2;
+  border-radius: 18px;
+  background: #fbfbfe;
+}
+.aiw-assetFilterTitle {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.aiw-assetFilterTitle strong { color: #1d2939; font-size: 16px; }
+.aiw-assetFilterTitle span { color: #667085; font-size: 13px; }
+.aiw-quickFilterGrid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+.aiw-quickFilterGrid label {
+  display: grid;
+  gap: 6px;
+  color: #667085;
+  font-size: 12px;
+  font-weight: 700;
+}
+.aiw-quickFilterGrid select,
+.aiw-quickFilterGrid input {
+  width: 100%;
+  min-height: 42px;
+  border: 1px solid #d9deea;
+  border-radius: 12px;
+  background: #fff;
+  padding: 0 12px;
+  color: #1d2939;
+}
+.aiw-assetQuickCounts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+.aiw-assetQuickCounts span {
+  padding: 7px 10px;
+  border-radius: 999px;
+  background: #f0ebff;
+  color: #6435ce;
+  font-size: 12px;
+  font-weight: 800;
+}
+.aiw-assetAdvanced,
+.aiw-collapsiblePanel {
+  margin: 12px 0;
+  border: 1px solid #e7e9f2;
+  border-radius: 16px;
+  background: #fff;
+  overflow: hidden;
+}
+.aiw-assetAdvanced > summary,
+.aiw-collapsiblePanel > summary {
+  cursor: pointer;
+  list-style: none;
+  padding: 14px 16px;
+  color: #475467;
+  font-weight: 800;
+  background: #fafafe;
+}
+.aiw-assetAdvanced > summary::-webkit-details-marker,
+.aiw-collapsiblePanel > summary::-webkit-details-marker { display: none; }
+.aiw-assetAdvanced > summary::after,
+.aiw-collapsiblePanel > summary::after {
+  content: '展开';
+  float: right;
+  color: #7c3aed;
+  font-size: 12px;
+}
+.aiw-assetAdvanced[open] > summary::after,
+.aiw-collapsiblePanel[open] > summary::after { content: '收起'; }
+.aiw-assetAdvancedBody,
+.aiw-collapsibleBody { padding: 14px 16px 16px; }
+.aiw-collapsiblePanel.aiw-assetIntelligencePanel { padding: 0; }
+.aiw-ratioBadge {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: #eef2ff;
+  color: #4f46e5;
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 800;
+}
+.aiw-ratioBadge.landscape { background: #fff2e8; color: #c2410c; }
+.aiw-ratioBadge.portrait { background: #ecfdf3; color: #027a48; }
+.aiw-ratioBadge.square { background: #f4f3ff; color: #5925dc; }
+.aiw-ratioBadge.unknown,
+.aiw-ratioBadge.other { background: #f2f4f7; color: #475467; }
+@media (max-width: 1080px) {
+  .aiw-landscapeControls { grid-template-columns: 1fr 1fr; }
+  .aiw-landscapeUploadButton { grid-column: 1 / -1; }
+  .aiw-quickFilterGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 720px) {
+  .aiw-landscapeWorkbenchTop { display: grid; }
+  .aiw-landscapeFlow { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .aiw-landscapeControls,
+  .aiw-quickFilterGrid { grid-template-columns: 1fr; }
+}

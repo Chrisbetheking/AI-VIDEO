@@ -4,13 +4,14 @@ import DouyinAccountLibrary from './DouyinAccountLibrary'
 import OpenClawWorkbench from './OpenClawWorkbench'
 import ContentBrainWorkbench from './ContentBrainWorkbench'
 import GraphicWindowWorkbench from './GraphicWindowWorkbench'
+import './asset-library-v10-40-8-10.css'
 import {
   emptyProjectDraft,
   getStoredToken,
   ProjectDraft,
   WorkspaceTab,
 } from './aiVideoApi'
-import { API_BASE, ZIP_UPLOAD_API_BASE, apiGet, uploadAssets, uploadAssetZip, getAssetZipImportJob, listAssetZipImportJobs, deleteAsset, getAssetIntelligence, getAssetIntelligenceHealth, startAssetIntelligenceAnalysis, getAssetIntelligenceJob, updateAssetIntelligenceControl, updateAssetIntelligence, AssetItem, AssetZipImportJob, AssetIntelligence, AssetIntelligenceJob, AssetIntelligenceListResponse } from './api'
+import { API_BASE, ZIP_UPLOAD_API_BASE, apiGet, apiPost, uploadAssets, uploadAssetZip, getAssetZipImportJob, listAssetZipImportJobs, deleteAsset, getAssetIntelligence, getAssetIntelligenceHealth, startAssetIntelligenceAnalysis, getAssetIntelligenceJob, updateAssetIntelligenceControl, updateAssetIntelligence, AssetItem, AssetZipImportJob, AssetIntelligence, AssetIntelligenceJob, AssetIntelligenceListResponse } from './api'
 
 const DRAFT_KEY = 'ai_video_engineering_project_draft_v16'
 const LEGACY_DRAFT_KEY = 'ai_video_engineering_project_draft_v15'
@@ -249,6 +250,297 @@ function useAssets() {
   return { assets, setAssets, busy, setBusy, error, setError, refresh, intelligenceState, setIntelligenceState }
 }
 
+
+// V10_40_8_10_ASSET_LIBRARY_LANDSCAPE_PIPELINE
+
+type AssetKindFilter = 'all' | 'video' | 'image'
+type AssetRatioFilter = 'all' | 'landscape' | 'portrait' | 'square' | 'other' | 'unknown'
+type AssetSceneFilter = 'all' | 'interior' | 'architecture' | 'street' | 'nature' | 'people' | 'food' | 'commercial' | 'map' | 'other'
+
+const ASSET_SCENE_OPTIONS: Array<{ value: AssetSceneFilter; label: string }> = [
+  { value: 'all', label: '全部场景' },
+  { value: 'interior', label: '室内 / 户型' },
+  { value: 'architecture', label: '建筑 / 楼盘' },
+  { value: 'street', label: '街景 / 交通' },
+  { value: 'nature', label: '自然 / 景色' },
+  { value: 'people', label: '人物 / 生活' },
+  { value: 'food', label: '餐饮 / 食物' },
+  { value: 'commercial', label: '商业 / 配套' },
+  { value: 'map', label: '地图 / 资料' },
+  { value: 'other', label: '其他' },
+]
+
+function assetDimensions(asset: AssetItem): { width: number; height: number } {
+  const raw = (asset as any)?.raw || {}
+  const intelligence = (asset as any)?.intelligence || {}
+  const width = Number((asset as any)?.width || raw?.width || intelligence?.width || intelligence?.media?.width || 0)
+  const height = Number((asset as any)?.height || raw?.height || intelligence?.height || intelligence?.media?.height || 0)
+  return { width, height }
+}
+
+function assetRatioGroup(asset: AssetItem): AssetRatioFilter {
+  const { width, height } = assetDimensions(asset)
+  if (!width || !height) {
+    const source = `${(asset as any)?.r2_key || ''} ${asset.url || ''} ${asset.filename || ''}`.toLowerCase()
+    if (source.includes('vertical-9x16')) return 'portrait'
+    return 'unknown'
+  }
+  const ratio = width / height
+  if (ratio >= 1.35) return 'landscape'
+  if (ratio <= 0.80) return 'portrait'
+  if (ratio >= 0.90 && ratio <= 1.10) return 'square'
+  return 'other'
+}
+
+function assetRatioLabel(asset: AssetItem): string {
+  const group = assetRatioGroup(asset)
+  const { width, height } = assetDimensions(asset)
+  const size = width && height ? `${width}×${height} · ` : ''
+  if (group === 'landscape') return `${size}横屏`
+  if (group === 'portrait') return `${size}竖屏`
+  if (group === 'square') return `${size}方形`
+  if (group === 'unknown') return '尺寸待识别'
+  return `${size}其他比例`
+}
+
+function assetSceneGroup(asset: AssetItem): AssetSceneFilter {
+  const intelligence: any = (asset as any)?.intelligence || {}
+  const text = [
+    asset.original_name,
+    asset.filename,
+    asset.folder,
+    intelligence.title,
+    intelligence.description,
+    intelligence.primary_category,
+    intelligence.secondary_category,
+    ...(Array.isArray(intelligence.keywords) ? intelligence.keywords : []),
+  ].filter(Boolean).join(' ').toLowerCase()
+
+  if (/(餐饮|餐厅|食物|食品|美食|咖啡|甜品|小吃|food|restaurant|cafe)/i.test(text)) return 'food'
+  if (/(室内|户型|客厅|卧室|厨房|卫生间|样板间|公寓内部|interior|living room|bedroom)/i.test(text)) return 'interior'
+  if (/(楼盘|建筑|外观|大楼|公寓|酒店|写字楼|地标|building|architecture|facade)/i.test(text)) return 'architecture'
+  if (/(街道|道路|交通|地铁|轻轨|公交|车流|通勤|street|road|traffic|metro|train)/i.test(text)) return 'street'
+  if (/(自然|景观|风景|公园|海景|山景|湖景|绿地|天空|日落|nature|scenery|park|ocean|mountain)/i.test(text)) return 'nature'
+  if (/(人物|家庭|生活|客户|顾问|儿童|老人|情侣|人群|people|person|family|lifestyle)/i.test(text)) return 'people'
+  if (/(商业|商场|购物|超市|学校|教育|医疗|医院|配套|娱乐|mall|school|hospital|commercial)/i.test(text)) return 'commercial'
+  if (/(地图|资料|表格|平面图|区位|路线|报告|截图|map|document|chart|floor plan)/i.test(text)) return 'map'
+  return 'other'
+}
+
+function terminalJobStatus(value: unknown): boolean {
+  return ['done', 'completed', 'partial', 'failed', 'cancelled'].includes(String(value || '').toLowerCase())
+}
+
+function LandscapeZipWorkbench({ onImported }: { onImported: () => void }) {
+  const [mode, setMode] = useState<'smart_crop' | 'fit_blur'>('smart_crop')
+  const [zipJob, setZipJob] = useState<any>(null)
+  const [reframeJob, setReframeJob] = useState<any>(null)
+  const [uploadProgress, setUploadProgress] = useState(0)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const startedReframeRef = useRef('')
+  const refreshedRef = useRef('')
+
+  const zipStatus = String(zipJob?.status || '').toLowerCase()
+  const reframeStatus = String(reframeJob?.status || '').toLowerCase()
+  const zipActive = Boolean(zipJob && !terminalJobStatus(zipStatus))
+  const reframeActive = Boolean(reframeJob && !terminalJobStatus(reframeStatus))
+  const active = busy || zipActive || reframeActive
+
+  async function uploadLandscapeZip(file: File | null) {
+    if (!file) return
+    setBusy(true)
+    setError('')
+    setUploadProgress(0)
+    setZipJob(null)
+    setReframeJob(null)
+    startedReframeRef.current = ''
+    refreshedRef.current = ''
+    try {
+      const next = await uploadAssetZip(file, 'self', 'content', (progress) => setUploadProgress(progress.percent))
+      setZipJob(next)
+    } catch (err: any) {
+      let recovered: AssetZipImportJob | null = null
+      try {
+        await new Promise((resolve) => window.setTimeout(resolve, 900))
+        const recent = await listAssetZipImportJobs(8)
+        recovered = (Array.isArray(recent?.jobs) ? recent.jobs : []).find((item) => {
+          const sameName = String(item?.zip_name || '') === file.name
+          const status = String(item?.status || '').toLowerCase()
+          const updatedAt = Date.parse(String(item?.updated_at || item?.created_at || ''))
+          const recentEnough = Number.isFinite(updatedAt) ? Date.now() - updatedAt < 20 * 60 * 1000 : true
+          return sameName && recentEnough && !['failed', 'cancelled'].includes(status)
+        }) || null
+      } catch {
+        recovered = null
+      }
+      if (recovered) setZipJob(recovered)
+      else setError(err?.message || String(err))
+    } finally {
+      setBusy(false)
+      setUploadProgress(0)
+    }
+  }
+
+  useEffect(() => {
+    const jobId = zipJob?.job_id
+    if (!jobId || terminalJobStatus(zipJob?.status)) return
+    let cancelled = false
+    const poll = async () => {
+      try {
+        const next = await getAssetZipImportJob(jobId)
+        if (!cancelled) setZipJob(next)
+      } catch (err: any) {
+        if (!cancelled) setError(err?.message || String(err))
+      }
+    }
+    void poll()
+    const timer = window.setInterval(() => void poll(), 1600)
+    return () => {
+      cancelled = true
+      window.clearInterval(timer)
+    }
+  }, [zipJob?.job_id, zipJob?.status])
+
+  useEffect(() => {
+    if (!zipJob?.job_id || zipStatus !== 'done') return
+    if (startedReframeRef.current === zipJob.job_id) return
+    startedReframeRef.current = zipJob.job_id
+
+    const imported = Array.isArray(zipJob?.imported_assets) ? zipJob.imported_assets : []
+    const objectKeys = Array.from(new Set(imported
+      .filter((item: any) => String(item?.kind || '').toLowerCase() === 'video')
+      .map((item: any) => String(item?.r2_key || item?.object_key || item?.key || (item?.filename ? `uploads/${item.filename}` : '')).trim())
+      .filter(Boolean)))
+
+    if (!objectKeys.length) {
+      setError('这个 ZIP 没有新导入的视频，或视频已被 SHA256 去重。普通照片仍会留在素材库。')
+      void onImported()
+      return
+    }
+
+    void apiPost<any>('/api/assets/r2-reframe/jobs', {
+      object_keys: objectKeys,
+      output_prefix: 'vertical-9x16',
+      mode,
+      force: false,
+      skip_non_landscape: true,
+      register_assets: true,
+      delete_local_after_upload: true,
+      sample_count: 12,
+      max_input_mb: 1200,
+      reserve_free_mb: 1536,
+      crf: 21,
+      preset: 'veryfast',
+    }).then((next) => {
+      setReframeJob(next?.job || next)
+      setError('')
+    }).catch((err: any) => setError(err?.message || String(err)))
+  }, [zipJob?.job_id, zipStatus, mode, onImported])
+
+  useEffect(() => {
+    const jobId = reframeJob?.id || reframeJob?.job_id
+    if (!jobId || terminalJobStatus(reframeJob?.status)) return
+    let cancelled = false
+    const poll = async () => {
+      try {
+        const next: any = await apiGet(`/api/assets/r2-reframe/jobs/${encodeURIComponent(String(jobId))}`)
+        if (!cancelled) setReframeJob(next?.job || next)
+      } catch (err: any) {
+        if (!cancelled) setError(err?.message || String(err))
+      }
+    }
+    void poll()
+    const timer = window.setInterval(() => void poll(), 2500)
+    return () => {
+      cancelled = true
+      window.clearInterval(timer)
+    }
+  }, [reframeJob?.id, reframeJob?.job_id, reframeJob?.status])
+
+  useEffect(() => {
+    const jobId = String(reframeJob?.id || reframeJob?.job_id || '')
+    if (!jobId || !terminalJobStatus(reframeJob?.status) || refreshedRef.current === jobId) return
+    refreshedRef.current = jobId
+    void onImported()
+  }, [reframeJob?.id, reframeJob?.job_id, reframeJob?.status, onImported])
+
+  const stage = reframeJob ? 4 : zipJob ? (zipStatus === 'done' ? 3 : 2) : busy ? 1 : 0
+  const progress = reframeJob
+    ? Math.round(Number(reframeJob?.progress || 0))
+    : zipJob
+      ? Math.round(Number(zipJob?.progress || 0))
+      : uploadProgress
+  const resultCount = Array.isArray(reframeJob?.results) ? reframeJob.results.length : Number(reframeJob?.completed_count || 0)
+  const failedCount = Array.isArray(reframeJob?.failures) ? reframeJob.failures.length : Number(reframeJob?.failed_count || 0)
+
+  return (
+    <section className="aiw-landscapeWorkbench">
+      <div className="aiw-landscapeWorkbenchTop">
+        <div>
+          <p className="aiw-eyebrow">LANDSCAPE ZIP → R2 → SMART 9:16</p>
+          <h3>16:9 横屏素材专区</h3>
+          <p>上传横屏视频 ZIP 后，系统自动导入 R2、筛出横屏视频、放大保留主要景物并生成新的 9:16 素材。原始横屏永远保留。</p>
+        </div>
+        <span className="aiw-landscapeBadge">单任务顺序处理 · 低磁盘模式</span>
+      </div>
+
+      <div className="aiw-landscapeFlow">
+        <span className={stage >= 1 ? 'active' : ''}>1. ZIP 直传</span>
+        <span className={stage >= 2 ? 'active' : ''}>2. 导入 R2</span>
+        <span className={stage >= 3 ? 'active' : ''}>3. 识别横屏</span>
+        <span className={stage >= 4 ? 'active' : ''}>4. 生成 9:16</span>
+      </div>
+
+      <div className="aiw-landscapeControls">
+        <label>
+          素材类型
+          <select value="video" disabled>
+            <option value="video">横屏视频 ZIP</option>
+          </select>
+        </label>
+        <label>
+          转竖方式
+          <select value={mode} onChange={(event) => setMode(event.target.value as 'smart_crop' | 'fit_blur')} disabled={active}>
+            <option value="smart_crop">智能放大裁切 · 保留主体和主要景色</option>
+            <option value="fit_blur">完整画面保全 · 模糊背景托底</option>
+          </select>
+        </label>
+        <label className={`aiw-landscapeUploadButton ${active ? 'busy' : ''}`}>
+          {busy ? `ZIP 上传 ${uploadProgress}%` : reframeActive ? `正在转竖 ${progress}%` : zipActive ? `正在导入 ${progress}%` : '上传横屏 ZIP'}
+          <input
+            type="file"
+            accept=".zip,application/zip,application/x-zip-compressed"
+            disabled={active}
+            onChange={(event) => {
+              void uploadLandscapeZip(event.currentTarget.files?.[0] || null)
+              event.currentTarget.value = ''
+            }}
+          />
+        </label>
+      </div>
+
+      {(zipJob || reframeJob || error) && <div className="aiw-landscapeProgressCard">
+        <div className="aiw-landscapeProgressTop">
+          <div>
+            <strong>{reframeJob?.message || zipJob?.message || '等待处理'}</strong>
+            <span>{reframeJob?.current_key || reframeJob?.current_file || zipJob?.current_file || zipJob?.zip_name || ''}</span>
+          </div>
+          <b>{Math.max(0, Math.min(100, progress))}%</b>
+        </div>
+        <div className="aiw-progressTrack"><i style={{ width: `${Math.max(0, Math.min(100, progress))}%` }} /></div>
+        <div className="aiw-landscapeResultStats">
+          <span><b>{zipJob?.summary?.videos || 0}</b>导入视频</span>
+          <span><b>{zipJob?.summary?.images || 0}</b>导入照片</span>
+          <span><b>{resultCount}</b>转竖完成/跳过</span>
+          <span><b>{failedCount}</b>处理失败</span>
+        </div>
+        {error && <div className="aiw-error">{error}</div>}
+      </div>}
+    </section>
+  )
+}
+
 function AssetLibraryPanel({ project, setProject, goTab }: { project: ProjectDraft; setProject: (p: ProjectDraft) => void; goTab: (tab: WorkspaceTab) => void }) {
   const { assets, setAssets, busy, setBusy, error, setError, refresh, intelligenceState, setIntelligenceState } = useAssets()
   const [selectedIds, setSelectedIds] = useState<string[]>(loadSelectedAssetIds)
@@ -263,6 +555,9 @@ function AssetLibraryPanel({ project, setProject, goTab }: { project: ProjectDra
   const [aiBusy, setAiBusy] = useState('')
   const [aiError, setAiError] = useState('')
   const [aiHealth, setAiHealth] = useState<any>(null)
+  const [kindFilter, setKindFilter] = useState<AssetKindFilter>('all')
+  const [ratioFilter, setRatioFilter] = useState<AssetRatioFilter>('all')
+  const [sceneFilter, setSceneFilter] = useState<AssetSceneFilter>('all')
   const [categoryFilter, setCategoryFilter] = useState('all')
   const [analysisFilter, setAnalysisFilter] = useState('all')
   const [cleanFilter, setCleanFilter] = useState('all')
@@ -274,6 +569,9 @@ function AssetLibraryPanel({ project, setProject, goTab }: { project: ProjectDra
     const intelligence = asset.intelligence
     const text = `${asset.original_name || ''} ${asset.filename || ''} ${asset.url || ''} ${asset.folder || ''} ${intelligence?.title || ''} ${intelligence?.description || ''} ${intelligence?.primary_category || ''} ${intelligence?.secondary_category || ''} ${(intelligence?.keywords || []).join(' ')}`.toLowerCase()
     if (folder !== 'all' && f !== folder) return false
+    if (kindFilter !== 'all' && asset.kind !== kindFilter) return false
+    if (ratioFilter !== 'all' && assetRatioGroup(asset) !== ratioFilter) return false
+    if (sceneFilter !== 'all' && assetSceneGroup(asset) !== sceneFilter) return false
     if (categoryFilter !== 'all' && intelligence?.primary_category !== categoryFilter) return false
     if (analysisFilter !== 'all' && String(intelligence?.analysis_status || 'pending') !== analysisFilter) return false
     if (cleanFilter !== 'all' && String(intelligence?.cleanliness?.status || 'uncertain') !== cleanFilter) return false
@@ -517,11 +815,61 @@ function AssetLibraryPanel({ project, setProject, goTab }: { project: ProjectDra
         <div>
           <p className="aiw-eyebrow">R2 ASSET LIBRARY / ORIGINAL BACKEND</p>
           <h2>素材库</h2>
-          <p>这里直接走你原来的 /api/assets 和 R2 存储。上传或选择素材后，会写入当前视频的 asset_context / r2_material_context。</p>
+          <p>素材按“视频 / 照片 → 画面比例 → 内容场景”管理；横屏 ZIP 可直接进入自动转竖流程，生成后仍回到 R2 素材库。</p>
         </div>
-        <span className="aiw-badge ok">已接原后端素材库</span>
+        <span className="aiw-badge ok">R2 已连接 · 横转竖已接入</span>
       </div>
 
+      <LandscapeZipWorkbench onImported={() => void refresh(true)} />
+
+      <div className="aiw-assetFilterShell">
+        <div className="aiw-assetFilterTitle">
+          <strong>快速筛选</strong>
+          <span>先选视频/照片，再看尺寸和场景，不再把分类堆满页面。</span>
+        </div>
+        <div className="aiw-quickFilterGrid">
+          <label>
+            类型
+            <select value={kindFilter} onChange={(event) => setKindFilter(event.target.value as AssetKindFilter)}>
+              <option value="all">全部素材</option>
+              <option value="video">视频</option>
+              <option value="image">照片</option>
+            </select>
+          </label>
+          <label>
+            画面比例
+            <select value={ratioFilter} onChange={(event) => setRatioFilter(event.target.value as AssetRatioFilter)}>
+              <option value="all">全部比例</option>
+              <option value="landscape">横屏 / 16:9</option>
+              <option value="portrait">竖屏 / 9:16</option>
+              <option value="square">方形 / 1:1</option>
+              <option value="other">其他比例</option>
+              <option value="unknown">尺寸待识别</option>
+            </select>
+          </label>
+          <label>
+            内容场景
+            <select value={sceneFilter} onChange={(event) => setSceneFilter(event.target.value as AssetSceneFilter)}>
+              {ASSET_SCENE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+            </select>
+          </label>
+          <label>
+            搜索
+            <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="景色 / 食物 / 室内 / KLCC" />
+          </label>
+        </div>
+        <div className="aiw-assetQuickCounts">
+          <span>{assets.filter((item) => item.kind === 'video').length} 视频</span>
+          <span>{assets.filter((item) => item.kind === 'image').length} 照片</span>
+          <span>{assets.filter((item) => assetRatioGroup(item) === 'landscape').length} 横屏</span>
+          <span>{assets.filter((item) => assetRatioGroup(item) === 'portrait').length} 竖屏</span>
+          <span>{filtered.length} 当前结果</span>
+        </div>
+      </div>
+
+      <details className="aiw-assetAdvanced">
+        <summary>常规上传与高级筛选</summary>
+        <div className="aiw-assetAdvancedBody">
       <div className="aiw-form four">
         <label>
           上传到文件夹
@@ -597,6 +945,8 @@ function AssetLibraryPanel({ project, setProject, goTab }: { project: ProjectDra
         <button className="aiw-muted" onClick={() => { void refresh(true) }} disabled={!!busy}>{busy === '加载素材' ? '刷新中...' : '刷新素材'}</button>
         <button className="aiw-purple" onClick={() => goTab('pureai')} disabled={!selectedIds.length}>带入视频创作</button>
       </div>
+        </div>
+      </details>
 
       {zipJob && <div className={`aiw-zipImportCard ${String(zipJob.status || '').toLowerCase()}`}>
         <div className="aiw-zipImportTop">
@@ -623,7 +973,9 @@ function AssetLibraryPanel({ project, setProject, goTab }: { project: ProjectDra
         </div>
       </div>}
 
-      <div className="aiw-assetIntelligencePanel">
+      <details className="aiw-assetIntelligencePanel aiw-collapsiblePanel">
+        <summary>AI 自动理解（可选）</summary>
+        <div className="aiw-collapsibleBody">
         <div className="aiw-assetIntelligenceHeader">
           <div>
             <p className="aiw-eyebrow">DOUBAO ASSET UNDERSTANDING</p>
@@ -652,7 +1004,8 @@ function AssetLibraryPanel({ project, setProject, goTab }: { project: ProjectDra
           <button className="aiw-muted" disabled={!!aiBusy} onClick={refreshIntelligence}>刷新分析结果</button>
         </div>
         {aiError && <div className="aiw-error">{aiError}</div>}
-      </div>
+        </div>
+      </details>
 
       <div className="aiw-metrics">
         <div><b>{assets.length}</b><span>素材总数</span></div>
@@ -678,7 +1031,8 @@ function AssetLibraryPanel({ project, setProject, goTab }: { project: ProjectDra
                   </button>
                   <strong title={asset.intelligence?.title || asset.original_name || asset.filename}>{asset.intelligence?.title || asset.original_name || asset.filename}</strong>
                   <span className="aiw-assetOriginalName">{asset.original_name || asset.filename}</span>
-                  <span>{folderLabel(asset.folder, asset.kind)} · {asset.kind} · {formatBytes(asset.size_bytes)}</span>
+                  <span>{folderLabel(asset.folder, asset.kind)} · {asset.kind === 'video' ? '视频' : '照片'} · {formatBytes(asset.size_bytes)}</span>
+            <em className={`aiw-ratioBadge ${assetRatioGroup(asset)}`}>{assetRatioLabel(asset)}</em>
                   <div className="aiw-intelligenceChips">
                     <em className={`status ${asset.intelligence?.analysis_status || 'pending'}`}>{asset.intelligence?.analysis_status === 'completed' ? '已分析' : asset.intelligence?.analysis_status === 'processing' ? '分析中' : asset.intelligence?.analysis_status === 'manual' ? '人工修改' : asset.intelligence?.analysis_status === 'failed' ? '分析失败' : asset.intelligence?.analysis_status === 'need_config' ? '待配置' : '待分析'}</em>
                     {asset.intelligence?.primary_category && <em>{asset.intelligence.primary_category}</em>}
@@ -730,7 +1084,7 @@ function AssetLibraryPanel({ project, setProject, goTab }: { project: ProjectDra
                 </div>
                 <div className="aiw-selectedAssetBody">
                   <strong title={asset.intelligence?.title || asset.original_name || asset.filename}>{asset.intelligence?.title || asset.original_name || asset.filename}</strong>
-                  <span>{folderLabel(asset.folder, asset.kind)} · {formatBytes(asset.size_bytes)}</span>
+                  <span>{folderLabel(asset.folder, asset.kind)} · {assetRatioLabel(asset)} · {formatBytes(asset.size_bytes)}</span>
                   {asset.intelligence?.description && <p className="aiw-selectedAssetDescription">{asset.intelligence.description}</p>}
                   {asset.intelligence?.primary_category && <div className="aiw-intelligenceChips"><em>{asset.intelligence.primary_category}</em>{asset.intelligence.secondary_category && <em>{asset.intelligence.secondary_category}</em>}</div>}
                   <div className="aiw-actions small aiw-selectedAssetActions">
