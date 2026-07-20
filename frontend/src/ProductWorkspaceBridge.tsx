@@ -1,3 +1,4 @@
+import R2DirectUploadQueue from './R2DirectUploadQueue'
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import VideoCreationWizard from './VideoCreationWizard'
 import DouyinAccountLibrary from './DouyinAccountLibrary'
@@ -820,7 +821,14 @@ function AssetLibraryPanel({ project, setProject, goTab }: { project: ProjectDra
         <span className="aiw-badge ok">R2 已连接 · 横转竖已接入</span>
       </div>
 
-      <LandscapeZipWorkbench onImported={() => void refresh(true)} />
+      {/* V10_40_8_11_R2_DIRECT_UPLOAD_QUEUE */}
+          <R2DirectUploadQueue onCompleted={() => void refresh(true)} />
+          <details className="aiw-assetAdvanced aiw-directUploadLegacy">
+            <summary>兼容 ZIP 上传（仅建议小包）</summary>
+            <div className="aiw-assetAdvancedBody">
+              <LandscapeZipWorkbench onImported={() => void refresh(true)} />
+            </div>
+          </details>
 
       <div className="aiw-assetFilterShell">
         <div className="aiw-assetFilterTitle">

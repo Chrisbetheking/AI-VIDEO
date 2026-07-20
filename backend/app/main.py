@@ -6162,3 +6162,9 @@ except Exception as _production_memory_exc:
 from app.services.r2_smart_vertical_reframe_v10_40_8_9 import router as r2_smart_vertical_reframe_router
 app.include_router(r2_smart_vertical_reframe_router)
 # END V10_40_8_9_R2_SMART_VERTICAL_REFRAME
+
+# V10_40_8_11_R2_DIRECT_UPLOAD_QUEUE
+from app.services.r2_direct_upload_queue_v10_40_8_11 import router as r2_direct_upload_queue_router
+app.include_router(r2_direct_upload_queue_router)
+print("V10_40_8_11_R2_DIRECT_UPLOAD_QUEUE_ROUTER_LOADED", flush=True)
+
