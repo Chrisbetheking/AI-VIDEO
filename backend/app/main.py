@@ -6157,3 +6157,8 @@ except Exception as _production_memory_exc:
         _production_memory_exc,
     )
 # ===== /V10.40.8.6 A1 REMOTE BROWSER + PRODUCTION MEMORY =====
+
+# BEGIN V10_40_8_9_R2_SMART_VERTICAL_REFRAME
+from app.services.r2_smart_vertical_reframe_v10_40_8_9 import router as r2_smart_vertical_reframe_router
+app.include_router(r2_smart_vertical_reframe_router)
+# END V10_40_8_9_R2_SMART_VERTICAL_REFRAME
