@@ -898,7 +898,7 @@ function AssetLibraryPanel({ project, setProject, goTab }: { project: ProjectDra
         </label>
         <label>
           连接状态
-          <input value={`${API_BASE || 'Pages 同源 API'} · ZIP 直传 ${ZIP_UPLOAD_API_BASE} · ${busy || 'ready'}`} readOnly />
+          <input value={`ECS API ${API_BASE} · ZIP 直传 ${ZIP_UPLOAD_API_BASE} · ${busy || 'ready'}`} readOnly />
         </label>
       </div>
 

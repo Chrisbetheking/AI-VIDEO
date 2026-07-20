@@ -1,15 +1,16 @@
 const envApiBase = (import.meta.env.VITE_API_BASE || '').replace(/\/$/, '')
 const isLocal = typeof window !== 'undefined' && /^(localhost|127\.0\.0\.1)$/i.test(window.location.hostname)
 
-// 生产环境统一使用当前页面的 /api 同源代理；本地开发仍允许直连 localhost。
+// V10.40.8.10.4: production frontend talks to ECS HTTPS API
+export const DEFAULT_PRODUCTION_API_BASE = 'https://ai-video.47-76-143-158.sslip.io'
 export const API_BASE = isLocal
   ? (envApiBase || 'http://localhost:8000')
-  : ''
+  : (envApiBase || DEFAULT_PRODUCTION_API_BASE)
 
 const envZipUploadBase = (import.meta.env.VITE_ZIP_UPLOAD_API_BASE || '').replace(/\/$/, '')
 export const ZIP_UPLOAD_API_BASE = isLocal
   ? API_BASE
-  : (envZipUploadBase || 'https://ai-video.47-76-143-158.sslip.io')
+  : (envZipUploadBase || API_BASE || DEFAULT_PRODUCTION_API_BASE)
 
 function withTimeout(ms = 90000) {
   const controller = new AbortController()
@@ -66,7 +67,7 @@ async function safeFetch<T>(url: string, init?: RequestInit, timeoutMs = 240000)
     }
     const msg = err?.message || String(err)
     if (msg === 'Failed to fetch') {
-      throw new Error(`无法连接后端：${url}\n请先打开 ${window.location.origin}/api/health，确认返回 ok；如果仍失败，请检查 ECS 后端服务和 Nginx。`)
+      throw new Error(`无法连接后端：${url}\n请先打开 ${API_BASE || window.location.origin}/api/health，确认返回 ok；如果仍失败，请检查 ECS 后端服务和 Nginx。`)
     }
     throw err
   } finally {
