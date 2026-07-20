@@ -27,7 +27,8 @@ from app.services.subtitle_edit_director_v10_40_8_7 import (
     direct_existing_video,
 )
 
-VERSION = "10.40.8.8-a10-a1"
+VERSION = "10.40.8.8-a10-r2"
+# V10_40_8_8_A10_R2_ADAPTIVE_QUALITY_GATE_FIX: adaptive quality gate
 # V10_40_8_8_A10_KEYWORD_BURST_EDIT_QUALITY_A1: A10 reports and health
 INSTALL_MARKER = "existing_video_smart_edit_v10_40_8_5_2"
 _LOCK = threading.RLock()
@@ -1353,6 +1354,11 @@ def install_existing_video_editor(
                 "semantic_role_match": True,
                 "edit_quality_gate": True,
                 "source_range_reuse_guard": True,
+                "candidate_pool_merge": True,
+                "forced_no_repeat": True,
+                "single_asset_graceful_fallback": True,
+                "adaptive_burst_cut_policy": True,
+                "overlay_only_burst_fallback": True,
                 "job_persistence": True,
                 "fal_forbidden": True,
             },

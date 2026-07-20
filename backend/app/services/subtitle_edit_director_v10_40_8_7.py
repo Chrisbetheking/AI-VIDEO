@@ -676,8 +676,8 @@ def burn_directed_subtitles_with_upload(
 _A9_DIRECT_EXISTING_VIDEO = direct_existing_video
 _A9_BUILD_ASS = _build_ass
 
-VERSION = "10.40.8.8-a10-a1"
-DIRECTOR_MARKER = "keyword_burst_edit_quality_v10_40_8_8_a10_a1"
+VERSION = "10.40.8.8-a10-r2"
+DIRECTOR_MARKER = "keyword_burst_edit_quality_v10_40_8_8_a10_r2"
 
 _A10_BURST_PHRASES = (
     "第一句就问价格",
@@ -1409,12 +1409,27 @@ def _a10_unique_candidates(
     return output
 
 
+def _a10_merge_candidates(
+    *groups: Sequence[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    output: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for group in groups:
+        for item in _a10_unique_candidates(group):
+            key = _asset_id(item) or _asset_url(item)
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            output.append(dict(item))
+    return output
+
+
 def _a10_boundaries(
     target_duration: float,
     desired_count: int,
     cues: Sequence[dict[str, Any]],
     bursts: Sequence[dict[str, Any]],
-) -> list[float]:
+) -> tuple[list[float], list[float], list[float]]:
     target = max(
         1.0,
         float(target_duration),
@@ -1446,6 +1461,8 @@ def _a10_boundaries(
         )
     ]
     boundaries = [0.0, target]
+    accepted_burst_starts: list[float] = []
+    skipped_burst_starts: list[float] = []
 
     def can_add(value: float) -> bool:
         ordered = sorted(
@@ -1469,6 +1486,9 @@ def _a10_boundaries(
     ):
         if can_add(value):
             boundaries.append(value)
+            accepted_burst_starts.append(value)
+        else:
+            skipped_burst_starts.append(value)
 
     for value in sorted(
         set(
@@ -1528,7 +1548,11 @@ def _a10_boundaries(
         target,
         3,
     )
-    return boundaries
+    return (
+        boundaries,
+        sorted(accepted_burst_starts),
+        sorted(skipped_burst_starts),
+    )
 
 
 def _a10_select_asset(
@@ -1622,9 +1646,15 @@ def _a10_select_asset(
         key=lambda item: item[0],
         reverse=True,
     )
-    return dict(
-        ranked[0][1]
-    )
+    if previous_asset and len(candidates) > 1:
+        for _, candidate in ranked:
+            candidate_id = (
+                _asset_id(candidate)
+                or _asset_url(candidate)
+            )
+            if candidate_id != previous_asset:
+                return dict(candidate)
+    return dict(ranked[0][1])
 
 
 def _a10_edit_timeline(
@@ -1634,34 +1664,46 @@ def _a10_edit_timeline(
     bursts: Sequence[dict[str, Any]],
     target_duration: float,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    candidates = _a10_unique_candidates(
-        input_clips
+    candidates = _a10_merge_candidates(
+        input_clips,
+        base_clips,
     )
-    if not candidates:
-        candidates = _a10_unique_candidates(
-            base_clips
-        )
     if not candidates:
         raise ValueError(
             "A10 剪辑导演没有可用的 R2 候选素材"
         )
 
-    desired = max(
-        len(base_clips),
-        min(
-            26,
-            int(
-                round(
-                    max(
-                        1.0,
-                        target_duration,
-                    )
-                    / 1.72
-                )
+    candidate_count = len(candidates)
+    if candidate_count == 1:
+        desired = min(
+            12,
+            max(
+                len(cues),
+                int(round(max(1.0, target_duration) / 3.6)),
             ),
-        ),
-    )
-    boundaries = _a10_boundaries(
+        )
+    elif candidate_count <= 3:
+        desired = min(
+            18,
+            max(
+                len(cues),
+                int(round(max(1.0, target_duration) / 2.25)),
+            ),
+        )
+    else:
+        desired = max(
+            len(base_clips),
+            min(
+                26,
+                int(round(max(1.0, target_duration) / 1.72)),
+            ),
+        )
+
+    (
+        boundaries,
+        synchronized_burst_starts,
+        overlay_only_burst_starts,
+    ) = _a10_boundaries(
         target_duration,
         desired,
         cues,
@@ -1676,6 +1718,10 @@ def _a10_edit_timeline(
         float(item["start"])
         for item in bursts
     ]
+    synchronized_start_set = {
+        round(item, 3)
+        for item in synchronized_burst_starts
+    }
 
     for index, (left, right) in enumerate(
         zip(
@@ -1765,13 +1811,11 @@ def _a10_edit_timeline(
             (
                 item
                 for item in bursts
-                if abs(
-                    float(
-                        item["start"]
-                    )
-                    - left
+                if (
+                    round(float(item["start"]), 3)
+                    in synchronized_start_set
+                    and abs(float(item["start"]) - left) <= 0.035
                 )
-                <= 0.035
             ),
             None,
         )
@@ -1895,20 +1939,14 @@ def _a10_edit_timeline(
     }
     alignment_errors = []
     timeline_boundaries = [
-        float(
-            item["timeline_start"]
-        )
+        float(item["timeline_start"])
         for item in output
     ]
-    for burst_start in burst_starts:
+    for burst_start in synchronized_burst_starts:
         alignment_errors.append(
             min(
-                abs(
-                    boundary
-                    - burst_start
-                )
-                for boundary
-                in timeline_boundaries
+                abs(boundary - burst_start)
+                for boundary in timeline_boundaries
             )
         )
     max_alignment = max(
@@ -1961,14 +1999,21 @@ def _a10_edit_timeline(
         "passed": not hard_failures,
         "hard_failures": hard_failures,
         "warnings": (
+            ["single_asset_pool_reused"]
+            if len(candidates) == 1
+            else []
+        )
+        + (
             ["asset_diversity_low"]
             if (
-                len(selected_assets)
-                < min(
-                    4,
-                    len(candidates),
-                )
+                len(candidates) > 1
+                and len(selected_assets) < min(4, len(candidates))
             )
+            else []
+        )
+        + (
+            ["keyword_overlay_without_cut"]
+            if overlay_only_burst_starts
             else []
         )
         + (
@@ -2022,13 +2067,16 @@ def _a10_edit_timeline(
             max_alignment,
             3,
         ),
+        "keyword_cut_requested_count": len(burst_starts),
         "keyword_cut_sync_count": sum(
             1
             for item in output
-            if item.get(
-                "keyword_burst"
-            )
+            if item.get("keyword_burst")
         ),
+        "keyword_overlay_only_count": len(overlay_only_burst_starts),
+        "candidate_pool_merged": True,
+        "single_asset_graceful_fallback": len(candidates) == 1,
+        "forced_no_repeat": len(candidates) > 1,
         "hook_shot_count": sum(
             1
             for item in output
@@ -2143,6 +2191,11 @@ async def direct_existing_video(
                 "keyword_cut_max_error_seconds"
             ]
         ),
+        "overlay_only_count": quality_gate.get(
+            "keyword_overlay_only_count",
+            0,
+        ),
+        "adaptive_cut_policy": True,
     }
     edit_report = {
         **(
