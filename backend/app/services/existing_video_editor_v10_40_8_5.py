@@ -26,8 +26,13 @@ from app.services.subtitle_edit_director_v10_40_8_7 import (
     burn_directed_subtitles_with_upload,
     direct_existing_video,
 )
+from app.services.a10_r4_output_guard_v10_40_8_12 import (
+    apply_a10_r4_director_guard,
+    measure_audio_loudness,
+)
 
-VERSION = "10.40.8.8-a10-r3"
+VERSION = "10.40.8.12-a10-r4"
+# V10_40_8_12_A10_R4_SEMANTIC_SINGLE_USE_AUDIO: strict visual single-use, semantic coverage, fresh ending, -16 LUFS
 # V10_40_8_8_A10_R3_GLOBAL_VISUAL_DEDUP: whole-video repetition guard
 # V10_40_8_8_A10_R2_ADAPTIVE_QUALITY_GATE_FIX: adaptive quality gate
 # V10_40_8_8_A10_KEYWORD_BURST_EDIT_QUALITY_A1: A10 reports and health
@@ -798,48 +803,47 @@ def _concat(clips: list[Path], destination: Path) -> None:
 
 
 def _mix(
-    base: Path, tts: Path | None, mode: str, destination: Path
+    base: Path,
+    tts: Path | None,
+    mode: str,
+    destination: Path,
 ) -> None:
+    """Final audio mix with short-video loudness normalization."""
+    loudnorm = "loudnorm=I=-16:LRA=7:TP=-1.5:linear=true:print_format=summary"
+    base_info = _probe(base)
     if mode == "retain_original" or not tts:
-        shutil.copy2(base, destination)
+        if not base_info.get("has_audio"):
+            shutil.copy2(base, destination)
+            return
+        _run(
+            [
+                "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+                "-i", str(base),
+                "-filter_complex", f"[0:a]{loudnorm}[a]",
+                "-map", "0:v:0", "-map", "[a]",
+                "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
+                "-shortest", "-movflags", "+faststart", str(destination),
+            ]
+        )
         return
+
     audio_filter = (
         "[0:a]volume=0.16[amb];"
         "[1:a]volume=1,apad[voice];"
-        "[amb][voice]amix=inputs=2:duration=first:normalize=0[a]"
+        f"[amb][voice]amix=inputs=2:duration=first:normalize=0,{loudnorm}[a]"
         if mode == "tts_with_ambient"
-        else "[1:a]volume=1,apad[a]"
+        else f"[1:a]volume=1,apad,{loudnorm}[a]"
     )
     _run(
         [
-            "ffmpeg",
-            "-y",
-            "-hide_banner",
-            "-loglevel",
-            "error",
-            "-i",
-            str(base),
-            "-i",
-            str(tts),
-            "-filter_complex",
-            audio_filter,
-            "-map",
-            "0:v:0",
-            "-map",
-            "[a]",
-            "-c:v",
-            "copy",
-            "-c:a",
-            "aac",
-            "-b:a",
-            "192k",
-            "-shortest",
-            "-movflags",
-            "+faststart",
-            str(destination),
+            "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+            "-i", str(base), "-i", str(tts),
+            "-filter_complex", audio_filter,
+            "-map", "0:v:0", "-map", "[a]",
+            "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
+            "-shortest", "-movflags", "+faststart", str(destination),
         ]
     )
-
 
 def _url(settings: Any, path: Path, prefix: str) -> str:
     return (
@@ -1017,6 +1021,12 @@ async def _render(
             clips=clips,
             target_duration=target,
         )
+        director_result = apply_a10_r4_director_guard(
+            settings=settings,
+            director_result=director_result,
+            payload=payload,
+            target_duration=target,
+        )
         clips = [dict(item) for item in director_result["clips"]]
         timings = [dict(item) for item in director_result["subtitle_segments"]]
         plan = {**plan, "clips": clips, "director": director_result["report"]}
@@ -1118,6 +1128,10 @@ async def _render(
             message="正在混音",
         )
         await asyncio.to_thread(_mix, base, tts, mode, mixed)
+        audio_normalization_report = await asyncio.to_thread(
+            measure_audio_loudness,
+            mixed,
+        )
 
         raw_url = _url(settings, mixed, "videos/existing-edit/raw")
         audio_url = _url(settings, tts, "audio/existing-edit") if tts else ""
@@ -1201,6 +1215,8 @@ async def _render(
             keyword_burst_report=director_result.get("keyword_burst_report"),
             edit_quality_gate=director_result.get("edit_quality_gate"),
             global_repeat_report=director_result.get("global_repeat_report"),
+            a10_r4_report=director_result.get("a10_r4_report"),
+            audio_normalization_report=audio_normalization_report,
             tts_warning=warning,
             fal_used=False,
             billing_guard="existing_edit_no_fal",
@@ -1368,6 +1384,13 @@ def install_existing_video_editor(
                 "diversity_aware_shot_count": True,
                 "source_interval_overlap_guard": True,
                 "whole_video_repeat_report": True,
+            "strict_visual_single_use": True,
+            "semantic_scene_diversity": True,
+            "fresh_ending_shot": True,
+            "landmark_share_cap": True,
+            "timeline_wide_keywords": True,
+            "loudness_normalization": True,
+            "audio_loudness_report": True,
                 "job_persistence": True,
                 "fal_forbidden": True,
             },
