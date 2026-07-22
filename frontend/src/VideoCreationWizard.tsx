@@ -2597,9 +2597,6 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
             <label>输出比例<select value={outputRatio} onChange={(e) => setOutputRatio(e.target.value as OutputRatio)}><option value="9:16">9:16 竖屏</option><option value="16:9">16:9 横屏</option><option value="1:1">1:1 方形</option></select></label>
             <label>剪辑节奏<select value={editPace} onChange={(e) => setEditPace(e.target.value as EditPace)}><option value="fast">快节奏</option><option value="normal">正常</option><option value="calm">舒缓</option></select></label>
             <div className="aiw-existingVideoCount"><b>{selectedVideos.length}</b><span>个视频已带入</span><button type="button" className="aiw-muted" onClick={() => openWorkspaceTab('assets')}>去素材库选视频</button></div>
-
-            <DynamicEditV2Selector />
-
 {/* V10_40_8_5_2_EXISTING_COVERAGE_UI */}
             <div className="aiw-coverageCard">
               <div className="aiw-coverageTitle">
@@ -3054,7 +3051,11 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
             {/* MATERIAL_SELECTION_MODE_V10_40_8_6 */}
             {creationMode === 'existing_edit' && (
               <div className="aiw-materialModePanel">
-                <div>
+          {/* V10_40_8_16_ENGINE_AT_STEP3_TOP */}
+          <DynamicEditV2Selector />
+
+          {/* V10_40_8_16_ENGINE_AT_STEP3_TOP */}
+<div>
                   <b>素材选择方式</b>
                   <span>
                     默认无需手选；系统按文案语义和真实 TTS

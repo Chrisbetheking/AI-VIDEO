@@ -19,8 +19,8 @@ from typing import Any, Callable
 
 from fastapi import Depends, HTTPException, Request
 
-VERSION = "10.40.8.15-real-sfx-theme-stickers-large-captions"
-INSTALL_MARKER = "V10_40_8_15_REAL_SFX_THEME_STICKERS_LARGE_CAPTIONS"
+VERSION = "10.40.8.16-balanced-editing-studio"
+INSTALL_MARKER = "V10_40_8_16_BALANCED_EDITING_STUDIO"
 _INSTALLED = False
 _LOCK = threading.RLock()
 
@@ -1024,7 +1024,12 @@ def _run_dynamic(settings: Any, proxy_job_id: str, payload: dict[str, Any]) -> N
         _update_proxy(settings, proxy_job_id, status="running", stage="classic_base_start", progress=2, message="正在保留 A10-R4 稳定底片")
         classic_payload = dict(payload)
         classic_payload["burn_subtitles"] = False
-        classic_payload["edit_pace"] = "dynamic_dense"
+        pace_key = str(payload.get("dynamic_visual_pace") or "balanced")
+        classic_payload["edit_pace"] = {
+            "calm": "dynamic_calm",
+            "balanced": "dynamic_balanced",
+            "punchy": "dynamic_punchy",
+        }.get(pace_key, "dynamic_balanced")
         classic_payload["dynamic_v2_parent_job_id"] = proxy_job_id
         classic_job = classic._start(settings, classic_payload)
         classic_job_id = str(classic_job["job_id"])
@@ -1074,7 +1079,7 @@ def _run_dynamic(settings: Any, proxy_job_id: str, payload: dict[str, Any]) -> N
         plan_path = work / "dynamic_effect_timeline.json"
         plan_path.write_text(json.dumps(plan, ensure_ascii=False, indent=2), encoding="utf-8")
 
-        _update_proxy(settings, proxy_job_id, stage="dynamic_render", progress=86, message="正在渲染大号短字幕、真实音效和主题透明贴纸", dynamic_effect_timeline=plan)
+        _update_proxy(settings, proxy_job_id, stage="dynamic_render", progress=86, message="正在渲染可调字幕、多样动效、低音量多样音效和安全区贴纸", dynamic_effect_timeline=plan)
         output_path = Path(getattr(settings, "outputs_dir", _data_dir(settings) / "outputs")) / f"{proxy_job_id}_dynamic_v2.mp4"
         render_report = render_dynamic_video(source_path, output_path, ass_path, plan)
         report = {
@@ -1162,6 +1167,13 @@ def start_dynamic(settings: Any, payload: dict[str, Any]) -> dict[str, Any]:
         "dynamic_subtitle_style": str(payload.get("dynamic_subtitle_style") or "dynamic_white_yellow"),
         "dynamic_sfx_level": str(payload.get("dynamic_sfx_level") or "balanced"),
         "dynamic_sticker_level": str(payload.get("dynamic_sticker_level") or "balanced"),
+        "dynamic_visual_pace": str(payload.get("dynamic_visual_pace") or "balanced"),
+        "dynamic_caption_size": str(payload.get("dynamic_caption_size") or "standard"),
+        "dynamic_caption_motion": str(payload.get("dynamic_caption_motion") or "smart_mix"),
+        "dynamic_caption_position": str(payload.get("dynamic_caption_position") or "auto"),
+        "dynamic_sfx_pack": str(payload.get("dynamic_sfx_pack") or "smart_mix"),
+        "dynamic_sticker_layout": str(payload.get("dynamic_sticker_layout") or "auto_safe"),
+        "dynamic_sticker_style": str(payload.get("dynamic_sticker_style") or "smart_mix"),
         "fal_used": False,
         "billing_guard": "dynamic_v2_no_fal",
         "created_at": _now(),
@@ -1231,6 +1243,13 @@ def install_dynamic_edit_v2(app: Any, get_settings: Callable[..., Any]) -> None:
         intensity = str(request.query_params.get("intensity") or payload.get("dynamic_edit_intensity") or "balanced")
         payload["dynamic_sfx_level"] = str(request.query_params.get("sfx_level") or payload.get("dynamic_sfx_level") or "balanced")
         payload["dynamic_sticker_level"] = str(request.query_params.get("sticker_level") or payload.get("dynamic_sticker_level") or "balanced")
+        payload["dynamic_visual_pace"] = str(request.query_params.get("visual_pace") or payload.get("dynamic_visual_pace") or "balanced")
+        payload["dynamic_caption_size"] = str(request.query_params.get("caption_size") or payload.get("dynamic_caption_size") or "standard")
+        payload["dynamic_caption_motion"] = str(request.query_params.get("caption_motion") or payload.get("dynamic_caption_motion") or "smart_mix")
+        payload["dynamic_caption_position"] = str(request.query_params.get("caption_position") or payload.get("dynamic_caption_position") or "auto")
+        payload["dynamic_sfx_pack"] = str(request.query_params.get("sfx_pack") or payload.get("dynamic_sfx_pack") or "smart_mix")
+        payload["dynamic_sticker_layout"] = str(request.query_params.get("sticker_layout") or payload.get("dynamic_sticker_layout") or "auto_safe")
+        payload["dynamic_sticker_style"] = str(request.query_params.get("sticker_style") or payload.get("dynamic_sticker_style") or "smart_mix")
         result = build_dynamic_plan(payload, timings, duration, intensity=intensity)
         return {"ok": True, "version": VERSION, "plan": result, "timings": timings}
 
@@ -1245,6 +1264,13 @@ def install_dynamic_edit_v2(app: Any, get_settings: Callable[..., Any]) -> None:
             payload["dynamic_subtitle_style"] = str(request.query_params.get("subtitle_style") or payload.get("dynamic_subtitle_style") or "dynamic_white_yellow")
             payload["dynamic_sfx_level"] = str(request.query_params.get("sfx_level") or payload.get("dynamic_sfx_level") or "balanced")
             payload["dynamic_sticker_level"] = str(request.query_params.get("sticker_level") or payload.get("dynamic_sticker_level") or "balanced")
+            payload["dynamic_visual_pace"] = str(request.query_params.get("visual_pace") or payload.get("dynamic_visual_pace") or "balanced")
+            payload["dynamic_caption_size"] = str(request.query_params.get("caption_size") or payload.get("dynamic_caption_size") or "standard")
+            payload["dynamic_caption_motion"] = str(request.query_params.get("caption_motion") or payload.get("dynamic_caption_motion") or "smart_mix")
+            payload["dynamic_caption_position"] = str(request.query_params.get("caption_position") or payload.get("dynamic_caption_position") or "auto")
+            payload["dynamic_sfx_pack"] = str(request.query_params.get("sfx_pack") or payload.get("dynamic_sfx_pack") or "smart_mix")
+            payload["dynamic_sticker_layout"] = str(request.query_params.get("sticker_layout") or payload.get("dynamic_sticker_layout") or "auto_safe")
+            payload["dynamic_sticker_style"] = str(request.query_params.get("sticker_style") or payload.get("dynamic_sticker_style") or "smart_mix")
             payload["edit_engine"] = "dynamic_v2"
             payload["burn_subtitles"] = False
             return start_dynamic(settings, payload)
@@ -1267,3 +1293,585 @@ def install_dynamic_edit_v2(app: Any, get_settings: Callable[..., Any]) -> None:
         return item
 
     _INSTALLED = True
+
+
+# =============================================================================
+# V10.40.8.16 BALANCED EDITING STUDIO OVERRIDES
+# =============================================================================
+V16_MARKER = "V10_40_8_16_BALANCED_EDITING_STUDIO"
+_V16_CONTEXT = threading.local()
+
+PACE_PROFILES: dict[str, dict[str, Any]] = {
+    "calm": {"label": "舒缓讲解", "seconds_per_clip": 3.20, "max_clips": 16},
+    "balanced": {"label": "均衡精剪", "seconds_per_clip": 2.55, "max_clips": 22},
+    "punchy": {"label": "紧凑口播", "seconds_per_clip": 2.10, "max_clips": 27},
+}
+
+EDIT_PRESETS = {
+    "restrained": {
+        "label": "克制",
+        "description": "主要动效少而准，不让字幕、贴纸和镜头同时抢画面。",
+        "max_major_effects_per_30s": 5,
+        "min_effect_gap_seconds": 3.80,
+        "zoom_strength": 0.026,
+        "micro_zoom_strength": 0.006,
+    },
+    "balanced": {
+        "label": "均衡",
+        "description": "镜头约 2.5 秒一换，字幕动效更丰富，但主要重击保持间隔。",
+        "max_major_effects_per_30s": 7,
+        "min_effect_gap_seconds": 2.80,
+        "zoom_strength": 0.038,
+        "micro_zoom_strength": 0.008,
+    },
+    "strong": {
+        "label": "加强",
+        "description": "适合强钩子短视频，但仍限制镜头和重音密度。",
+        "max_major_effects_per_30s": 10,
+        "min_effect_gap_seconds": 2.10,
+        "zoom_strength": 0.048,
+        "micro_zoom_strength": 0.010,
+    },
+}
+
+SFX_LEVELS = {
+    "off": {"label": "关闭", "volume": 0.0, "max_per_30s": 0, "min_gap": 99.0},
+    "light": {"label": "轻柔", "volume": 0.09, "max_per_30s": 3, "min_gap": 3.80},
+    "balanced": {"label": "均衡", "volume": 0.15, "max_per_30s": 5, "min_gap": 3.00},
+    "strong": {"label": "明显", "volume": 0.22, "max_per_30s": 7, "min_gap": 2.45},
+}
+
+STICKER_LEVELS = {
+    "off": {"label": "关闭", "max_per_30s": 0, "min_gap": 99.0},
+    "light": {"label": "少量", "max_per_30s": 2, "min_gap": 8.0},
+    "balanced": {"label": "均衡", "max_per_30s": 3, "min_gap": 6.0},
+    "rich": {"label": "丰富", "max_per_30s": 5, "min_gap": 4.5},
+}
+
+CAPTION_SIZE_PRESETS = {
+    "compact": 92,
+    "standard": 110,
+    "large": 128,
+    "xlarge": 146,
+}
+
+CAPTION_MOTION_PRESETS = {
+    "smart_mix": "智能混合",
+    "pop_bounce": "弹跳放大",
+    "slide_mix": "左右滑入",
+    "lift_fade": "上浮淡入",
+    "elastic": "弹性回弹",
+    "rotate_snap": "轻旋归位",
+    "typewriter": "逐字扫入",
+    "impact_cut": "关键词重击",
+    "clean_fade": "极简淡入",
+}
+
+CAPTION_POSITION_PRESETS = {
+    "auto": "智能避让",
+    "lower": "底部安全区",
+    "middle": "中部强调区",
+}
+
+SFX_VARIANT_BANKS: dict[str, list[tuple[str, float]]] = {
+    "hook": [
+        ("hook_low_hit_a.wav", 0.86),
+        ("hook_low_hit_b.wav", 0.78),
+        ("hook_snap.wav", 0.74),
+    ],
+    "question": [
+        ("question_soft_ping.wav", 0.68),
+        ("question_pluck.wav", 0.62),
+        ("question_rise.wav", 0.58),
+    ],
+    "turn": [
+        ("turn_air_whoosh.wav", 0.66),
+        ("turn_reverse_sweep.wav", 0.60),
+        ("turn_soft_swipe.wav", 0.56),
+    ],
+    "data": [
+        ("data_tick_a.wav", 0.64),
+        ("data_tick_b.wav", 0.58),
+        ("data_drop.wav", 0.60),
+    ],
+    "risk": [
+        ("risk_low_alert.wav", 0.62),
+        ("risk_tap.wav", 0.55),
+        ("risk_short_alarm.wav", 0.50),
+    ],
+    "comparison": [
+        ("compare_slide_a.wav", 0.54),
+        ("compare_slide_b.wav", 0.50),
+        ("compare_toggle.wav", 0.48),
+    ],
+    "list": [
+        ("list_click_a.wav", 0.50),
+        ("list_click_b.wav", 0.46),
+        ("list_wood_tap.wav", 0.44),
+    ],
+    "evidence": [
+        ("evidence_camera_soft.wav", 0.48),
+        ("evidence_confirm.wav", 0.46),
+    ],
+    "cta": [
+        ("cta_chime_a.wav", 0.58),
+        ("cta_chime_b.wav", 0.54),
+        ("cta_confirm.wav", 0.50),
+    ],
+}
+
+ICON_STICKERS = {
+    "house", "office", "key", "pin", "map", "palm", "money", "chart",
+    "metro", "car", "shopping", "food", "construction", "people", "warning",
+    "search", "clipboard", "check", "camera", "comment", "bell", "point", "question",
+}
+DOODLE_STICKERS = {
+    "doodle_arrow_curve", "doodle_arrow_up", "doodle_burst", "doodle_brackets",
+    "doodle_circle", "doodle_check", "doodle_route", "doodle_sparkles",
+    "doodle_underline", "doodle_warning", "doodle_question", "doodle_price_tag",
+}
+
+_V15_BUILD_DYNAMIC_PLAN = build_dynamic_plan
+
+
+def _v16_context(payload: dict[str, Any]) -> dict[str, Any]:
+    size_raw = str(payload.get("dynamic_caption_size") or "standard")
+    try:
+        size_value = max(84, min(160, int(float(size_raw))))
+    except Exception:
+        size_value = CAPTION_SIZE_PRESETS.get(size_raw, 110)
+    return {
+        "visual_pace": str(payload.get("dynamic_visual_pace") or "balanced"),
+        "caption_size": size_value,
+        "caption_motion": str(payload.get("dynamic_caption_motion") or "smart_mix"),
+        "caption_position": str(payload.get("dynamic_caption_position") or "auto"),
+        "sfx_pack": str(payload.get("dynamic_sfx_pack") or "smart_mix"),
+        "sticker_layout": str(payload.get("dynamic_sticker_layout") or "auto_safe"),
+        "sticker_style": str(payload.get("dynamic_sticker_style") or "smart_mix"),
+    }
+
+
+def _v16_semantic_roles() -> set[str]:
+    return {"hook", "question", "turn", "data", "risk", "comparison", "list", "evidence", "cta"}
+
+
+def _v16_choose_variant(role: str, event: dict[str, Any], index: int, last_asset: str) -> tuple[str, float]:
+    options = list(SFX_VARIANT_BANKS.get(role) or [])
+    if not options:
+        return "", 0.0
+    ordered = sorted(
+        options,
+        key=lambda item: hashlib.sha256(
+            f"{event.get('id')}:{event.get('source_text')}:{index}:{item[0]}".encode("utf-8")
+        ).digest(),
+    )
+    for asset, role_gain in ordered:
+        if asset != last_asset and (_sfx_root() / asset).exists():
+            return asset, role_gain
+    return ordered[0]
+
+
+def _v16_choose_sticker(event: dict[str, Any], index: int, style: str, last_asset: str) -> str:
+    base = _choose_sticker(event, index)
+    role = str(event.get("role") or "knowledge")
+    text = str(event.get("source_text") or "")
+    doodle_by_role = {
+        "hook": ["doodle_burst", "doodle_arrow_curve", "doodle_sparkles"],
+        "question": ["doodle_question", "doodle_circle", "doodle_arrow_curve"],
+        "turn": ["doodle_arrow_curve", "doodle_brackets", "doodle_underline"],
+        "data": ["doodle_price_tag", "doodle_circle", "doodle_underline"],
+        "risk": ["doodle_warning", "doodle_brackets", "doodle_circle"],
+        "comparison": ["doodle_brackets", "doodle_arrow_up", "doodle_underline"],
+        "list": ["doodle_check", "doodle_underline", "doodle_brackets"],
+        "evidence": ["doodle_circle", "doodle_arrow_curve", "doodle_sparkles"],
+        "cta": ["doodle_arrow_up", "doodle_sparkles", "doodle_check"],
+    }
+    if style == "icons":
+        candidates = [base]
+    elif style == "doodles":
+        candidates = doodle_by_role.get(role, ["doodle_sparkles", "doodle_underline"])
+    else:
+        candidates = [base] + doodle_by_role.get(role, [])
+        if re.search(r"价格|预算|钱|回报|收益", text):
+            candidates += ["money", "chart", "doodle_price_tag"]
+        if re.search(r"区域|位置|交通|路线", text):
+            candidates += ["pin", "map", "doodle_route", "doodle_arrow_curve"]
+    candidates = [x for x in candidates if x and x != last_asset and (_sticker_root() / f"{x}.png").exists()]
+    return _deterministic_choice(candidates, f"v16:{event.get('id')}:{index}:{style}") if candidates else ""
+
+
+def _v16_sticker_position(layout: str, event: dict[str, Any], index: int, last_side: str) -> tuple[str, str]:
+    if layout == "top":
+        choices = ["upper_left", "upper_right"]
+    elif layout == "side":
+        choices = ["side_left", "side_right"]
+    else:
+        # Default auto mode never uses the middle center or the subtitle zone.
+        choices = ["upper_left", "upper_right", "side_left", "side_right"]
+        if str(event.get("role")) in {"hook", "question", "risk", "data"}:
+            choices = ["upper_left", "upper_right"]
+    filtered = [item for item in choices if ("left" if "left" in item else "right") != last_side]
+    selected = _deterministic_choice(filtered or choices, f"position:{event.get('id')}:{index}")
+    return selected, ("left" if "left" in selected else "right")
+
+
+def _decorate_events(
+    events: list[dict[str, Any]],
+    duration: float,
+    *,
+    sfx_level: str,
+    sticker_level: str,
+) -> list[dict[str, Any]]:
+    result = [dict(item) for item in events]
+    context = getattr(_V16_CONTEXT, "config", {}) or {}
+    sfx_cfg = SFX_LEVELS.get(sfx_level) or SFX_LEVELS["balanced"]
+    sticker_cfg = STICKER_LEVELS.get(sticker_level) or STICKER_LEVELS["balanced"]
+
+    max_sfx = max(0, int(math.ceil(max(1.0, duration) / 30.0 * int(sfx_cfg["max_per_30s"]))))
+    sfx_gap = float(sfx_cfg["min_gap"])
+    used_sfx = 0
+    last_sfx_start = -999.0
+    last_sfx_asset = ""
+    for index, event in enumerate(result):
+        role = str(event.get("role") or "knowledge")
+        start = _safe_float(event.get("start"), 0.0)
+        if used_sfx >= max_sfx:
+            break
+        if role not in _v16_semantic_roles() or start - last_sfx_start < sfx_gap:
+            continue
+        asset, role_gain = _v16_choose_variant(role, event, index, last_sfx_asset)
+        if not asset or float(sfx_cfg["volume"]) <= 0:
+            continue
+        event["sfx"] = {
+            "asset": asset,
+            "gain": round(float(sfx_cfg["volume"]) * role_gain, 4),
+            "role": role,
+        }
+        used_sfx += 1
+        last_sfx_start = start
+        last_sfx_asset = asset
+
+    max_stickers = max(0, int(math.ceil(max(1.0, duration) / 30.0 * int(sticker_cfg["max_per_30s"]))))
+    sticker_gap = float(sticker_cfg["min_gap"])
+    sticker_style = str(context.get("sticker_style") or "smart_mix")
+    sticker_layout = str(context.get("sticker_layout") or "auto_safe")
+    used_stickers = 0
+    last_sticker_start = -999.0
+    last_sticker_asset = ""
+    last_side = ""
+    for index, event in enumerate(result):
+        if used_stickers >= max_stickers:
+            break
+        start = _safe_float(event.get("start"), 0.0)
+        role = str(event.get("role") or "knowledge")
+        if role == "knowledge" or start - last_sticker_start < sticker_gap:
+            continue
+        asset = _v16_choose_sticker(event, index, sticker_style, last_sticker_asset)
+        if not asset:
+            continue
+        position, side = _v16_sticker_position(sticker_layout, event, index, last_side)
+        event_end = max(start + 0.85, _safe_float(event.get("end"), start + 1.25))
+        span = min(1.35, max(0.90, event_end - start))
+        event["sticker"] = {
+            "asset": f"{asset}.png",
+            "position": position,
+            "size": 132 + (index % 3) * 10,
+            "start": round(start, 3),
+            "end": round(min(duration, start + span), 3),
+        }
+        used_stickers += 1
+        last_sticker_start = start
+        last_sticker_asset = asset
+        last_side = side
+    return result
+
+
+def build_dynamic_plan(
+    payload: dict[str, Any],
+    timings: list[dict[str, Any]],
+    duration: float,
+    *,
+    intensity: str = "balanced",
+) -> dict[str, Any]:
+    context = _v16_context(payload)
+    _V16_CONTEXT.config = context
+    plan = _V15_BUILD_DYNAMIC_PLAN(payload, timings, duration, intensity=intensity)
+    visual_pace = context["visual_pace"] if context["visual_pace"] in PACE_PROFILES else "balanced"
+    plan["version"] = VERSION
+    plan["visual_pace"] = visual_pace
+    plan["caption_size"] = context["caption_size"]
+    plan["caption_motion"] = context["caption_motion"]
+    plan["caption_position"] = context["caption_position"]
+    plan["sfx_pack"] = context["sfx_pack"]
+    plan["sticker_layout"] = context["sticker_layout"]
+    plan["sticker_style"] = context["sticker_style"]
+    plan["pace_profile"] = PACE_PROFILES[visual_pace]
+    return plan
+
+
+def _v16_y_position(position: str, role: str, index: int) -> int:
+    if position == "middle":
+        return 900 + (index % 2) * 110
+    if position == "lower":
+        return 1435 + (index % 2) * 90
+    if role in {"hook", "question", "data", "risk", "turn"}:
+        return 820 + (index % 2) * 120
+    return 1435 + (index % 2) * 88
+
+
+def _v16_karaoke(text: str) -> str:
+    chars = []
+    for char in text:
+        chars.append(r"{\kf7}" + char)
+    return "".join(chars)
+
+
+def _v16_motion(
+    motion: str,
+    role: str,
+    index: int,
+    x: int,
+    y: int,
+    text: str,
+) -> tuple[str, str]:
+    choices = ["pop_bounce", "slide_left", "slide_right", "lift_fade", "elastic", "rotate_snap", "clean_fade"]
+    if motion == "smart_mix":
+        if role in {"hook", "data", "risk"}:
+            motion = ["pop_bounce", "elastic", "impact_cut"][index % 3]
+        elif role in {"question", "turn", "comparison"}:
+            motion = ["slide_left", "slide_right", "rotate_snap"][index % 3]
+        else:
+            motion = choices[index % len(choices)]
+    elif motion == "slide_mix":
+        motion = "slide_left" if index % 2 == 0 else "slide_right"
+
+    if motion == "typewriter":
+        return rf"{{\an5\pos({x},{y})\fad(45,65)}}", _v16_karaoke(text)
+    if motion == "slide_left":
+        return rf"{{\an5\move(-180,{y},{x},{y},0,210)\fad(30,70)}}", text
+    if motion == "slide_right":
+        return rf"{{\an5\move(1260,{y},{x},{y},0,210)\fad(30,70)}}", text
+    if motion == "lift_fade":
+        return rf"{{\an5\move({x},{y + 105},{x},{y},0,190)\fad(55,80)}}", text
+    if motion == "elastic":
+        return rf"{{\an5\pos({x},{y})\fscx58\fscy58\t(0,115,\fscx118\fscy118)\t(115,235,\fscx100\fscy100)\fad(30,70)}}", text
+    if motion == "rotate_snap":
+        return rf"{{\an5\pos({x},{y})\frz-9\fscx112\fscy112\t(0,185,\frz0\fscx100\fscy100)\fad(35,70)}}", text
+    if motion == "impact_cut":
+        return rf"{{\an5\pos({x},{y})\fscx150\fscy150\t(0,105,\fscx96\fscy96)\t(105,180,\fscx100\fscy100)\fad(20,55)}}", text
+    if motion == "clean_fade":
+        return rf"{{\an5\pos({x},{y})\fad(110,110)}}", text
+    return rf"{{\an5\pos({x},{y})\fscx132\fscy132\t(0,155,\fscx100\fscy100)\fad(35,70)}}", text
+
+
+def write_dynamic_ass(
+    destination: Path,
+    timings: list[dict[str, Any]],
+    keywords: list[str],
+    *,
+    style_id: str,
+) -> Path:
+    preset = SUBTITLE_PRESETS.get(style_id) or SUBTITLE_PRESETS["dynamic_white_yellow"]
+    context = getattr(_V16_CONTEXT, "config", {}) or {}
+    base_size = int(context.get("caption_size") or preset.get("font_size") or 110)
+    base_size = max(84, min(160, base_size))
+    impact_size = min(176, max(base_size + 22, int(base_size * 1.28)))
+    motion = str(context.get("caption_motion") or "smart_mix")
+    position = str(context.get("caption_position") or "auto")
+    font_name = "Noto Sans CJK SC"
+    header = f"""[Script Info]
+ScriptType: v4.00+
+PlayResX: 1080
+PlayResY: 1920
+ScaledBorderAndShadow: yes
+WrapStyle: 2
+
+[V4+ Styles]
+Format: Name,Fontname,Fontsize,PrimaryColour,SecondaryColour,OutlineColour,BackColour,Bold,Italic,Underline,StrikeOut,ScaleX,ScaleY,Spacing,Angle,BorderStyle,Outline,Shadow,Alignment,MarginL,MarginR,MarginV,Encoding
+Style: Dynamic,{font_name},{base_size},{preset['primary']},{preset['highlight']},{preset['outline']},&H00000000,-1,0,0,0,100,100,1.0,0,1,{preset['outline_width']},{preset['shadow']},5,45,45,0,1
+Style: Impact,{font_name},{impact_size},{preset['primary']},{preset['highlight']},{preset['outline']},&H00000000,-1,0,0,0,100,100,1.1,0,1,{preset['outline_width'] + 1},{preset['shadow']},5,40,40,0,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+"""
+    lines = [header]
+    last_motion = ""
+    for index, item in enumerate(timings):
+        start = _safe_float(item.get("start"), 0.0)
+        end = max(start + 0.30, _safe_float(item.get("end"), start + 0.85))
+        raw_text = _wrap_text(str(item.get("text") or ""), 7)
+        role = _classify(raw_text)
+        impact = role in {"hook", "data", "risk", "question", "turn"} and index % 2 == 0
+        style = "Impact" if impact else "Dynamic"
+        text = _highlight_ass(raw_text, keywords, str(preset["highlight"]))
+        if impact:
+            role_color = {
+                "data": preset.get("highlight"),
+                "risk": "&H00004BFF",
+                "question": preset.get("accent"),
+                "turn": preset.get("accent"),
+                "hook": preset.get("highlight"),
+            }.get(role, preset.get("highlight"))
+            text = rf"{{\c{role_color}}}{text}"
+        y = _v16_y_position(position, role, index)
+        selected_motion = motion
+        if motion == "smart_mix":
+            candidates = ["pop_bounce", "slide_left", "slide_right", "lift_fade", "elastic", "rotate_snap", "clean_fade"]
+            selected_motion = candidates[index % len(candidates)]
+            if selected_motion == last_motion:
+                selected_motion = candidates[(index + 1) % len(candidates)]
+        animation, animated_text = _v16_motion(selected_motion, role, index, 540, y, text)
+        last_motion = selected_motion
+        lines.append(
+            f"Dialogue: 0,{_ass_time(start)},{_ass_time(end)},{style},,0,0,0,,{animation}{animated_text}\n"
+        )
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_text("".join(lines), encoding="utf-8-sig")
+    return destination
+
+
+def _build_video_filters(
+    work: Path,
+    plan: dict[str, Any],
+    ass_path: Path,
+    sticker_inputs: list[dict[str, Any]],
+    *,
+    width: int = 1080,
+    height: int = 1920,
+) -> str:
+    events = plan.get("events") or []
+    limits = plan.get("limits") or {}
+    zoom_strength = _safe_float(limits.get("zoom_strength"), 0.038)
+    micro_strength = _safe_float(limits.get("micro_zoom_strength"), 0.008)
+    zoom_terms: list[str] = []
+
+    # Caption animation does not force a shot change. Micro zoom occurs only on
+    # every fourth caption beat, preventing the restless V15 feeling.
+    beats = [float(value) for value in (plan.get("caption_beats") or [])[:48]]
+    for index, start in enumerate(beats):
+        if index % 4:
+            continue
+        span = 0.88
+        zoom_terms.append(
+            f"+{micro_strength:.4f}*between(t,{start:.3f},{start + span:.3f})*sin(PI*(t-{start:.3f})/{span:.3f})"
+        )
+    for event in events:
+        if event.get("effect") not in {"hook_punch", "question_pulse", "turn_focus", "risk_alert", "data_card"}:
+            continue
+        start = _safe_float(event.get("start"), 0.0)
+        end = max(start + 0.35, _safe_float(event.get("end"), start + 0.95))
+        span = max(0.25, end - start)
+        strength = zoom_strength * (1.05 if event.get("effect") in {"hook_punch", "data_card"} else 0.70)
+        zoom_terms.append(f"+{strength:.4f}*between(t,{start:.3f},{end:.3f})*sin(PI*(t-{start:.3f})/{span:.3f})")
+
+    factor = "1" + "".join(zoom_terms)
+    chain = [
+        f"[0:v]scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height},setsar=1[base]",
+        f"[base]scale=w='{width}*({factor})':h='{height}*({factor})':eval=frame,crop={width}:{height}:(iw-{width})/2:(ih-{height})/2[v0]",
+    ]
+    current = "v0"
+    fontfile = _font_name()
+    font_opt = f":fontfile='{_ffmpeg_escape_path(Path(fontfile))}'" if fontfile else ""
+    palette = {
+        "hook_punch": ("#FFE22E", 142, 470),
+        "question_pulse": ("#FF6A72", 132, 590),
+        "turn_focus": ("#FF9D36", 128, 470),
+        "data_card": ("#FFE22E", 148, 560),
+        "risk_alert": ("#FF5757", 138, 510),
+    }
+    focus_events = [
+        (event, text_path)
+        for event, text_path in _event_text_files(work, plan)
+        if str(event.get("effect") or "") in palette
+    ]
+    focus_limit = max(2, int(math.ceil(max(1.0, _safe_float(plan.get("duration"), 30.0)) / 30.0 * 4)))
+    for index, (event, text_path) in enumerate(focus_events[:focus_limit], start=1):
+        effect = str(event.get("effect") or "hook_punch")
+        color, font_size, y = palette[effect]
+        start = _safe_float(event.get("start"), 0.0)
+        end = max(start + 0.30, _safe_float(event.get("end"), start + 0.95))
+        next_label = f"vtxt{index}"
+        x_expr = "(w-text_w)/2" if index % 2 else r"max(45\,(w-text_w)/2-145)"
+        alpha = (
+            f"if(lt(t,{start + 0.10:.3f}),(t-{start:.3f})/0.10,"
+            f"if(gt(t,{end - 0.10:.3f}),({end:.3f}-t)/0.10,1))"
+        )
+        chain.append(
+            f"[{current}]drawtext=textfile='{_ffmpeg_escape_path(text_path)}'{font_opt}:expansion=none:"
+            f"fontsize={font_size}:fontcolor={color}:borderw=7:bordercolor=black@0.86:shadowx=2:shadowy=3:"
+            f"x={x_expr}:y={y}:alpha='{alpha}':enable='between(t,{start:.3f},{end:.3f})'[{next_label}]"
+        )
+        current = next_label
+
+    position_xy = {
+        "upper_left": ("54", "250"),
+        "upper_right": ("W-w-54", "270"),
+        "side_left": ("48", "560"),
+        "side_right": ("W-w-48", "580"),
+    }
+    for index, item in enumerate(sticker_inputs, start=1):
+        sticker = item["sticker"]
+        input_index = int(item["input_index"])
+        start = _safe_float(sticker.get("start"), 0.0)
+        end = max(start + 0.70, _safe_float(sticker.get("end"), start + 1.05))
+        span = max(0.70, end - start)
+        size = max(105, min(172, int(sticker.get("size") or 140)))
+        position = str(sticker.get("position") or "upper_right")
+        x_expr, y_base = position_xy.get(position, position_xy["upper_right"])
+        sticker_label = f"sticker{index}"
+        next_label = f"vstk{index}"
+        chain.append(
+            f"[{input_index}:v]format=rgba,scale={size}:{size}:force_original_aspect_ratio=decrease,"
+            f"pad={size + 22}:{size + 22}:(ow-iw)/2:(oh-ih)/2:color=0x00000000,"
+            f"rotate='0.020*sin(2*PI*t/1.45)':ow=rotw(iw):oh=roth(ih):c=none,"
+            f"trim=duration={span:.3f},fade=t=in:st=0:d=0.12:alpha=1,"
+            f"fade=t=out:st={max(0.1, span - 0.16):.3f}:d=0.16:alpha=1,"
+            f"setpts=PTS-STARTPTS+{start:.3f}/TB[{sticker_label}]"
+        )
+        y_expr = f"{y_base}+7*sin(2*PI*(t-{start:.3f})/1.35)"
+        chain.append(
+            f"[{current}][{sticker_label}]overlay=x='{x_expr}':y='{y_expr}':"
+            f"eof_action=pass:shortest=0:enable='between(t,{start:.3f},{end:.3f})'[{next_label}]"
+        )
+        current = next_label
+
+    ass_escaped = _ffmpeg_escape_path(ass_path)
+    chain.append(f"[{current}]ass='{ass_escaped}'[vout]")
+    return ";".join(chain)
+
+
+def _build_audio_filters(
+    plan: dict[str, Any],
+    *,
+    has_audio: bool,
+    sfx_inputs: list[dict[str, Any]],
+) -> tuple[str, str | None]:
+    if not has_audio:
+        return "", None
+    if not sfx_inputs:
+        return "", "0:a?"
+
+    parts: list[str] = ["[0:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo[voice]"]
+    labels: list[str] = ["voice"]
+    for index, item in enumerate(sfx_inputs, start=1):
+        event = item["event"]
+        sfx = item["sfx"]
+        input_index = int(item["input_index"])
+        delay = int(max(0.0, _safe_float(event.get("start"), 0.0)) * 1000)
+        # V16 caps effective SFX gain far below V15. Transient sounds remain
+        # audible but no longer dominate narration.
+        gain = max(0.025, min(0.22, _safe_float(sfx.get("gain"), 0.10)))
+        label = f"sfx{index}"
+        parts.append(
+            f"[{input_index}:a]aresample=48000,pan=stereo|c0=c0|c1=c0,"
+            f"atrim=0:0.72,asetpts=PTS-STARTPTS,highpass=f=80,lowpass=f=12500,"
+            f"volume={gain:.4f},afade=t=in:st=0:d=0.012,"
+            f"afade=t=out:st=0.48:d=0.18,adelay={delay}|{delay}[{label}]"
+        )
+        labels.append(label)
+    parts.append(
+        "".join(f"[{label}]" for label in labels)
+        + f"amix=inputs={len(labels)}:duration=first:dropout_transition=0:normalize=0,"
+        "alimiter=limit=0.94,loudnorm=I=-16:LRA=7:TP=-1.8[aout]"
+    )
+    return ";".join(parts), "aout"

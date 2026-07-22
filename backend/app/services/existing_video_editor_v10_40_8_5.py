@@ -360,12 +360,16 @@ def _visual_parts(parts: list[str], count: int) -> list[str]:
 
 
 # V10_40_8_14_DYNAMIC_DENSE_PACE: used only by Dynamic V2; classic pace remains unchanged.
+# V10_40_8_16_BALANCED_DYNAMIC_PACE: only Dynamic V2 uses these keys.
 def _desired_clip_count(
     parts: list[str], manual_count: int, target: float, pace: str
 ) -> int:
     pace_key = str(pace or "normal").lower()
     seconds_per_clip = {
-        "dynamic_dense": 1.45,
+        "dynamic_calm": 3.20,
+        "dynamic_balanced": 2.55,
+        "dynamic_punchy": 2.10,
+        "dynamic_dense": 2.10,
         "fast": 2.8,
         "normal": 3.8,
         "slow": 4.8,
@@ -376,7 +380,13 @@ def _desired_clip_count(
         manual_count,
         int(math.ceil(max(1.0, target) / seconds_per_clip)),
     )
-    limit = 36 if pace_key == "dynamic_dense" else 24
+    dynamic_limits = {
+        "dynamic_calm": 16,
+        "dynamic_balanced": 22,
+        "dynamic_punchy": 27,
+        "dynamic_dense": 27,
+    }
+    limit = dynamic_limits.get(pace_key, 24)
     return max(1, min(count, limit))
 
 
