@@ -6133,6 +6133,15 @@ try:
 except Exception as _existing_video_edit_exc:
     print("EXISTING_VIDEO_EDITOR_V10_40_8_5_LOAD_FAILED", _existing_video_edit_exc)
 # ===== /V10.40.8.5 EXISTING VIDEO SMART EDIT =====
+# ===== V10.40.8.13 DYNAMIC TALKING-HEAD EDIT V2 =====
+try:
+    from app.services.dynamic_edit_v2_v10_40_8_13 import install_dynamic_edit_v2
+    install_dynamic_edit_v2(app, get_settings)
+    print("V10_40_8_13_DYNAMIC_EDIT_V2_LOADED", flush=True)
+except Exception as _dynamic_edit_v2_exc:
+    print("V10_40_8_13_DYNAMIC_EDIT_V2_LOAD_FAILED", repr(_dynamic_edit_v2_exc), flush=True)
+# ===== /V10.40.8.13 DYNAMIC TALKING-HEAD EDIT V2 =====
+
 
 # ===== V10.40.8.6 A1 REMOTE BROWSER + PRODUCTION MEMORY =====
 try:

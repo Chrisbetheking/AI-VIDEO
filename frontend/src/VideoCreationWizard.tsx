@@ -1,3 +1,4 @@
+import DynamicEditV2Selector, { getDynamicEditV2StartEndpoint } from './DynamicEditV2Selector'
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import {
   apiGet,
@@ -2318,7 +2319,7 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
       setStep(4)
       try {
         const data = await apiPost(
-          '/api/video/existing-edit/start',
+          getDynamicEditV2StartEndpoint(),
           (() => {
             const base: any = existingEditPayload(finalPlan)
             const materialMode = String(
@@ -2597,7 +2598,9 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
             <label>剪辑节奏<select value={editPace} onChange={(e) => setEditPace(e.target.value as EditPace)}><option value="fast">快节奏</option><option value="normal">正常</option><option value="calm">舒缓</option></select></label>
             <div className="aiw-existingVideoCount"><b>{selectedVideos.length}</b><span>个视频已带入</span><button type="button" className="aiw-muted" onClick={() => openWorkspaceTab('assets')}>去素材库选视频</button></div>
 
-            {/* V10_40_8_5_2_EXISTING_COVERAGE_UI */}
+            <DynamicEditV2Selector />
+
+{/* V10_40_8_5_2_EXISTING_COVERAGE_UI */}
             <div className="aiw-coverageCard">
               <div className="aiw-coverageTitle">
                 <strong>素材覆盖与自动补选</strong>
