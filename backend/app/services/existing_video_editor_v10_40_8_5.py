@@ -31,7 +31,7 @@ from app.services.a10_r4_output_guard_v10_40_8_12 import (
     measure_audio_loudness,
 )
 
-VERSION = "10.40.8.20-real-tts-semantic-generation-fix"
+VERSION = "10.40.8.21-semantic-master-timeline-quality-gate"
 # V10_40_8_12_A10_R4_SEMANTIC_SINGLE_USE_AUDIO: strict visual single-use, semantic coverage, fresh ending, -16 LUFS
 # V10_40_8_8_A10_R3_GLOBAL_VISUAL_DEDUP: whole-video repetition guard
 # V10_40_8_8_A10_R2_ADAPTIVE_QUALITY_GATE_FIX: adaptive quality gate
@@ -910,6 +910,59 @@ def _voice_segments(
     return result
 
 
+
+
+def _build_semantic_speech_units(
+    parts: list[str], timings: list[dict[str, Any]], target: float,
+) -> list[dict[str, Any]]:
+    """Align sentence-level script parts to real TTS fragments without exposing subtitle chunks."""
+    normalized: list[dict[str, Any]] = []
+    for index, raw in enumerate(timings):
+        item = dict(raw) if isinstance(raw, dict) else {
+            "text": getattr(raw, "text", ""),
+            "start": getattr(raw, "start", None),
+            "end": getattr(raw, "end", None),
+            "duration": getattr(raw, "duration", None),
+        }
+        start = _float(item.get("start") if item.get("start") is not None else item.get("start_time"), -1.0)
+        end = _float(item.get("end") if item.get("end") is not None else item.get("end_time"), -1.0)
+        if end <= start:
+            duration = _float(item.get("duration") or item.get("duration_seconds"), 0.0)
+            if start >= 0 and duration > 0:
+                end = start + duration
+        normalized.append({"text": str(item.get("text") or ""), "start": start, "end": end})
+
+    valid_timeline = normalized and all(x["start"] >= 0 and x["end"] > x["start"] for x in normalized)
+    if not valid_timeline:
+        return _cues(parts, target)
+
+    clean = lambda value: re.sub(r"[^\u4e00-\u9fffA-Za-z0-9%]+", "", str(value or ""))
+    units: list[dict[str, Any]] = []
+    timing_index = 0
+    for part_index, part in enumerate(parts):
+        wanted = clean(part)
+        start = normalized[timing_index]["start"] if timing_index < len(normalized) else (units[-1]["end"] if units else 0.0)
+        end = start
+        collected = ""
+        while timing_index < len(normalized):
+            current = normalized[timing_index]
+            collected += clean(current["text"])
+            end = current["end"]
+            timing_index += 1
+            if not wanted or len(collected) >= max(1, int(len(wanted) * 0.82)) or wanted in collected:
+                break
+        units.append({
+            "index": part_index,
+            "text": part,
+            "start": round(start, 3),
+            "end": round(max(start + 0.3, end), 3),
+            "duration": round(max(0.3, end - start), 3),
+        })
+    if units:
+        units[-1]["end"] = round(max(units[-1]["end"], target), 3)
+        units[-1]["duration"] = round(units[-1]["end"] - units[-1]["start"], 3)
+    return units
+
 def _cues(parts: list[str], target: float) -> list[dict[str, Any]]:
     durations = _durations(len(parts), target)
     output: list[dict[str, Any]] = []
@@ -1061,14 +1114,17 @@ async def _render(
                         )
                         normalized_timings.append(item)
 
+                    semantic_speech_units = _build_semantic_speech_units(parts, normalized_timings, target)
                     semantic_payload = {
                         **payload,
+                        "semantic_speech_units": semantic_speech_units,
                         "tts_segments": normalized_timings,
                         "subtitle_segments": normalized_timings,
                         "actual_tts_duration_seconds": round(target, 3),
                         "target_duration_seconds": round(target, 3),
                         "material_selection_mode": run_material_mode,
                         "lock_edit_plan": False,
+                        "enforce_semantic_master_timeline": True,
                     }
                     plan = build_semantic_tts_plan(
                         settings,
@@ -1087,6 +1143,8 @@ async def _render(
                             "semantic_tts_replanned": True,
                             "timing_source": "real_tts_segments",
                             "tts_segment_count": len(normalized_timings),
+                            "semantic_sentence_count": len(semantic_speech_units),
+                            "semantic_master_timeline": True,
                         }
                     )
                     plan["message"] = (
@@ -1130,9 +1188,32 @@ async def _render(
             payload=payload,
             target_duration=target,
         )
-        clips = [dict(item) for item in director_result["clips"]]
+        directed_clips = [dict(item) for item in director_result["clips"]]
         timings = [dict(item) for item in director_result["subtitle_segments"]]
+        semantic_master = bool(
+            payload.get("enforce_semantic_master_timeline")
+            or (plan.get("coverage") or {}).get("semantic_tts_replanned")
+        )
+        if semantic_master:
+            clips = [dict(item) for item in (plan.get("clips") or [])]
+            if not clips:
+                raise ValueError("真实 TTS 语义镜头计划为空")
+            planned_seconds = sum(float(item.get("duration") or 0) for item in clips)
+            if abs(planned_seconds - target) > 0.35:
+                clips[-1]["duration"] = round(float(clips[-1].get("duration") or 0) + target - planned_seconds, 3)
+                clips[-1]["duration_seconds"] = clips[-1]["duration"]
+            director_result.setdefault("report", {})
+            director_result["report"].update({
+                "semantic_master_timeline": True,
+                "semantic_shot_count": len(clips),
+                "discarded_director_clip_count": len(directed_clips),
+                "subtitle_fragments_do_not_cut_video": True,
+            })
+        else:
+            clips = directed_clips
         plan = {**plan, "clips": clips, "director": director_result["report"]}
+        if semantic_master and len(clips) != len(plan.get("clips") or []):
+            raise ValueError("语义主时间线镜头数量被后处理改写")
         payload = {
             **payload,
             "subtitle_style": director_result["subtitle_style"],

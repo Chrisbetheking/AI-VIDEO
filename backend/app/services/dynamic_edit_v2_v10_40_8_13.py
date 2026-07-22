@@ -19,8 +19,8 @@ from typing import Any, Callable
 
 from fastapi import Depends, HTTPException, Request
 
-VERSION = "10.40.8.20-real-tts-semantic-generation-fix"
-INSTALL_MARKER = "V10_40_8_20_REAL_TTS_SEMANTIC_GENERATION_FIX"
+VERSION = "10.40.8.21-semantic-master-timeline-quality-gate"
+INSTALL_MARKER = "V10_40_8_21_SEMANTIC_MASTER_TIMELINE_QUALITY_GATE"
 _INSTALLED = False
 _LOCK = threading.RLock()
 
@@ -421,56 +421,45 @@ def _clean_caption_text(text: str) -> str:
     return clean
 
 
-def _caption_chunks(text: str, *, max_chars: int = 7) -> list[str]:
+def _caption_chunks(text: str, *, max_chars: int = 9) -> list[str]:
     clean = _clean_caption_text(text)
     if not clean:
         return []
-
-    semantic = re.sub(
-        r"(但是|不过|所以|如果|比如|然后|因为|其实|真正|而是|先看|再看|最后|第一|第二|第三|第四)",
-        r"|\1",
-        clean,
+    protected = (
+        "吉隆坡买房", "第一眼", "自住还是投资", "这两个方向", "区域完全不一样",
+        "真实的生活半径", "每天通勤时间", "周边超市", "学校离得远不远",
+        "这些现有配套", "住进去舒不舒服", "价格只是门槛", "区域租客",
+        "本地需求支撑", "把用途想明白", "区域才不会踩坑", "一对一拆解",
+        "生活半径", "生活配套", "租客来源", "交通规划", "投资逻辑", "区域选择",
     )
-    coarse = [
-        item.strip("|，,。！？!?；;、：:")
-        for item in re.split(r"[|，,。！？!?；;、：:]+", semantic)
-        if item.strip("|，,。！？!?；;、：:")
-    ]
-    protected_suffixes = (
-        "生活半径", "现金流", "回报率", "交通规划", "生活配套", "租客来源",
-        "交付周期", "区域用途", "区域选择", "投资逻辑", "真实价格", "项目风险",
-        "楼盘位置", "户型设计", "预算区间", "未来规划",
-    )
+    coarse = [x for x in re.split(r"[，,。！？!?；;、：:]+", clean) if x]
     output: list[str] = []
-    for item in coarse or [clean]:
-        remaining = item
+    for phrase in coarse or [clean]:
+        remaining = phrase
         while len(remaining) > max_chars:
-            cut = min(6, max_chars)
-            protected_cut = False
-            for suffix in protected_suffixes:
-                if remaining.endswith(suffix) and 3 <= len(remaining) - len(suffix) <= max_chars:
-                    cut = len(remaining) - len(suffix)
-                    protected_cut = True
-                    break
-            if len(remaining) - cut == 1:
-                cut -= 1
-            # Do not strand pronouns or particles at the end of a caption.
-            if not protected_cut and cut > 3 and remaining[cut - 1] in "你我他她这那的和与":
-                cut -= 1
+            cut = max_chars
+            for candidate in range(max_chars, 3, -1):
+                left, right = remaining[:candidate], remaining[candidate:]
+                if any(term.startswith(right) and term in remaining for term in protected):
+                    continue
+                if any(left.endswith(term[:-1]) and right.startswith(term[-1:]) for term in protected if len(term) > 1):
+                    continue
+                if len(right) == 1:
+                    continue
+                cut = candidate
+                break
             output.append(remaining[:cut])
             remaining = remaining[cut:]
         if remaining:
-            if len(remaining) == 1 and output and len(output[-1]) < max_chars:
+            if len(remaining) <= 2 and output and len(output[-1]) + len(remaining) <= max_chars:
                 output[-1] += remaining
             else:
                 output.append(remaining)
-    compact = [item for item in output if item]
-    for index in range(len(compact) - 1):
-        if len(compact[index]) >= 3 and compact[index][-1] in "你我他她":
-            compact[index + 1] = compact[index][-1] + compact[index + 1]
-            compact[index] = compact[index][:-1]
-    return [item for item in compact if item]
-
+    expected = re.sub(r"[^\u4e00-\u9fffA-Za-z0-9%]+", "", clean)
+    actual = re.sub(r"[^\u4e00-\u9fffA-Za-z0-9%]+", "", "".join(output))
+    if expected != actual:
+        raise ValueError("字幕安全切分发生文字丢失")
+    return [item for item in output if item]
 
 def _spread_chunks(chunks: list[str], start: float, end: float) -> list[dict[str, Any]]:
     if not chunks:
@@ -624,8 +613,8 @@ def build_dynamic_plan(
         tail.update(effect="cta_tag" if tail["role"] == "cta" else "keyword_focus", start=max(0.0, min(duration - 1.3, tail["start"])), end=min(duration, max(tail["start"] + 1.1, tail["end"])))
         selected.append(tail)
     selected.sort(key=lambda x: x["start"])
-    sfx_level = str(payload.get("dynamic_sfx_level") or "balanced")
-    sticker_level = str(payload.get("dynamic_sticker_level") or "balanced")
+    sfx_level = "off"  # V21 quality gate: disable unapproved SFX bank
+    sticker_level = "off"  # V21 quality gate: disable random stickers
     selected = _decorate_events(
         selected,
         duration,
@@ -1017,6 +1006,22 @@ def render_dynamic_video(
     }
 
 
+
+
+def _apply_clean_single_caption_policy(plan: dict[str, Any]) -> dict[str, Any]:
+    """V21: one ASS subtitle layer only; no duplicate text cards or random stickers."""
+    cleaned = dict(plan)
+    cleaned["events"] = []
+    cleaned["stickers"] = []
+    cleaned["sfx_events"] = []
+    cleaned["clean_render_policy"] = {
+        "single_caption_layer": True,
+        "duplicate_text_overlays": False,
+        "random_stickers": False,
+        "sfx_temporarily_disabled": True,
+    }
+    return cleaned
+
 def _run_dynamic(settings: Any, proxy_job_id: str, payload: dict[str, Any]) -> None:
     classic = _classic()
     work = _work_dir(settings, proxy_job_id)
@@ -1097,6 +1102,7 @@ def _run_dynamic(settings: Any, proxy_job_id: str, payload: dict[str, Any]) -> N
         sticker_level = str(payload.get("dynamic_sticker_level") or "balanced")
         payload["ai_shot_beats"] = semantic_plan.get("beats") or []
         plan = build_dynamic_plan(payload, timings, duration, intensity=intensity)
+        plan = _apply_clean_single_caption_policy(plan)  # CLEAN_SINGLE_CAPTION_POLICY_V21
         plan["ai_shot_beats"] = semantic_plan.get("beats") or []
         plan["ai_director_report"] = semantic_plan.get("director_report") or {}
         plan["subtitle_style"] = style_id
@@ -1767,7 +1773,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         end = max(start + 0.30, _safe_float(item.get("end"), start + 0.85))
         raw_text = _clean_caption_text(str(item.get("text") or ""))
         role = _classify(raw_text)
-        impact = role in {"hook", "data", "risk", "question", "turn"} and index % 2 == 0
+        impact = False  # V21 no second giant text layer
         style = "Impact" if impact else "Dynamic"
         text = _highlight_ass(raw_text, keywords, str(preset["highlight"]))
         if impact:
@@ -1782,7 +1788,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         y = _v16_y_position(position, role, index)
         selected_motion = motion
         if motion == "smart_mix":
-            candidates = ["pop_bounce", "slide_left", "slide_right", "lift_fade", "elastic", "rotate_snap", "clean_fade"]
+            candidates = ["clean_fade", "lift_fade"]
             selected_motion = candidates[index % len(candidates)]
             if selected_motion == last_motion:
                 selected_motion = candidates[(index + 1) % len(candidates)]

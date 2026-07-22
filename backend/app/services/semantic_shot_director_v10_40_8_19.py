@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-VERSION = "10.40.8.20-real-tts-semantic-generation-fix"
+VERSION = "10.40.8.21-semantic-master-timeline-quality-gate"
 REGISTRY_FILE = "existing_edit_asset_usage.json"
 _REGISTRY_LOCK = threading.RLock()
 
@@ -25,6 +25,24 @@ _ENTITY_TERMS = (
     "公园", "超市", "餐厅", "咖啡馆", "写字楼", "办公区", "机场", "高铁", "车站",
     "银行", "菜市场", "健身房", "泳池", "会所", "大学", "幼儿园", "小学", "中学",
 )
+
+# V21 hard semantic intents. Exact semantic meaning outranks freshness and uniqueness.
+_INTENT_ALIASES: dict[str, tuple[str, ...]] = {
+    "学校": ("学校", "校园", "教室", "学生", "小学", "中学", "大学", "school", "campus", "classroom"),
+    "超市": ("超市", "便利店", "杂货店", "生鲜", "supermarket", "grocery", "convenience store"),
+    "商场": ("商场", "购物中心", "商业中心", "mall", "shopping centre", "shopping center"),
+    "医院": ("医院", "诊所", "医疗", "hospital", "clinic", "medical"),
+    "通勤": ("通勤", "交通", "道路", "街道", "地铁", "轻轨", "公交", "驾车", "commute", "traffic", "road", "metro", "train"),
+    "餐厅": ("餐厅", "餐饮", "饭店", "restaurant", "dining", "food"),
+    "办公": ("办公", "写字楼", "办公室", "白领", "office", "workplace"),
+    "住宅": ("住宅", "公寓", "楼盘", "社区", "小区", "residential", "apartment", "condo"),
+}
+_NEUTRAL_VISUAL_TERMS = (
+    "城市", "街景", "道路", "住宅", "公寓", "社区", "人物", "咨询", "地图", "区域",
+    "city", "street", "road", "residential", "apartment", "people", "consulting", "map",
+)
+_UNRELATED_ENTITY_TERMS = tuple(sorted(set(_ENTITY_TERMS) | {"海岛", "海滩", "烧烤", "聚餐", "美食", "beach", "island", "barbecue"}))
+
 _THEME_TERMS = {
     "交通": ("交通", "地铁", "轻轨", "通勤", "线路", "车程", "出行", "机场", "高铁"),
     "配套": ("配套", "商场", "餐饮", "生活", "学校", "医院", "医疗", "超市", "公园"),
@@ -246,9 +264,53 @@ def _candidate_assets(settings: Any, payload: dict[str, Any]) -> tuple[list[dict
     return result, resolved_previous
 
 
+
+def _split_long_speech_units(units: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Split only long spoken clauses, never 3-8 character subtitle cards."""
+    output: list[dict[str, Any]] = []
+    for unit in units:
+        start = _safe_float(unit.get("start"), 0.0)
+        end = _safe_float(unit.get("end"), start)
+        text = _text(unit.get("text"))
+        span = end - start
+        if span <= 6.8 or len(text) <= 18:
+            output.append(dict(unit))
+            continue
+        raw_parts = [x.strip() for x in re.split(r"[，,；;]|(?=(?:但是|不过|所以|比如|投资呢|自住的话|想清楚了吗))", text) if x.strip()]
+        if len(raw_parts) < 2:
+            output.append(dict(unit))
+            continue
+        groups: list[str] = []
+        current = ""
+        total_chars = max(1, len(re.sub(r"\s+", "", text)))
+        for part in raw_parts:
+            projected = span * len(re.sub(r"\s+", "", current + part)) / total_chars
+            if current and projected > 6.4:
+                groups.append(current)
+                current = part
+            else:
+                current += part
+        if current:
+            groups.append(current)
+        if len(groups) < 2:
+            output.append(dict(unit))
+            continue
+        weights = [max(2, len(re.sub(r"\s+", "", x))) for x in groups]
+        cursor = start
+        for index, (part, weight) in enumerate(zip(groups, weights)):
+            part_end = end if index == len(groups) - 1 else cursor + span * weight / sum(weights)
+            output.append({"text": part, "start": round(cursor, 3), "end": round(part_end, 3)})
+            cursor = part_end
+    for index, item in enumerate(output):
+        item["index"] = index
+    return output
+
+
 def _speech_units(payload: dict[str, Any]) -> list[dict[str, Any]]:
     raw: Any = []
-    for key in ("tts_segments", "subtitle_segments", "segments", "script_segments", "voice_segments"):
+    # SEMANTIC_MASTER_TIMELINE_V21: shot planning consumes sentence-level speech units.
+    # Subtitle fragments are presentation-only and must never create visual cuts.
+    for key in ("semantic_speech_units", "tts_sentence_segments", "script_segments", "voice_segments", "tts_segments"):
         value = payload.get(key)
         if isinstance(value, list) and value:
             raw = value
@@ -288,8 +350,7 @@ def _speech_units(payload: dict[str, Any]) -> list[dict[str, Any]]:
             unit["start"] = round(cursor, 3)
             unit["end"] = round(end, 3)
             cursor = end
-    return units
-
+    return _split_long_speech_units(units)
 
 def _entities(text: str) -> list[str]:
     found: list[str] = []
@@ -476,26 +537,103 @@ def _score_asset(query: str, asset: dict[str, Any], registry: dict[str, Any], cu
     )
 
 
+
+
+def _requested_intents(query: str) -> list[str]:
+    lowered = _text(query).lower()
+    found: list[str] = []
+    for intent, aliases in _INTENT_ALIASES.items():
+        if any(alias.lower() in lowered for alias in aliases) and intent not in found:
+            found.append(intent)
+    return found
+
+
+def _asset_matches_intent(asset: dict[str, Any], intent: str) -> bool:
+    text = _asset_text(asset).lower()
+    aliases = _INTENT_ALIASES.get(intent) or (intent,)
+    return any(alias.lower() in text for alias in aliases)
+
+
+def _is_neutral_asset(asset: dict[str, Any]) -> bool:
+    text = _asset_text(asset).lower()
+    if any(term.lower() in text for term in _UNRELATED_ENTITY_TERMS):
+        return False
+    return any(term.lower() in text for term in _NEUTRAL_VISUAL_TERMS)
+
+
+def _enforce_beat_rhythm(units: list[dict[str, Any]], beats: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Keep ordinary explanations around 3.2-6.6s without using subtitle fragments."""
+    if not units or not beats:
+        return beats
+    output: list[dict[str, Any]] = []
+    max_hold = 6.6
+    for beat in beats:
+        indexes = sorted(int(x) for x in (beat.get("unit_indexes") or []))
+        if not indexes or beat.get("beat_type") == "entity_burst":
+            output.append(dict(beat))
+            continue
+        chunk: list[int] = []
+        chunk_start = units[indexes[0]]["start"]
+        for unit_index in indexes:
+            candidate_end = units[unit_index]["end"]
+            if chunk and candidate_end - chunk_start > max_hold:
+                item = dict(beat)
+                item["unit_indexes"] = chunk
+                item["reason"] = (str(item.get("reason") or "") + "；V21 长句语义分镜").strip("；")
+                output.append(item)
+                chunk = []
+                chunk_start = units[unit_index]["start"]
+            chunk.append(unit_index)
+        if chunk:
+            item = dict(beat)
+            item["unit_indexes"] = chunk
+            output.append(item)
+
+    # Merge accidental tiny ordinary holds into the previous compatible beat.
+    merged: list[dict[str, Any]] = []
+    for beat in output:
+        idx = beat.get("unit_indexes") or []
+        span = units[idx[-1]]["end"] - units[idx[0]]["start"] if idx else 0.0
+        if (
+            merged and span < 2.2 and beat.get("beat_type") == "hold"
+            and merged[-1].get("beat_type") == "hold"
+            and units[idx[-1]]["end"] - units[merged[-1]["unit_indexes"][0]]["start"] <= max_hold
+        ):
+            merged[-1]["unit_indexes"] = [*merged[-1]["unit_indexes"], *idx]
+        else:
+            merged.append(dict(beat))
+    return merged
+
 def _choose_asset(query: str, candidates: list[dict[str, Any]], registry: dict[str, Any], use_count: dict[str, int], previous_id: str) -> dict[str, Any]:
     valid = [asset for asset in candidates if _asset_url(asset)]
     if not valid:
         raise ValueError("R2 素材库没有可解析的视频 URL")
 
-    # In an entity burst, semantic correctness outranks the no-repeat rule.
-    # Reusing the actual school clip for “学校” is better than showing a fresh
-    # hospital clip merely to keep every asset unique.
-    requested_entities = [term for term in _ENTITY_TERMS if term in query]
+    intents = _requested_intents(query)
     exact = [
         asset for asset in valid
-        if requested_entities and any(term in _asset_text(asset) for term in requested_entities)
+        if intents and all(_asset_matches_intent(asset, intent) for intent in intents)
     ]
     if exact:
         pool = exact
+        match_status = "exact_entity"
+    elif intents:
+        # Never replace school/supermarket/commute with beach, food or landmarks.
+        neutral = [asset for asset in valid if _is_neutral_asset(asset)]
+        if not neutral:
+            raise ValueError(f"缺少语义匹配素材：{'/'.join(intents)}；已阻止随机错配")
+        pool = neutral
+        match_status = "neutral_fallback"
     else:
         unused = [asset for asset in valid if use_count.get(_asset_id(asset), 0) == 0]
         pool = unused or [asset for asset in valid if _asset_id(asset) != previous_id] or valid
-    return max(pool, key=lambda asset: _score_asset(query, asset, registry, use_count.get(_asset_id(asset), 0), previous_id))
+        match_status = "semantic_general"
 
+    chosen = max(pool, key=lambda asset: _score_asset(query, asset, registry, use_count.get(_asset_id(asset), 0), previous_id))
+    chosen = dict(chosen)
+    chosen["_semantic_match_status"] = match_status
+    chosen["_semantic_requested_intents"] = intents
+    return chosen
 
 def _expand_beats(units: list[dict[str, Any]], beats: list[dict[str, Any]]) -> list[dict[str, Any]]:
     expanded: list[dict[str, Any]] = []
@@ -544,6 +682,7 @@ def build_plan(settings: Any, payload: dict[str, Any], job_id: str) -> dict[str,
         beats = _fallback_beats(units)
         director_report = {"used_ai": False, "fallback": True, "fallback_reason": str(exc)[:500], "director_notes": ["DeepSeek 不可用，已使用语义规则兜底。"]}
 
+    beats = _enforce_beat_rhythm(units, beats)
     expanded = _expand_beats(units, beats)
     with _REGISTRY_LOCK:
         registry = _load_registry(settings)
@@ -572,6 +711,8 @@ def build_plan(settings: Any, payload: dict[str, Any], job_id: str) -> dict[str,
             "entity": item.get("entity") or "", "semantic_themes": sorted(_themes(item["text"])),
             "history_use_count": int(_safe_float(_history_entry(registry, aid).get("use_count"), 0)),
             "current_job_use_count": use_count[aid],
+                "semantic_match_status": chosen.get("_semantic_match_status") or "semantic_general",
+                "semantic_requested_intents": chosen.get("_semantic_requested_intents") or [],
         })
 
     ids = [_text(clip.get("asset_id")) for clip in clips]
@@ -620,6 +761,7 @@ def prepare_classic_payload(settings: Any, payload: dict[str, Any], job_id: str)
     next_payload["shot_director"] = "ai_auto"
     next_payload["asset_usage_job_id"] = job_id
     next_payload["semantic_director_version"] = VERSION
+    next_payload["enforce_semantic_master_timeline"] = True
     next_payload["ai_shot_beats"] = plan.get("beats") or []
     next_payload["target_duration_seconds"] = (
         plan["target_duration_seconds"]
