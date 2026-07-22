@@ -1175,14 +1175,20 @@ def _run_dynamic(settings: Any, proxy_job_id: str, payload: dict[str, Any]) -> N
             finished_at=_now(),
         )
     except Exception as exc:
+        error_type = type(exc).__name__
+        error_detail = " ".join(str(exc).split())[:240] or error_type
         _update_proxy(
             settings,
             proxy_job_id,
             status="failed",
             stage="failed",
-            progress=100,
-            error=str(exc)[:3000],
-            message=f"动态精剪 V2 失败：{exc}；A10-R4 原版未被修改",
+            progress=0,
+            error_type=error_type,
+            error=error_detail,
+            message=(
+                f"动态精剪 V2 失败：{error_type}: "
+                f"{error_detail}；A10-R4 原版仍可用"
+            ),
             fal_used=False,
             billing_guard="dynamic_v2_no_fal",
             finished_at=_now(),
@@ -2085,7 +2091,24 @@ def _caption_chunks(text: str, *, max_chars: int = 10) -> list[str]:
     output: list[str] = []
     for clause in clauses or [raw]:
         output.extend(_caption_dp_segment(clause, max_chars=max_chars))
-    assert "".join(output) == _clean_caption_text(raw), (raw, output)
+    # 字幕切分会主动移除句号、逗号等标点。
+    # 完整性检查只比较真正的文字、数字和百分号，不能把标点差异当成内容丢失。
+    expected_text = re.sub(
+        r"[^\\u4e00-\\u9fffA-Za-z0-9%]+",
+        "",
+        _clean_caption_text(raw),
+    )
+    actual_text = re.sub(
+        r"[^\\u4e00-\\u9fffA-Za-z0-9%]+",
+        "",
+        "".join(output),
+    )
+    if actual_text != expected_text:
+        raise ValueError(
+            "字幕切分内容不一致："
+            f"expected={expected_text[:120]!r}, "
+            f"actual={actual_text[:120]!r}"
+        )
     return output
 
 
