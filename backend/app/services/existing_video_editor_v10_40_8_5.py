@@ -61,12 +61,20 @@ def _load_jobs(settings: Any) -> dict[str, dict[str, Any]]:
         return {}
 
 
+# V10_40_8_13_1_SHARED_JOB_PERSISTENCE_HOTFIX: serialize all writers and use a unique atomic temp file.
 def _save_jobs(settings: Any, jobs: dict[str, dict[str, Any]]) -> None:
     path = _jobs_path(settings)
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps(jobs, ensure_ascii=False, indent=2), encoding="utf-8")
-    tmp.replace(path)
+    with _LOCK:
+        tmp = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+        try:
+            tmp.write_text(
+                json.dumps(jobs, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+            tmp.replace(path)
+        finally:
+            tmp.unlink(missing_ok=True)
 
 
 def _update_job(settings: Any, job_id: str, **patch: Any) -> dict[str, Any]:

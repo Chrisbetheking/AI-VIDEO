@@ -19,7 +19,7 @@ from typing import Any, Callable
 
 from fastapi import Depends, HTTPException, Request
 
-VERSION = "10.40.8.13-dynamic-talking-head-v2"
+VERSION = "10.40.8.13.1-dynamic-job-persistence-hotfix"
 INSTALL_MARKER = "V10_40_8_13_DYNAMIC_EDIT_V2"
 _INSTALLED = False
 _LOCK = threading.RLock()
@@ -177,7 +177,7 @@ def _update_proxy(settings: Any, job_id: str, **updates: Any) -> dict[str, Any]:
     # every job version to A10-R4. Dynamic proxy jobs share the persistence file
     # for frontend compatibility, but must retain their own version and mode.
     classic = _classic()
-    with _LOCK:
+    with classic._LOCK:
         jobs = classic._load_jobs(settings)
         item = dict(jobs.get(job_id) or {"job_id": job_id})
         item.update(updates)
@@ -191,14 +191,16 @@ def _update_proxy(settings: Any, job_id: str, **updates: Any) -> dict[str, Any]:
 
 def _save_proxy(settings: Any, job: dict[str, Any]) -> None:
     classic = _classic()
-    with _LOCK:
+    with classic._LOCK:
         jobs = classic._load_jobs(settings)
         jobs[str(job["job_id"])] = job
         classic._save_jobs(settings, jobs)
 
 
 def _read_proxy(settings: Any, job_id: str) -> dict[str, Any] | None:
-    return _classic()._load_jobs(settings).get(job_id)
+    classic = _classic()
+    with classic._LOCK:
+        return classic._load_jobs(settings).get(job_id)
 
 
 def _safe_float(value: Any, default: float = 0.0) -> float:
