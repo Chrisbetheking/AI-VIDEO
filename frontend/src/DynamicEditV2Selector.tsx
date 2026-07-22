@@ -17,7 +17,7 @@ type StoredConfig = {
   subtitleStyle: DynamicSubtitleStyle
 }
 
-const STORAGE_KEY = 'ai_video_dynamic_edit_v2_config_v10_40_8_13'
+const STORAGE_KEY = 'ai_video_dynamic_edit_v2_config_v10_40_8_14'
 
 const DEFAULT_CONFIG: StoredConfig = {
   engine: 'classic_a10_r4',
@@ -31,12 +31,19 @@ const SUBTITLE_PRESETS: Array<{
   description: string
   previewClass: string
 }> = [
-  { id: 'dynamic_white_yellow', label: '白字黄词精剪款', description: '参考口播精剪，白色大字 + 黄色重点词。', previewClass: 'white-yellow' },
-  { id: 'dynamic_black_box', label: '黑底信息条', description: '半透明黑底，适合避坑、区域拆解和逻辑内容。', previewClass: 'black-box' },
-  { id: 'dynamic_gold_property', label: '金色地产讲解', description: '金色重点 + 深色底，适合预算、资产和项目讲解。', previewClass: 'gold-property' },
-  { id: 'dynamic_minimal_pro', label: '极简专业白字', description: '柔和描边，适合人物和高级感楼盘。', previewClass: 'minimal-pro' },
-  { id: 'dynamic_red_hook', label: '红黄钩子重击', description: '疑问、风险和转折使用红黄重点。', previewClass: 'red-hook' },
-  { id: 'dynamic_dual_line', label: '专业解释双行款', description: '较长专业句自然分两行，重点词单独高亮。', previewClass: 'dual-line' },
+  { id: 'dynamic_white_yellow', label: '白黄短句跳词', description: '3-8 字短句，白字黑描边，重点词亮黄。', previewClass: 'white-yellow' },
+  { id: 'dynamic_black_box', label: '橙白视觉冲击', description: '取消黑底条，改为橙白短词和中心重击。', previewClass: 'orange-impact' },
+  { id: 'dynamic_gold_property', label: '金白地产短句', description: '金色关键词配白字，适合区域、预算和资产内容。', previewClass: 'gold-property' },
+  { id: 'dynamic_minimal_pro', label: '极简白字口播', description: '无底色短白字，轻描边，画面更干净。', previewClass: 'minimal-pro' },
+  { id: 'dynamic_red_hook', label: '红黄疑问重击', description: '疑问、风险和数字使用红黄短词放大。', previewClass: 'red-hook' },
+  { id: 'dynamic_dual_line', label: '清单节奏短句', description: '清单词逐条出现，不再显示长双行字幕。', previewClass: 'list-rhythm' },
+]
+
+const PREVIEW_BEATS = [
+  { caption: '先看区域', focus: '区域', accent: '用途' },
+  { caption: '别只看价格', focus: '价格', accent: '半径' },
+  { caption: '真正需要的', focus: '需要', accent: '生活' },
+  { caption: '生活半径', focus: '半径', accent: '配套' },
 ]
 
 function loadConfig(): StoredConfig {
@@ -85,7 +92,7 @@ export default function DynamicEditV2Selector() {
   }, [config])
 
   useEffect(() => {
-    const timer = window.setInterval(() => setPreviewPulse((value) => value + 1), 2600)
+    const timer = window.setInterval(() => setPreviewPulse((value) => value + 1), 1450)
     return () => window.clearInterval(timer)
   }, [])
 
@@ -93,14 +100,15 @@ export default function DynamicEditV2Selector() {
     () => SUBTITLE_PRESETS.find((item) => item.id === config.subtitleStyle) || SUBTITLE_PRESETS[0],
     [config.subtitleStyle],
   )
+  const beat = PREVIEW_BEATS[previewPulse % PREVIEW_BEATS.length]
 
   return (
     <section className="dynamic-edit-v2-shell" data-dynamic-edit-v2="true">
       <div className="dynamic-edit-v2-header">
         <div>
-          <span className="dynamic-edit-v2-eyebrow">V10.40.8.13 · DYNAMIC TALKING-HEAD EDIT V2</span>
+          <span className="dynamic-edit-v2-eyebrow">V10.40.8.14 · REFERENCE KINETIC CAPTIONS</span>
           <h4>剪辑引擎</h4>
-          <p>原 A10-R4 完整保留；新版单独生成，可随时切回稳定版。</p>
+          <p>原 A10-R4 不动；新版按参考视频重做短句字幕、更多镜头和跳词节奏。</p>
         </div>
         <span className="dynamic-edit-v2-beta">双版本并存</span>
       </div>
@@ -122,9 +130,9 @@ export default function DynamicEditV2Selector() {
           className={`dynamic-edit-v2-engine dynamic ${config.engine === 'dynamic_v2' ? 'selected' : ''}`}
           onClick={() => setConfig((current) => ({ ...current, engine: 'dynamic_v2' }))}
         >
-          <span className="dynamic-edit-v2-engine-tag">Beta 新版</span>
-          <strong>动态精剪 V2</strong>
-          <small>钩子重击、轻推近、信息卡、数字强化、动态字幕和轻音效。</small>
+          <span className="dynamic-edit-v2-engine-tag">参考视频重做版</span>
+          <strong>动态短句精剪</strong>
+          <small>3-8 字字幕、更多镜头、无文本框、重点词弹入和轻推近。</small>
           <span className="dynamic-edit-v2-check">{config.engine === 'dynamic_v2' ? '✓ 当前选择' : '选择新版'}</span>
         </button>
       </div>
@@ -132,15 +140,15 @@ export default function DynamicEditV2Selector() {
       {config.engine === 'dynamic_v2' && (
         <div className="dynamic-edit-v2-settings">
           <div className="dynamic-edit-v2-preview" key={previewPulse}>
-            <div className="dynamic-edit-v2-preview-person" />
-            <div className="dynamic-edit-v2-preview-card">
-              <span>区域选择</span>
-              <b>先看用途</b>
-            </div>
+            <div className="dynamic-edit-v2-preview-scene" />
+            <span className="dynamic-edit-v2-preview-word word-main">{beat.focus}</span>
+            <span className="dynamic-edit-v2-preview-word word-side">{beat.accent}</span>
             <div className={`dynamic-edit-v2-preview-subtitle ${selectedSubtitle.previewClass}`}>
-              吉隆坡买房 <em>先看区域和用途</em>
+              {beat.caption}
             </div>
-            <i className="dynamic-edit-v2-preview-focus">重点</i>
+            <div className="dynamic-edit-v2-preview-beats" aria-hidden="true">
+              <i /><i /><i /><i />
+            </div>
           </div>
 
           <div className="dynamic-edit-v2-controls">
@@ -150,21 +158,21 @@ export default function DynamicEditV2Selector() {
                 value={config.intensity}
                 onChange={(event) => setConfig((current) => ({ ...current, intensity: event.target.value as DynamicEditIntensity }))}
               >
-                <option value="restrained">克制 · 约 5 个主要效果 / 30 秒</option>
-                <option value="balanced">标准 · 约 8 个主要效果 / 30 秒</option>
-                <option value="strong">强节奏 · 约 11 个主要效果 / 30 秒</option>
+                <option value="restrained">克制 · 短句字幕 + 约 7 个主要效果 / 30 秒</option>
+                <option value="balanced">参考节奏 · 更多镜头 + 约 11 个主要效果 / 30 秒</option>
+                <option value="strong">强节奏 · 密集短句 + 约 15 个主要效果 / 30 秒</option>
               </select>
             </label>
             <div className="dynamic-edit-v2-rule-note">
-              <b>安全规则</b>
-              <span>不会每句都加动画；连续大效果自动间隔；新版失败不会覆盖原版。</span>
+              <b>新版硬规则</b>
+              <span>不显示大块文本框；字幕单屏 3-8 字；动态版使用更密的素材切片，稳定版不受影响。</span>
             </div>
           </div>
 
           <div className="dynamic-edit-v2-subtitle-heading">
             <div>
-              <strong>动态字幕模板</strong>
-              <span>已参考你提供视频里的白字黄词、红黄钩子、黑底信息条和专业双行字幕。</span>
+              <strong>短句动态字幕</strong>
+              <span>参考视频的核心是短句、跳词、颜色重音和位置变化，不是给整句套黑框。</span>
             </div>
             <span>生成时自动烧录</span>
           </div>
@@ -179,7 +187,7 @@ export default function DynamicEditV2Selector() {
               >
                 <strong>{preset.label}</strong>
                 <span className={`dynamic-edit-v2-subtitle-sample ${preset.previewClass}`}>
-                  吉隆坡买房<br /><em>先看区域和用途</em>
+                  先看<em>区域</em>
                 </span>
                 <small>{preset.description}</small>
               </button>
@@ -188,7 +196,7 @@ export default function DynamicEditV2Selector() {
 
           <div className="dynamic-edit-v2-ab-note">
             <b>输出策略</b>
-            <span>选择新版后，后端先生成 A10-R4 稳定底片，再生成动态精剪版；两条视频地址同时保留，方便 A/B 对比和回退。</span>
+            <span>选择新版后，仍先保留 A10-R4 稳定底片，再生成动态短句版；两条地址同时保留，方便对比和回退。</span>
           </div>
         </div>
       )}

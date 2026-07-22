@@ -19,121 +19,136 @@ from typing import Any, Callable
 
 from fastapi import Depends, HTTPException, Request
 
-VERSION = "10.40.8.13.1-dynamic-job-persistence-hotfix"
-INSTALL_MARKER = "V10_40_8_13_DYNAMIC_EDIT_V2"
+VERSION = "10.40.8.14-reference-kinetic-captions"
+INSTALL_MARKER = "V10_40_8_14_REFERENCE_KINETIC_CAPTIONS"
 _INSTALLED = False
 _LOCK = threading.RLock()
 
 EDIT_PRESETS: dict[str, dict[str, Any]] = {
     "restrained": {
-        "label": "克制精剪",
-        "description": "轻推近、重点词和少量信息卡，适合专业楼盘讲解。",
-        "max_major_effects_per_30s": 5,
-        "min_effect_gap_seconds": 3.6,
-        "zoom_strength": 0.035,
-        "sfx_volume": 0.035,
+        "label": "克制短句精剪",
+        "description": "字幕拆成短句，轻推近与少量重点词，不使用文本框。",
+        "max_major_effects_per_30s": 7,
+        "min_effect_gap_seconds": 2.7,
+        "zoom_strength": 0.032,
+        "micro_zoom_strength": 0.010,
+        "sfx_volume": 0.028,
     },
     "balanced": {
-        "label": "标准精剪",
-        "description": "参考口播精剪节奏，字幕、信息卡、数字和局部聚焦均衡。",
-        "max_major_effects_per_30s": 8,
-        "min_effect_gap_seconds": 2.5,
-        "zoom_strength": 0.055,
-        "sfx_volume": 0.05,
+        "label": "参考节奏精剪",
+        "description": "3-8 字短字幕、更多镜头、跳词和构图变化，贴近参考视频节奏。",
+        "max_major_effects_per_30s": 11,
+        "min_effect_gap_seconds": 1.75,
+        "zoom_strength": 0.052,
+        "micro_zoom_strength": 0.016,
+        "sfx_volume": 0.040,
     },
     "strong": {
-        "label": "强节奏精剪",
-        "description": "更密集的钩子、数据卡和重点词，但仍限制连续特效。",
-        "max_major_effects_per_30s": 11,
-        "min_effect_gap_seconds": 1.9,
-        "zoom_strength": 0.075,
-        "sfx_volume": 0.065,
+        "label": "强节奏短句精剪",
+        "description": "更密的短句字幕、重点词与镜头变化，但不添加大块文本框。",
+        "max_major_effects_per_30s": 15,
+        "min_effect_gap_seconds": 1.15,
+        "zoom_strength": 0.068,
+        "micro_zoom_strength": 0.022,
+        "sfx_volume": 0.052,
     },
 }
 
 SUBTITLE_PRESETS: dict[str, dict[str, Any]] = {
     "dynamic_white_yellow": {
-        "label": "白字黄词精剪款",
-        "description": "参考口播精剪：白色大字、黑描边，重点词使用黄色。",
-        "font_size": 78,
+        "label": "白黄短句跳词",
+        "description": "白字黑描边，重点词亮黄；每屏 3-8 字，无底框。",
+        "font_size": 82,
+        "impact_size": 104,
         "primary": "&H00FFFFFF",
         "highlight": "&H0000E8FF",
-        "outline": "&H00151515",
-        "back": "&H78000000",
+        "accent": "&H0000A5FF",
+        "outline": "&H00111111",
+        "back": "&H00000000",
         "border_style": 1,
         "outline_width": 6,
         "shadow": 2,
-        "margin_v": 255,
+        "margin_v": 250,
         "alignment": 2,
     },
     "dynamic_black_box": {
-        "label": "黑底信息条",
-        "description": "半透明黑底白字，适合信息密集、避坑和逻辑讲解。",
-        "font_size": 70,
+        "label": "橙白视觉冲击",
+        "description": "取消黑底条，改为橙白短句与中心重击词。",
+        "font_size": 80,
+        "impact_size": 106,
         "primary": "&H00FFFFFF",
-        "highlight": "&H0000D7FF",
-        "outline": "&H00101010",
-        "back": "&H8A15111A",
-        "border_style": 3,
-        "outline_width": 2,
-        "shadow": 0,
+        "highlight": "&H000096FF",
+        "accent": "&H00004BFF",
+        "outline": "&H00111111",
+        "back": "&H00000000",
+        "border_style": 1,
+        "outline_width": 6,
+        "shadow": 2,
         "margin_v": 250,
         "alignment": 2,
     },
     "dynamic_gold_property": {
-        "label": "金色地产讲解",
-        "description": "金色重点、深色底，适合预算、区域和资产逻辑。",
-        "font_size": 74,
+        "label": "金白地产短句",
+        "description": "金色关键词配白字，适合预算、区域与资产内容，无底框。",
+        "font_size": 80,
+        "impact_size": 104,
         "primary": "&H00FFFFFF",
         "highlight": "&H004BC8FF",
-        "outline": "&H00140F18",
-        "back": "&H760B0910",
+        "accent": "&H0000D7FF",
+        "outline": "&H00130F17",
+        "back": "&H00000000",
         "border_style": 1,
         "outline_width": 7,
         "shadow": 2,
-        "margin_v": 255,
+        "margin_v": 252,
         "alignment": 2,
     },
     "dynamic_minimal_pro": {
-        "label": "极简专业白字",
-        "description": "无底色白字、柔和描边，适合人物口播和高级感楼盘。",
-        "font_size": 70,
+        "label": "极简白字口播",
+        "description": "短白字、轻描边，不加底色，适合干净专业画面。",
+        "font_size": 76,
+        "impact_size": 96,
         "primary": "&H00FFFFFF",
-        "highlight": "&H00EAC6A8",
-        "outline": "&H00423D4B",
+        "highlight": "&H00E8D6C8",
+        "accent": "&H00FFFFFF",
+        "outline": "&H003A3541",
         "back": "&H00000000",
         "border_style": 1,
         "outline_width": 4,
         "shadow": 2,
-        "margin_v": 245,
+        "margin_v": 248,
         "alignment": 2,
     },
     "dynamic_red_hook": {
-        "label": "红黄钩子重击",
-        "description": "疑问、风险和转折使用红黄重点，适合开场和避坑。",
-        "font_size": 80,
+        "label": "红黄疑问重击",
+        "description": "疑问、风险和数字用红黄短词放大，不使用横向文本框。",
+        "font_size": 82,
+        "impact_size": 112,
         "primary": "&H00FFFFFF",
         "highlight": "&H00004BFF",
+        "accent": "&H0000E8FF",
         "outline": "&H00101010",
-        "back": "&H6A000000",
+        "back": "&H00000000",
         "border_style": 1,
         "outline_width": 7,
         "shadow": 3,
-        "margin_v": 260,
+        "margin_v": 255,
         "alignment": 2,
     },
     "dynamic_dual_line": {
-        "label": "专业解释双行款",
-        "description": "允许自然双行，重点词独立高亮，适合较长专业句。",
-        "font_size": 66,
+        "label": "清单节奏短句",
+        "description": "仍以单行短句为主，清单词逐条出现，不再显示长双行。",
+        "font_size": 78,
+        "impact_size": 100,
         "primary": "&H00FFFFFF",
         "highlight": "&H0000D7FF",
+        "accent": "&H000096FF",
         "outline": "&H00151418",
-        "back": "&H52000000",
+        "back": "&H00000000",
         "border_style": 1,
         "outline_width": 5,
         "shadow": 2,
-        "margin_v": 235,
+        "margin_v": 245,
         "alignment": 2,
     },
 }
@@ -260,6 +275,85 @@ def _text_of_segment(item: dict[str, Any]) -> str:
     ).strip()
 
 
+def _clean_caption_text(text: str) -> str:
+    clean = re.sub(r"\s+", "", str(text or "")).strip()
+    clean = re.sub(r"^[，,。；;、：:]+|[，,。；;、：:]+$", "", clean)
+    return clean
+
+
+def _caption_chunks(text: str, *, max_chars: int = 8) -> list[str]:
+    clean = _clean_caption_text(text)
+    if not clean:
+        return []
+
+    semantic = re.sub(
+        r"(但是|不过|所以|如果|比如|然后|因为|其实|真正|而是|先看|再看|最后|第一|第二|第三|第四)",
+        r"|\1",
+        clean,
+    )
+    coarse = [
+        item.strip("|，,。！？!?；;、：:")
+        for item in re.split(r"[|，,。！？!?；;、：:]+", semantic)
+        if item.strip("|，,。！？!?；;、：:")
+    ]
+    protected_suffixes = (
+        "生活半径", "现金流", "回报率", "交通规划", "生活配套", "租客来源",
+        "交付周期", "区域用途", "区域选择", "投资逻辑", "真实价格", "项目风险",
+        "楼盘位置", "户型设计", "预算区间", "未来规划",
+    )
+    output: list[str] = []
+    for item in coarse or [clean]:
+        remaining = item
+        while len(remaining) > max_chars:
+            cut = min(6, max_chars)
+            protected_cut = False
+            for suffix in protected_suffixes:
+                if remaining.endswith(suffix) and 3 <= len(remaining) - len(suffix) <= max_chars:
+                    cut = len(remaining) - len(suffix)
+                    protected_cut = True
+                    break
+            if len(remaining) - cut == 1:
+                cut -= 1
+            # Do not strand pronouns or particles at the end of a caption.
+            if not protected_cut and cut > 3 and remaining[cut - 1] in "你我他她这那的和与":
+                cut -= 1
+            output.append(remaining[:cut])
+            remaining = remaining[cut:]
+        if remaining:
+            if len(remaining) == 1 and output and len(output[-1]) < max_chars:
+                output[-1] += remaining
+            else:
+                output.append(remaining)
+    compact = [item for item in output if item]
+    for index in range(len(compact) - 1):
+        if len(compact[index]) >= 3 and compact[index][-1] in "你我他她":
+            compact[index + 1] = compact[index][-1] + compact[index + 1]
+            compact[index] = compact[index][:-1]
+    return [item for item in compact if item]
+
+
+def _spread_chunks(chunks: list[str], start: float, end: float) -> list[dict[str, Any]]:
+    if not chunks:
+        return []
+    span = max(0.36, end - start)
+    weights = [max(2, len(_clean_caption_text(item))) for item in chunks]
+    total = max(1, sum(weights))
+    cursor = start
+    result: list[dict[str, Any]] = []
+    for index, (chunk, weight) in enumerate(zip(chunks, weights)):
+        if index == len(chunks) - 1:
+            chunk_end = end
+        else:
+            chunk_end = min(end, cursor + span * weight / total)
+        if chunk_end <= cursor:
+            chunk_end = min(end, cursor + 0.36)
+        result.append({"text": chunk, "start": round(cursor, 3), "end": round(chunk_end, 3)})
+        cursor = chunk_end
+    if result:
+        result[-1]["end"] = round(max(result[-1]["start"] + 0.28, end), 3)
+    return result
+
+
 def _normalize_timings(payload: dict[str, Any], base_job: dict[str, Any], duration: float) -> list[dict[str, Any]]:
     raw = base_job.get("timings") or base_job.get("subtitle_segments") or payload.get("segments") or payload.get("script_segments") or []
     items: list[dict[str, Any]] = []
@@ -272,25 +366,25 @@ def _normalize_timings(payload: dict[str, Any], base_job: dict[str, Any], durati
         start = _safe_float(raw_item.get("start") or raw_item.get("start_time"), -1.0)
         end = _safe_float(raw_item.get("end") or raw_item.get("end_time"), -1.0)
         items.append({"text": text, "start": start, "end": end})
+
     if items and all(item["start"] >= 0 and item["end"] > item["start"] for item in items):
-        return items
+        fragmented: list[dict[str, Any]] = []
+        for item in items:
+            fragmented.extend(_spread_chunks(_caption_chunks(item["text"]), item["start"], item["end"]))
+        return fragmented
 
     script = str(payload.get("script_text") or payload.get("script") or "").strip()
     if not script and items:
         script = "。".join(item["text"] for item in items)
-    pieces = [x.strip() for x in re.split(r"(?<=[。！？!?；;])", script) if x.strip()]
-    if not pieces:
-        pieces = [script or "动态精剪"]
-    weights = [max(1, len(re.sub(r"\s+", "", text))) for text in pieces]
-    total = sum(weights)
+    chunks = _caption_chunks(script or "动态精剪")
+    weights = [max(2, len(_clean_caption_text(item))) for item in chunks]
+    total = max(1, sum(weights))
     cursor = 0.0
     normalized: list[dict[str, Any]] = []
-    for text, weight in zip(pieces, weights):
-        span = duration * weight / max(1, total)
-        normalized.append({"text": text, "start": cursor, "end": min(duration, cursor + span)})
-        cursor += span
-    if normalized:
-        normalized[-1]["end"] = duration
+    for index, (chunk, weight) in enumerate(zip(chunks, weights)):
+        end = duration if index == len(chunks) - 1 else min(duration, cursor + duration * weight / total)
+        normalized.append({"text": chunk, "start": round(cursor, 3), "end": round(end, 3)})
+        cursor = end
     return normalized
 
 
@@ -397,10 +491,14 @@ def build_dynamic_plan(
         "duration": round(duration, 3),
         "keywords": keywords,
         "events": selected,
+        "caption_beats": [round(_safe_float(item.get("start"), 0.0), 3) for item in timings],
+        "caption_count": len(timings),
+        "visual_pace": "dynamic_dense",
         "limits": {
             "max_major_effects": max_effects,
             "min_effect_gap_seconds": min_gap,
             "zoom_strength": preset["zoom_strength"],
+            "micro_zoom_strength": preset.get("micro_zoom_strength", 0.016),
         },
     }
 
@@ -418,14 +516,8 @@ def _ass_escape(text: str) -> str:
 
 
 def _wrap_text(text: str, limit: int) -> str:
-    clean = re.sub(r"\s+", "", text.strip())
-    if len(clean) <= limit:
-        return clean
-    split = min(len(clean) - 1, max(4, limit))
-    punctuation = [idx for idx in range(max(3, split - 3), min(len(clean), split + 4)) if clean[idx] in "，、；："]
-    if punctuation:
-        split = punctuation[0] + 1
-    return clean[:split] + r"\N" + clean[split:]
+    clean = _clean_caption_text(text)
+    return clean[: max(3, min(8, int(limit or 8)))]
 
 
 def _highlight_ass(text: str, keywords: list[str], highlight: str) -> str:
@@ -465,11 +557,12 @@ ScriptType: v4.00+
 PlayResX: 1080
 PlayResY: 1920
 ScaledBorderAndShadow: yes
-WrapStyle: 0
+WrapStyle: 2
 
 [V4+ Styles]
 Format: Name,Fontname,Fontsize,PrimaryColour,SecondaryColour,OutlineColour,BackColour,Bold,Italic,Underline,StrikeOut,ScaleX,ScaleY,Spacing,Angle,BorderStyle,Outline,Shadow,Alignment,MarginL,MarginR,MarginV,Encoding
-Style: Dynamic,{font_name},{preset['font_size']},{preset['primary']},{preset['highlight']},{preset['outline']},{preset['back']},-1,0,0,0,100,100,1.2,0,{preset['border_style']},{preset['outline_width']},{preset['shadow']},{preset['alignment']},72,72,{preset['margin_v']},1
+Style: Dynamic,{font_name},{preset['font_size']},{preset['primary']},{preset['highlight']},{preset['outline']},{preset['back']},-1,0,0,0,100,100,1.0,0,{preset['border_style']},{preset['outline_width']},{preset['shadow']},2,55,55,{preset['margin_v']},1
+Style: Impact,{font_name},{preset['impact_size']},{preset['primary']},{preset['highlight']},{preset['outline']},{preset['back']},-1,0,0,0,100,100,1.2,0,{preset['border_style']},{preset['outline_width'] + 1},{preset['shadow']},5,45,45,0,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -477,13 +570,29 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     lines = [header]
     for index, item in enumerate(timings):
         start = _safe_float(item.get("start"), 0.0)
-        end = max(start + 0.35, _safe_float(item.get("end"), start + 1.2))
-        text = _wrap_text(str(item.get("text") or ""), 11 if style_id != "dynamic_dual_line" else 14)
-        text = _highlight_ass(text, keywords, str(preset["highlight"]))
-        role = _classify(str(item.get("text") or ""))
-        animation = r"{\fad(70,90)\fscx116\fscy116\t(0,180,\fscx100\fscy100)}" if role in {"hook", "data", "risk", "turn"} else r"{\fad(90,90)}"
+        end = max(start + 0.28, _safe_float(item.get("end"), start + 0.8))
+        raw_text = _wrap_text(str(item.get("text") or ""), 8)
+        text = _highlight_ass(raw_text, keywords, str(preset["highlight"]))
+        role = _classify(raw_text)
+        impact = role in {"hook", "data", "risk", "question", "turn"} and len(raw_text) <= 7
+        if impact:
+            role_color = {
+                "data": preset.get("highlight"),
+                "risk": "&H00004BFF",
+                "question": preset.get("accent"),
+                "turn": preset.get("accent"),
+                "hook": preset.get("highlight"),
+            }.get(role, preset.get("highlight"))
+            text = rf"{{\c{role_color}}}{text}"
+            y = 880 + (index % 3) * 105
+            animation = rf"{{\an5\pos(540,{y})\fad(45,70)\fscx132\fscy132\t(0,150,\fscx100\fscy100)}}"
+            style = "Impact"
+        else:
+            y = 1435 + (index % 2) * 72
+            animation = rf"{{\an5\pos(540,{y})\fad(55,70)\fscx112\fscy112\t(0,130,\fscx100\fscy100)}}"
+            style = "Dynamic"
         lines.append(
-            f"Dialogue: 0,{_ass_time(start)},{_ass_time(end)},Dynamic,,0,0,0,,{animation}{text}\n"
+            f"Dialogue: 0,{_ass_time(start)},{_ass_time(end)},{style},,0,0,0,,{animation}{text}\n"
         )
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_text("".join(lines), encoding="utf-8-sig")
@@ -500,7 +609,7 @@ def _event_text_files(work: Path, plan: dict[str, Any]) -> list[tuple[dict[str, 
     text_dir.mkdir(parents=True, exist_ok=True)
     for event in plan.get("events") or []:
         path = text_dir / f"{event['id']}.txt"
-        path.write_text(str(event.get("focus_text") or "重点")[:18], encoding="utf-8")
+        path.write_text(_clean_caption_text(str(event.get("focus_text") or "重点"))[:8], encoding="utf-8")
         result.append((event, path))
     return result
 
@@ -514,15 +623,29 @@ def _build_video_filters(
     height: int = 1920,
 ) -> str:
     events = plan.get("events") or []
-    zoom_strength = _safe_float((plan.get("limits") or {}).get("zoom_strength"), 0.055)
+    limits = plan.get("limits") or {}
+    zoom_strength = _safe_float(limits.get("zoom_strength"), 0.052)
+    micro_strength = _safe_float(limits.get("micro_zoom_strength"), 0.016)
     zoom_terms: list[str] = []
+
+    # Small reframing beats follow the short subtitle rhythm. They create the
+    # reference-video feeling without covering the picture with UI cards.
+    beats = [float(value) for value in (plan.get("caption_beats") or [])[:40]]
+    for index, start in enumerate(beats):
+        if index % 2:
+            continue
+        span = 0.68 if index % 4 else 0.92
+        zoom_terms.append(
+            f"+{micro_strength:.4f}*between(t,{start:.3f},{start + span:.3f})*sin(PI*(t-{start:.3f})/{span:.3f})"
+        )
     for event in events:
-        if event.get("effect") in {"hook_punch", "question_pulse", "turn_focus", "risk_alert", "keyword_focus"}:
+        if event.get("effect") in {"hook_punch", "question_pulse", "turn_focus", "risk_alert", "keyword_focus", "data_card"}:
             start = _safe_float(event.get("start"), 0.0)
-            end = max(start + 0.3, _safe_float(event.get("end"), start + 1.0))
+            end = max(start + 0.3, _safe_float(event.get("end"), start + 0.9))
             span = max(0.2, end - start)
-            strength = zoom_strength * (1.18 if event.get("effect") == "hook_punch" else 0.82)
+            strength = zoom_strength * (1.15 if event.get("effect") in {"hook_punch", "data_card"} else 0.78)
             zoom_terms.append(f"+{strength:.4f}*between(t,{start:.3f},{end:.3f})*sin(PI*(t-{start:.3f})/{span:.3f})")
+
     factor = "1" + "".join(zoom_terms)
     chain = [
         f"[0:v]scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height},setsar=1[base]",
@@ -532,40 +655,33 @@ def _build_video_filters(
     fontfile = _font_name()
     font_opt = f":fontfile='{_ffmpeg_escape_path(Path(fontfile))}'" if fontfile else ""
     palette = {
-        "hook_punch": ("#FFCC2F", "#17111D", 112, 270),
-        "question_pulse": ("#FFFFFF", "#3D2B56", 104, 290),
-        "turn_focus": ("#FF9F43", "#17111D", 100, 290),
-        "data_card": ("#FFE46B", "#31253C", 106, 335),
-        "risk_alert": ("#FF5353", "#211018", 104, 305),
-        "comparison_card": ("#FFFFFF", "#273149", 92, 330),
-        "list_card": ("#FFE46B", "#26212C", 92, 330),
-        "evidence_pip": ("#FFFFFF", "#22252C", 88, 330),
-        "cta_tag": ("#FFFFFF", "#6E42E5", 92, 320),
-        "keyword_focus": ("#FFE46B", "#251E2D", 94, 305),
+        "hook_punch": ("#FFE22E", 126, 520),
+        "question_pulse": ("#FF4F66", 118, 650),
+        "turn_focus": ("#FF9D36", 112, 500),
+        "data_card": ("#FFE22E", 132, 610),
+        "risk_alert": ("#FF4F4F", 120, 560),
+        "comparison_card": ("#FFFFFF", 102, 440),
+        "list_card": ("#FFE46B", 106, 450),
+        "evidence_pip": ("#FFFFFF", 98, 430),
+        "cta_tag": ("#FFFFFF", 104, 520),
+        "keyword_focus": ("#FFE22E", 104, 470),
     }
     for index, (event, text_path) in enumerate(_event_text_files(work, plan), start=1):
         effect = str(event.get("effect") or "keyword_focus")
-        color, box_color, font_size, y = palette.get(effect, palette["keyword_focus"])
+        color, font_size, y = palette.get(effect, palette["keyword_focus"])
         start = _safe_float(event.get("start"), 0.0)
-        end = max(start + 0.3, _safe_float(event.get("end"), start + 1.0))
+        end = max(start + 0.28, _safe_float(event.get("end"), start + 0.9))
         next_label = f"v{index}"
-        if effect in {"data_card", "list_card", "comparison_card", "evidence_pip"}:
-            x = 72 if index % 2 else 578
-            w = 430
-            h = 230
-            box_y = 235
-            filter_part = (
-                f"[{current}]drawbox=x={x}:y={box_y}:w={w}:h={h}:color={box_color}@0.82:t=fill:enable='between(t,{start:.3f},{end:.3f})',"
-                f"drawbox=x={x}:y={box_y}:w=8:h={h}:color={color}@1:t=fill:enable='between(t,{start:.3f},{end:.3f})',"
-                f"drawtext=textfile='{_ffmpeg_escape_path(text_path)}'{font_opt}:expansion=none:fontsize={font_size}:fontcolor={color}:borderw=4:bordercolor=black@0.75:"
-                f"x={x + 34}:y={box_y + 60}:enable='between(t,{start:.3f},{end:.3f})'[{next_label}]"
-            )
-        else:
-            filter_part = (
-                f"[{current}]drawbox=x=70:y={y - 42}:w=940:h={font_size + 84}:color={box_color}@0.72:t=fill:enable='between(t,{start:.3f},{end:.3f})',"
-                f"drawtext=textfile='{_ffmpeg_escape_path(text_path)}'{font_opt}:expansion=none:fontsize={font_size}:fontcolor={color}:borderw=5:bordercolor=black@0.82:"
-                f"x=(w-text_w)/2:y={y}:enable='between(t,{start:.3f},{end:.3f})'[{next_label}]"
-            )
+        x_expr = "(w-text_w)/2" if index % 3 else r"max(38\,(w-text_w)/2-170)"
+        alpha = (
+            f"if(lt(t,{start + 0.10:.3f}),(t-{start:.3f})/0.10,"
+            f"if(gt(t,{end - 0.10:.3f}),({end:.3f}-t)/0.10,1))"
+        )
+        filter_part = (
+            f"[{current}]drawtext=textfile='{_ffmpeg_escape_path(text_path)}'{font_opt}:expansion=none:"
+            f"fontsize={font_size}:fontcolor={color}:borderw=6:bordercolor=black@0.86:shadowx=2:shadowy=3:"
+            f"x={x_expr}:y={y}:alpha='{alpha}':enable='between(t,{start:.3f},{end:.3f})'[{next_label}]"
+        )
         chain.append(filter_part)
         current = next_label
     ass_escaped = _ffmpeg_escape_path(ass_path)
@@ -652,6 +768,7 @@ def _run_dynamic(settings: Any, proxy_job_id: str, payload: dict[str, Any]) -> N
         _update_proxy(settings, proxy_job_id, status="running", stage="classic_base_start", progress=2, message="正在保留 A10-R4 稳定底片")
         classic_payload = dict(payload)
         classic_payload["burn_subtitles"] = False
+        classic_payload["edit_pace"] = "dynamic_dense"
         classic_payload["dynamic_v2_parent_job_id"] = proxy_job_id
         classic_job = classic._start(settings, classic_payload)
         classic_job_id = str(classic_job["job_id"])
@@ -817,9 +934,12 @@ def install_dynamic_edit_v2(app: Any, get_settings: Callable[..., Any]) -> None:
                 "semantic_effect_timeline": True,
                 "dynamic_zoom": True,
                 "hook_punch": True,
-                "data_cards": True,
+                "data_cards": False,
                 "risk_alerts": True,
-                "list_cards": True,
+                "list_cards": False,
+                "no_text_boxes": True,
+                "micro_caption_fragments": True,
+                "dynamic_dense_base_clips": True,
                 "reference_subtitle_pack": True,
                 "keyword_highlight": True,
                 "micro_sfx": True,
