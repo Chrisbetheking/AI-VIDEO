@@ -19,8 +19,8 @@ from typing import Any, Callable
 
 from fastapi import Depends, HTTPException, Request
 
-VERSION = "10.40.8.18-clean-semantic-director"
-INSTALL_MARKER = "V10_40_8_17_SEMANTIC_SHOT_DIRECTOR"
+VERSION = "10.40.8.19-ai-semantic-beat-director-pro-sfx"
+INSTALL_MARKER = "V10_40_8_19_AI_BEAT_DIRECTOR_PRO_SFX"
 _INSTALLED = False
 _LOCK = threading.RLock()
 
@@ -1022,7 +1022,7 @@ def _run_dynamic(settings: Any, proxy_job_id: str, payload: dict[str, Any]) -> N
     work = _work_dir(settings, proxy_job_id)
     try:
         _update_proxy(settings, proxy_job_id, status="running", stage="semantic_plan", progress=2, message="正在读取上一页镜头并生成语义切镜计划")
-        from app.services.semantic_shot_director_v10_40_8_18 import prepare_classic_payload
+        from app.services.semantic_shot_director_v10_40_8_19 import prepare_classic_payload
 
         prepared = prepare_classic_payload(settings, payload, proxy_job_id)
         classic_payload = dict(prepared["payload"])
@@ -1095,7 +1095,10 @@ def _run_dynamic(settings: Any, proxy_job_id: str, payload: dict[str, Any]) -> N
         style_id = str(payload.get("dynamic_subtitle_style") or "dynamic_white_yellow")
         sfx_level = str(payload.get("dynamic_sfx_level") or "balanced")
         sticker_level = str(payload.get("dynamic_sticker_level") or "balanced")
+        payload["ai_shot_beats"] = semantic_plan.get("beats") or []
         plan = build_dynamic_plan(payload, timings, duration, intensity=intensity)
+        plan["ai_shot_beats"] = semantic_plan.get("beats") or []
+        plan["ai_director_report"] = semantic_plan.get("director_report") or {}
         plan["subtitle_style"] = style_id
         ass_path = write_dynamic_ass(work / "dynamic_subtitles.ass", timings, plan.get("keywords") or [], style_id=style_id)
         plan_path = work / "dynamic_effect_timeline.json"
@@ -1131,7 +1134,7 @@ def _run_dynamic(settings: Any, proxy_job_id: str, payload: dict[str, Any]) -> N
         _update_proxy(settings, proxy_job_id, stage="upload", progress=96, message="正在上传动态精剪版并保留稳定版")
         dynamic_url = classic._url(settings, output_path, "videos/existing-edit-v2/final")
         classic_url = str(base.get("video_url") or base.get("output_url") or source_url)
-        from app.services.semantic_shot_director_v10_40_8_18 import record_success
+        from app.services.semantic_shot_director_v10_40_8_19 import record_success
 
         usage_written = record_success(
             settings,
@@ -1260,6 +1263,9 @@ def install_dynamic_edit_v2(app: Any, get_settings: Callable[..., Any]) -> None:
                 "micro_caption_fragments": True,
                 "dynamic_dense_base_clips": False,
                 "semantic_scene_boundaries": True,
+                "deepseek_ai_beat_director": True,
+                "entity_burst_one_entity_one_shot": True,
+                "professional_cc0_sfx_bank": True,
                 "locked_previous_page_shot_plan": True,
                 "persistent_asset_usage_recorder": True,
                 "audio_tail_guard": True,
@@ -1287,7 +1293,7 @@ def install_dynamic_edit_v2(app: Any, get_settings: Callable[..., Any]) -> None:
         intensity = str(request.query_params.get("intensity") or payload.get("dynamic_edit_intensity") or "balanced")
         payload["dynamic_sfx_level"] = str(request.query_params.get("sfx_level") or payload.get("dynamic_sfx_level") or "balanced")
         payload["dynamic_sticker_level"] = str(request.query_params.get("sticker_level") or payload.get("dynamic_sticker_level") or "balanced")
-        payload["dynamic_visual_pace"] = str(request.query_params.get("visual_pace") or payload.get("dynamic_visual_pace") or "balanced")
+        payload["dynamic_visual_pace"] = "ai_auto"
         payload["dynamic_caption_size"] = str(request.query_params.get("caption_size") or payload.get("dynamic_caption_size") or "standard")
         payload["dynamic_caption_motion"] = str(request.query_params.get("caption_motion") or payload.get("dynamic_caption_motion") or "smart_mix")
         payload["dynamic_caption_position"] = str(request.query_params.get("caption_position") or payload.get("dynamic_caption_position") or "auto")
@@ -1308,7 +1314,7 @@ def install_dynamic_edit_v2(app: Any, get_settings: Callable[..., Any]) -> None:
             payload["dynamic_subtitle_style"] = str(request.query_params.get("subtitle_style") or payload.get("dynamic_subtitle_style") or "dynamic_white_yellow")
             payload["dynamic_sfx_level"] = str(request.query_params.get("sfx_level") or payload.get("dynamic_sfx_level") or "balanced")
             payload["dynamic_sticker_level"] = str(request.query_params.get("sticker_level") or payload.get("dynamic_sticker_level") or "balanced")
-            payload["dynamic_visual_pace"] = str(request.query_params.get("visual_pace") or payload.get("dynamic_visual_pace") or "balanced")
+            payload["dynamic_visual_pace"] = "ai_auto"
             payload["dynamic_caption_size"] = str(request.query_params.get("caption_size") or payload.get("dynamic_caption_size") or "standard")
             payload["dynamic_caption_motion"] = str(request.query_params.get("caption_motion") or payload.get("dynamic_caption_motion") or "smart_mix")
             payload["dynamic_caption_position"] = str(request.query_params.get("caption_position") or payload.get("dynamic_caption_position") or "auto")
@@ -1503,16 +1509,26 @@ def _v16_choose_variant(role: str, event: dict[str, Any], index: int, last_asset
     options = list(SFX_VARIANT_BANKS.get(role) or [])
     if not options:
         return "", 0.0
+    context = getattr(_V16_CONTEXT, "config", {}) or {}
+    pack = str(context.get("sfx_pack") or "pro_short_video")
+    allowed = SFX_PACK_FILES.get(pack)
+    if allowed:
+        filtered = [item for item in options if item[0] in allowed]
+        if filtered:
+            options = filtered
     ordered = sorted(
         options,
         key=lambda item: hashlib.sha256(
-            f"{event.get('id')}:{event.get('source_text')}:{index}:{item[0]}".encode("utf-8")
+            f"{pack}:{event.get('id')}:{event.get('source_text')}:{index}:{item[0]}".encode("utf-8")
         ).digest(),
     )
     for asset, role_gain in ordered:
         if asset != last_asset and (_sfx_root() / asset).exists():
             return asset, role_gain
-    return ordered[0]
+    for asset, role_gain in ordered:
+        if (_sfx_root() / asset).exists():
+            return asset, role_gain
+    return "", 0.0
 
 
 def _v16_choose_sticker(event: dict[str, Any], index: int, style: str, last_asset: str) -> str:
@@ -2238,3 +2254,146 @@ def render_dynamic_video(
             "output_delta_seconds": round(delta, 3),
         },
     }
+
+
+# =============================================================================
+# V10.40.8.19 AI BEAT DIRECTOR + PROFESSIONAL CC0 SFX OVERRIDES
+# =============================================================================
+V19_MARKER = "V10_40_8_19_AI_BEAT_DIRECTOR_PRO_SFX"
+V19_PRO_SFX_DIR = Path(os.getenv("AI_VIDEO_PRO_SFX_DIR", "/data/ai-video/sfx-professional-v19"))
+
+# These files are downloaded directly by the deployment script from
+# VideoEditingSFX's CC0 library. They are not repackaged in this ZIP.
+SFX_VARIANT_BANKS = {
+    "hook": [
+        ("cinematic-heavy-hit.mp3", 0.44),
+        ("simple-whoosh-1.mp3", 0.30),
+        ("pop-sound.mp3", 0.25),
+    ],
+    "question": [
+        ("pop-sound.mp3", 0.27),
+        ("chime.mp3", 0.23),
+        ("button-pressed.mp3", 0.20),
+    ],
+    "turn": [
+        ("swoosh-fast-1.mp3", 0.28),
+        ("swipe.mp3", 0.24),
+        ("deep-whoosh-1.mp3", 0.26),
+    ],
+    "data": [
+        ("click-button.mp3", 0.20),
+        ("pop-sound.mp3", 0.23),
+        ("button-pressed.mp3", 0.18),
+    ],
+    "risk": [
+        ("cinematic-heavy-hit.mp3", 0.32),
+        ("swoosh-fast-with-thud.mp3", 0.29),
+        ("deep-whoosh-1.mp3", 0.25),
+    ],
+    "comparison": [
+        ("swoosh-fast-with-thud.mp3", 0.27),
+        ("cinematic-reverse-1.mp3", 0.24),
+        ("swipe.mp3", 0.21),
+    ],
+    "list": [
+        ("pop-sound.mp3", 0.19),
+        ("button-pressed.mp3", 0.17),
+        ("click-button.mp3", 0.16),
+    ],
+    "evidence": [
+        ("analog-shutter.mp3", 0.20),
+        ("camera-1.mp3", 0.18),
+        ("click-button.mp3", 0.15),
+    ],
+    "cta": [
+        ("apple-pay-success.mp3", 0.22),
+        ("success.mp3", 0.20),
+        ("chime.mp3", 0.20),
+    ],
+}
+
+
+SFX_LEVELS = {
+    "off": {"label": "关闭", "volume": 0.0, "max_per_30s": 0, "min_gap": 99.0},
+    "light": {"label": "专业轻量", "volume": 0.075, "max_per_30s": 3, "min_gap": 4.6},
+    "balanced": {"label": "专业标准", "volume": 0.105, "max_per_30s": 4, "min_gap": 3.8},
+    "strong": {"label": "专业强化", "volume": 0.135, "max_per_30s": 5, "min_gap": 3.2},
+}
+
+SFX_PACK_FILES: dict[str, set[str]] = {
+    "pro_clean_ui": {
+        "pop-sound.mp3", "click-button.mp3", "button-pressed.mp3", "chime.mp3",
+        "apple-pay-success.mp3", "success.mp3", "swipe.mp3", "analog-shutter.mp3", "camera-1.mp3",
+    },
+    "pro_cinematic_light": {
+        "cinematic-heavy-hit.mp3", "simple-whoosh-1.mp3", "deep-whoosh-1.mp3",
+        "swoosh-fast-1.mp3", "swoosh-fast-with-thud.mp3", "cinematic-reverse-1.mp3",
+        "chime.mp3", "success.mp3", "analog-shutter.mp3",
+    },
+}
+
+
+V19_SFX_META = {
+    "simple-whoosh-1.mp3": (0.0, 1.05),
+    "deep-whoosh-1.mp3": (0.0, 1.55),
+    "swoosh-fast-1.mp3": (0.0, 1.00),
+    "swoosh-fast-with-thud.mp3": (0.0, 1.20),
+    "cinematic-heavy-hit.mp3": (0.0, 1.55),
+    "cinematic-reverse-1.mp3": (0.0, 1.45),
+    "pop-sound.mp3": (0.0, 0.90),
+    "click-button.mp3": (0.0, 0.85),
+    "button-pressed.mp3": (0.0, 0.85),
+    "chime.mp3": (0.0, 1.35),
+    "apple-pay-success.mp3": (0.0, 1.30),
+    "success.mp3": (0.0, 1.20),
+    "swipe.mp3": (0.0, 1.00),
+    "analog-shutter.mp3": (0.0, 1.05),
+    "camera-1.mp3": (0.0, 1.05),
+}
+
+
+
+def _sfx_root() -> Path:
+    return V19_PRO_SFX_DIR
+
+
+def _build_audio_filters(
+    plan: dict[str, Any], *, has_audio: bool, sfx_inputs: list[dict[str, Any]],
+) -> tuple[str, str | None]:
+    if not has_audio:
+        return "", None
+    render_duration = max(0.1, _safe_float(plan.get("render_duration"), _safe_float(plan.get("duration"), 30.0)))
+    voice_chain = (
+        f"[0:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,"
+        f"apad=pad_dur=0.16,atrim=duration={render_duration:.3f},"
+        f"afade=t=out:st={max(0.0, render_duration - 0.14):.3f}:d=0.14[voice]"
+    )
+    if not sfx_inputs:
+        return voice_chain + ";[voice]loudnorm=I=-16:LRA=7:TP=-1.8[aout]", "aout"
+    parts: list[str] = [voice_chain]
+    labels: list[str] = ["voice"]
+    for index, item in enumerate(sfx_inputs, start=1):
+        event = item["event"]
+        sfx = item["sfx"]
+        input_index = int(item["input_index"])
+        delay = int(max(0.0, _safe_float(event.get("start"), 0.0)) * 1000)
+        asset_name = Path(str(item.get("path") or "")).name
+        trim_start, trim_duration = V19_SFX_META.get(asset_name, (0.0, 1.25))
+        gain = max(0.010, min(0.105, _safe_float(sfx.get("gain"), 0.045)))
+        fade_out_start = max(0.20, trim_duration - min(0.24, trim_duration * 0.22))
+        label = f"sfx{index}"
+        parts.append(
+            f"[{input_index}:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,"
+            f"atrim=start={trim_start:.3f}:duration={trim_duration:.3f},asetpts=PTS-STARTPTS,"
+            f"highpass=f=45,lowpass=f=18000,acompressor=threshold=0.12:ratio=2.4:attack=5:release=90,"
+            f"volume={gain:.4f},afade=t=in:st=0:d=0.018,"
+            f"afade=t=out:st={fade_out_start:.3f}:d={max(0.08, trim_duration-fade_out_start):.3f},"
+            f"adelay={delay}|{delay}[{label}]"
+        )
+        labels.append(label)
+    parts.append(
+        "".join(f"[{label}]" for label in labels)
+        + f"amix=inputs={len(labels)}:duration=first:dropout_transition=0:normalize=0,"
+        "alimiter=limit=0.88,loudnorm=I=-16:LRA=7:TP=-2.0[aout]"
+    )
+    return ";".join(parts), "aout"

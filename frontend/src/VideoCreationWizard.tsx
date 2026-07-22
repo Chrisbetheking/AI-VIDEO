@@ -841,46 +841,51 @@ function workflowResultParts(workflow: Record<string, any> | null) {
       : {}
   return { packaging, review, cover, xhs }
 }
-
-
-// V10_40_8_18_LOCKED_SHOT_PLAN_PAYLOAD: preserve the exact visible shot order and assets.
+// V10_40_8_19_AI_SHOT_ASSET_POOL_PAYLOAD: keep every visible shot as an AI-priority asset candidate.
 function buildLockedExistingEditPlan(shots: any[]) {
   const clips = (Array.isArray(shots) ? shots : []).map((shot: any, index: number) => {
     const nested = shot?.asset && typeof shot.asset === 'object' ? shot.asset : {}
-    const assetUrl = String(shot?.assetUrl || shot?.asset_url || shot?.r2Url || shot?.r2_url || shot?.url || nested?.url || nested?.r2_url || '').trim()
-    if (!assetUrl) return null
+    const media = shot?.media && typeof shot.media === 'object' ? shot.media : {}
+    const r2 = shot?.r2 && typeof shot.r2 === 'object' ? shot.r2 : {}
+    const preview = shot?.preview && typeof shot.preview === 'object' ? shot.preview : {}
+    const assetUrl = String(
+      shot?.assetUrl || shot?.asset_url || shot?.r2Url || shot?.r2_url || shot?.videoUrl || shot?.video_url ||
+      shot?.downloadUrl || shot?.download_url || shot?.publicUrl || shot?.public_url || shot?.signedUrl || shot?.signed_url ||
+      shot?.url || nested?.url || nested?.r2_url || nested?.r2Url || nested?.video_url || nested?.public_url ||
+      media?.url || media?.video_url || r2?.url || r2?.public_url || preview?.url || preview?.video_url || ''
+    ).trim()
+    const assetId = String(
+      shot?.assetId || shot?.asset_id || shot?.r2Key || shot?.r2_key || shot?.objectKey || shot?.object_key ||
+      shot?.key || nested?.id || nested?.asset_id || nested?.assetId || nested?.r2_key || shot?.id || ''
+    ).trim()
+    const assetName = String(
+      shot?.assetName || shot?.asset_name || shot?.originalName || shot?.original_name || shot?.filename ||
+      shot?.name || nested?.name || nested?.filename || shot?.title || shot?.scene || shot?.description || ''
+    ).trim()
+    if (!assetUrl && !assetId && !assetName) return null
     const startTime = Number(shot?.startTime ?? shot?.start_time ?? 0) || 0
     const endTime = Number(shot?.endTime ?? shot?.end_time ?? 0) || 0
     const duration = Math.max(0.65, Number(shot?.duration ?? shot?.duration_seconds ?? (endTime > startTime ? endTime - startTime : 3.2)) || 3.2)
-    const assetId = String(shot?.assetId || shot?.asset_id || nested?.id || nested?.asset_id || `locked_${index + 1}`)
-    const title = String(shot?.title || shot?.scene || shot?.description || `镜头 ${index + 1}`)
+    const title = String(shot?.title || shot?.scene || shot?.description || assetName || `镜头 ${index + 1}`)
     return {
-      id: String(shot?.id || `locked_shot_${index + 1}`),
-      index: index + 1,
-      title,
+      id: String(shot?.id || `ai_asset_candidate_${index + 1}`),
+      index: index + 1, title,
       scene: String(shot?.scene || shot?.description || title),
       description: String(shot?.description || shot?.scene || title),
       narration: String(shot?.narration || shot?.copy || shot?.text || shot?.script || ''),
-      duration,
-      duration_seconds: duration,
-      source: 'r2',
-      selection_source: 'manual',
-      manual_locked: true,
-      asset_id: assetId,
-      asset_ids: [assetId],
-      asset_url: assetUrl,
-      asset_name: String(shot?.assetName || shot?.asset_name || nested?.name || title),
-      start_time: Math.max(0, startTime),
-      end_time: endTime > startTime ? endTime : Math.max(0, startTime) + duration,
-      auto_start: false,
-      preserve_audio: Boolean(shot?.preserveAudio ?? shot?.preserve_audio ?? false),
+      duration, duration_seconds: duration, source: 'r2', selection_source: 'previous_page',
+      manual_locked: Boolean(assetUrl), asset_id: assetId, asset_ids: assetId ? [assetId] : [],
+      asset_url: assetUrl, asset_name: assetName || title,
+      start_time: Math.max(0, startTime), end_time: endTime > startTime ? endTime : Math.max(0, startTime) + duration,
+      auto_start: true, preserve_audio: Boolean(shot?.preserveAudio ?? shot?.preserve_audio ?? false),
       speed: Math.max(0.75, Math.min(1.5, Number(shot?.speed || 1))),
-      transition: String(shot?.transition || '轻柔淡化'),
-      camera: String(shot?.camera || shot?.motion || '保留原片运镜'),
+      transition: String(shot?.transition || '轻柔淡化'), camera: String(shot?.camera || shot?.motion || '保留原片运镜'),
     }
   }).filter(Boolean)
-  return { clips, source: 'step3_shot_plan', locked: clips.length > 0 }
+  return { clips, source: 'step3_ai_asset_pool', locked: clips.length > 0 && clips.every((clip: any) => Boolean(clip.asset_url)) }
 }
+
+
 
 export default function VideoCreationWizard({ project, setProject, goTab }: Props) {
   // V10_40_8_6_A5_R3_BUNDLE_CONTRACT_FIX
@@ -2378,10 +2383,10 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
                       : r2Context
                 )
             return {
-    // V10_40_8_18_LOCKED_SHOT_PLAN_PAYLOAD
+    // V10_40_8_19_AI_SHOT_ASSET_POOL_PAYLOAD
     shot_plan: shotPlan,
     edit_plan: buildLockedExistingEditPlan(shotPlan),
-    lock_edit_plan: buildLockedExistingEditPlan(shotPlan).clips.length > 0,
+    lock_edit_plan: buildLockedExistingEditPlan(shotPlan).locked,
     ...base,
     material_selection_mode: materialMode,
     auto_fill_assets: materialMode !== 'manual',
@@ -3084,8 +3089,9 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
       <div className="aiw-stepGrid three">
         <section className="aiw-stepCard">
           <h3>{creationMode === 'existing_edit' ? '素材剪辑计划' : '镜头计划'}</h3>
-          {/* V10_40_8_18_SELECTOR_AT_MATERIAL_EDIT_PLAN */}
+          {/* V10_40_8_19_SELECTOR_AT_MATERIAL_EDIT_PLAN */}
           <DynamicEditV2Selector shotCount={shotPlan.length} />
+          {/* V10_40_8_18_SELECTOR_AT_MATERIAL_EDIT_PLAN */}
             {/* MATERIAL_SELECTION_MODE_V10_40_8_6 */}
             {creationMode === 'existing_edit' && (
               <div className="aiw-materialModePanel">
