@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-VERSION = "10.40.8.19-ai-semantic-beat-director"
+VERSION = "10.40.8.20-real-tts-semantic-generation-fix"
 REGISTRY_FILE = "existing_edit_asset_usage.json"
 _REGISTRY_LOCK = threading.RLock()
 
@@ -592,18 +592,41 @@ def build_plan(settings: Any, payload: dict[str, Any], job_id: str) -> dict[str,
 
 
 def prepare_classic_payload(settings: Any, payload: dict[str, Any], job_id: str) -> dict[str, Any]:
+    # V10_40_8_20_REAL_TTS_SEMANTIC_GENERATION_FIX: the pre-TTS semantic plan is only a preview/candidate pool.
+    # Auto and hybrid jobs must stay unlocked so the classic renderer can generate
+    # real TTS first, then run this semantic director again with true start/end data.
     plan = build_plan(settings, payload, job_id)
     next_payload = dict(payload)
+    requested_mode = _text(
+        payload.get("material_selection_mode")
+        or payload.get("selection_mode")
+        or ("hybrid" if _extract_previous_page_items(payload) else "auto")
+    ).lower()
+    if requested_mode not in {"auto", "hybrid", "manual"}:
+        requested_mode = "hybrid" if _extract_previous_page_items(payload) else "auto"
+
     next_payload["burn_subtitles"] = False
-    next_payload["edit_plan"] = {"clips": plan["clips"], "source": plan["source"], "version": VERSION}
-    next_payload["lock_edit_plan"] = True
-    next_payload["material_selection_mode"] = "manual"
+    next_payload["edit_plan"] = {
+        "clips": plan["clips"],
+        "source": plan["source"],
+        "version": VERSION,
+        "timing_source": "pre_tts_preview",
+    }
+    next_payload["material_selection_mode"] = requested_mode
+    next_payload["lock_edit_plan"] = requested_mode == "manual"
+    next_payload["auto_fill_assets"] = requested_mode != "manual"
+    next_payload["semantic_tts_replan"] = True
+    next_payload["tts_timing_required"] = True
+    next_payload["shot_director"] = "ai_auto"
     next_payload["asset_usage_job_id"] = job_id
     next_payload["semantic_director_version"] = VERSION
     next_payload["ai_shot_beats"] = plan.get("beats") or []
-    next_payload["target_duration_seconds"] = plan["target_duration_seconds"] or next_payload.get("target_duration_seconds") or 30
+    next_payload["target_duration_seconds"] = (
+        plan["target_duration_seconds"]
+        or next_payload.get("target_duration_seconds")
+        or 30
+    )
     return {"payload": next_payload, "plan": plan}
-
 
 def record_success(settings: Any, job_id: str, clips: list[dict[str, Any]]) -> dict[str, Any]:
     ids = [_text(item.get("asset_id")) for item in clips if _text(item.get("asset_id"))]

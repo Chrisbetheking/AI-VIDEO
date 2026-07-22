@@ -31,7 +31,7 @@ from app.services.a10_r4_output_guard_v10_40_8_12 import (
     measure_audio_loudness,
 )
 
-VERSION = "10.40.8.12-a10-r4"
+VERSION = "10.40.8.20-real-tts-semantic-generation-fix"
 # V10_40_8_12_A10_R4_SEMANTIC_SINGLE_USE_AUDIO: strict visual single-use, semantic coverage, fresh ending, -16 LUFS
 # V10_40_8_8_A10_R3_GLOBAL_VISUAL_DEDUP: whole-video repetition guard
 # V10_40_8_8_A10_R2_ADAPTIVE_QUALITY_GATE_FIX: adaptive quality gate
@@ -1028,11 +1028,92 @@ async def _render(
                 }
             )
         else:
-            plan = build_edit_plan(
-                payload,
-                settings=settings,
-                target_duration_override=target,
+            # V10_40_8_20_REAL_TTS_SEMANTIC_GENERATION_FIX: V19 used the pre-TTS preview plan or the classic equal
+            # duration planner. Re-run the semantic director only after TTS has
+            # produced real per-sentence timings. Ordinary explanations can hold;
+            # explicit entities such as 商场 / 学校 / 医院 may split inside that
+            # sentence's actual speech interval.
+            semantic_tts_requested = bool(
+                payload.get("semantic_tts_replan")
+                or payload.get("semantic_director_version")
+                or str(payload.get("shot_director") or "").strip().lower() == "ai_auto"
             )
+            if semantic_tts_requested:
+                try:
+                    from app.services.semantic_shot_director_v10_40_8_19 import (
+                        build_plan as build_semantic_tts_plan,
+                    )
+
+                    normalized_timings: list[dict[str, Any]] = []
+                    for timing_index, timing in enumerate(timings):
+                        if isinstance(timing, dict):
+                            item = dict(timing)
+                        else:
+                            item = {
+                                "text": getattr(timing, "text", ""),
+                                "start": getattr(timing, "start", None),
+                                "end": getattr(timing, "end", None),
+                                "duration": getattr(timing, "duration", None),
+                            }
+                        item.setdefault(
+                            "text",
+                            parts[timing_index] if timing_index < len(parts) else "",
+                        )
+                        normalized_timings.append(item)
+
+                    semantic_payload = {
+                        **payload,
+                        "tts_segments": normalized_timings,
+                        "subtitle_segments": normalized_timings,
+                        "actual_tts_duration_seconds": round(target, 3),
+                        "target_duration_seconds": round(target, 3),
+                        "material_selection_mode": run_material_mode,
+                        "lock_edit_plan": False,
+                    }
+                    plan = build_semantic_tts_plan(
+                        settings,
+                        semantic_payload,
+                        job_id,
+                    )
+                    plan.setdefault("coverage", {})
+                    plan["coverage"].update(
+                        {
+                            "actual_tts_seconds": round(target, 3),
+                            "timeline_seconds": round(
+                                sum(float(item.get("duration") or 0) for item in plan.get("clips") or []),
+                                3,
+                            ),
+                            "real_tts_replanned": True,
+                            "semantic_tts_replanned": True,
+                            "timing_source": "real_tts_segments",
+                            "tts_segment_count": len(normalized_timings),
+                        }
+                    )
+                    plan["message"] = (
+                        f"已按真实 TTS {target:.2f} 秒重新执行 AI 语义镜头导演，"
+                        f"生成 {len(plan.get('clips') or [])} 个语义镜头"
+                    )
+                except Exception as semantic_exc:
+                    plan = build_edit_plan(
+                        payload,
+                        settings=settings,
+                        target_duration_override=target,
+                    )
+                    plan.setdefault("coverage", {})
+                    plan["coverage"].update(
+                        {
+                            "actual_tts_seconds": round(target, 3),
+                            "semantic_tts_fallback": True,
+                            "semantic_tts_error": str(semantic_exc)[:500],
+                            "timing_source": "classic_fallback",
+                        }
+                    )
+            else:
+                plan = build_edit_plan(
+                    payload,
+                    settings=settings,
+                    target_duration_override=target,
+                )
             clips = [dict(item) for item in plan["clips"]]
 
         # V10_40_8_7_A9_R3_SPLIT_SOURCE_CONTRACT: runtime director
@@ -1250,7 +1331,7 @@ async def _render(
             job_id,
             status="failed",
             stage="failed",
-            progress=100,
+            progress=0,
             error=str(exc)[:3000],
             message=f"现有视频剪辑失败：{exc}",
             fal_used=False,
@@ -1327,7 +1408,7 @@ def _repair(settings: Any) -> None:
             item.update(
                 status="failed",
                 stage="recovered_after_restart",
-                progress=100,
+                progress=0,
                 error="后端重启导致剪辑中断，请重新发起；不会调用 FAL",
                 finished_at=_now(),
                 updated_at=_now(),

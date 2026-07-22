@@ -69,6 +69,8 @@ type ShotPlan = {
   matchScore?: number
   analysisDescription?: string
   autoStart?: boolean
+  timingSource?: 'pending_tts' | 'real_tts'
+  durationProvisional?: boolean
 }
 
 type JobPayload = {
@@ -138,7 +140,7 @@ const LEGACY_WIZARD_DRAFT_KEYS = [
 ]
 const CLEAN_ONCE_KEY = 'ai_video_wizard_v10_40_8_5_2_explicit_reset'
 const VIDEO_PROGRESS_RESET_GUARD_KEY = 'ai_video_video_progress_reset_guard_v10_40_8_6'
-const VIDEO_PROGRESS_BUILD_MARKER = 'AI_VIDEO_V10_40_8_6_A5_R3_BUNDLE_CONTRACT_FIX'
+const VIDEO_PROGRESS_BUILD_MARKER = 'V10_40_8_20_REAL_TTS_SEMANTIC_GENERATION_FIX'
 
 function parseWizardDraft(raw: string | null): Record<string, any> {
   if (!raw) return {}
@@ -728,29 +730,48 @@ function buildPrompt(city: string, scene: string, _narration: string, index = 1)
   return `Premium 9:16 cinematic vertical video for Malaysia real-estate content.\nShot ${index} main scene: ${scene}.\n${klRule}\nVisual-only rule: never render narration, subtitles, captions, headlines, stickers, labels, UI, logos, watermarks, signs, letters, numbers or pseudo-text inside the generated image. The picture must contain zero readable or unreadable text. Single-scene rule: one full-screen continuous camera shot only, not a montage, not split screen and not a panel layout. Ultra realistic, natural lighting, clean composition, high detail, smooth camera movement, no black borders, no documents, no papers, no charts, no screenshots.`
 }
 
+// V10_40_8_20_REAL_TTS_SEMANTIC_GENERATION_FIX: do not invent equal 3.5-second shots before TTS exists.
+// Other Step 3 summaries still use this helper to estimate card count.
+// It is intentionally preserved, but never used to assign shot durations.
 function targetShotCount(duration: number) {
   return Math.max(4, Math.min(12, Math.ceil(Number(duration || 20) / 4)))
 }
 
-function generateShotPlan(segments: ScriptSegment[], duration: number, city: string, project: ProjectDraft): ShotPlan[] {
-  const count = targetShotCount(duration)
+function segmentRealTtsDuration(segment?: ScriptSegment): number {
+  const item = (segment || {}) as ScriptSegment & Record<string, any>
+  const start = Number(item.start ?? item.start_time ?? item.speech_start)
+  const end = Number(item.end ?? item.end_time ?? item.speech_end)
+  const direct = Number(item.ttsDuration ?? item.tts_duration ?? item.duration_seconds ?? item.duration)
+  if (Number.isFinite(start) && Number.isFinite(end) && end > start) {
+    return Math.round((end - start) * 1000) / 1000
+  }
+  if (Number.isFinite(direct) && direct > 0) {
+    return Math.round(direct * 1000) / 1000
+  }
+  return 0
+}
+
+function generateShotPlan(segments: ScriptSegment[], _duration: number, city: string, project: ProjectDraft): ShotPlan[] {
+  const usableSegments = segments.filter((segment) => String(segment?.text || '').trim())
+  const sourceSegments: Array<ScriptSegment | undefined> = usableSegments.length ? usableSegments : [undefined]
   const scenes = cityScenes(city)
-  const each = Math.round((Number(duration || 20) / count) * 10) / 10
   const assetIds = asArray(project.selectedMaterialIds)
 
-  return Array.from({ length: count }, (_, index) => {
-    const segment = segments[index % Math.max(segments.length, 1)]
+  return sourceSegments.map((segment, index) => {
     const scene = scenes[index % scenes.length]
+    const realTtsDuration = segmentRealTtsDuration(segment)
     return {
       id: `shot_${index + 1}`,
       index: index + 1,
       title: scene,
       scene,
       narration: segment?.text || '',
-      duration: each,
+      duration: realTtsDuration,
+      timingSource: realTtsDuration > 0 ? 'real_tts' : 'pending_tts',
+      durationProvisional: realTtsDuration <= 0,
       source: assetIds.length ? 'mixed' : 'ai',
-      camera: index % 2 === 0 ? '慢推进' : '横移展示',
-      transition: index === 0 ? '开场建立' : '自然衔接',
+      camera: '由 AI 语义导演结合真实 TTS 判断',
+      transition: index === 0 ? '开场建立' : '按语义边界切换',
       prompt: buildPrompt(city, scene, segment?.text || '', index + 1),
       avoid: city === 'kuala_lumpur'
         ? ['海边', '沙滩', '海岛', '分屏', '拼贴', '多宫格', '文件桌面', '纸张', '图表', '计算器', '乱码文字', '字幕', '标题', '水印', 'Logo', '贴纸', 'UI', '数字', '字母', '假价格']
@@ -865,7 +886,8 @@ function buildLockedExistingEditPlan(shots: any[]) {
     if (!assetUrl && !assetId && !assetName) return null
     const startTime = Number(shot?.startTime ?? shot?.start_time ?? 0) || 0
     const endTime = Number(shot?.endTime ?? shot?.end_time ?? 0) || 0
-    const duration = Math.max(0.65, Number(shot?.duration ?? shot?.duration_seconds ?? (endTime > startTime ? endTime - startTime : 3.2)) || 3.2)
+    const measuredDuration = Number(shot?.duration ?? shot?.duration_seconds ?? (endTime > startTime ? endTime - startTime : 0)) || 0
+  const duration = measuredDuration > 0 ? Math.max(0.65, measuredDuration) : 0.65
     const title = String(shot?.title || shot?.scene || shot?.description || assetName || `镜头 ${index + 1}`)
     return {
       id: String(shot?.id || `ai_asset_candidate_${index + 1}`),
@@ -873,7 +895,7 @@ function buildLockedExistingEditPlan(shots: any[]) {
       scene: String(shot?.scene || shot?.description || title),
       description: String(shot?.description || shot?.scene || title),
       narration: String(shot?.narration || shot?.copy || shot?.text || shot?.script || ''),
-      duration, duration_seconds: duration, source: 'r2', selection_source: 'previous_page',
+      duration, duration_seconds: duration, timing_source: measuredDuration > 0 ? 'real_tts' : 'pending_tts', duration_provisional: measuredDuration <= 0, source: 'r2', selection_source: 'previous_page',
       manual_locked: Boolean(assetUrl), asset_id: assetId, asset_ids: assetId ? [assetId] : [],
       asset_url: assetUrl, asset_name: assetName || title,
       start_time: Math.max(0, startTime), end_time: endTime > startTime ? endTime : Math.max(0, startTime) + duration,

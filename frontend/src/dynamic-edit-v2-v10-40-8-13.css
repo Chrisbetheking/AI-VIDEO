@@ -9,3 +9,18 @@
 @keyframes v19Preview{0%,100%{opacity:.3;transform:translateX(-50%) scale(.86)}35%,75%{opacity:1;transform:translateX(-50%) scale(1)}}
 @media(max-width:1100px){.v19-compact-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.v19-style-row{grid-template-columns:repeat(3,minmax(0,1fr))}.v19-rule-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:760px){.v19-topline{align-items:flex-start}.v19-engine-row,.v19-caption-layout,.v19-two-fields,.v19-rule-grid{grid-template-columns:1fr}.v19-compact-grid{grid-template-columns:1fr}.v19-ai-card{grid-column:span 1}.v19-font-row{grid-template-columns:1fr}.v19-style-row{grid-template-columns:repeat(2,minmax(0,1fr))}}
+
+/* V10_40_8_20_REAL_TTS_SEMANTIC_GENERATION_FIX: compact Step 3 editor and make TTS ownership visually explicit. */
+.dynamic-edit-v2-shell.v19{padding:13px 14px;margin:6px 0 10px;border-radius:14px}
+.dynamic-edit-v2-shell.v19 .v19-topline{gap:12px}
+.dynamic-edit-v2-shell.v19 .v19-title p{max-width:760px;line-height:1.45}
+.dynamic-edit-v2-shell.v19 .v19-engine-row{margin-top:9px;gap:8px}
+.dynamic-edit-v2-shell.v19 .v19-engine-row>button{padding:9px 11px}
+.dynamic-edit-v2-shell.v19 .v19-workbench{margin-top:8px;padding-top:8px}
+.dynamic-edit-v2-shell.v19 .v19-tabs{position:sticky;top:0;z-index:2;padding:4px 0;background:#fff}
+.dynamic-edit-v2-shell.v19 .v19-compact-grid{gap:7px;margin-top:7px}
+.dynamic-edit-v2-shell.v19 .v19-ai-card,.dynamic-edit-v2-shell.v19 .v19-rule{padding:9px 10px}
+.dynamic-edit-v2-shell.v19 .v19-caption-layout{grid-template-columns:220px minmax(0,1fr);gap:9px;margin-top:8px}
+.dynamic-edit-v2-shell.v19 .v19-mini-preview{min-height:132px}
+.dynamic-edit-v2-shell.v19 .v19-style-row{grid-template-columns:repeat(3,minmax(0,1fr));max-height:248px;overflow:auto;padding-right:3px}
+@media(max-width:1200px){.dynamic-edit-v2-shell.v19 .v19-caption-layout{grid-template-columns:1fr}}

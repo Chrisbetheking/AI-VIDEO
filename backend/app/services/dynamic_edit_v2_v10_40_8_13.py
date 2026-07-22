@@ -19,8 +19,8 @@ from typing import Any, Callable
 
 from fastapi import Depends, HTTPException, Request
 
-VERSION = "10.40.8.19-ai-semantic-beat-director-pro-sfx"
-INSTALL_MARKER = "V10_40_8_19_AI_BEAT_DIRECTOR_PRO_SFX"
+VERSION = "10.40.8.20-real-tts-semantic-generation-fix"
+INSTALL_MARKER = "V10_40_8_20_REAL_TTS_SEMANTIC_GENERATION_FIX"
 _INSTALLED = False
 _LOCK = threading.RLock()
 

@@ -28,7 +28,7 @@ export interface StoredConfig {
   stickerStyle: DynamicStickerStyle
 }
 
-const STORAGE_KEY = 'ai-video-dynamic-edit-v2-v19'
+const STORAGE_KEY = 'ai-video-dynamic-edit-v2-v20'
 const DEFAULT_CONFIG: StoredConfig = {
   engine: 'dynamic_v2', intensity: 'balanced', shotDirector: 'ai_auto',
   subtitleStyle: 'dynamic_white_yellow', captionSize: 118, captionMotion: 'smart_mix', captionPosition: 'auto',
@@ -112,7 +112,7 @@ export default function DynamicEditV2Selector({shotCount=0}:{shotCount?:number})
 
   return <section className="dynamic-edit-v2-shell v19" data-dynamic-edit-v2="true" data-placement="shot-plan-section">
     <div className="v19-topline">
-      <div className="v19-title"><span>V10.40.8.19 · AI BEAT DIRECTOR</span><h4>剪辑引擎与动效</h4><p>镜头长度由口播语义和 TTS 时间自动判断，不再提供固定秒数档位。</p></div>
+      <div className="v19-title"><span>V10.40.8.20 · REAL TTS DIRECTOR</span><h4>剪辑引擎与动效</h4><p>V10_40_8_20_REAL_TTS_SEMANTIC_GENERATION_FIX：生成任务先完成逐句 TTS，再按真实 start/end 重排镜头；页面不再用平均秒数冒充最终时长。</p></div>
       <div className="v19-shot-status"><strong>{shotCount}</strong><span>上一页镜头</span></div>
     </div>
 
