@@ -1,8 +1,10 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { type ChangeEvent, useEffect, useMemo, useState } from 'react'
 import './dynamic-edit-v2-v10-40-8-13.css'
 
 export type DynamicEditEngine = 'classic_a10_r4' | 'dynamic_v2'
 export type DynamicEditIntensity = 'restrained' | 'balanced' | 'strong'
+export type DynamicSfxLevel = 'off' | 'light' | 'balanced' | 'strong'
+export type DynamicStickerLevel = 'off' | 'light' | 'balanced' | 'rich'
 export type DynamicSubtitleStyle =
   | 'dynamic_white_yellow'
   | 'dynamic_black_box'
@@ -15,14 +17,18 @@ type StoredConfig = {
   engine: DynamicEditEngine
   intensity: DynamicEditIntensity
   subtitleStyle: DynamicSubtitleStyle
+  sfxLevel: DynamicSfxLevel
+  stickerLevel: DynamicStickerLevel
 }
 
-const STORAGE_KEY = 'ai_video_dynamic_edit_v2_config_v10_40_8_14'
+const STORAGE_KEY = 'ai_video_dynamic_edit_v2_config_v10_40_8_15'
 
 const DEFAULT_CONFIG: StoredConfig = {
   engine: 'classic_a10_r4',
   intensity: 'balanced',
   subtitleStyle: 'dynamic_white_yellow',
+  sfxLevel: 'balanced',
+  stickerLevel: 'balanced',
 }
 
 const SUBTITLE_PRESETS: Array<{
@@ -31,19 +37,19 @@ const SUBTITLE_PRESETS: Array<{
   description: string
   previewClass: string
 }> = [
-  { id: 'dynamic_white_yellow', label: '白黄短句跳词', description: '3-8 字短句，白字黑描边，重点词亮黄。', previewClass: 'white-yellow' },
-  { id: 'dynamic_black_box', label: '橙白视觉冲击', description: '取消黑底条，改为橙白短词和中心重击。', previewClass: 'orange-impact' },
-  { id: 'dynamic_gold_property', label: '金白地产短句', description: '金色关键词配白字，适合区域、预算和资产内容。', previewClass: 'gold-property' },
-  { id: 'dynamic_minimal_pro', label: '极简白字口播', description: '无底色短白字，轻描边，画面更干净。', previewClass: 'minimal-pro' },
-  { id: 'dynamic_red_hook', label: '红黄疑问重击', description: '疑问、风险和数字使用红黄短词放大。', previewClass: 'red-hook' },
-  { id: 'dynamic_dual_line', label: '清单节奏短句', description: '清单词逐条出现，不再显示长双行字幕。', previewClass: 'list-rhythm' },
+  { id: 'dynamic_white_yellow', label: '白黄大字跳词', description: '3-7 字大字幕，白字黑描边，重点词亮黄。', previewClass: 'white-yellow' },
+  { id: 'dynamic_black_box', label: '橙白大字冲击', description: '取消黑底条，改为橙白短词和中心重击。', previewClass: 'orange-impact' },
+  { id: 'dynamic_gold_property', label: '金白地产大字', description: '金色关键词配白字，适合区域、预算和资产内容。', previewClass: 'gold-property' },
+  { id: 'dynamic_minimal_pro', label: '极简专业大字', description: '无底色短白字，轻描边，画面更干净。', previewClass: 'minimal-pro' },
+  { id: 'dynamic_red_hook', label: '红黄疑问大字', description: '疑问、风险和数字使用红黄短词放大。', previewClass: 'red-hook' },
+  { id: 'dynamic_dual_line', label: '清单节奏大字', description: '清单词逐条出现，不再显示长双行字幕。', previewClass: 'list-rhythm' },
 ]
 
 const PREVIEW_BEATS = [
-  { caption: '先看区域', focus: '区域', accent: '用途' },
-  { caption: '别只看价格', focus: '价格', accent: '半径' },
-  { caption: '真正需要的', focus: '需要', accent: '生活' },
-  { caption: '生活半径', focus: '半径', accent: '配套' },
+  { caption: '先看区域', focus: '区域', accent: '用途', sticker: '📍', sound: 'WHOOSH' },
+  { caption: '别只看价格', focus: '价格', accent: '预算', sticker: '💰', sound: 'POP' },
+  { caption: '真实租客', focus: '租客', accent: '需求', sticker: '👥', sound: 'TICK' },
+  { caption: '生活半径', focus: '半径', accent: '配套', sticker: '🛍️', sound: 'DING' },
 ]
 
 function loadConfig(): StoredConfig {
@@ -57,6 +63,8 @@ function loadConfig(): StoredConfig {
       subtitleStyle: SUBTITLE_PRESETS.some((item) => item.id === parsed?.subtitleStyle)
         ? parsed.subtitleStyle
         : 'dynamic_white_yellow',
+      sfxLevel: ['off', 'light', 'balanced', 'strong'].includes(parsed?.sfxLevel) ? parsed.sfxLevel : 'balanced',
+      stickerLevel: ['off', 'light', 'balanced', 'rich'].includes(parsed?.stickerLevel) ? parsed.stickerLevel : 'balanced',
     }
   } catch {
     return DEFAULT_CONFIG
@@ -79,6 +87,8 @@ export function getDynamicEditV2StartEndpoint(): string {
   const query = new URLSearchParams({
     intensity: config.intensity,
     subtitle_style: config.subtitleStyle,
+    sfx_level: config.sfxLevel,
+    sticker_level: config.stickerLevel,
   })
   return `/api/video/existing-edit-v2/start?${query.toString()}`
 }
@@ -106,9 +116,9 @@ export default function DynamicEditV2Selector() {
     <section className="dynamic-edit-v2-shell" data-dynamic-edit-v2="true">
       <div className="dynamic-edit-v2-header">
         <div>
-          <span className="dynamic-edit-v2-eyebrow">V10.40.8.14 · REFERENCE KINETIC CAPTIONS</span>
+          <span className="dynamic-edit-v2-eyebrow">V10.40.8.15 · REAL SFX + THEME STICKERS</span>
           <h4>剪辑引擎</h4>
-          <p>原 A10-R4 不动；新版按参考视频重做短句字幕、更多镜头和跳词节奏。</p>
+          <p>原 A10-R4 不动；新版加入更大字幕、可听见的真实音效和无背景主题贴纸。</p>
         </div>
         <span className="dynamic-edit-v2-beta">双版本并存</span>
       </div>
@@ -130,9 +140,9 @@ export default function DynamicEditV2Selector() {
           className={`dynamic-edit-v2-engine dynamic ${config.engine === 'dynamic_v2' ? 'selected' : ''}`}
           onClick={() => setConfig((current) => ({ ...current, engine: 'dynamic_v2' }))}
         >
-          <span className="dynamic-edit-v2-engine-tag">参考视频重做版</span>
+          <span className="dynamic-edit-v2-engine-tag">参考视频增强版</span>
           <strong>动态短句精剪</strong>
-          <small>3-8 字字幕、更多镜头、无文本框、重点词弹入和轻推近。</small>
+          <small>3-7 字大字幕、更多镜头、真实音效、透明贴纸和重点词弹入。</small>
           <span className="dynamic-edit-v2-check">{config.engine === 'dynamic_v2' ? '✓ 当前选择' : '选择新版'}</span>
         </button>
       </div>
@@ -143,6 +153,10 @@ export default function DynamicEditV2Selector() {
             <div className="dynamic-edit-v2-preview-scene" />
             <span className="dynamic-edit-v2-preview-word word-main">{beat.focus}</span>
             <span className="dynamic-edit-v2-preview-word word-side">{beat.accent}</span>
+            <span className="dynamic-edit-v2-preview-sticker" aria-hidden="true">{beat.sticker}</span>
+            <span className="dynamic-edit-v2-preview-sfx" aria-label={`音效 ${beat.sound}`}>
+              <i /><i /><i /><i /><small>{beat.sound}</small>
+            </span>
             <div className={`dynamic-edit-v2-preview-subtitle ${selectedSubtitle.previewClass}`}>
               {beat.caption}
             </div>
@@ -151,28 +165,52 @@ export default function DynamicEditV2Selector() {
             </div>
           </div>
 
-          <div className="dynamic-edit-v2-controls">
+          <div className="dynamic-edit-v2-controls dynamic-edit-v2-controls-v15">
             <label>
               <span>动态效果强度</span>
               <select
                 value={config.intensity}
-                onChange={(event) => setConfig((current) => ({ ...current, intensity: event.target.value as DynamicEditIntensity }))}
+                onChange={(event: ChangeEvent<HTMLSelectElement>) => setConfig((current) => ({ ...current, intensity: event.target.value as DynamicEditIntensity }))}
               >
-                <option value="restrained">克制 · 短句字幕 + 约 7 个主要效果 / 30 秒</option>
-                <option value="balanced">参考节奏 · 更多镜头 + 约 11 个主要效果 / 30 秒</option>
-                <option value="strong">强节奏 · 密集短句 + 约 15 个主要效果 / 30 秒</option>
+                <option value="restrained">克制 · 约 7 个主要效果 / 30 秒</option>
+                <option value="balanced">参考节奏 · 约 11 个主要效果 / 30 秒</option>
+                <option value="strong">强节奏 · 约 15 个主要效果 / 30 秒</option>
+              </select>
+            </label>
+            <label>
+              <span>动态音效</span>
+              <select
+                value={config.sfxLevel}
+                onChange={(event: ChangeEvent<HTMLSelectElement>) => setConfig((current) => ({ ...current, sfxLevel: event.target.value as DynamicSfxLevel }))}
+              >
+                <option value="off">关闭</option>
+                <option value="light">轻 · 少量提示</option>
+                <option value="balanced">标准 · 清晰可听</option>
+                <option value="strong">强 · 更明显的重击与转场</option>
+              </select>
+            </label>
+            <label>
+              <span>主题贴纸</span>
+              <select
+                value={config.stickerLevel}
+                onChange={(event: ChangeEvent<HTMLSelectElement>) => setConfig((current) => ({ ...current, stickerLevel: event.target.value as DynamicStickerLevel }))}
+              >
+                <option value="off">关闭</option>
+                <option value="light">少量 · 约 3 个 / 30 秒</option>
+                <option value="balanced">标准 · 约 6 个 / 30 秒</option>
+                <option value="rich">丰富 · 约 10 个 / 30 秒</option>
               </select>
             </label>
             <div className="dynamic-edit-v2-rule-note">
               <b>新版硬规则</b>
-              <span>不显示大块文本框；字幕单屏 3-8 字；动态版使用更密的素材切片，稳定版不受影响。</span>
+              <span>不显示大块文本框；字幕单屏 3-7 字并整体放大；贴纸只用透明图，不出现白底或色块背景。</span>
             </div>
           </div>
 
           <div className="dynamic-edit-v2-subtitle-heading">
             <div>
-              <strong>短句动态字幕</strong>
-              <span>参考视频的核心是短句、跳词、颜色重音和位置变化，不是给整句套黑框。</span>
+              <strong>大号短句字幕</strong>
+              <span>参考视频的核心是大号短句、跳词、颜色重音、贴纸和语义音效，不是给整句套黑框。</span>
             </div>
             <span>生成时自动烧录</span>
           </div>
@@ -196,7 +234,7 @@ export default function DynamicEditV2Selector() {
 
           <div className="dynamic-edit-v2-ab-note">
             <b>输出策略</b>
-            <span>选择新版后，仍先保留 A10-R4 稳定底片，再生成动态短句版；两条地址同时保留，方便对比和回退。</span>
+            <span>选择新版后，仍先保留 A10-R4 稳定底片，再生成带大字幕、真实音效和主题贴纸的动态版；两条地址同时保留。</span>
           </div>
         </div>
       )}
