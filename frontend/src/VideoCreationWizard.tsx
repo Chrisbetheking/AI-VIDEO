@@ -842,6 +842,46 @@ function workflowResultParts(workflow: Record<string, any> | null) {
   return { packaging, review, cover, xhs }
 }
 
+
+// V10_40_8_18_LOCKED_SHOT_PLAN_PAYLOAD: preserve the exact visible shot order and assets.
+function buildLockedExistingEditPlan(shots: any[]) {
+  const clips = (Array.isArray(shots) ? shots : []).map((shot: any, index: number) => {
+    const nested = shot?.asset && typeof shot.asset === 'object' ? shot.asset : {}
+    const assetUrl = String(shot?.assetUrl || shot?.asset_url || shot?.r2Url || shot?.r2_url || shot?.url || nested?.url || nested?.r2_url || '').trim()
+    if (!assetUrl) return null
+    const startTime = Number(shot?.startTime ?? shot?.start_time ?? 0) || 0
+    const endTime = Number(shot?.endTime ?? shot?.end_time ?? 0) || 0
+    const duration = Math.max(0.65, Number(shot?.duration ?? shot?.duration_seconds ?? (endTime > startTime ? endTime - startTime : 3.2)) || 3.2)
+    const assetId = String(shot?.assetId || shot?.asset_id || nested?.id || nested?.asset_id || `locked_${index + 1}`)
+    const title = String(shot?.title || shot?.scene || shot?.description || `镜头 ${index + 1}`)
+    return {
+      id: String(shot?.id || `locked_shot_${index + 1}`),
+      index: index + 1,
+      title,
+      scene: String(shot?.scene || shot?.description || title),
+      description: String(shot?.description || shot?.scene || title),
+      narration: String(shot?.narration || shot?.copy || shot?.text || shot?.script || ''),
+      duration,
+      duration_seconds: duration,
+      source: 'r2',
+      selection_source: 'manual',
+      manual_locked: true,
+      asset_id: assetId,
+      asset_ids: [assetId],
+      asset_url: assetUrl,
+      asset_name: String(shot?.assetName || shot?.asset_name || nested?.name || title),
+      start_time: Math.max(0, startTime),
+      end_time: endTime > startTime ? endTime : Math.max(0, startTime) + duration,
+      auto_start: false,
+      preserve_audio: Boolean(shot?.preserveAudio ?? shot?.preserve_audio ?? false),
+      speed: Math.max(0.75, Math.min(1.5, Number(shot?.speed || 1))),
+      transition: String(shot?.transition || '轻柔淡化'),
+      camera: String(shot?.camera || shot?.motion || '保留原片运镜'),
+    }
+  }).filter(Boolean)
+  return { clips, source: 'step3_shot_plan', locked: clips.length > 0 }
+}
+
 export default function VideoCreationWizard({ project, setProject, goTab }: Props) {
   // V10_40_8_6_A5_R3_BUNDLE_CONTRACT_FIX
   function clearAllVideoProgress() {
@@ -2338,21 +2378,17 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
                       : r2Context
                 )
             return {
-              ...base,
-              material_selection_mode: materialMode,
-              auto_fill_assets: materialMode !== 'manual',
-              selected_assets: selected,
-              asset_context: selected,
-              r2_material_context: selected,
-              lock_edit_plan:
-                materialMode === 'auto'
-                  ? false
-                  : Boolean(base.lock_edit_plan),
-              edit_plan:
-                materialMode === 'auto'
-                  ? undefined
-                  : base.edit_plan,
-            }
+    // V10_40_8_18_LOCKED_SHOT_PLAN_PAYLOAD
+    shot_plan: shotPlan,
+    edit_plan: buildLockedExistingEditPlan(shotPlan),
+    lock_edit_plan: buildLockedExistingEditPlan(shotPlan).clips.length > 0,
+    ...base,
+    material_selection_mode: materialMode,
+    auto_fill_assets: materialMode !== 'manual',
+    selected_assets: selected,
+    asset_context: selected,
+    r2_material_context: selected
+}
           })(),
           240000,
         )
@@ -3048,11 +3084,12 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
       <div className="aiw-stepGrid three">
         <section className="aiw-stepCard">
           <h3>{creationMode === 'existing_edit' ? '素材剪辑计划' : '镜头计划'}</h3>
+          {/* V10_40_8_18_SELECTOR_AT_MATERIAL_EDIT_PLAN */}
+          <DynamicEditV2Selector shotCount={shotPlan.length} />
             {/* MATERIAL_SELECTION_MODE_V10_40_8_6 */}
             {creationMode === 'existing_edit' && (
               <div className="aiw-materialModePanel">
           {/* V10_40_8_16_ENGINE_AT_STEP3_TOP */}
-          <DynamicEditV2Selector />
 
           {/* V10_40_8_16_ENGINE_AT_STEP3_TOP */}
 <div>

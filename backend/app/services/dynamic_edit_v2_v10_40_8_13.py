@@ -19,8 +19,8 @@ from typing import Any, Callable
 
 from fastapi import Depends, HTTPException, Request
 
-VERSION = "10.40.8.16-balanced-editing-studio"
-INSTALL_MARKER = "V10_40_8_16_BALANCED_EDITING_STUDIO"
+VERSION = "10.40.8.18-clean-semantic-director"
+INSTALL_MARKER = "V10_40_8_17_SEMANTIC_SHOT_DIRECTOR"
 _INSTALLED = False
 _LOCK = threading.RLock()
 
@@ -721,7 +721,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     for index, item in enumerate(timings):
         start = _safe_float(item.get("start"), 0.0)
         end = max(start + 0.28, _safe_float(item.get("end"), start + 0.8))
-        raw_text = _wrap_text(str(item.get("text") or ""), 7)
+        raw_text = _clean_caption_text(str(item.get("text") or ""))
         text = _highlight_ass(raw_text, keywords, str(preset["highlight"]))
         role = _classify(raw_text)
         impact = role in {"hook", "data", "risk", "question", "turn"} and len(raw_text) <= 7
@@ -1021,16 +1021,24 @@ def _run_dynamic(settings: Any, proxy_job_id: str, payload: dict[str, Any]) -> N
     classic = _classic()
     work = _work_dir(settings, proxy_job_id)
     try:
-        _update_proxy(settings, proxy_job_id, status="running", stage="classic_base_start", progress=2, message="正在保留 A10-R4 稳定底片")
-        classic_payload = dict(payload)
-        classic_payload["burn_subtitles"] = False
-        pace_key = str(payload.get("dynamic_visual_pace") or "balanced")
-        classic_payload["edit_pace"] = {
-            "calm": "dynamic_calm",
-            "balanced": "dynamic_balanced",
-            "punchy": "dynamic_punchy",
-        }.get(pace_key, "dynamic_balanced")
+        _update_proxy(settings, proxy_job_id, status="running", stage="semantic_plan", progress=2, message="正在读取上一页镜头并生成语义切镜计划")
+        from app.services.semantic_shot_director_v10_40_8_18 import prepare_classic_payload
+
+        prepared = prepare_classic_payload(settings, payload, proxy_job_id)
+        classic_payload = dict(prepared["payload"])
+        semantic_plan = dict(prepared["plan"])
         classic_payload["dynamic_v2_parent_job_id"] = proxy_job_id
+        _update_proxy(
+            settings,
+            proxy_job_id,
+            semantic_shot_plan=semantic_plan,
+            asset_usage_report=semantic_plan.get("usage_report") or {},
+            message=(
+                f"已按上一页锁定 {len(semantic_plan.get('clips') or [])} 个镜头"
+                if semantic_plan.get("locked")
+                else f"已生成 {len(semantic_plan.get('clips') or [])} 个语义镜头，优先使用未重复素材"
+            ),
+        )
         classic_job = classic._start(settings, classic_payload)
         classic_job_id = str(classic_job["job_id"])
         _update_proxy(settings, proxy_job_id, base_job_id=classic_job_id, classic_job_id=classic_job_id)
@@ -1061,13 +1069,27 @@ def _run_dynamic(settings: Any, proxy_job_id: str, payload: dict[str, Any]) -> N
         if not base or str(base.get("status")) != "done":
             raise TimeoutError("等待 A10-R4 稳定底片超时")
 
+        applied_clips = (
+            ((base.get("edit_plan") or {}).get("clips") if isinstance(base.get("edit_plan"), dict) else None)
+            or base.get("clips")
+            or ((classic_payload.get("edit_plan") or {}).get("clips") if isinstance(classic_payload.get("edit_plan"), dict) else None)
+            or []
+        )
+        if hasattr(classic, "_record_asset_usage") and applied_clips:
+            classic._record_asset_usage(settings, proxy_job_id, applied_clips)
+
         source_url = str(base.get("no_subtitle_video_url") or base.get("raw_video_url") or base.get("video_url") or "")
         if not source_url:
             raise RuntimeError("稳定底片没有可用视频地址")
         source_suffix = Path(urllib.parse.urlparse(source_url).path).suffix or ".mp4"
         source_path = _download(source_url, work / f"classic_base{source_suffix}")
         info = _probe(source_path)
-        duration = max(0.1, _safe_float(base.get("duration_seconds"), info["duration"]) or info["duration"])
+        duration = max(
+            0.1,
+            _safe_float(info.get("audio_duration"), 0.0)
+            or _safe_float(base.get("duration_seconds"), info["duration"])
+            or info["duration"],
+        )
         timings = _normalize_timings(payload, base, duration)
         intensity = str(payload.get("dynamic_edit_intensity") or "balanced")
         style_id = str(payload.get("dynamic_subtitle_style") or "dynamic_white_yellow")
@@ -1095,6 +1117,11 @@ def _run_dynamic(settings: Any, proxy_job_id: str, payload: dict[str, Any]) -> N
             "sticker_level": sticker_level,
             "sfx_count": render_report.get("sfx_count", 0),
             "sticker_count": render_report.get("sticker_count", 0),
+            "shot_plan_applied": bool((classic_payload.get("edit_plan") or {}).get("clips")),
+            "locked_shot_plan_count": len((classic_payload.get("edit_plan") or {}).get("clips") or []),
+            "semantic_shot_plan": semantic_plan,
+            "asset_usage_report": semantic_plan.get("usage_report") or {},
+            "audio_tail_guard": render_report.get("audio_tail_guard") or {},
             "person_cutout": {"requested": False, "status": "deferred_until_mask_quality_gate"},
             "render": render_report,
             "created_at": _now(),
@@ -1104,6 +1131,13 @@ def _run_dynamic(settings: Any, proxy_job_id: str, payload: dict[str, Any]) -> N
         _update_proxy(settings, proxy_job_id, stage="upload", progress=96, message="正在上传动态精剪版并保留稳定版")
         dynamic_url = classic._url(settings, output_path, "videos/existing-edit-v2/final")
         classic_url = str(base.get("video_url") or base.get("output_url") or source_url)
+        from app.services.semantic_shot_director_v10_40_8_18 import record_success
+
+        usage_written = record_success(
+            settings,
+            proxy_job_id,
+            list((semantic_plan or {}).get("clips") or []),
+        )
         _update_proxy(
             settings,
             proxy_job_id,
@@ -1127,6 +1161,11 @@ def _run_dynamic(settings: Any, proxy_job_id: str, payload: dict[str, Any]) -> N
             dynamic_edit_intensity=intensity,
             dynamic_sfx_level=sfx_level,
             dynamic_sticker_level=sticker_level,
+            shot_plan_applied=bool((classic_payload.get("edit_plan") or {}).get("clips")),
+            locked_shot_plan_count=len((classic_payload.get("edit_plan") or {}).get("clips") or []),
+            semantic_shot_plan=semantic_plan,
+            asset_usage_report=usage_written,
+            audio_tail_guard=render_report.get("audio_tail_guard") or {},
             base_job_id=classic_job_id,
             fal_used=False,
             billing_guard="dynamic_v2_wraps_existing_edit_no_fal",
@@ -1219,7 +1258,12 @@ def install_dynamic_edit_v2(app: Any, get_settings: Callable[..., Any]) -> None:
                 "list_cards": False,
                 "no_text_boxes": True,
                 "micro_caption_fragments": True,
-                "dynamic_dense_base_clips": True,
+                "dynamic_dense_base_clips": False,
+                "semantic_scene_boundaries": True,
+                "locked_previous_page_shot_plan": True,
+                "persistent_asset_usage_recorder": True,
+                "audio_tail_guard": True,
+                "phrase_safe_caption_segmentation": True,
                 "reference_subtitle_pack": True,
                 "keyword_highlight": True,
                 "micro_sfx": False,
@@ -1699,7 +1743,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     for index, item in enumerate(timings):
         start = _safe_float(item.get("start"), 0.0)
         end = max(start + 0.30, _safe_float(item.get("end"), start + 0.85))
-        raw_text = _wrap_text(str(item.get("text") or ""), 7)
+        raw_text = _clean_caption_text(str(item.get("text") or ""))
         role = _classify(raw_text)
         impact = role in {"hook", "data", "risk", "question", "turn"} and index % 2 == 0
         style = "Impact" if impact else "Dynamic"
@@ -1875,3 +1919,322 @@ def _build_audio_filters(
         "alimiter=limit=0.94,loudnorm=I=-16:LRA=7:TP=-1.8[aout]"
     )
     return ";".join(parts), "aout"
+
+
+
+# =============================================================================
+# V10.40.8.17 SEMANTIC SHOT DIRECTOR OVERRIDES
+# =============================================================================
+V17_MARKER = "V10_40_8_17_SEMANTIC_SHOT_DIRECTOR"
+
+V17_PROTECTED_CAPTION_PHRASES = tuple(sorted({
+    "吉隆坡", "马来西亚", "第一眼", "真实价格", "真实用途", "先看你的真实用途",
+    "自住还是出租", "生活半径", "交通和生活半径", "产权校验", "退出路径",
+    "产权校验和退出路径", "租客来源", "交付周期", "交通规划", "生活配套",
+    "现金流", "回报率", "预算区间", "区域选择", "投资逻辑", "未来规划",
+    "不要只看价格", "先看区域和用途", "再看交通", "提前想清楚",
+}, key=len, reverse=True))
+
+V17_ORPHAN_START = set("的了是在和与或但却吗呢啊呀也就都而及把被给从到对")
+V17_ORPHAN_END = set("的了是在和与或但却把被给从到对")
+V17_SEMANTIC_BOUNDARIES = (
+    "但是", "不过", "然而", "所以", "如果", "比如", "然后", "因为", "其实",
+    "真正", "而是", "先看", "再看", "最后", "另外", "同时", "而且", "接下来",
+    "第一", "第二", "第三", "第四", "关键是", "重点是",
+)
+
+
+def _probe(path: Path) -> dict[str, Any]:
+    cmd = [
+        "ffprobe", "-v", "error", "-show_entries",
+        "format=duration:stream=codec_type,width,height,r_frame_rate,duration",
+        "-of", "json", str(path),
+    ]
+    data = json.loads(subprocess.check_output(cmd, text=True))
+    streams = data.get("streams") or []
+    video = next((x for x in streams if x.get("codec_type") == "video"), {})
+    audio = next((x for x in streams if x.get("codec_type") == "audio"), {})
+    rate = str(video.get("r_frame_rate") or "30/1")
+    try:
+        n, d = rate.split("/", 1)
+        fps = float(n) / max(1.0, float(d))
+    except Exception:
+        fps = 30.0
+    format_duration = _safe_float((data.get("format") or {}).get("duration"), 0.0)
+    video_duration = _safe_float(video.get("duration"), format_duration)
+    audio_duration = _safe_float(audio.get("duration"), 0.0)
+    return {
+        "duration": format_duration or video_duration or audio_duration,
+        "video_duration": video_duration or format_duration,
+        "audio_duration": audio_duration,
+        "width": int(video.get("width") or 0),
+        "height": int(video.get("height") or 0),
+        "fps": max(20.0, min(60.0, fps or 30.0)),
+        "has_audio": bool(audio),
+    }
+
+
+def _caption_forbidden_cuts(text: str) -> set[int]:
+    forbidden: set[int] = set()
+    for phrase in V17_PROTECTED_CAPTION_PHRASES:
+        start = 0
+        while True:
+            index = text.find(phrase, start)
+            if index < 0:
+                break
+            forbidden.update(range(index + 1, index + len(phrase)))
+            start = index + 1
+    return forbidden
+
+
+def _caption_dp_segment(text: str, max_chars: int = 10) -> list[str]:
+    text = _clean_caption_text(text)
+    if not text:
+        return []
+    if len(text) <= max_chars + 2:
+        return [text]
+    forbidden = _caption_forbidden_cuts(text)
+    n = len(text)
+    inf = 10**9
+    cost = [inf] * (n + 1)
+    prev = [-1] * (n + 1)
+    cost[0] = 0
+    boundary_positions = {0, n}
+    for marker in V17_SEMANTIC_BOUNDARIES:
+        start = 0
+        while True:
+            idx = text.find(marker, start)
+            if idx < 0:
+                break
+            boundary_positions.add(idx)
+            boundary_positions.add(idx + len(marker))
+            start = idx + 1
+    for i in range(n):
+        if cost[i] >= inf:
+            continue
+        for j in range(i + 2, min(n, i + max_chars + 3) + 1):
+            if j < n and j in forbidden:
+                continue
+            chunk = text[i:j]
+            length = len(chunk)
+            penalty = abs(length - 7) * 1.4
+            if length < 4:
+                penalty += 18
+            if length > max_chars:
+                penalty += (length - max_chars) * 8
+            if chunk[0] in V17_ORPHAN_START:
+                penalty += 22
+            if chunk[-1] in V17_ORPHAN_END:
+                penalty += 18
+            if j in boundary_positions:
+                penalty -= 4
+            if i in boundary_positions:
+                penalty -= 2
+            if cost[i] + penalty < cost[j]:
+                cost[j] = cost[i] + penalty
+                prev[j] = i
+    if prev[n] < 0:
+        return [text]
+    chunks: list[str] = []
+    cursor = n
+    while cursor > 0:
+        start = prev[cursor]
+        if start < 0:
+            return [text]
+        chunks.append(text[start:cursor])
+        cursor = start
+    chunks.reverse()
+    # Merge accidental orphan/single-character pieces without deleting text.
+    merged: list[str] = []
+    for chunk in chunks:
+        if merged and (len(chunk) == 1 or chunk[0] in V17_ORPHAN_START):
+            merged[-1] += chunk
+        else:
+            merged.append(chunk)
+    if len(merged) > 1 and (len(merged[-1]) == 1 or merged[-1][-1] in V17_ORPHAN_END):
+        merged[-2] += merged[-1]
+        merged.pop()
+    return [item for item in merged if item]
+
+
+def _caption_chunks(text: str, *, max_chars: int = 10) -> list[str]:
+    raw = re.sub(r"\\s+", "", str(text or "")).strip()
+    if not raw:
+        return []
+    clauses = [
+        item.strip("，,。！？!?；;、：:")
+        for item in re.split(r"[，,。！？!?；;、：:]+", raw)
+        if item.strip("，,。！？!?；;、：:")
+    ]
+    output: list[str] = []
+    for clause in clauses or [raw]:
+        output.extend(_caption_dp_segment(clause, max_chars=max_chars))
+    assert "".join(output) == _clean_caption_text(raw), (raw, output)
+    return output
+
+
+def _normalize_locked_shot_plan(payload: dict[str, Any]) -> dict[str, Any]:
+    raw_candidates: list[Any] = []
+    edit_plan = payload.get("edit_plan")
+    if isinstance(edit_plan, dict):
+        raw_candidates.append(edit_plan.get("clips"))
+    raw_candidates.extend([
+        payload.get("shot_plan"), payload.get("shotPlan"), payload.get("shots"),
+    ])
+    raw: list[Any] = []
+    for candidate in raw_candidates:
+        if isinstance(candidate, list) and candidate:
+            raw = candidate
+            break
+    clips: list[dict[str, Any]] = []
+    for index, item in enumerate(raw, 1):
+        if not isinstance(item, dict):
+            continue
+        nested = item.get("asset") if isinstance(item.get("asset"), dict) else {}
+        url = str(
+            item.get("asset_url") or item.get("assetUrl") or item.get("r2_url")
+            or item.get("url") or nested.get("url") or nested.get("r2_url") or ""
+        ).strip()
+        if not url:
+            continue
+        asset_id = str(
+            item.get("asset_id") or item.get("assetId") or item.get("id")
+            or nested.get("id") or nested.get("asset_id") or hashlib.sha256(url.encode()).hexdigest()[:20]
+        ).strip()
+        start = _safe_float(item.get("start_time") if item.get("start_time") is not None else item.get("startTime"), 0.0)
+        end = _safe_float(item.get("end_time") if item.get("end_time") is not None else item.get("endTime"), 0.0)
+        duration = _safe_float(item.get("duration_seconds") or item.get("duration"), 0.0)
+        if duration <= 0 and end > start:
+            duration = end - start
+        duration = max(0.65, duration or 3.2)
+        narration = str(item.get("narration") or item.get("copy") or item.get("text") or item.get("script") or "").strip()
+        title = str(item.get("title") or item.get("scene") or item.get("description") or f"镜头 {index}").strip()
+        clips.append({
+            "id": str(item.get("id") or f"locked_shot_{index}"),
+            "index": index,
+            "title": title,
+            "scene": str(item.get("scene") or item.get("description") or title),
+            "description": str(item.get("description") or item.get("scene") or title),
+            "narration": narration,
+            "duration": round(duration, 3),
+            "duration_seconds": round(duration, 3),
+            "source": "r2",
+            "selection_source": "manual",
+            "manual_locked": True,
+            "asset_id": asset_id,
+            "asset_ids": [asset_id],
+            "asset_url": url,
+            "asset_name": str(item.get("asset_name") or item.get("assetName") or nested.get("name") or title),
+            "start_time": max(0.0, start),
+            "end_time": max(start + 0.1, end) if end > start else round(max(0.0, start) + duration, 3),
+            "auto_start": False,
+            "preserve_audio": bool(item.get("preserve_audio") if item.get("preserve_audio") is not None else item.get("preserveAudio", False)),
+            "speed": max(0.75, min(1.5, _safe_float(item.get("speed"), 1.0))),
+            "transition": str(item.get("transition") or "轻柔淡化"),
+            "camera": str(item.get("camera") or "保留原片运镜"),
+        })
+    return {"clips": clips, "source": "previous_page_shot_plan", "locked": bool(clips)}
+
+
+def _build_audio_filters(
+    plan: dict[str, Any], *, has_audio: bool, sfx_inputs: list[dict[str, Any]],
+) -> tuple[str, str | None]:
+    if not has_audio:
+        return "", None
+    render_duration = max(0.1, _safe_float(plan.get("render_duration"), _safe_float(plan.get("duration"), 30.0)))
+    voice_chain = (
+        f"[0:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,"
+        f"apad=pad_dur=0.16,atrim=duration={render_duration:.3f},"
+        f"afade=t=out:st={max(0.0, render_duration - 0.14):.3f}:d=0.14[voice]"
+    )
+    if not sfx_inputs:
+        return voice_chain + ";[voice]loudnorm=I=-16:LRA=7:TP=-1.8[aout]", "aout"
+    parts: list[str] = [voice_chain]
+    labels: list[str] = ["voice"]
+    for index, item in enumerate(sfx_inputs, start=1):
+        event = item["event"]
+        sfx = item["sfx"]
+        input_index = int(item["input_index"])
+        delay = int(max(0.0, _safe_float(event.get("start"), 0.0)) * 1000)
+        gain = max(0.018, min(0.16, _safe_float(sfx.get("gain"), 0.08)))
+        label = f"sfx{index}"
+        parts.append(
+            f"[{input_index}:a]aresample=48000,pan=stereo|c0=c0|c1=c0,"
+            f"atrim=0:0.62,asetpts=PTS-STARTPTS,highpass=f=90,lowpass=f=11500,"
+            f"volume={gain:.4f},afade=t=in:st=0:d=0.012,"
+            f"afade=t=out:st=0.40:d=0.16,adelay={delay}|{delay}[{label}]"
+        )
+        labels.append(label)
+    parts.append(
+        "".join(f"[{label}]" for label in labels)
+        + f"amix=inputs={len(labels)}:duration=first:dropout_transition=0:normalize=0,"
+        "alimiter=limit=0.90,loudnorm=I=-16:LRA=7:TP=-2.0[aout]"
+    )
+    return ";".join(parts), "aout"
+
+
+def render_dynamic_video(
+    input_path: Path, output_path: Path, ass_path: Path, plan: dict[str, Any],
+) -> dict[str, Any]:
+    info = _probe(input_path)
+    video_duration = _safe_float(info.get("video_duration"), info.get("duration") or 0.0)
+    audio_duration = _safe_float(info.get("audio_duration"), 0.0)
+    if info.get("has_audio") and audio_duration > 0:
+        render_duration = min(video_duration or audio_duration + 0.12, audio_duration + 0.12)
+    else:
+        render_duration = video_duration or _safe_float(info.get("duration"), 0.0)
+    render_duration = max(0.1, render_duration)
+    plan["render_duration"] = round(render_duration, 3)
+    plan["duration"] = min(_safe_float(plan.get("duration"), render_duration), render_duration)
+
+    sticker_inputs = _collect_sticker_inputs(plan)
+    sfx_inputs = [
+        item for item in _collect_sfx_inputs(plan)
+        if _safe_float(item.get("event", {}).get("start"), 0.0) < render_duration - 0.18
+    ]
+    cmd = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-i", str(input_path)]
+    next_input_index = 1
+    for item in sticker_inputs:
+        item["input_index"] = next_input_index
+        sticker = item["sticker"]
+        span = max(0.6, _safe_float(sticker.get("end"), 1.0) - _safe_float(sticker.get("start"), 0.0))
+        cmd += ["-loop", "1", "-framerate", f"{info['fps']:.3f}", "-t", f"{span:.3f}", "-i", str(item["path"])]
+        next_input_index += 1
+    for item in sfx_inputs:
+        item["input_index"] = next_input_index
+        cmd += ["-i", str(item["path"])]
+        next_input_index += 1
+    video_filters = _build_video_filters(input_path.parent, plan, ass_path, sticker_inputs)
+    audio_filters, audio_label = _build_audio_filters(plan, has_audio=bool(info["has_audio"]), sfx_inputs=sfx_inputs)
+    cmd += ["-filter_complex", video_filters + (";" + audio_filters if audio_filters else ""), "-map", "[vout]"]
+    if audio_label == "aout":
+        cmd += ["-map", "[aout]"]
+    cmd += [
+        "-t", f"{render_duration:.3f}", "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+        "-pix_fmt", "yuv420p", "-r", f"{info['fps']:.3f}",
+    ]
+    if info["has_audio"]:
+        cmd += ["-c:a", "aac", "-b:a", "192k"]
+    cmd += ["-movflags", "+faststart", str(output_path)]
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    subprocess.run(cmd, check=True, timeout=7200)
+    rendered = _probe(output_path)
+    output_video = _safe_float(rendered.get("video_duration"), rendered.get("duration") or 0.0)
+    output_audio = _safe_float(rendered.get("audio_duration"), 0.0)
+    delta = abs(output_video - output_audio) if output_audio > 0 else 0.0
+    if abs(output_video - render_duration) > 0.35:
+        raise RuntimeError(f"动态精剪输出时长异常：expected={render_duration:.3f}, actual={output_video:.3f}")
+    if output_audio > 0 and delta > 0.25:
+        raise RuntimeError(f"动态精剪音画尾部不一致：video={output_video:.3f}, audio={output_audio:.3f}")
+    return {
+        "input": info, "output": rendered, "ffmpeg_command": cmd,
+        "sticker_count": len(sticker_inputs), "sfx_count": len(sfx_inputs),
+        "sticker_assets": [item["path"].name for item in sticker_inputs],
+        "sfx_assets": [item["path"].name for item in sfx_inputs],
+        "audio_tail_guard": {
+            "enabled": True, "input_video_duration": round(video_duration, 3),
+            "input_audio_duration": round(audio_duration, 3), "render_duration": round(render_duration, 3),
+            "output_video_duration": round(output_video, 3), "output_audio_duration": round(output_audio, 3),
+            "output_delta_seconds": round(delta, 3),
+        },
+    }
