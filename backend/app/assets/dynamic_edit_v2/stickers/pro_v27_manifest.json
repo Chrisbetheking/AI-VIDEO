@@ -1,0 +1,90 @@
+{
+  "version": "pro-stickers-v27",
+  "license": "Original AI-VIDEO project graphics",
+  "assets": [
+    {
+      "filename": "pro27_chart.png",
+      "sha256": "09c761d5d66e0dfcadb1175dce6e95404b7320707bc560cb61df90c91428deba",
+      "size_bytes": 5418,
+      "width": 256,
+      "height": 256
+    },
+    {
+      "filename": "pro27_check.png",
+      "sha256": "a03a6c1c697d860a488553eb58b1e6ae817a7276d3af15ab682683e0d49c1315",
+      "size_bytes": 5982,
+      "width": 256,
+      "height": 256
+    },
+    {
+      "filename": "pro27_comment.png",
+      "sha256": "2e28bde8c60a5a909fceb9878ebc21ee70633869dfd25570c5d79ef9b1d48e61",
+      "size_bytes": 5514,
+      "width": 256,
+      "height": 256
+    },
+    {
+      "filename": "pro27_compare.png",
+      "sha256": "84268be059c999801f4e1429009e68a710c9b389e76b1a4201e5d567c96d1738",
+      "size_bytes": 5367,
+      "width": 256,
+      "height": 256
+    },
+    {
+      "filename": "pro27_house.png",
+      "sha256": "0806f3a23bca91ec6ea00568adcf2758fba8cfe84d4b617d8f697b62d997a0b8",
+      "size_bytes": 5365,
+      "width": 256,
+      "height": 256
+    },
+    {
+      "filename": "pro27_people.png",
+      "sha256": "3a4f35c3fd873933d76d5ff0a3f52c4158ec556e2884642477703137b2a45baa",
+      "size_bytes": 6035,
+      "width": 256,
+      "height": 256
+    },
+    {
+      "filename": "pro27_price.png",
+      "sha256": "6f42a3fb5a3324fece4257532659ddf9e6499104143cdd00226e680346228e76",
+      "size_bytes": 5755,
+      "width": 256,
+      "height": 256
+    },
+    {
+      "filename": "pro27_question.png",
+      "sha256": "ed64c3b7c15ffbdb31f4c35e70982e8807b7d885ad4b99d5df96931da5fa7e0e",
+      "size_bytes": 5596,
+      "width": 256,
+      "height": 256
+    },
+    {
+      "filename": "pro27_route.png",
+      "sha256": "2793bfeed7ed10a951dc0608e706e04dfbc4f1f952afe98e996a6c75f3c49acc",
+      "size_bytes": 6076,
+      "width": 256,
+      "height": 256
+    },
+    {
+      "filename": "pro27_school.png",
+      "sha256": "c4e98ca80edbd405c2a99b41ce688a6dc45eb3991a9a74b61102549099cc27af",
+      "size_bytes": 5499,
+      "width": 256,
+      "height": 256
+    },
+    {
+      "filename": "pro27_shopping.png",
+      "sha256": "c33453d70c9d64edf9c05e67d8c3436876a84897d61b1f250632325a670d4e00",
+      "size_bytes": 5359,
+      "width": 256,
+      "height": 256
+    },
+    {
+      "filename": "pro27_warning.png",
+      "sha256": "849334d6b9a19fbb67c859ad8e3d86fffa1292b8516daa85a11216f1fce4618b",
+      "size_bytes": 5257,
+      "width": 256,
+      "height": 256
+    }
+  ]
+}

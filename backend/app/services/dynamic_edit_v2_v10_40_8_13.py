@@ -19,8 +19,8 @@ from typing import Any, Callable
 
 from fastapi import Depends, HTTPException, Request
 
-VERSION = "10.40.8.26-native-word-sync-pro-effects-gate"
-INSTALL_MARKER = "V10_40_8_26_NATIVE_WORD_SYNC_PRO_EFFECTS_GATE"
+VERSION = "10.40.8.27-reference-driven-teaching-effects-gate"
+INSTALL_MARKER = "V10_40_8_27_REFERENCE_DRIVEN_TEACHING_EFFECTS_GATE"
 _INSTALLED = False
 _LOCK = threading.RLock()
 
@@ -322,6 +322,8 @@ def _decorate_events(
     sticker_cfg = STICKER_LEVELS.get(sticker_level) or STICKER_LEVELS["balanced"]
 
     max_sfx = max(0, int(math.ceil(max(1.0, duration) / 30.0 * int(sfx_cfg["max_per_30s"]))))
+    if sfx_level == "balanced" and duration >= 12.0:
+        max_sfx = max(4, max_sfx)
     for event in result[:max_sfx]:
         asset_name, gain = SFX_ASSET_MAP.get(str(event.get("effect") or "keyword_focus"), SFX_ASSET_MAP["keyword_focus"])
         if float(sfx_cfg["volume"]) > 0 and (_sfx_root() / asset_name).exists():
@@ -1457,7 +1459,7 @@ def _run_dynamic(settings: Any, proxy_job_id: str, payload: dict[str, Any]) -> N
         plan["ai_shot_beats"] = semantic_plan.get("beats") or []
         plan["ai_director_report"] = semantic_plan.get("director_report") or {}
         plan["subtitle_style"] = style_id
-        ass_path = write_dynamic_ass(work / "dynamic_subtitles.ass", timings, plan.get("keywords") or [], style_id=style_id)
+        ass_path = write_dynamic_ass(work / "dynamic_subtitles.ass", timings, plan.get("keywords") or [], style_id=style_id, events=plan.get("events") or [])
         plan_path = work / "dynamic_effect_timeline.json"
         plan_path.write_text(json.dumps(plan, ensure_ascii=False, indent=2), encoding="utf-8")
 
@@ -1491,7 +1493,7 @@ def _run_dynamic(settings: Any, proxy_job_id: str, payload: dict[str, Any]) -> N
             "keyword_impact_count": int(plan.get("keyword_impact_count") or 0),
             "subtitle_timing_source": plan.get("subtitle_timing_source"),
             "native_word_timestamp_count": int(plan.get("native_word_timestamp_count") or 0),
-            "sfx_pack_version": "mixkit-pro-v26",
+            "sfx_pack_version": "mixkit-pro-v27",
             "shot_plan_applied": bool((classic_payload.get("edit_plan") or {}).get("clips")),
             "locked_shot_plan_count": len((classic_payload.get("edit_plan") or {}).get("clips") or []),
             "semantic_shot_plan": semantic_plan,
@@ -1665,9 +1667,15 @@ def install_dynamic_edit_v2(app: Any, get_settings: Callable[..., Any]) -> None:
                 "runtime_child_job_binding": True,
                 "volcengine_native_word_timestamps": True,
                 "mixkit_professional_sfx_v26": True,
+                "mixkit_professional_sfx_v27": True,
                 "inline_keyword_scale_pulse": True,
                 "semantic_sticker_effects": True,
                 "effect_delivery_quality_gate": True,
+                "reference_driven_teaching_effects": True,
+                "semantic_callout_cards": True,
+                "pro_sticker_pack_v27": True,
+                "audible_sfx_mix_gate": True,
+                "effect_density_guard_v27": True,
                 "unapproved_sfx_disabled": True,
                 "random_stickers_disabled": True,
                 "reference_subtitle_pack": True,
@@ -3212,3 +3220,843 @@ def _build_audio_filters(plan: dict[str, Any], *, has_audio: bool, sfx_inputs: l
         labels.append(label)
     parts.append("".join(f"[{label}]" for label in labels) + f"amix=inputs={len(labels)}:duration=first:dropout_transition=0:normalize=0,alimiter=limit=0.91,loudnorm=I=-16:LRA=7:TP=-1.8[aout]")
     return ";".join(parts), "aout"
+
+
+
+# =============================================================================
+# V10.40.8.27 REFERENCE-DRIVEN TEACHING / TALKING-HEAD EFFECT ENGINE
+# =============================================================================
+V27_MARKER = "V10_40_8_27_REFERENCE_DRIVEN_TEACHING_EFFECTS"
+V27_PRO_SFX_DIR = Path(os.getenv("AI_VIDEO_PRO_SFX_DIR_V27", "/data/ai-video/sfx-professional-v27"))
+
+SFX_VARIANT_BANKS = {
+    "hook": [
+        ("mixkit-explainer-video-pops-whoosh-light-pop-3005.mp3", 0.96),
+        ("mixkit-cinematic-whoosh-fast-transition-1492.mp3", 0.82),
+    ],
+    "question": [
+        ("mixkit-interface-hint-notification-911.mp3", 0.78),
+    ],
+    "turn": [
+        ("mixkit-fast-small-sweep-transition-166.mp3", 0.82),
+        ("mixkit-air-woosh-1489.mp3", 0.72),
+    ],
+    "data": [
+        ("mixkit-explainer-video-pops-whoosh-light-pop-3005.mp3", 0.76),
+        ("mixkit-interface-hint-notification-911.mp3", 0.62),
+    ],
+    "risk": [
+        ("mixkit-human-single-heart-beat-490.mp3", 0.92),
+        ("mixkit-cinematic-whoosh-fast-transition-1492.mp3", 0.68),
+    ],
+    "comparison": [
+        ("mixkit-fast-small-sweep-transition-166.mp3", 0.86),
+        ("mixkit-air-woosh-1489.mp3", 0.70),
+    ],
+    "list": [
+        ("mixkit-explainer-video-pops-whoosh-light-pop-3005.mp3", 0.70),
+        ("mixkit-interface-hint-notification-911.mp3", 0.58),
+    ],
+    "evidence": [
+        ("mixkit-camera-shutter-click-1133.mp3", 0.70),
+        ("mixkit-interface-hint-notification-911.mp3", 0.52),
+    ],
+    "cta": [
+        ("mixkit-interface-hint-notification-911.mp3", 0.78),
+    ],
+    "knowledge": [
+        ("mixkit-explainer-video-pops-whoosh-light-pop-3005.mp3", 0.58),
+    ],
+}
+
+SFX_LEVELS = {
+    "off": {"label": "关闭", "volume": 0.0, "max_per_30s": 0, "min_gap": 99.0},
+    "light": {"label": "教学轻量", "volume": 0.18, "max_per_30s": 4, "min_gap": 3.6},
+    "balanced": {"label": "教学标准", "volume": 0.24, "max_per_30s": 6, "min_gap": 2.7},
+    "strong": {"label": "教学强化", "volume": 0.30, "max_per_30s": 8, "min_gap": 2.1},
+}
+
+STICKER_LEVELS = {
+    "off": {"label": "关闭", "max_per_30s": 0, "min_gap": 99.0},
+    "light": {"label": "少量语义图标", "max_per_30s": 4, "min_gap": 3.6},
+    "balanced": {"label": "标准语义图标", "max_per_30s": 6, "min_gap": 2.7},
+    "rich": {"label": "丰富语义图标", "max_per_30s": 8, "min_gap": 2.1},
+}
+
+V27_SFX_META = {
+    "mixkit-cinematic-whoosh-fast-transition-1492.mp3": (0.0, 0.78),
+    "mixkit-air-woosh-1489.mp3": (0.0, 0.72),
+    "mixkit-fast-small-sweep-transition-166.mp3": (0.0, 0.58),
+    "mixkit-interface-hint-notification-911.mp3": (0.0, 0.62),
+    "mixkit-human-single-heart-beat-490.mp3": (0.0, 0.72),
+    "mixkit-explainer-video-pops-whoosh-light-pop-3005.mp3": (0.0, 0.62),
+    "mixkit-camera-shutter-click-1133.mp3": (0.0, 0.48),
+}
+
+V27_ROLE_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
+    ("cta", re.compile(r"关注|评论|私信|留言|收藏|转发|告诉我|找我|联系|主页|一对一", re.I)),
+    ("list", re.compile(r"第一|第二|第三|第四|第五|第[一二三四五六七八九十]+|这几点|步骤|清单|重点[一二三四五六七八九十\d]", re.I)),
+    ("comparison", re.compile(r"自住.{0,8}投资|投资.{0,8}自住|对比|相比|不同|区别|前者|后者|不是.{0,8}而是", re.I)),
+    ("risk", re.compile(r"风险|避坑|不要|不能|错误|踩坑|买错|低价|迷惑|亏|贵|陷阱|误区", re.I)),
+    ("question", re.compile(r"为什么|怎么|到底|是不是|哪里|什么|多少|好不好|能不能|吗[？?]?|疑问|问题", re.I)),
+    ("turn", re.compile(r"但是|然而|其实|真正|反而|结果|却|重点是|关键是|先分清|再看|最后", re.I)),
+    ("data", re.compile(r"\d+(?:\.\d+)?\s*(?:%|万|亿|年|个月|天|套|个|条|公里|分钟|RM|马币|人民币)?", re.I)),
+    ("evidence", re.compile(r"地图|数据|截图|报告|实拍|现场|证据|规划|线路|户型图", re.I)),
+    ("hook", re.compile(r"买房|千万|一定要|别再|大多数|很多人|先别|记住|第一眼|开头", re.I)),
+]
+
+V27_SEMANTIC_KEYWORDS = (
+    "吉隆坡买房", "价格", "买错", "自住", "投资", "投资逻辑", "租客来源",
+    "租客", "转手", "生活半径", "社区配套", "低价", "长期价值", "区域",
+    "交通", "学校", "商场", "医院", "预算", "风险", "回报", "收益",
+)
+
+
+def _sfx_root() -> Path:
+    return V27_PRO_SFX_DIR
+
+
+def _classify(text: str) -> str:
+    value = _clean_caption_text(str(text or ""))
+    for role, pattern in V27_ROLE_PATTERNS:
+        if pattern.search(value):
+            return role
+    return "knowledge"
+
+
+def _keywords(payload: dict[str, Any], timings: list[dict[str, Any]]) -> list[str]:
+    joined = "".join(_clean_caption_text(str(item.get("text") or "")) for item in timings)
+    found: list[str] = []
+    for item in payload.get("keyword_insights") or []:
+        value = str(item.get("value") if isinstance(item, dict) else item or "").strip()
+        value = _clean_caption_text(value)
+        if 2 <= len(value) <= 10 and value in joined and value not in found:
+            found.append(value)
+    for value in V27_SEMANTIC_KEYWORDS:
+        if value in joined and value not in found:
+            found.append(value)
+    for match in re.findall(r"\d+(?:\.\d+)?(?:%|万|亿|年|个月|天|套|个|条|公里|分钟)?", joined):
+        if match and match not in found:
+            found.append(match)
+    return found[:16]
+
+
+def _pick_focus(text: str, keywords: list[str]) -> str:
+    clean = _clean_caption_text(str(text or ""))
+    if "自住" in clean and "投资" in clean:
+        return "自住 VS 投资"
+    replacements = (
+        ("租客从哪里来", "租客来源"),
+        ("租客哪里来", "租客来源"),
+        ("转手好不好", "转手能力"),
+        ("别被低价迷惑", "别被低价迷惑"),
+        ("长期价值才关键", "长期价值"),
+        ("生活半径", "生活半径"),
+        ("社区配套", "社区配套"),
+    )
+    for source, target in replacements:
+        if source in clean:
+            return target[:10]
+    for keyword in sorted((item for item in keywords if item), key=len, reverse=True):
+        if keyword in clean:
+            return keyword[:10]
+    number = re.search(r"\d+(?:\.\d+)?\s*(?:%|万|亿|年|个月|天|套|个|条|公里|分钟)?", clean)
+    if number:
+        return number.group(0).strip()[:10]
+    return clean[:8] or "重点"
+
+
+V27_STICKER_RULES: list[tuple[re.Pattern[str], str]] = [
+    (re.compile(r"学校|学区|教育", re.I), "pro27_school"),
+    (re.compile(r"自住.{0,8}投资|投资.{0,8}自住|对比|区别|不同", re.I), "pro27_compare"),
+    (re.compile(r"租客|人群|客户|白领", re.I), "pro27_people"),
+    (re.compile(r"生活半径|交通|通勤|地铁|路线|区域|位置", re.I), "pro27_route"),
+    (re.compile(r"社区配套|商场|超市|购物|生活配套", re.I), "pro27_shopping"),
+    (re.compile(r"风险|买错|踩坑|迷惑|不要|不能", re.I), "pro27_warning"),
+    (re.compile(r"价格|预算|低价|金额|租金", re.I), "pro27_price"),
+    (re.compile(r"转手|回报|收益|价值|升值", re.I), "pro27_chart"),
+    (re.compile(r"评论|告诉我|咨询|私信|一对一", re.I), "pro27_comment"),
+    (re.compile(r"为什么|哪里|什么|好不好|能不能|吗", re.I), "pro27_question"),
+    (re.compile(r"房|住宅|公寓|楼盘|买房", re.I), "pro27_house"),
+]
+
+
+def _v16_choose_sticker(event: dict[str, Any], index: int, style: str, last_asset: str) -> str:
+    text = _clean_caption_text(str(event.get("source_text") or ""))
+    role = str(event.get("role") or "knowledge")
+    candidate = ""
+    for pattern, asset in V27_STICKER_RULES:
+        if pattern.search(text):
+            candidate = asset
+            break
+    if not candidate:
+        candidate = {
+            "hook": "pro27_house",
+            "question": "pro27_question",
+            "turn": "pro27_route",
+            "data": "pro27_chart",
+            "risk": "pro27_warning",
+            "comparison": "pro27_compare",
+            "list": "pro27_check",
+            "evidence": "pro27_check",
+            "cta": "pro27_comment",
+            "knowledge": "pro27_check",
+        }.get(role, "pro27_check")
+    if candidate == last_asset:
+        fallback = {
+            "pro27_warning": "pro27_price",
+            "pro27_route": "pro27_house",
+            "pro27_chart": "pro27_check",
+            "pro27_comment": "pro27_check",
+        }.get(candidate, "pro27_check")
+        if (_sticker_root() / f"{fallback}.png").is_file():
+            candidate = fallback
+    return candidate if (_sticker_root() / f"{candidate}.png").is_file() else ""
+
+
+def _v27_make_event(index: int, item: dict[str, Any], duration: float, keywords: list[str]) -> dict[str, Any]:
+    text = _clean_caption_text(str(item.get("text") or ""))
+    role = _classify(text)
+    start = max(0.0, _safe_float(item.get("start"), 0.0))
+    end = min(duration, max(start + 0.40, _safe_float(item.get("end"), start + 1.0)))
+    effect_map = {
+        "hook": "hook_punch",
+        "question": "question_pulse",
+        "turn": "turn_focus",
+        "data": "data_card",
+        "risk": "risk_alert",
+        "comparison": "comparison_card",
+        "list": "list_card",
+        "evidence": "evidence_pip",
+        "cta": "cta_tag",
+        "knowledge": "keyword_focus",
+    }
+    priority = {
+        "hook": 11, "comparison": 10, "risk": 9, "data": 8, "question": 8,
+        "list": 7, "turn": 7, "cta": 8, "evidence": 6, "knowledge": 3,
+    }
+    return {
+        "id": f"v27_fx_{index + 1:02d}",
+        "segment_index": index,
+        "start": round(start, 3),
+        "end": round(min(end, start + (1.15 if role in {"hook", "risk", "data", "comparison"} else 1.35)), 3),
+        "role": role,
+        "effect": effect_map[role],
+        "focus_text": _pick_focus(text, keywords),
+        "source_text": text,
+        "priority": priority[role],
+    }
+
+
+def _v27_select_events(timings: list[dict[str, Any]], duration: float, intensity: str, keywords: list[str]) -> list[dict[str, Any]]:
+    candidates = [_v27_make_event(index, item, duration, keywords) for index, item in enumerate(timings)]
+    semantic_terms = re.compile(r"房|价格|投资|自住|租客|转手|生活半径|社区配套|低价|长期价值|区域|交通|学校|商场|医院")
+    candidates = [
+        item for item in candidates
+        if item["role"] != "knowledge" or semantic_terms.search(item["source_text"])
+    ]
+    max_per_30 = {"restrained": 8, "balanced": 12, "strong": 16}.get(intensity, 12)
+    max_events = max(3, int(math.ceil(max(1.0, duration) / 30.0 * max_per_30)))
+    min_gap = {"restrained": 2.35, "balanced": 1.55, "strong": 1.05}.get(intensity, 1.55)
+    selected: list[dict[str, Any]] = []
+    for candidate in sorted(candidates, key=lambda item: (-int(item["priority"]), float(item["start"]))):
+        if any(abs(float(candidate["start"]) - float(item["start"])) < min_gap for item in selected):
+            continue
+        selected.append(candidate)
+        if len(selected) >= max_events:
+            break
+    selected.sort(key=lambda item: float(item["start"]))
+    if candidates and (not selected or float(selected[0]["start"]) > 0.9):
+        first = dict(candidates[0])
+        first.update(role="hook", effect="hook_punch", start=0.0, priority=11)
+        selected.insert(0, first)
+    if candidates:
+        tail_candidates = [item for item in candidates if float(item["start"]) >= duration * 0.72]
+        if tail_candidates and not any(float(item["start"]) >= duration * 0.72 for item in selected):
+            selected.append(dict(tail_candidates[-1]))
+
+    # Reference-driven teaching videos need a stable narrative spine:
+    # hook -> strongest explanation/comparison -> risk/question -> CTA.
+    mandatory_roles = ("hook", "comparison", "risk", "question", "cta")
+    for role in mandatory_roles:
+        role_candidates = [item for item in candidates if item.get("role") == role]
+        if not role_candidates or any(item.get("role") == role for item in selected):
+            continue
+        chosen = role_candidates[-1] if role == "cta" else role_candidates[0]
+        selected.append(dict(chosen))
+
+    selected = sorted({item["id"]: item for item in selected}.values(), key=lambda item: float(item["start"]))
+    if len(selected) > max_events:
+        mandatory_ids = {
+            item["id"] for item in selected
+            if item.get("role") in set(mandatory_roles)
+        }
+        mandatory = [item for item in selected if item["id"] in mandatory_ids]
+        optional = sorted(
+            [item for item in selected if item["id"] not in mandatory_ids],
+            key=lambda item: (-int(item.get("priority") or 0), float(item.get("start") or 0.0)),
+        )
+        selected = sorted((mandatory + optional[:max(0, max_events-len(mandatory))])[:max_events], key=lambda item: float(item["start"]))
+    return selected
+
+
+def _v27_callout_text(event: dict[str, Any]) -> str:
+    text = _clean_caption_text(str(event.get("source_text") or ""))
+    role = str(event.get("role") or "knowledge")
+    if role == "comparison" and "自住" in text and "投资" in text:
+        return "自住  VS  投资"
+    if role == "risk" and "低价" in text:
+        return "别被低价迷惑"
+    if role == "cta":
+        return "评论告诉我"
+    return str(event.get("focus_text") or "")[:10]
+
+
+def _v27_decorate_events(
+    events: list[dict[str, Any]],
+    duration: float,
+    *,
+    sfx_level: str,
+    sticker_level: str,
+) -> list[dict[str, Any]]:
+    result = [dict(item) for item in events]
+    sfx_cfg = SFX_LEVELS.get(sfx_level) or SFX_LEVELS["light"]
+    sticker_cfg = STICKER_LEVELS.get(sticker_level) or STICKER_LEVELS["light"]
+
+    max_sfx = max(0, int(math.ceil(max(1.0, duration) / 30.0 * int(sfx_cfg["max_per_30s"]))))
+    if sfx_level == "balanced" and duration >= 12.0:
+        max_sfx = max(4, max_sfx)
+    last_sfx_start = -999.0
+    last_sfx_asset = ""
+    used_sfx = 0
+    for index, event in enumerate(result):
+        if used_sfx >= max_sfx:
+            break
+        start = float(event["start"])
+        role = str(event.get("role") or "knowledge")
+        if role != "cta" and start - last_sfx_start < float(sfx_cfg["min_gap"]):
+            continue
+        options = SFX_VARIANT_BANKS.get(role) or SFX_VARIANT_BANKS["knowledge"]
+        asset = ""
+        role_gain = 0.0
+        for name, gain in options:
+            if name != last_sfx_asset and (_sfx_root() / name).is_file():
+                asset, role_gain = name, gain
+                break
+        if not asset:
+            for name, gain in options:
+                if (_sfx_root() / name).is_file():
+                    asset, role_gain = name, gain
+                    break
+        if asset and float(sfx_cfg["volume"]) > 0:
+            event["sfx"] = {
+                "asset": asset,
+                "gain": round(float(sfx_cfg["volume"]) * float(role_gain), 4),
+                "role": role,
+            }
+            used_sfx += 1
+            last_sfx_start = start
+            last_sfx_asset = asset
+
+    # Keep one polished completion cue for the CTA instead of spending the
+    # entire sound budget before the final action line.
+    cta_events = [event for event in result if event.get("role") == "cta"]
+    if sfx_level != "off" and cta_events and not any(event.get("sfx") for event in cta_events):
+        cta = cta_events[-1]
+        if used_sfx >= max_sfx:
+            removable = next((event for event in reversed(result) if event.get("sfx") and event.get("role") not in {"hook", "comparison", "risk"}), None)
+            if removable is not None:
+                removable.pop("sfx", None)
+                used_sfx -= 1
+        asset = "mixkit-interface-hint-notification-911.mp3"
+        if used_sfx < max_sfx and (_sfx_root() / asset).is_file():
+            cta["sfx"] = {"asset": asset, "gain": round(float(sfx_cfg["volume"]) * 0.78, 4), "role": "cta"}
+            used_sfx += 1
+
+    max_stickers = max(0, int(math.ceil(max(1.0, duration) / 30.0 * int(sticker_cfg["max_per_30s"]))))
+    if sticker_level == "balanced" and duration >= 12.0:
+        max_stickers = max(4, max_stickers)
+    last_sticker_start = -999.0
+    last_asset = ""
+    used_stickers = 0
+    positions = ("upper_right", "side_left", "upper_left", "side_right")
+    for index, event in enumerate(result):
+        if used_stickers >= max_stickers:
+            break
+        start = float(event["start"])
+        role = str(event.get("role") or "knowledge")
+        if role != "cta" and start - last_sticker_start < float(sticker_cfg["min_gap"]):
+            continue
+        asset = _v16_choose_sticker(event, index, "pro_v27", last_asset)
+        if not asset:
+            continue
+        span = 1.20 if event.get("role") in {"hook", "comparison", "risk"} else 1.05
+        event["sticker"] = {
+            "asset": f"{asset}.png",
+            "position": positions[used_stickers % len(positions)],
+            "size": 146 + (used_stickers % 2) * 10,
+            "start": round(start, 3),
+            "end": round(min(duration, start + span), 3),
+        }
+        used_stickers += 1
+        last_sticker_start = start
+        last_asset = asset
+
+    if sticker_level != "off" and cta_events and not any(event.get("sticker") for event in cta_events):
+        cta = cta_events[-1]
+        if used_stickers >= max_stickers:
+            removable = next((event for event in reversed(result) if event.get("sticker") and event.get("role") not in {"hook", "comparison", "risk"}), None)
+            if removable is not None:
+                removable.pop("sticker", None)
+                used_stickers -= 1
+        asset = "pro27_comment"
+        if used_stickers < max_stickers and (_sticker_root() / f"{asset}.png").is_file():
+            start = float(cta["start"])
+            cta["sticker"] = {
+                "asset": f"{asset}.png", "position": "upper_right", "size": 152,
+                "start": round(start, 3), "end": round(min(duration, start + 1.15), 3),
+            }
+            used_stickers += 1
+
+    callout_limit = max(2, int(math.ceil(max(1.0, duration) / 30.0 * 5)))
+    if duration >= 12.0:
+        callout_limit = max(4, callout_limit)
+    callout_gap = 2.8
+    callout_count = 0
+    last_callout = -999.0
+    callout_roles = {"hook", "comparison", "risk", "data", "list", "question", "cta", "turn"}
+    for event in result:
+        if callout_count >= callout_limit:
+            break
+        start = float(event["start"])
+        role = str(event.get("role") or "knowledge")
+        if role not in callout_roles or (role != "cta" and start - last_callout < callout_gap):
+            continue
+        text = _v27_callout_text(event)
+        if not text:
+            continue
+        event["callout"] = {
+            "text": text,
+            "style": "badge" if role in {"comparison", "list", "cta"} else "impact",
+            "start": round(start + 0.03, 3),
+            "end": round(min(duration, start + (0.95 if role in {"hook", "comparison", "risk"} else 0.78)), 3),
+        }
+        callout_count += 1
+        last_callout = start
+
+    if cta_events and not any(event.get("callout") for event in cta_events):
+        cta = cta_events[-1]
+        if callout_count >= callout_limit:
+            removable = next((event for event in reversed(result) if event.get("callout") and event.get("role") not in {"hook", "comparison", "risk"}), None)
+            if removable is not None:
+                removable.pop("callout", None)
+                callout_count -= 1
+        if callout_count < callout_limit:
+            start = float(cta["start"])
+            cta["callout"] = {
+                "text": "评论告诉我", "style": "badge",
+                "start": round(start + 0.03, 3), "end": round(min(duration, start + 0.92), 3),
+            }
+    return result
+
+
+_V26_BUILD_DYNAMIC_PLAN_ACTIVE = build_dynamic_plan
+
+
+def build_dynamic_plan(
+    payload: dict[str, Any],
+    timings: list[dict[str, Any]],
+    duration: float,
+    *,
+    intensity: str = "balanced",
+) -> dict[str, Any]:
+    plan = _V26_BUILD_DYNAMIC_PLAN_ACTIVE(payload, timings, duration, intensity=intensity)
+    keywords = _keywords(payload, timings)
+    events = _v27_select_events(timings, duration, intensity, keywords)
+    sfx_level = str(payload.get("dynamic_sfx_level") or "light")
+    sticker_level = str(payload.get("dynamic_sticker_level") or "light")
+    events = _v27_decorate_events(
+        events, duration, sfx_level=sfx_level, sticker_level=sticker_level
+    )
+    plan.update({
+        "version": VERSION,
+        "keywords": keywords,
+        "events": events,
+        "sfx_level": sfx_level,
+        "sticker_level": sticker_level,
+        "visual_pace": "reference_driven_teaching",
+        "reference_profile": {
+            "sources": ["user_reference_rough_vs_fine", "user_reference_sfx_taxonomy", "user_reference_text_mask", "user_reference_list_cards"],
+            "callout_max_per_30s": 5,
+            "sticker_semantic_only": True,
+            "caption_layer_count": 1,
+            "duplicate_full_caption_overlay": False,
+        },
+    })
+    plan["limits"] = {
+        "max_major_effects": len(events),
+        "min_effect_gap_seconds": {"restrained": 2.35, "balanced": 1.55, "strong": 1.05}.get(intensity, 1.55),
+        "zoom_strength": {"restrained": 0.034, "balanced": 0.050, "strong": 0.064}.get(intensity, 0.050),
+        "micro_zoom_strength": {"restrained": 0.006, "balanced": 0.010, "strong": 0.014}.get(intensity, 0.010),
+    }
+    plan["subtitle_timing_source"] = (
+        "volcengine_native_word_timestamp"
+        if any(item.get("native_word_timestamp") for item in timings)
+        else "segment_duration_fallback"
+    )
+    plan["native_word_timestamp_count"] = sum(int(item.get("native_word_count") or 0) for item in timings)
+    plan["keyword_impact_count"] = sum(
+        1 for item in timings
+        if any(keyword and keyword in _clean_caption_text(str(item.get("text") or "")) for keyword in keywords)
+        or _classify(str(item.get("text") or "")) in {"hook", "comparison", "risk", "question", "data", "cta"}
+    )
+    plan["keyword_impact_count"] = min(max(1, plan["keyword_impact_count"]), max(4, int(math.ceil(duration / 30.0 * 7))))
+    plan["effect_delivery"] = {
+        "requested_sfx_level": sfx_level,
+        "requested_sticker_level": sticker_level,
+        "planned_sfx_count": sum(1 for event in events if event.get("sfx")),
+        "planned_sticker_count": sum(1 for event in events if event.get("sticker")),
+        "planned_callout_count": sum(1 for event in events if event.get("callout")),
+        "keyword_impact_count": plan["keyword_impact_count"],
+        "sfx_pack": "mixkit-pro-v27",
+        "sticker_pack": "pro-stickers-v27",
+    }
+    return plan
+
+
+def _validate_v26_effect_plan(
+    plan: dict[str, Any],
+    timings: list[dict[str, Any]],
+    sfx_level: str,
+    sticker_level: str,
+) -> dict[str, Any]:
+    events = list(plan.get("events") or [])
+    sfx_count = sum(1 for event in events if isinstance(event.get("sfx"), dict))
+    sticker_count = sum(1 for event in events if isinstance(event.get("sticker"), dict))
+    callout_count = sum(1 for event in events if isinstance(event.get("callout"), dict))
+    if sfx_level != "off" and sfx_count <= 0:
+        raise ValueError("V27 专业音效计划为空")
+    if sticker_level != "off" and sticker_count <= 0:
+        raise ValueError("V27 语义贴纸计划为空")
+    if callout_count <= 0:
+        raise ValueError("V27 特殊文字效果计划为空")
+    if int(plan.get("keyword_impact_count") or 0) <= 0:
+        raise ValueError("V27 关键词强调计划为空")
+    if not any(item.get("native_word_timestamp") for item in timings):
+        plan.setdefault("warnings", []).append("native_word_timestamp_missing")
+    return plan
+
+
+def _highlight_ass(text: str, keywords: list[str], highlight: str) -> str:
+    escaped = _ass_escape(text)
+    for keyword in sorted((item for item in keywords if item), key=len, reverse=True):
+        safe = _ass_escape(keyword)
+        if safe in escaped:
+            pulse = (
+                rf"{{\c{highlight}\bord9\fscx120\fscy120"
+                rf"\t(0,135,\fscx100\fscy100\bord7)}}{safe}"
+                rf"{{\c&H00FFFFFF&\bord7\fscx100\fscy100}}"
+            )
+            return escaped.replace(safe, pulse, 1)
+    return escaped
+
+
+def write_dynamic_ass(
+    destination: Path,
+    timings: list[dict[str, Any]],
+    keywords: list[str],
+    *,
+    style_id: str,
+    events: list[dict[str, Any]] | None = None,
+) -> Path:
+    preset = SUBTITLE_PRESETS.get(style_id) or SUBTITLE_PRESETS["dynamic_white_yellow"]
+    context = getattr(_V16_CONTEXT, "config", {}) or {}
+    base_size = max(88, min(142, int(context.get("caption_size") or 110)))
+    font_name = "Noto Sans CJK SC"
+    header = f"""[Script Info]
+ScriptType: v4.00+
+PlayResX: 1080
+PlayResY: 1920
+ScaledBorderAndShadow: yes
+WrapStyle: 2
+
+[V4+ Styles]
+Format: Name,Fontname,Fontsize,PrimaryColour,SecondaryColour,OutlineColour,BackColour,Bold,Italic,Underline,StrikeOut,ScaleX,ScaleY,Spacing,Angle,BorderStyle,Outline,Shadow,Alignment,MarginL,MarginR,MarginV,Encoding
+Style: Dynamic,{font_name},{base_size},{preset['primary']},{preset['highlight']},{preset['outline']},&H00000000,-1,0,0,0,100,100,0.8,0,1,{preset['outline_width']},{preset['shadow']},5,55,55,0,1
+Style: Callout,{font_name},124,&H00FFFFFF,&H0000E8FF,&H00101010,&H00000000,-1,0,0,0,100,100,1.1,0,1,8,3,5,45,45,0,1
+Style: Badge,{font_name},92,&H00FFFFFF,&H0000E8FF,&H00101010,&H70000000,-1,0,0,0,100,100,0.7,0,3,3,0,5,42,42,0,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+"""
+    lines = [header]
+    for index, item in enumerate(timings):
+        start = _safe_float(item.get("start"), 0.0)
+        end = max(start + 0.30, _safe_float(item.get("end"), start + 0.85))
+        raw_text = _clean_caption_text(str(item.get("text") or ""))
+        role = _classify(raw_text)
+        text = _highlight_ass(raw_text, keywords, str(preset["highlight"]))
+        y = 1420 + (index % 2) * 86
+        if role in {"hook", "comparison", "risk", "question"}:
+            animation = rf"{{\an5\pos(540,{y})\fscx108\fscy108\t(0,120,\fscx100\fscy100)\fad(35,65)}}"
+        else:
+            animation = rf"{{\an5\move(540,{y+34},540,{y},0,150)\fad(55,75)}}"
+        lines.append(
+            f"Dialogue: 0,{_ass_time(start)},{_ass_time(end)},Dynamic,,0,0,0,,{animation}{text}\n"
+        )
+
+    for index, event in enumerate(events or []):
+        callout = event.get("callout")
+        if not isinstance(callout, dict):
+            continue
+        role = str(event.get("role") or "knowledge")
+        start = _safe_float(callout.get("start"), _safe_float(event.get("start"), 0.0))
+        end = max(start + 0.45, _safe_float(callout.get("end"), start + 0.80))
+        text = _ass_escape(str(callout.get("text") or event.get("focus_text") or "")[:12])
+        style = "Badge" if str(callout.get("style")) == "badge" else "Callout"
+        color = {
+            "risk": "&H00004BFF",
+            "question": "&H0000E8FF",
+            "data": "&H0000E8FF",
+            "hook": "&H0000E8FF",
+            "turn": "&H000096FF",
+            "comparison": "&H00FFFFFF",
+            "cta": "&H00FFFFFF",
+        }.get(role, "&H00FFFFFF")
+        y = {
+            "hook": 520,
+            "comparison": 650,
+            "risk": 610,
+            "question": 670,
+            "data": 600,
+            "list": 650,
+            "turn": 610,
+            "cta": 1080,
+        }.get(role, 620)
+        if role == "risk":
+            animation = rf"{{\an5\move(525,{y},555,{y},0,90)\c{color}\fscx138\fscy138\t(0,145,\fscx100\fscy100)\fad(20,70)}}"
+        elif style == "Badge":
+            animation = rf"{{\an5\pos(540,{y})\c{color}\fscx124\fscy124\t(0,150,\fscx100\fscy100)\fad(25,85)}}"
+        else:
+            animation = rf"{{\an5\pos(540,{y})\c{color}\fscx148\fscy148\t(0,150,\fscx100\fscy100)\fad(20,70)}}"
+        lines.append(
+            f"Dialogue: 1,{_ass_time(start)},{_ass_time(end)},{style},,0,0,0,,{animation}{text}\n"
+        )
+
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_text("".join(lines), encoding="utf-8-sig")
+    return destination
+
+
+def _build_video_filters(
+    work: Path,
+    plan: dict[str, Any],
+    ass_path: Path,
+    sticker_inputs: list[dict[str, Any]],
+    *,
+    width: int = 1080,
+    height: int = 1920,
+) -> str:
+    events = list(plan.get("events") or [])
+    limits = plan.get("limits") or {}
+    zoom_strength = _safe_float(limits.get("zoom_strength"), 0.050)
+    micro_strength = _safe_float(limits.get("micro_zoom_strength"), 0.010)
+    zoom_terms: list[str] = []
+    for event in events:
+        start = _safe_float(event.get("start"), 0.0)
+        end = max(start + 0.35, _safe_float(event.get("end"), start + 0.95))
+        span = max(0.28, min(1.15, end - start))
+        role = str(event.get("role") or "knowledge")
+        if role not in {"hook", "comparison", "risk", "question", "turn", "data", "cta"}:
+            continue
+        multiplier = {
+            "hook": 1.20,
+            "comparison": 0.90,
+            "risk": 0.95,
+            "question": 0.78,
+            "turn": 0.70,
+            "data": 0.90,
+            "cta": 0.62,
+        }.get(role, 0.65)
+        strength = zoom_strength * multiplier
+        zoom_terms.append(
+            f"+{strength:.4f}*between(t,{start:.3f},{start+span:.3f})"
+            f"*sin(PI*(t-{start:.3f})/{span:.3f})"
+        )
+    for index, beat in enumerate([float(value) for value in (plan.get("caption_beats") or [])[:48]]):
+        if index % 5:
+            continue
+        span = 0.70
+        zoom_terms.append(
+            f"+{micro_strength:.4f}*between(t,{beat:.3f},{beat+span:.3f})"
+            f"*sin(PI*(t-{beat:.3f})/{span:.3f})"
+        )
+    factor = "1" + "".join(zoom_terms)
+    chain = [
+        f"[0:v]scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height},setsar=1[base]",
+        f"[base]scale=w='{width}*({factor})':h='{height}*({factor})':eval=frame,"
+        f"crop={width}:{height}:(iw-{width})/2:(ih-{height})/2[v0]",
+    ]
+    current = "v0"
+    position_xy = {
+        "upper_left": ("52", "245"),
+        "upper_right": ("W-w-52", "260"),
+        "side_left": ("48", "700"),
+        "side_right": ("W-w-48", "720"),
+    }
+    for index, item in enumerate(sticker_inputs, start=1):
+        sticker = item["sticker"]
+        input_index = int(item["input_index"])
+        start = _safe_float(sticker.get("start"), 0.0)
+        end = max(start + 0.72, _safe_float(sticker.get("end"), start + 1.10))
+        span = max(0.72, end - start)
+        size = max(120, min(176, int(sticker.get("size") or 150)))
+        x_expr, y_base = position_xy.get(str(sticker.get("position") or "upper_right"), position_xy["upper_right"])
+        sticker_label = f"v27sticker{index}"
+        next_label = f"v27stk{index}"
+        chain.append(
+            f"[{input_index}:v]format=rgba,scale={size}:{size}:force_original_aspect_ratio=decrease,"
+            f"pad={size+24}:{size+24}:(ow-iw)/2:(oh-ih)/2:color=0x00000000,"
+            f"trim=duration={span:.3f},fade=t=in:st=0:d=0.09:alpha=1,"
+            f"fade=t=out:st={max(0.1,span-0.16):.3f}:d=0.16:alpha=1,"
+            f"setpts=PTS-STARTPTS+{start:.3f}/TB[{sticker_label}]"
+        )
+        chain.append(
+            f"[{current}][{sticker_label}]overlay=x='{x_expr}':"
+            f"y='{y_base}+8*sin(2*PI*(t-{start:.3f})/1.15)':"
+            f"eof_action=pass:shortest=0:enable='between(t,{start:.3f},{end:.3f})'[{next_label}]"
+        )
+        current = next_label
+    chain.append(f"[{current}]ass='{_ffmpeg_escape_path(ass_path)}'[vout]")
+    return ";".join(chain)
+
+
+def _build_audio_filters(
+    plan: dict[str, Any],
+    *,
+    has_audio: bool,
+    sfx_inputs: list[dict[str, Any]],
+) -> tuple[str, str | None]:
+    if not has_audio:
+        return "", None
+    render_duration = max(0.1, _safe_float(plan.get("render_duration"), _safe_float(plan.get("duration"), 30.0)))
+    voice_chain = (
+        f"[0:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,"
+        f"apad=pad_dur=0.16,atrim=duration={render_duration:.3f},"
+        f"afade=t=out:st={max(0.0,render_duration-0.14):.3f}:d=0.14,"
+        f"loudnorm=I=-16:LRA=7:TP=-2.0[voice]"
+    )
+    if not sfx_inputs:
+        return voice_chain + ";[voice]alimiter=limit=0.94[aout]", "aout"
+    parts = [voice_chain]
+    labels = ["voice"]
+    for index, item in enumerate(sfx_inputs, start=1):
+        event = item["event"]
+        sfx = item["sfx"]
+        input_index = int(item["input_index"])
+        delay = int(max(0.0, _safe_float(event.get("start"), 0.0)) * 1000)
+        asset_name = Path(str(item.get("path") or "")).name
+        trim_start, trim_duration = V27_SFX_META.get(asset_name, (0.0, 0.65))
+        gain = max(0.055, min(0.235, _safe_float(sfx.get("gain"), 0.135)))
+        fade_out_start = max(0.16, trim_duration - min(0.18, trim_duration * 0.25))
+        label = f"v27sfx{index}"
+        if index % 2:
+            pan = "pan=stereo|c0=0.70*c0|c1=1.00*c1"
+        else:
+            pan = "pan=stereo|c0=1.00*c0|c1=0.70*c1"
+        parts.append(
+            f"[{input_index}:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,"
+            f"atrim=start={trim_start:.3f}:duration={trim_duration:.3f},asetpts=PTS-STARTPTS,"
+            f"highpass=f=70,lowpass=f=14500,acompressor=threshold=0.11:ratio=2.0:attack=4:release=75,"
+            f"volume={gain:.4f},{pan},afade=t=in:st=0:d=0.010,"
+            f"afade=t=out:st={fade_out_start:.3f}:d={max(0.07,trim_duration-fade_out_start):.3f},"
+            f"adelay={delay}|{delay}[{label}]"
+        )
+        labels.append(label)
+    parts.append(
+        "".join(f"[{label}]" for label in labels)
+        + f"amix=inputs={len(labels)}:duration=first:dropout_transition=0:normalize=0,"
+        f"alimiter=limit=0.94[aout]"
+    )
+    return ";".join(parts), "aout"
+
+
+_V26_RENDER_DYNAMIC_VIDEO_ACTIVE = render_dynamic_video
+
+
+def _v27_channel_mean_volume(
+    path: Path,
+    expression: str,
+    *,
+    start: float | None = None,
+    duration: float | None = None,
+) -> float:
+    cmd = ["ffmpeg", "-hide_banner", "-nostats"]
+    if start is not None:
+        cmd += ["-ss", f"{max(0.0, start):.3f}"]
+    if duration is not None:
+        cmd += ["-t", f"{max(0.12, duration):.3f}"]
+    cmd += [
+        "-i", str(path),
+        "-af", f"pan=mono|c0={expression},volumedetect",
+        "-f", "null", "-",
+    ]
+    proc = subprocess.run(cmd, text=True, capture_output=True, timeout=180)
+    match = re.search(r"mean_volume:\s*(-?\d+(?:\.\d+)?)\s*dB", proc.stderr)
+    return float(match.group(1)) if match else -120.0
+
+
+def render_dynamic_video(
+    input_path: Path,
+    output_path: Path,
+    ass_path: Path,
+    plan: dict[str, Any],
+) -> dict[str, Any]:
+    report = _V26_RENDER_DYNAMIC_VIDEO_ACTIVE(input_path, output_path, ass_path, plan)
+    sfx_count = int(report.get("sfx_count") or 0)
+    mid_db = _v27_channel_mean_volume(output_path, "0.5*c0+0.5*c1")
+    side_db = _v27_channel_mean_volume(output_path, "0.5*c0-0.5*c1")
+    side_delta = side_db - mid_db
+    window_rows: list[dict[str, float]] = []
+    for event in plan.get("events") or []:
+        if not isinstance(event.get("sfx"), dict):
+            continue
+        start = max(0.0, _safe_float(event.get("start"), 0.0))
+        window_mid = _v27_channel_mean_volume(
+            output_path, "0.5*c0+0.5*c1", start=start, duration=0.82
+        )
+        window_side = _v27_channel_mean_volume(
+            output_path, "0.5*c0-0.5*c1", start=start, duration=0.82
+        )
+        window_rows.append({
+            "start": round(start, 3),
+            "mid_db": round(window_mid, 2),
+            "side_db": round(window_side, 2),
+            "side_minus_mid_db": round(window_side - window_mid, 2),
+        })
+    window_deltas = sorted(row["side_minus_mid_db"] for row in window_rows)
+    best_window = max(window_deltas) if window_deltas else -120.0
+    median_window = (
+        window_deltas[len(window_deltas) // 2]
+        if window_deltas else -120.0
+    )
+    audible_passed = (
+        sfx_count <= 0
+        or (best_window >= -35.0 and median_window >= -44.0)
+    )
+    report["audible_sfx_mix"] = {
+        "whole_track_mid_mean_db": round(mid_db, 2),
+        "whole_track_side_mean_db": round(side_db, 2),
+        "whole_track_side_minus_mid_db": round(side_delta, 2),
+        "best_sfx_window_side_minus_mid_db": round(best_window, 2),
+        "median_sfx_window_side_minus_mid_db": round(median_window, 2),
+        "windows": window_rows,
+        "passed": audible_passed,
+    }
+    if not audible_passed:
+        raise ValueError(
+            "V27 音效可听度不足："
+            f"best_window={best_window:.2f}dB, median_window={median_window:.2f}dB"
+        )
+    return report
+
