@@ -19,8 +19,8 @@ from typing import Any, Callable
 
 from fastapi import Depends, HTTPException, Request
 
-VERSION = "10.40.8.29-natural-cadence-asset-memory"
-INSTALL_MARKER = "V10_40_8_29_NATURAL_CADENCE_ASSET_MEMORY"
+VERSION = "10.40.8.30-stable-sequence-effects"
+INSTALL_MARKER = "V10_40_8_30_STABLE_SEQUENCE_EFFECTS"
 _INSTALLED = False
 _LOCK = threading.RLock()
 
@@ -4239,4 +4239,266 @@ def render_dynamic_video(input_path: Path, output_path: Path, ass_path: Path, pl
     report['audio_tail_guard']={'target_duration':round(target,4),'output_duration':round(final_duration,4),'shortest_cut_forbidden':True,'passed':True}
     report['semantic_component_count']=len(_collect_sticker_inputs(plan))
     report['effect_engine']='v28_semantic_editor_engine'
+    return report
+
+# =============================================================================
+# V10.40.8.30 CLEAN SEMANTIC EFFECT DELIVERY
+# =============================================================================
+# The V27 builder previously reintroduced small icon stickers after V28 had
+# rendered semantic cards. This final override is the production path: legacy
+# stickers/callouts are removed first, then only semantic cards and audible,
+# role-bound SFX are assigned.
+_V29_BUILD_DYNAMIC_PLAN_CLEAN_EFFECTS = build_dynamic_plan
+_V29_RENDER_DYNAMIC_VIDEO_CLEAN_EFFECTS = render_dynamic_video
+
+V30_COMPONENT_ROOT = V28_COMPONENT_ROOT / "v30"
+V30_COMPONENT_ROOT.mkdir(parents=True, exist_ok=True)
+
+
+def _v30_semantic_role(text: str, fallback: str = "knowledge") -> str:
+    value = _clean_caption_text(text)
+    if re.search(r"(评论|留言|关注|下一条|告诉我|帮你分析|私信)", value):
+        return "cta"
+    if re.search(r"(最看重什么|为什么|怎么|到底|吗|？)", value):
+        return "question"
+    if re.search(r"(别光听|不要只看|别被|风险|注意|误区|搞错)", value):
+        return "risk"
+    if re.search(r"(自住.*投资|投资.*自住|自住.*出租|出租.*自住|不等于|≠|对比|区别)", value):
+        return "comparison"
+    if re.search(r"(三件事|三点|分别|①|②|③|清单|确认)", value):
+        return "list"
+    if re.search(r"(第一步|第二步|第三步|流程|签署|支付|抵扣)", value):
+        return "data"
+    return _v28_role(value, fallback)
+
+
+def _v30_card_copy(role: str, text: str) -> tuple[str, list[str]]:
+    clean = _clean_caption_text(text)
+    if role == "comparison":
+        title = "自住  VS  投资" if ("自住" in clean and ("投资" in clean or "出租" in clean)) else "核心对比"
+        return title, [clean[:26]]
+    if role == "risk":
+        return "别只看表面", [clean[:28]]
+    if role == "question":
+        return "你最看重什么？", [clean[:28]]
+    if role == "cta":
+        return "评论告诉我", ["把你的需求说清楚", "按实际情况帮你分析"]
+    if role == "list":
+        terms = [x for x in ("交通", "商圈", "租客来源", "金额", "退款", "抵扣") if x in clean]
+        return "重点看这几项", terms[:3] or [clean[:28]]
+    if role == "data":
+        return "关键流程", [clean[:28]]
+    return "重点", [clean[:28]]
+
+
+def _v30_render_component(event: dict[str, Any]) -> Path:
+    from PIL import Image, ImageDraw, ImageFont
+
+    role = str(event.get("role") or "knowledge")
+    source_text = str(event.get("source_text") or event.get("focus_text") or "")
+    title, rows = _v30_card_copy(role, source_text)
+    digest = hashlib.sha256(f"v30|{role}|{title}|{'|'.join(rows)}".encode("utf-8")).hexdigest()[:24]
+    path = V30_COMPONENT_ROOT / f"{digest}.png"
+    if path.exists():
+        return path
+    width, height = 720, 270
+    image = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(image)
+    palette = {
+        "risk": ((37, 15, 23, 242), (255, 82, 96, 255)),
+        "comparison": ((14, 22, 42, 242), (139, 124, 255, 255)),
+        "list": ((14, 35, 31, 242), (65, 214, 132, 255)),
+        "cta": ((20, 24, 40, 242), (255, 210, 66, 255)),
+        "question": ((15, 29, 45, 242), (74, 197, 255, 255)),
+        "data": ((25, 29, 42, 242), (255, 169, 64, 255)),
+    }
+    bg, accent = palette.get(role, ((18, 24, 38, 242), (205, 190, 255, 255)))
+    draw.rounded_rectangle((5, 5, width - 5, height - 5), radius=34, fill=bg, outline=(255, 255, 255, 44), width=2)
+    draw.rounded_rectangle((25, 27, 38, height - 27), radius=7, fill=accent)
+    font_path = "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc"
+    title_font = ImageFont.truetype(font_path, 48)
+    row_font = ImageFont.truetype(font_path, 32)
+    draw.text((66, 34), title, font=title_font, fill=accent)
+    y = 112
+    for index, row in enumerate(rows[:3], start=1):
+        prefix = f"{index}. " if len(rows) > 1 else ""
+        draw.text((68, y), prefix + row, font=row_font, fill=(255, 255, 255, 246))
+        y += 48
+    image.save(path)
+    return path
+
+
+def _decorate_events(events: list[dict[str, Any]], duration: float, *, sfx_level: str, sticker_level: str) -> list[dict[str, Any]]:
+    cleaned: list[dict[str, Any]] = []
+    for source in events:
+        event = dict(source)
+        # Never inherit V16/V27 emoji/icon sticker or duplicate callout layers.
+        for key in ("sticker", "callout", "sfx", "legacy_sticker", "keyword_overlay", "impact_overlay"):
+            event.pop(key, None)
+        text = str(event.get("source_text") or event.get("focus_text") or "")
+        event["role"] = _v30_semantic_role(text, str(event.get("role") or "knowledge"))
+        cleaned.append(event)
+
+    max_sfx = 0 if sfx_level == "off" else max(3, min(6, int(math.ceil(max(1.0, duration) / 9.5))))
+    max_cards = 0 if sticker_level == "off" else max(3, min(5, int(math.ceil(max(1.0, duration) / 10.0))))
+    sfx_gap = 3.2
+    card_gap = 3.8
+    last_sfx = -999.0
+    last_card = -999.0
+    sfx_count = 0
+    card_count = 0
+    roles = {"hook", "comparison", "risk", "question", "data", "list", "cta", "turn"}
+
+    for index, event in enumerate(cleaned):
+        role = str(event.get("role") or "knowledge")
+        start = max(0.0, _safe_float(event.get("start"), 0.0))
+        end = max(start + 0.6, _safe_float(event.get("end"), start + 1.2))
+        if sfx_count < max_sfx and role in roles and (role == "cta" or start - last_sfx >= sfx_gap):
+            bank = SFX_VARIANT_BANKS.get(role) or SFX_VARIANT_BANKS.get("turn") or []
+            if bank:
+                asset, _ = bank[index % len(bank)]
+                if (_sfx_root() / asset).is_file():
+                    gain = {
+                        "hook": 0.56, "comparison": 0.50, "risk": 0.48,
+                        "question": 0.45, "data": 0.44, "list": 0.43,
+                        "turn": 0.40, "cta": 0.52,
+                    }.get(role, 0.42)
+                    event["sfx"] = {"asset": asset, "gain": gain, "role": role, "audible_mix": True}
+                    sfx_count += 1
+                    last_sfx = start
+        if card_count < max_cards and role in {"comparison", "risk", "question", "data", "list", "cta"} and (role == "cta" or start - last_card >= card_gap):
+            span = 1.55 if role in {"comparison", "risk", "cta"} else 1.30
+            event["sticker"] = {
+                "asset": "__v30_semantic_component__",
+                "position": "upper_left" if card_count % 2 == 0 else "upper_right",
+                "size": 590,
+                "start": round(start, 3),
+                "end": round(min(duration, max(start + 1.0, min(end, start + span))), 3),
+                "semantic_only": True,
+            }
+            card_count += 1
+            last_card = start
+    return cleaned
+
+
+def build_dynamic_plan(payload: dict[str, Any], timings: list[dict[str, Any]], duration: float, *, intensity: str = "balanced") -> dict[str, Any]:
+    plan = _V29_BUILD_DYNAMIC_PLAN_CLEAN_EFFECTS(payload, timings, duration, intensity=intensity)
+    sfx_level = str(payload.get("dynamic_sfx_level") or "light")
+    sticker_level = str(payload.get("dynamic_sticker_level") or "light")
+    raw_events = [dict(item) for item in (plan.get("events") or []) if isinstance(item, dict)]
+    plan["events"] = _decorate_events(raw_events, duration, sfx_level=sfx_level, sticker_level=sticker_level)
+    plan["version"] = VERSION
+    plan["sfx_level"] = sfx_level
+    plan["sticker_level"] = sticker_level
+    plan["visual_pace"] = "stable_sequence_semantic_effects"
+    plan["legacy_sticker_forbidden"] = True
+    plan["semantic_component_only"] = True
+    plan["effect_delivery"] = {
+        "requested_sfx_level": sfx_level,
+        "requested_sticker_level": sticker_level,
+        "planned_sfx_count": sum(1 for event in plan["events"] if isinstance(event.get("sfx"), dict)),
+        "planned_sticker_count": sum(1 for event in plan["events"] if isinstance(event.get("sticker"), dict)),
+        "planned_callout_count": 0,
+        "keyword_impact_count": int(plan.get("keyword_impact_count") or 0),
+        "sfx_pack": "mixkit-pro-v30-audible",
+        "sticker_pack": "semantic-cards-v30-no-emoji",
+    }
+    return plan
+
+
+def _collect_sticker_inputs(plan: dict[str, Any]) -> list[dict[str, Any]]:
+    result: list[dict[str, Any]] = []
+    for event in plan.get("events") or []:
+        sticker = event.get("sticker")
+        if not isinstance(sticker, dict):
+            continue
+        if sticker.get("asset") != "__v30_semantic_component__":
+            # Final production path forbids old tiny icon/emoji files.
+            continue
+        path = _v30_render_component(event)
+        if path.is_file():
+            result.append({"event": event, "sticker": sticker, "path": path})
+    return result
+
+
+def _highlight_ass(text: str, keywords: list[str], highlight: str) -> str:
+    escaped = _ass_escape(text)
+    for keyword in sorted((item for item in keywords if item), key=len, reverse=True):
+        safe = _ass_escape(keyword)
+        if safe in escaped:
+            pulse = (
+                rf"{{\c{highlight}\bord10\shad2\fscx132\fscy132"
+                rf"\t(0,190,\fscx100\fscy100\bord7\shad1)}}{safe}"
+                rf"{{\c&H00FFFFFF&\bord7\shad1\fscx100\fscy100}}"
+            )
+            return escaped.replace(safe, pulse, 1)
+    return escaped
+
+
+def _build_audio_filters(plan: dict[str, Any], *, has_audio: bool, sfx_inputs: list[dict[str, Any]]) -> tuple[str, str | None]:
+    if not has_audio:
+        return "", None
+    duration = max(0.1, _safe_float(plan.get("render_duration"), _safe_float(plan.get("duration"), 30.0)))
+    duck_terms: list[str] = []
+    for item in sfx_inputs:
+        start = max(0.0, _safe_float((item.get("event") or {}).get("start"), 0.0))
+        duck_terms.append(f"-0.10*between(t,{start:.3f},{start + 0.52:.3f})")
+    duck = "1" + "".join(duck_terms)
+    parts = [
+        f"[0:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,"
+        f"apad=pad_dur={duration:.3f},atrim=duration={duration:.3f},"
+        f"loudnorm=I=-16:LRA=7:TP=-2.0,volume='{duck}':eval=frame[voice]"
+    ]
+    labels = ["voice"]
+    for index, item in enumerate(sfx_inputs, start=1):
+        event = item["event"]
+        sfx = item["sfx"]
+        inp = int(item["input_index"])
+        delay = int(max(0.0, _safe_float(event.get("start"), 0.0)) * 1000)
+        gain = max(0.36, min(0.62, _safe_float(sfx.get("gain"), 0.46)))
+        label = f"v30sfx{index}"
+        parts.append(
+            f"[{inp}:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,"
+            f"atrim=0:1.45,asetpts=PTS-STARTPTS,highpass=f=90,lowpass=f=14500,"
+            f"volume={gain:.4f},afade=t=in:st=0:d=0.010,afade=t=out:st=1.18:d=0.22,"
+            f"adelay={delay}|{delay}[{label}]"
+        )
+        labels.append(label)
+    if len(labels) == 1:
+        parts.append("[voice]alimiter=limit=0.94[aout]")
+    else:
+        parts.append(
+            "".join(f"[{label}]" for label in labels)
+            + f"amix=inputs={len(labels)}:duration=longest:dropout_transition=0:normalize=0,"
+            + f"atrim=duration={duration:.3f},loudnorm=I=-15.5:LRA=8:TP=-1.5,alimiter=limit=0.96[aout]"
+        )
+    return ";".join(parts), "aout"
+
+
+def _validate_v26_effect_plan(plan: dict[str, Any], timings: list[dict[str, Any]], sfx_level: str, sticker_level: str) -> dict[str, Any]:
+    events = list(plan.get("events") or [])
+    sfx_count = sum(1 for event in events if isinstance(event.get("sfx"), dict))
+    sticker_count = sum(1 for event in events if isinstance(event.get("sticker"), dict))
+    legacy_count = sum(
+        1 for event in events
+        if isinstance(event.get("sticker"), dict)
+        and event["sticker"].get("asset") != "__v30_semantic_component__"
+    )
+    if sfx_level != "off" and sfx_count <= 0:
+        raise ValueError("V30 可听音效计划为空")
+    if sticker_level != "off" and sticker_count <= 0:
+        raise ValueError("V30 语义信息卡计划为空")
+    if legacy_count:
+        raise ValueError(f"V30 检测到旧图标贴纸：{legacy_count}")
+    if int(plan.get("keyword_impact_count") or 0) <= 0:
+        raise ValueError("V30 关键词冲击计划为空")
+    return plan
+
+
+def render_dynamic_video(input_path: Path, output_path: Path, ass_path: Path, plan: dict[str, Any]) -> dict[str, Any]:
+    report = _V29_RENDER_DYNAMIC_VIDEO_CLEAN_EFFECTS(input_path, output_path, ass_path, plan)
+    report["effect_engine"] = "v30_clean_semantic_effects"
+    report["legacy_sticker_forbidden"] = True
+    report["semantic_component_count"] = len(_collect_sticker_inputs(plan))
+    report["audible_sfx_count"] = sum(1 for event in plan.get("events") or [] if isinstance(event.get("sfx"), dict))
     return report

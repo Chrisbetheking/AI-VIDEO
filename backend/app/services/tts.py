@@ -802,3 +802,86 @@ async def synthesize_tts_segments(
         item["continuous_tts"] = True
         item["continuous_group_count"] = len(grouped_segments)
     return output, duration, warning, expanded
+
+# =============================================================================
+# V10.40.8.30 CONTINUOUS NATURAL DELIVERY — FEWER HARD GROUP JOINS
+# =============================================================================
+V30_MAX_GROUP_CHARS = 180
+V30_MAX_GROUP_SEGMENTS = 8
+V30_GROUP_TAIL_PAUSE_MS = 70
+
+
+def _v30_strong_group_boundary(current: VoiceSegment, following: VoiceSegment | None) -> bool:
+    if following is None:
+        return True
+    if not _v29_same_voice_profile(current, following):
+        return True
+    current_text = sanitize_tts_text(current.text)
+    next_text = sanitize_tts_text(following.text)
+    # Keep normal explanations, transitions, “最后” and list explanations in one
+    # contextual request. Split only before a real CTA/brand close or an explicit
+    # very long authored pause.
+    if int(current.pause_after_ms or 0) >= 520:
+        return True
+    if re.match(r"^(评论|留言|关注|私信|下一条)", next_text):
+        return True
+    if re.search(r"(评论|留言|关注|私信|下一条)", current_text):
+        return True
+    return False
+
+
+def _v30_group_voice_segments(segments: list[VoiceSegment]) -> tuple[list[VoiceSegment], list[list[int]]]:
+    usable = [segment for segment in segments[:30] if sanitize_tts_text(segment.text)]
+    groups: list[list[VoiceSegment]] = []
+    mappings: list[list[int]] = []
+    current: list[VoiceSegment] = []
+    current_indexes: list[int] = []
+    current_chars = 0
+
+    for index, segment in enumerate(usable):
+        value = sanitize_tts_text(segment.text)
+        next_chars = len(_v29_clean_alignment_text(value))
+        would_overflow = bool(current) and (
+            len(current) >= V30_MAX_GROUP_SEGMENTS
+            or current_chars + next_chars > V30_MAX_GROUP_CHARS
+            or not _v29_same_voice_profile(current[-1], segment)
+        )
+        if would_overflow:
+            groups.append(current)
+            mappings.append(current_indexes)
+            current = []
+            current_indexes = []
+            current_chars = 0
+        current.append(segment)
+        current_indexes.append(index)
+        current_chars += next_chars
+        following = usable[index + 1] if index + 1 < len(usable) else None
+        if _v30_strong_group_boundary(segment, following):
+            groups.append(current)
+            mappings.append(current_indexes)
+            current = []
+            current_indexes = []
+            current_chars = 0
+    if current:
+        groups.append(current)
+        mappings.append(current_indexes)
+
+    grouped_segments: list[VoiceSegment] = []
+    for items in groups:
+        first = items[0]
+        last = items[-1]
+        grouped_segments.append(VoiceSegment(
+            text=_v29_join_group_text(items),
+            emotion=first.emotion,
+            speed_ratio=float(first.speed_ratio),
+            volume_ratio=float(first.volume_ratio),
+            pitch_ratio=float(first.pitch_ratio),
+            # The cloud voice already performs punctuation pauses. A second long
+            # silent WAV made the delivery sound stitched; keep only a tiny guard.
+            pause_after_ms=min(V30_GROUP_TAIL_PAUSE_MS, max(0, int(last.pause_after_ms or 0))),
+        ))
+    return grouped_segments, mappings
+
+
+# The final synthesize_tts_segments resolves this global at call time.
+_v29_group_voice_segments = _v30_group_voice_segments

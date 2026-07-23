@@ -112,7 +112,7 @@ export default function DynamicEditV2Selector({shotCount=0}:{shotCount?:number})
 
   return <section className="dynamic-edit-v2-shell v19" data-dynamic-edit-v2="true" data-placement="shot-plan-section">
     <div className="v19-topline">
-      <div className="v19-title"><span>V10.40.8.29 · NATURAL CADENCE</span><h4>AI 教学口播精剪</h4><p>真实 TTS 决定最终时长；完整长句优先稳镜，具体地点逐项快切，慢推素材自动轻加速，并记录跨视频素材使用历史。</p></div>
+      <div className="v19-title"><span>V10.40.8.30 · STABLE SEQUENCE</span><h4>AI 教学口播精剪</h4><p>真实 TTS 决定最终时长；禁止相邻重复画面和旧图标贴纸，具体地点逐项快切，结尾按风险/提问/互动收束。</p></div>
       <div className="v19-shot-status"><strong>{shotCount}</strong><span>上一页镜头</span></div>
     </div>
 
@@ -126,7 +126,7 @@ export default function DynamicEditV2Selector({shotCount=0}:{shotCount?:number})
     </div>
 
     {config.engine==='dynamic_v2' && <div className="v19-workbench">
-      <nav className="v19-tabs">{([['director','AI 镜头导演'],['captions','字幕模板'],['sound','专业音效 / 贴纸'],['rules','验收规则']] as const).map(([id,label])=><button key={id} type="button" className={tab===id?'selected':''} onClick={()=>setTab(id)}>{label}</button>)}</nav>
+      <nav className="v19-tabs">{([['director','AI 镜头导演'],['captions','字幕模板'],['sound','专业音效 / 信息卡'],['rules','验收规则']] as const).map(([id,label])=><button key={id} type="button" className={tab===id?'selected':''} onClick={()=>setTab(id)}>{label}</button>)}</nav>
 
       {tab==='director' && <div className="v19-compact-grid">
         <article className="v19-ai-card primary"><div><b>DeepSeek 自动判断镜头边界</b><span>读取完整口播、TTS 时间、上一页镜头和 R2 素材描述后输出剪辑节拍。</span></div><i>AI 自动</i></article>
@@ -150,11 +150,11 @@ export default function DynamicEditV2Selector({shotCount=0}:{shotCount?:number})
         <label className="v19-field"><span>音效强度</span><select value={config.sfxLevel} onChange={(e:ChangeEvent<HTMLSelectElement>)=>setConfig(c=>({...c,sfxLevel:e.target.value as DynamicSfxLevel}))}><option value="off">关闭</option><option value="light">专业轻量（推荐）</option><option value="balanced">专业标准</option><option value="strong">专业强化</option></select></label>
         <label className="v19-field"><span>音效风格</span><select value={config.sfxPack} onChange={(e:ChangeEvent<HTMLSelectElement>)=>setConfig(c=>({...c,sfxPack:e.target.value as DynamicSfxPack}))}><option value="pro_short_video">短视频通用</option><option value="pro_clean_ui">干净 UI / Pop</option><option value="pro_cinematic_light">轻电影感</option></select></label>
         <label className="v19-field"><span>教学组件密度</span><select value={config.stickerLevel} onChange={(e:ChangeEvent<HTMLSelectElement>)=>setConfig(c=>({...c,stickerLevel:e.target.value as DynamicStickerLevel}))}><option value="off">关闭</option><option value="light">少量（推荐）</option><option value="balanced">均衡</option><option value="rich">丰富</option></select></label>
-        <label className="v19-field"><span>教学组件风格</span><select value={config.stickerStyle} onChange={(e:ChangeEvent<HTMLSelectElement>)=>setConfig(c=>({...c,stickerStyle:e.target.value as DynamicStickerStyle}))}><option value="smart_mix">语义信息卡（推荐）</option><option value="icons">极简图标卡</option><option value="doodles">轻量标注线</option></select></label>
+        <label className="v19-field"><span>信息卡风格</span><select value={config.stickerStyle} onChange={(e:ChangeEvent<HTMLSelectElement>)=>setConfig(c=>({...c,stickerStyle:e.target.value as DynamicStickerStyle}))}><option value="smart_mix">语义信息卡（推荐）</option><option value="icons">语义标签卡</option><option value="doodles">轻量信息条</option></select></label>
         <label className="v19-field"><span>教学组件位置</span><select value={config.stickerLayout} onChange={(e:ChangeEvent<HTMLSelectElement>)=>setConfig(c=>({...c,stickerLayout:e.target.value as DynamicStickerLayout}))}><option value="auto_safe">自动安全区</option><option value="top">上方两角</option><option value="side">左右侧边</option></select></label>
       </div>}
 
-      {tab==='rules' && <div className="v19-rule-grid"><article><b>长句稳镜</b><span>同一意思即使有多个逗号也保持主镜头；只在完整句间或真实语义转折切换。</span></article><article><b>地点快切</b><span>咖啡厅、商场、学校等并列小场景按出现顺序逐项切换，不把普通长句拆碎。</span></article><article><b>素材记忆</b><span>记录素材、源片段、语义角色和速度；最近三条优先换新，高匹配旧素材允许复用。</span></article><article><b>慢镜加速</b><span>缓慢航拍、慢推和静态镜头自动使用约 1.10–1.20 倍速度；合同和文字特写保持原速。</span></article><article><b>连续配音</b><span>普通相邻句合并为连续 TTS 语义段，减少每句重新起调和过长人工停顿。</span></article><article><b>音画收口</b><span>最终时长以真实音轨为准，尾音安全区和字幕词组完整性继续强制校验。</span></article></div>}
+      {tab==='rules' && <div className="v19-rule-grid"><article><b>长句稳镜</b><span>同一意思不按逗号乱切；相邻镜头禁止复用同一素材或同类城市地标画面。</span></article><article><b>地点快切</b><span>咖啡厅、商场、学校等并列小场景按出现顺序逐项切换，不把普通长句拆碎。</span></article><article><b>素材记忆</b><span>记录素材、源片段、语义角色和速度；最近三条优先换新，高匹配旧素材允许复用。</span></article><article><b>慢镜加速</b><span>缓慢航拍、慢推和静态镜头自动使用约 1.10–1.20 倍速度；合同和文字特写保持原速。</span></article><article><b>连续配音</b><span>普通解释尽量一次连续合成，只在真实 CTA 或明确长停顿处分组，避免 0.4 秒以上硬拼接。</span></article><article><b>收尾结构</b><span>长结尾按风险提醒、互动问题、评论 CTA 拆成不同画面，禁止单一双子塔空镜拖满。</span></article><article><b>干净效果</b><span>只使用语义信息卡和可听专业音效，旧问号、对勾、Emoji 小贴纸全部禁用。</span></article></div>}
     </div>}
   </section>
 }

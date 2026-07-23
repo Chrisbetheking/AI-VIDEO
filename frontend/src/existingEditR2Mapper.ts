@@ -30,6 +30,8 @@ export type ExistingR2Shot = {
   speedReason?: string
   segmentSelectionReason?: string
   semanticScore?: number
+  visualFamily?: string
+  sequenceGuard?: Record<string, unknown>
 }
 
 function textValue(...values: unknown[]): string {
@@ -202,6 +204,10 @@ export function mapExistingR2ClipsToShots(
       speedReason,
       segmentSelectionReason,
       semanticScore: numberValue(0, clip.semantic_score, clip.semanticScore),
+      visualFamily: textValue(clip.visual_family, clip.visualFamily),
+      sequenceGuard: clip.sequence_guard && typeof clip.sequence_guard === 'object'
+        ? clip.sequence_guard as Record<string, unknown>
+        : undefined,
     }
   })
 

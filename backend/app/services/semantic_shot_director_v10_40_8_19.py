@@ -12,8 +12,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-VERSION = "10.40.8.29-natural-cadence-asset-memory"
-# V10_40_8_29_NATURAL_CADENCE_ASSET_MEMORY
+VERSION = "10.40.8.30-stable-sequence-effects"
+# V10_40_8_30_STABLE_SEQUENCE_EFFECTS
 # REAL_TTS_CHILD_MASTER_SYNC_R9
 REGISTRY_FILE = "existing_edit_asset_usage.json"
 _REGISTRY_LOCK = threading.RLock()
@@ -1096,4 +1096,288 @@ def build_plan(settings: Any, payload: dict[str, Any], job_id: str) -> dict[str,
     plan['asset_memory_policy'] = 'recent_3_explore_recent_10_penalty_high_match_reuse'
     plan['slow_footage_auto_speed'] = True
     plan['production_brief_used'] = bool(_text(next_payload.get('production_brief')))
+    return plan
+
+# =============================================================================
+# V10.40.8.30 STABLE SEQUENCE + CONCRETE-SCENE DIRECTOR
+# =============================================================================
+# V10_40_8_30_STABLE_SEQUENCE_EFFECTS
+
+# Concrete service/decision scenes are allowed to micro-cut in spoken order.
+# Generic framing words such as “用途” remain in the narration but do not create
+# an empty visual shot.
+_ENTITY_TERMS = tuple(dict.fromkeys((*_ENTITY_TERMS, "交通", "商圈", "租客来源")))
+_INTENT_ALIASES = {
+    **_INTENT_ALIASES,
+    "商圈": ("商圈", "商业街", "商业中心", "商场", "购物中心", "餐饮", "咖啡厅", "mall", "shopping", "commercial district"),
+    "租客来源": ("租客", "租房", "白领", "学生", "办公区", "写字楼", "通勤人群", "tenant", "renter", "office worker", "student"),
+}
+_UNRELATED_ENTITY_TERMS = tuple(sorted(set(_UNRELATED_ENTITY_TERMS) | {"交通", "商圈", "租客来源"}))
+
+_V29_BUILD_PLAN_STABLE_SEQUENCE = build_plan
+
+
+def _v30_visual_family(asset: dict[str, Any]) -> str:
+    text = _asset_text(asset).lower()
+    families = (
+        ("city_landmark", ("双子塔", "klcc", "天际线", "城市航拍", "城市远景", "skyline", "twin tower", "drone city")),
+        ("street_market", ("菜市场", "老街", "街市", "市场", "market street", "wet market")),
+        ("cafe", ("咖啡厅", "咖啡馆", "咖啡店", "cafe", "coffee shop")),
+        ("mall", ("商场", "购物中心", "商业中心", "mall", "shopping centre", "shopping center")),
+        ("school", ("学校", "校园", "大学", "小学", "中学", "school", "campus")),
+        ("traffic", ("交通", "道路", "地铁", "轻轨", "车流", "road", "metro", "traffic")),
+        ("tenant", ("租客", "白领", "学生", "办公区", "写字楼", "tenant", "office worker")),
+        ("contract", ("合同", "签字", "spa", "文件", "条款", "contract", "signing")),
+        ("residential", ("住宅", "公寓", "楼盘", "社区", "样板间", "apartment", "condo", "residential")),
+    )
+    for family, terms in families:
+        if any(term in text for term in terms):
+            return family
+    return ""
+
+
+def _v30_role_for_text(text: str) -> str:
+    value = _text(text)
+    if re.search(r"(评论|留言|告诉我|(?:帮你|给你)[^。！？!?，,]{0,16}分析|私信|关注|下一条)", value):
+        return "cta"
+    if re.search(r"(最看重什么|怎么看|怎么选|吗|？|到底)", value):
+        return "question"
+    if re.search(r"(别光听|不要只看|别被|风险|注意|误区)", value):
+        return "risk"
+    if re.search(r"(自住.*投资|投资.*自住|自住.*出租|出租.*自住|对比|区别)", value):
+        return "comparison"
+    return "hold"
+
+
+def _v30_split_endgame(text: str, start: float, end: float) -> list[dict[str, Any]]:
+    """Split a long closing beat into risk/question/CTA only when the script has
+    those actual semantic clauses. This avoids an 8-second skyline ending while
+    keeping ordinary long explanations stable.
+    """
+    duration = max(0.0, end - start)
+    if duration < 5.2 or not re.search(r"(评论|留言|告诉我|(?:帮你|给你)[^。！？!?，,]{0,16}分析|私信|关注|最看重什么|别光听|不要只看)", text):
+        return []
+    raw = [x.strip() for x in re.split(r"(?<=[。！？!?；;])|[，,](?=(?:你|我|别|不要|评论|留言|关注))", text) if x.strip()]
+    if len(raw) < 2:
+        markers = [m.start() for m in re.finditer(r"(别光听|不要只看|你最看重什么|评论|留言|告诉我|(?:我|我们)?(?:帮你|给你)[^。！？!?，,]{0,16}分析|关注)", text)]
+        if len(markers) >= 2:
+            raw = []
+            cursor = 0
+            for position in markers[1:]:
+                raw.append(text[cursor:position])
+                cursor = position
+            raw.append(text[cursor:])
+            raw = [x.strip() for x in raw if x.strip()]
+    grouped: list[dict[str, str]] = []
+    for clause in raw:
+        role = _v30_role_for_text(clause)
+        if grouped and grouped[-1]["role"] == role:
+            grouped[-1]["text"] += clause
+        else:
+            grouped.append({"role": role, "text": clause})
+    meaningful = [item for item in grouped if item["role"] in {"risk", "question", "cta"}]
+    if len(meaningful) < 2:
+        return []
+    weights = [max(3, len(re.sub(r"\s+", "", item["text"]))) for item in grouped]
+    total = max(1, sum(weights))
+    cursor = start
+    output: list[dict[str, Any]] = []
+    for index, (item, weight) in enumerate(zip(grouped, weights)):
+        item_end = end if index == len(grouped) - 1 else cursor + duration * weight / total
+        output.append({
+            "text": item["text"],
+            "role": item["role"],
+            "start": round(cursor, 4),
+            "end": round(item_end, 4),
+            "duration": round(max(0.7, item_end - cursor), 4),
+        })
+        cursor = item_end
+    return output
+
+
+def _v30_rank_distinct_asset(
+    query: str,
+    candidates: list[dict[str, Any]],
+    registry: dict[str, Any],
+    use_count: dict[str, int],
+    previous_id: str,
+    previous_family: str,
+) -> dict[str, Any] | None:
+    valid = [item for item in candidates if _asset_url(item) and _asset_id(item) != previous_id]
+    if not valid:
+        return None
+    intents = _requested_intents(query)
+    if intents:
+        exact = [item for item in valid if all(_asset_matches_intent(item, intent) for intent in intents)]
+        if exact:
+            valid = exact
+    ranked = sorted(
+        valid,
+        key=lambda item: _score_asset(query, item, registry, use_count.get(_asset_id(item), 0), previous_id),
+        reverse=True,
+    )
+    for item in ranked:
+        family = _v30_visual_family(item)
+        if previous_family and family == previous_family and family in {"city_landmark", "street_market", "contract"}:
+            continue
+        return item
+    return ranked[0] if ranked else None
+
+
+def _v30_apply_asset(
+    clip: dict[str, Any],
+    asset: dict[str, Any],
+    registry: dict[str, Any],
+    semantic_seed: str,
+) -> dict[str, Any]:
+    item = dict(clip)
+    aid = _asset_id(asset)
+    duration = max(0.55, _safe_float(item.get("duration"), 2.8))
+    speed, speed_reason = _motion_profile(asset, _text(item.get("beat_type")), duration)
+    source_start, auto_start, segment_reason = _choose_source_segment_start(asset, registry, duration, speed, semantic_seed)
+    title = _asset_name(asset) or _text(asset.get("ai_title")) or item.get("asset_name") or "R2 素材"
+    item.update({
+        "asset_id": aid,
+        "asset_ids": [aid],
+        "asset_url": _asset_url(asset),
+        "asset_name": title,
+        "title": title,
+        "scene": _asset_text(asset) or title,
+        "description": _asset_text(asset) or title,
+        "selection_source": asset.get("_selection_source") or "auto",
+        "start_time": round(source_start, 3),
+        "end_time": round(source_start + duration * speed, 3),
+        "auto_start": auto_start,
+        "speed": round(speed, 3),
+        "speed_reason": speed_reason,
+        "segment_selection_reason": segment_reason,
+        "visual_family": _v30_visual_family(asset),
+    })
+    return item
+
+
+def _v30_resequence_plan(settings: Any, payload: dict[str, Any], job_id: str, plan: dict[str, Any]) -> dict[str, Any]:
+    candidates, _ = _candidate_assets(settings, payload)
+    by_id = {_asset_id(item): item for item in candidates if _asset_id(item)}
+    with _REGISTRY_LOCK:
+        registry = _load_registry(settings)
+    output: list[dict[str, Any]] = []
+    use_count: dict[str, int] = {}
+    previous_id = ""
+    previous_family = ""
+
+    for source_index, raw_clip in enumerate(plan.get("clips") or [], start=1):
+        clip = dict(raw_clip)
+        speech_start = _safe_float(clip.get("speech_start"), 0.0)
+        speech_end = max(speech_start + 0.2, _safe_float(clip.get("speech_end"), speech_start + _safe_float(clip.get("duration"), 0.0)))
+        narration = _text(clip.get("narration"))
+        splits = _v30_split_endgame(narration, speech_start, speech_end)
+        specs = splits or [{
+            "text": narration,
+            "role": _v30_role_for_text(narration),
+            "start": speech_start,
+            "end": speech_end,
+            "duration": max(0.55, speech_end - speech_start),
+        }]
+
+        for local_index, spec in enumerate(specs, start=1):
+            next_clip = dict(clip)
+            next_clip["id"] = f"{clip.get('id') or 'clip'}_v30_{local_index}" if len(specs) > 1 else clip.get("id")
+            next_clip["narration"] = spec["text"]
+            next_clip["duration"] = round(max(0.55, _safe_float(spec.get("duration"), 0.8)), 3)
+            next_clip["duration_seconds"] = next_clip["duration"]
+            next_clip["speech_start"] = round(_safe_float(spec.get("start"), speech_start), 3)
+            next_clip["speech_end"] = round(_safe_float(spec.get("end"), speech_end), 3)
+            role = _text(spec.get("role") or next_clip.get("beat_type") or "hold")
+            if role in {"risk", "question", "cta", "comparison"}:
+                next_clip["beat_type"] = role
+                next_clip["cadence_mode"] = "semantic_endgame"
+                next_clip["beat_reason"] = "结尾按风险/问题/互动语义收束，禁止单一城市空镜拖满"
+
+            current_asset = by_id.get(_text(next_clip.get("asset_id")))
+            current_family = _v30_visual_family(current_asset or next_clip)
+            must_replace = (
+                not current_asset
+                or _text(next_clip.get("asset_id")) == previous_id
+                or (previous_family and current_family == previous_family and current_family in {"city_landmark", "street_market", "contract"})
+                or len(specs) > 1 and local_index > 1
+            )
+            if must_replace:
+                role_query = {
+                    "risk": "风险提醒 合同 条款 注意",
+                    "question": "人物 思考 咨询 选择",
+                    "cta": "人物 手机 评论 咨询 互动",
+                    "comparison": "自住 投资 对比 住宅 租客",
+                }.get(role, "")
+                query = " ".join(x for x in (role_query, _text(next_clip.get("entity")), spec["text"]) if x)
+                replacement = _v30_rank_distinct_asset(query, candidates, registry, use_count, previous_id, previous_family)
+                if replacement is not None:
+                    next_clip = _v30_apply_asset(next_clip, replacement, registry, f"{job_id}|{source_index}|{local_index}|{query}")
+                    next_clip["selection_reason"] = "连续画面去重：改用同语义不同素材/角度"
+                    current_asset = replacement
+                    current_family = _v30_visual_family(replacement)
+            elif current_asset is not None:
+                next_clip["visual_family"] = current_family
+
+            # Source trim must follow the newly split timeline duration. Keeping
+            # the old source_end would silently reintroduce a long/repeated range.
+            source_start = max(0.0, _safe_float(next_clip.get("start_time"), 0.0))
+            source_speed = max(0.75, _safe_float(next_clip.get("speed"), 1.0))
+            next_clip["end_time"] = round(source_start + _safe_float(next_clip.get("duration"), 0.0) * source_speed, 3)
+            aid = _text(next_clip.get("asset_id"))
+            if aid:
+                use_count[aid] = use_count.get(aid, 0) + 1
+            next_clip["sequence_guard"] = {
+                "adjacent_same_asset_forbidden": True,
+                "adjacent_generic_family_forbidden": True,
+                "previous_asset_id": previous_id,
+                "previous_visual_family": previous_family,
+                "passed": not (aid and aid == previous_id),
+            }
+            output.append(next_clip)
+            previous_id = aid
+            previous_family = _text(next_clip.get("visual_family") or current_family)
+
+    for index, clip in enumerate(output, start=1):
+        clip["index"] = index
+    ids = [_text(item.get("asset_id")) for item in output if _text(item.get("asset_id"))]
+    plan = dict(plan)
+    plan["clips"] = output
+    plan["target_duration_seconds"] = round(sum(_safe_float(item.get("duration"), 0.0) for item in output), 3)
+    report = dict(plan.get("usage_report") or {})
+    report.update({
+        "clip_count": len(output),
+        "unique_asset_count": len(set(ids)),
+        "repeat_count": max(0, len(ids) - len(set(ids))),
+        "asset_ids": ids,
+        "adjacent_duplicate_guard": True,
+        "generic_family_guard": True,
+        "semantic_endgame_split": True,
+    })
+    plan["usage_report"] = report
+    plan["sequence_policy"] = "no_adjacent_asset_or_generic_family_repeat"
+    return plan
+
+
+def build_plan(settings: Any, payload: dict[str, Any], job_id: str) -> dict[str, Any]:
+    plan = _V29_BUILD_PLAN_STABLE_SEQUENCE(settings, payload, job_id)
+    plan = _v30_resequence_plan(settings, payload, job_id, plan)
+    components: list[dict[str, Any]] = []
+    for index, clip in enumerate(plan.get("clips") or [], start=1):
+        narration = _text(clip.get("narration"))
+        component = _v28_component_type(narration, _text(clip.get("beat_type")))
+        clip["teaching_component"] = component
+        if component != "caption_emphasis":
+            components.append({
+                "id": f"component_{index}",
+                "clip_id": clip.get("id"),
+                "type": component,
+                "text": narration[:42],
+                "start": _safe_float(clip.get("speech_start"), 0.0),
+                "duration": _safe_float(clip.get("duration"), 0.0),
+            })
+    plan["teaching_components"] = components
+    plan["version"] = VERSION
+    plan["cadence_policy"] = "stable_long_sentence_concrete_scene_micro_cut"
+    plan["asset_memory_policy"] = "recent_memory_plus_adjacent_visual_family_guard"
     return plan
