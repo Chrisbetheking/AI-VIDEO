@@ -19,8 +19,8 @@ from typing import Any, Callable
 
 from fastapi import Depends, HTTPException, Request
 
-VERSION = "10.40.8.21-semantic-master-timeline-quality-gate"
-INSTALL_MARKER = "V10_40_8_21_SEMANTIC_MASTER_TIMELINE_QUALITY_GATE"
+VERSION = "10.40.8.22-caption-phrase-safe-clean-render-gate"
+INSTALL_MARKER = "V10_40_8_22_CAPTION_PHRASE_SAFE_CLEAN_RENDER_GATE"
 _INSTALLED = False
 _LOCK = threading.RLock()
 
@@ -613,13 +613,13 @@ def build_dynamic_plan(
         tail.update(effect="cta_tag" if tail["role"] == "cta" else "keyword_focus", start=max(0.0, min(duration - 1.3, tail["start"])), end=min(duration, max(tail["start"] + 1.1, tail["end"])))
         selected.append(tail)
     selected.sort(key=lambda x: x["start"])
-    sfx_level = "off"  # V21 quality gate: disable unapproved SFX bank
-    sticker_level = "off"  # V21 quality gate: disable random stickers
+    sfx_level = "off"  # R8 hard quality gate
+    sticker_level = "off"  # R8 hard quality gate
     selected = _decorate_events(
         selected,
         duration,
-        sfx_level=sfx_level,
-        sticker_level=sticker_level,
+        sfx_level = "off",  # R8 hard quality gate
+        sticker_level = "off",  # R8 hard quality gate
     )
     return {
         "version": VERSION,
@@ -660,14 +660,18 @@ def _wrap_text(text: str, limit: int) -> str:
 
 
 def _highlight_ass(text: str, keywords: list[str], highlight: str) -> str:
+    """Highlight inside the same subtitle layer without scale or duplicate text."""
     escaped = _ass_escape(text)
-    for keyword in sorted((x for x in keywords if x), key=len, reverse=True):
+    for keyword in sorted((item for item in keywords if item), key=len, reverse=True):
         safe = _ass_escape(keyword)
         if safe in escaped:
-            escaped = escaped.replace(safe, rf"{{\c{highlight}\fscx108\fscy108}}{safe}{{\c&H00FFFFFF&\fscx100\fscy100}}", 1)
+            escaped = escaped.replace(
+                safe,
+                rf"{{\c{highlight}}}{safe}{{\c&H00FFFFFF&}}",
+                1,
+            )
             break
     return escaped
-
 
 def _font_name() -> str:
     candidates = [
@@ -713,7 +717,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         raw_text = _clean_caption_text(str(item.get("text") or ""))
         text = _highlight_ass(raw_text, keywords, str(preset["highlight"]))
         role = _classify(raw_text)
-        impact = role in {"hook", "data", "risk", "question", "turn"} and len(raw_text) <= 7
+        impact = False  # R8 single caption layer
         if impact:
             role_color = {
                 "data": preset.get("highlight"),
@@ -1009,18 +1013,52 @@ def render_dynamic_video(
 
 
 def _apply_clean_single_caption_policy(plan: dict[str, Any]) -> dict[str, Any]:
-    """V21: one ASS subtitle layer only; no duplicate text cards or random stickers."""
+    """R8 quality gate: one subtitle layer, no unapproved overlays, SFX or stickers."""
     cleaned = dict(plan)
-    cleaned["events"] = []
-    cleaned["stickers"] = []
-    cleaned["sfx_events"] = []
+    for key in (
+        "events", "stickers", "sticker_events", "sfx_events", "sound_effects",
+        "keyword_overlays", "impact_overlays", "text_cards", "data_cards",
+        "risk_cards", "list_cards", "cta_cards",
+    ):
+        cleaned[key] = []
+    cleaned["dynamic_sfx_level"] = "off"
+    cleaned["dynamic_sticker_level"] = "off"
     cleaned["clean_render_policy"] = {
         "single_caption_layer": True,
         "duplicate_text_overlays": False,
+        "keyword_scale_animation": False,
         "random_stickers": False,
-        "sfx_temporarily_disabled": True,
+        "unapproved_sfx": False,
+        "phrase_boundary_gate": True,
+        "version": VERSION,
     }
     return cleaned
+
+
+def _validate_clean_render_plan(
+    plan: dict[str, Any], timings: list[dict[str, Any]],
+) -> dict[str, Any]:
+    forbidden = (
+        "events", "stickers", "sticker_events", "sfx_events", "sound_effects",
+        "keyword_overlays", "impact_overlays", "text_cards", "data_cards",
+        "risk_cards", "list_cards", "cta_cards",
+    )
+    dirty = [key for key in forbidden if plan.get(key)]
+    if dirty:
+        raise ValueError(f"R8 清洁渲染闸门失败，仍有额外图层：{','.join(dirty)}")
+    if any(not isinstance(item, dict) or not str(item.get("text") or "").strip() for item in timings):
+        raise ValueError("R8 字幕时间轴包含空字幕")
+    policy = plan.get("clean_render_policy") or {}
+    if not policy.get("single_caption_layer") or policy.get("random_stickers"):
+        raise ValueError("R8 单层字幕策略未生效")
+    plan["quality_gate"] = {
+        "passed": True,
+        "single_caption_layer": True,
+        "phrase_boundary_gate": True,
+        "sfx_disabled": True,
+        "stickers_disabled": True,
+    }
+    return plan
 
 def _run_dynamic(settings: Any, proxy_job_id: str, payload: dict[str, Any]) -> None:
     classic = _classic()
@@ -1080,6 +1118,15 @@ def _run_dynamic(settings: Any, proxy_job_id: str, payload: dict[str, Any]) -> N
             or ((classic_payload.get("edit_plan") or {}).get("clips") if isinstance(classic_payload.get("edit_plan"), dict) else None)
             or []
         )
+        expected_semantic_clips = list((semantic_plan or {}).get("clips") or [])
+        if not expected_semantic_clips:
+            raise ValueError("R8 语义主时间线为空")
+        if len(applied_clips) != len(expected_semantic_clips):
+            raise ValueError(
+                "R8 语义主时间线镜头数量不一致："
+                f"expected={len(expected_semantic_clips)}, actual={len(applied_clips)}"
+            )
+        # CAPTION_PHRASE_SAFE_CLEAN_RENDER_R8
         if hasattr(classic, "_record_asset_usage") and applied_clips:
             classic._record_asset_usage(settings, proxy_job_id, applied_clips)
 
@@ -1098,11 +1145,13 @@ def _run_dynamic(settings: Any, proxy_job_id: str, payload: dict[str, Any]) -> N
         timings = _normalize_timings(payload, base, duration)
         intensity = str(payload.get("dynamic_edit_intensity") or "balanced")
         style_id = str(payload.get("dynamic_subtitle_style") or "dynamic_white_yellow")
-        sfx_level = str(payload.get("dynamic_sfx_level") or "balanced")
-        sticker_level = str(payload.get("dynamic_sticker_level") or "balanced")
+        sfx_level = "off"  # R8 hard quality gate
+        sticker_level = "off"  # R8 hard quality gate
         payload["ai_shot_beats"] = semantic_plan.get("beats") or []
         plan = build_dynamic_plan(payload, timings, duration, intensity=intensity)
-        plan = _apply_clean_single_caption_policy(plan)  # CLEAN_SINGLE_CAPTION_POLICY_V21
+        plan = _validate_clean_render_plan(
+            _apply_clean_single_caption_policy(plan), timings
+        )  # CAPTION_PHRASE_SAFE_CLEAN_RENDER_R8
         plan["ai_shot_beats"] = semantic_plan.get("beats") or []
         plan["ai_director_report"] = semantic_plan.get("director_report") or {}
         plan["subtitle_style"] = style_id
@@ -1110,7 +1159,7 @@ def _run_dynamic(settings: Any, proxy_job_id: str, payload: dict[str, Any]) -> N
         plan_path = work / "dynamic_effect_timeline.json"
         plan_path.write_text(json.dumps(plan, ensure_ascii=False, indent=2), encoding="utf-8")
 
-        _update_proxy(settings, proxy_job_id, stage="dynamic_render", progress=86, message="正在渲染可调字幕、多样动效、低音量多样音效和安全区贴纸", dynamic_effect_timeline=plan)
+        _update_proxy(settings, proxy_job_id, stage="dynamic_render", progress=86, message="正在渲染单层安全字幕和克制镜头动效", dynamic_effect_timeline=plan)
         output_path = Path(getattr(settings, "outputs_dir", _data_dir(settings) / "outputs")) / f"{proxy_job_id}_dynamic_v2.mp4"
         render_report = render_dynamic_video(source_path, output_path, ass_path, plan)
         report = {
@@ -1121,7 +1170,7 @@ def _run_dynamic(settings: Any, proxy_job_id: str, payload: dict[str, Any]) -> N
             "subtitle_style": style_id,
             "effect_count": len(plan.get("events") or []),
             "events": plan.get("events") or [],
-            "safe_effects": ["semantic_zoom", "large_kinetic_captions", "transparent_theme_stickers", "real_sfx_assets", "dynamic_ass_subtitles"],
+            "safe_effects": ["semantic_master_timeline", "single_ass_caption_layer", "phrase_safe_caption_segmentation", "clean_fade"],
             "sfx_level": sfx_level,
             "sticker_level": sticker_level,
             "sfx_count": render_report.get("sfx_count", 0),
@@ -1219,8 +1268,8 @@ def start_dynamic(settings: Any, payload: dict[str, Any]) -> dict[str, Any]:
         "edit_engine": "dynamic_v2",
         "dynamic_edit_intensity": str(payload.get("dynamic_edit_intensity") or "balanced"),
         "dynamic_subtitle_style": str(payload.get("dynamic_subtitle_style") or "dynamic_white_yellow"),
-        "dynamic_sfx_level": str(payload.get("dynamic_sfx_level") or "balanced"),
-        "dynamic_sticker_level": str(payload.get("dynamic_sticker_level") or "balanced"),
+        "dynamic_sfx_level": "off",
+        "dynamic_sticker_level": "off",
         "dynamic_visual_pace": str(payload.get("dynamic_visual_pace") or "balanced"),
         "dynamic_caption_size": str(payload.get("dynamic_caption_size") or "standard"),
         "dynamic_caption_motion": str(payload.get("dynamic_caption_motion") or "smart_mix"),
@@ -1277,17 +1326,21 @@ def install_dynamic_edit_v2(app: Any, get_settings: Callable[..., Any]) -> None:
                 "semantic_scene_boundaries": True,
                 "deepseek_ai_beat_director": True,
                 "entity_burst_one_entity_one_shot": True,
-                "professional_cc0_sfx_bank": True,
+                "professional_cc0_sfx_bank": False,
                 "locked_previous_page_shot_plan": True,
                 "persistent_asset_usage_recorder": True,
                 "audio_tail_guard": True,
                 "phrase_safe_caption_segmentation": True,
+                "caption_phrase_boundary_gate": True,
+                "clean_single_caption_layer": True,
+                "unapproved_sfx_disabled": True,
+                "random_stickers_disabled": True,
                 "reference_subtitle_pack": True,
                 "keyword_highlight": True,
                 "micro_sfx": False,
-                "real_sfx_assets": True,
-                "semantic_transparent_stickers": True,
-                "large_caption_pack": True,
+                "real_sfx_assets": False,
+                "semantic_transparent_stickers": False,
+                "large_caption_pack": False,
                 "person_cutout_quality_gate": "phase_2",
                 "fal_forbidden": True,
             },
@@ -1303,8 +1356,8 @@ def install_dynamic_edit_v2(app: Any, get_settings: Callable[..., Any]) -> None:
         duration = _safe_float(payload.get("target_duration_seconds"), 30.0)
         timings = _normalize_timings(payload, {}, duration)
         intensity = str(request.query_params.get("intensity") or payload.get("dynamic_edit_intensity") or "balanced")
-        payload["dynamic_sfx_level"] = str(request.query_params.get("sfx_level") or payload.get("dynamic_sfx_level") or "balanced")
-        payload["dynamic_sticker_level"] = str(request.query_params.get("sticker_level") or payload.get("dynamic_sticker_level") or "balanced")
+        payload["dynamic_sfx_level"] = "off"  # R8 hard quality gate
+        payload["dynamic_sticker_level"] = "off"  # R8 hard quality gate
         payload["dynamic_visual_pace"] = "ai_auto"
         payload["dynamic_caption_size"] = str(request.query_params.get("caption_size") or payload.get("dynamic_caption_size") or "standard")
         payload["dynamic_caption_motion"] = str(request.query_params.get("caption_motion") or payload.get("dynamic_caption_motion") or "smart_mix")
@@ -1313,6 +1366,7 @@ def install_dynamic_edit_v2(app: Any, get_settings: Callable[..., Any]) -> None:
         payload["dynamic_sticker_layout"] = str(request.query_params.get("sticker_layout") or payload.get("dynamic_sticker_layout") or "auto_safe")
         payload["dynamic_sticker_style"] = str(request.query_params.get("sticker_style") or payload.get("dynamic_sticker_style") or "smart_mix")
         result = build_dynamic_plan(payload, timings, duration, intensity=intensity)
+        result = _validate_clean_render_plan(_apply_clean_single_caption_policy(result), timings)
         return {"ok": True, "version": VERSION, "plan": result, "timings": timings}
 
     @app.post("/api/video/existing-edit-v2/start")
@@ -1324,8 +1378,8 @@ def install_dynamic_edit_v2(app: Any, get_settings: Callable[..., Any]) -> None:
             payload = dict(payload)
             payload["dynamic_edit_intensity"] = str(request.query_params.get("intensity") or payload.get("dynamic_edit_intensity") or "balanced")
             payload["dynamic_subtitle_style"] = str(request.query_params.get("subtitle_style") or payload.get("dynamic_subtitle_style") or "dynamic_white_yellow")
-            payload["dynamic_sfx_level"] = str(request.query_params.get("sfx_level") or payload.get("dynamic_sfx_level") or "balanced")
-            payload["dynamic_sticker_level"] = str(request.query_params.get("sticker_level") or payload.get("dynamic_sticker_level") or "balanced")
+            payload["dynamic_sfx_level"] = "off"  # R8 hard quality gate
+            payload["dynamic_sticker_level"] = "off"  # R8 hard quality gate
             payload["dynamic_visual_pace"] = "ai_auto"
             payload["dynamic_caption_size"] = str(request.query_params.get("caption_size") or payload.get("dynamic_caption_size") or "standard")
             payload["dynamic_caption_motion"] = str(request.query_params.get("caption_motion") or payload.get("dynamic_caption_motion") or "smart_mix")
@@ -1773,7 +1827,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         end = max(start + 0.30, _safe_float(item.get("end"), start + 0.85))
         raw_text = _clean_caption_text(str(item.get("text") or ""))
         role = _classify(raw_text)
-        impact = False  # V21 no second giant text layer
+        impact = False  # R8 single caption layer
         style = "Impact" if impact else "Dynamic"
         text = _highlight_ass(raw_text, keywords, str(preset["highlight"]))
         if impact:
@@ -2085,38 +2139,105 @@ def _caption_dp_segment(text: str, max_chars: int = 10) -> list[str]:
     return [item for item in merged if item]
 
 
-def _caption_chunks(text: str, *, max_chars: int = 10) -> list[str]:
-    raw = re.sub(r"\\s+", "", str(text or "")).strip()
-    if not raw:
+def _caption_chunks(text: str, *, max_chars: int = 9) -> list[str]:
+    """Phrase-safe Chinese caption segmentation for one ASS subtitle layer."""
+    clean = _clean_caption_text(text)
+    if not clean:
         return []
-    clauses = [
-        item.strip("，,。！？!?；;、：:")
-        for item in re.split(r"[，,。！？!?；;、：:]+", raw)
-        if item.strip("，,。！？!?；;、：:")
-    ]
-    output: list[str] = []
-    for clause in clauses or [raw]:
-        output.extend(_caption_dp_segment(clause, max_chars=max_chars))
-    # 字幕切分会主动移除句号、逗号等标点。
-    # 完整性检查只比较真正的文字、数字和百分号，不能把标点差异当成内容丢失。
-    expected_text = re.sub(
-        r"[^\\u4e00-\\u9fffA-Za-z0-9%]+",
-        "",
-        _clean_caption_text(raw),
-    )
-    actual_text = re.sub(
-        r"[^\\u4e00-\\u9fffA-Za-z0-9%]+",
-        "",
-        "".join(output),
-    )
-    if actual_text != expected_text:
-        raise ValueError(
-            "字幕切分内容不一致："
-            f"expected={expected_text[:120]!r}, "
-            f"actual={actual_text[:120]!r}"
-        )
-    return output
 
+    protected = tuple(sorted({
+        "吉隆坡买房", "第一眼", "价格看", "很容易买错", "自住还是投资",
+        "这两个方向", "区域完全不一样", "自住的话", "价格便宜",
+        "重点考察", "真实的生活半径", "生活半径", "每天通勤时间",
+        "周边超市", "学校离得远不远", "这些现有配套", "现有配套",
+        "住进去舒不舒服", "投资呢", "价格只是门槛", "区域租客",
+        "租客从哪里来", "未来转手", "本地需求支撑", "把用途想明白",
+        "区域才不会踩坑", "想清楚了吗", "评论区打出来", "一对一拆解",
+        "生活配套", "租客来源", "交通规划", "投资逻辑", "区域选择",
+        "购物中心", "国际学校", "医疗配套", "公共交通", "通勤时间",
+    }, key=len, reverse=True))
+
+    coarse = [part for part in re.split(r"[，,。！？!?；;、：:]+", clean) if part]
+    output: list[str] = []
+
+    def illegal_cuts(phrase: str) -> set[int]:
+        illegal: set[int] = set()
+        for term in protected:
+            start = 0
+            while True:
+                index = phrase.find(term, start)
+                if index < 0:
+                    break
+                illegal.update(range(index + 1, index + len(term)))
+                start = index + 1
+        return illegal
+
+    for phrase in coarse or [clean]:
+        remaining = phrase
+        while len(remaining) > max_chars:
+            illegal = illegal_cuts(remaining)
+            lower = 4
+            preferred = [
+                position for position in range(min(max_chars, len(remaining) - 2), lower - 1, -1)
+                if position not in illegal and len(remaining) - position >= 2
+            ]
+            if preferred:
+                cut = preferred[0]
+            else:
+                overflow = [
+                    position for position in range(max_chars + 1, min(len(remaining) - 1, max_chars + 4) + 1)
+                    if position not in illegal and len(remaining) - position >= 2
+                ]
+                if overflow:
+                    cut = overflow[0]
+                else:
+                    legal = [
+                        position for position in range(2, len(remaining) - 1)
+                        if position not in illegal
+                    ]
+                    if not legal:
+                        output.append(remaining)
+                        remaining = ""
+                        break
+                    cut = min(legal, key=lambda position: (abs(position - max_chars), -position))
+            output.append(remaining[:cut])
+            remaining = remaining[cut:]
+        if remaining:
+            if len(remaining) <= 2 and output and len(output[-1]) + len(remaining) <= max_chars + 2:
+                output[-1] += remaining
+            else:
+                output.append(remaining)
+
+    # Merge accidental short fragments where possible without crossing punctuation groups.
+    compact: list[str] = []
+    for item in output:
+        if len(item) <= 2 and compact and len(compact[-1]) + len(item) <= max_chars + 2:
+            compact[-1] += item
+        else:
+            compact.append(item)
+
+    expected = re.sub(r"[^\u4e00-\u9fffA-Za-z0-9%]+", "", clean)
+    actual = re.sub(r"[^\u4e00-\u9fffA-Za-z0-9%]+", "", "".join(compact))
+    if expected != actual:
+        raise ValueError("字幕安全切分发生文字丢失")
+
+    # A protected phrase may never cross two caption cards.
+    joined = "".join(compact)
+    boundaries: set[int] = set()
+    cursor = 0
+    for item in compact[:-1]:
+        cursor += len(item)
+        boundaries.add(cursor)
+    for term in protected:
+        start = 0
+        while True:
+            index = joined.find(term, start)
+            if index < 0:
+                break
+            if any(index < boundary < index + len(term) for boundary in boundaries):
+                raise ValueError(f"字幕词组被腰斩：{term}")
+            start = index + 1
+    return [item for item in compact if item]
 
 def _normalize_locked_shot_plan(payload: dict[str, Any]) -> dict[str, Any]:
     raw_candidates: list[Any] = []

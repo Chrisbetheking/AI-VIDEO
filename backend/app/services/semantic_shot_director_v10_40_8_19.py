@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-VERSION = "10.40.8.21-semantic-master-timeline-quality-gate"
+VERSION = "10.40.8.22-caption-phrase-safe-clean-render-gate"
 REGISTRY_FILE = "existing_edit_asset_usage.json"
 _REGISTRY_LOCK = threading.RLock()
 
@@ -308,7 +308,8 @@ def _split_long_speech_units(units: list[dict[str, Any]]) -> list[dict[str, Any]
 
 def _speech_units(payload: dict[str, Any]) -> list[dict[str, Any]]:
     raw: Any = []
-    # SEMANTIC_MASTER_TIMELINE_V21: shot planning consumes sentence-level speech units.
+    # SEMANTIC_MASTER_TIMELINE_V21
+# CAPTION_PHRASE_SAFE_CLEAN_RENDER_R8: captions never alter shot planning: shot planning consumes sentence-level speech units.
     # Subtitle fragments are presentation-only and must never create visual cuts.
     for key in ("semantic_speech_units", "tts_sentence_segments", "script_segments", "voice_segments", "tts_segments"):
         value = payload.get(key)

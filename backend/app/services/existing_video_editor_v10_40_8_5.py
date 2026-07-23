@@ -31,7 +31,7 @@ from app.services.a10_r4_output_guard_v10_40_8_12 import (
     measure_audio_loudness,
 )
 
-VERSION = "10.40.8.21-semantic-master-timeline-quality-gate"
+VERSION = "10.40.8.22-caption-phrase-safe-clean-render-gate"
 # V10_40_8_12_A10_R4_SEMANTIC_SINGLE_USE_AUDIO: strict visual single-use, semantic coverage, fresh ending, -16 LUFS
 # V10_40_8_8_A10_R3_GLOBAL_VISUAL_DEDUP: whole-video repetition guard
 # V10_40_8_8_A10_R2_ADAPTIVE_QUALITY_GATE_FIX: adaptive quality gate
@@ -1145,6 +1145,7 @@ async def _render(
                             "tts_segment_count": len(normalized_timings),
                             "semantic_sentence_count": len(semantic_speech_units),
                             "semantic_master_timeline": True,
+                            "caption_phrase_safe_clean_render": True,
                         }
                     )
                     plan["message"] = (
@@ -1212,8 +1213,10 @@ async def _render(
         else:
             clips = directed_clips
         plan = {**plan, "clips": clips, "director": director_result["report"]}
-        if semantic_master and len(clips) != len(plan.get("clips") or []):
-            raise ValueError("语义主时间线镜头数量被后处理改写")
+        if semantic_master:
+            semantic_master_shot_count = len(clips)
+            plan["semantic_master_shot_count"] = semantic_master_shot_count
+            plan["caption_phrase_safe_clean_render"] = True  # CAPTION_PHRASE_SAFE_CLEAN_RENDER_R8
         payload = {
             **payload,
             "subtitle_style": director_result["subtitle_style"],
