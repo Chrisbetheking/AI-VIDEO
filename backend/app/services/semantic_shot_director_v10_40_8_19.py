@@ -12,7 +12,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-VERSION = "10.40.8.33-semantic-relevance-caption-hierarchy"
+VERSION = "10.40.8.34-dedup-keyword-entity-cta"
+# V10_40_8_34_DEDUP_KEYWORD_ENTITY_CTA
 # V10_40_8_33_SEMANTIC_RELEVANCE_CAPTION_HIERARCHY
 # V10_40_8_32_REFERENCE_KINETIC_TYPOGRAPHY
 # V10_40_8_31_CLEAN_TEXT_PRO_STICKERS
@@ -1667,4 +1668,202 @@ def build_plan(settings: Any, payload: dict[str, Any], job_id: str) -> dict[str,
     plan["version"] = VERSION
     plan["asset_memory_policy"] = "semantic_fit_first_then_recent_memory_exploration"
     plan["cadence_policy"] = "long_sentence_one_theme_max_two_angles_concrete_entity_micro_cut"
+    return plan
+
+# =============================================================================
+# V10.40.8.34 ENTITY-LOCKED RETRIEVAL + SKYLINE QUOTA
+# =============================================================================
+V34_MARKER = "V10_40_8_34_DEDUP_KEYWORD_ENTITY_CTA"
+V34_MAX_CITY_LANDMARK_RATIO = 0.20
+
+
+def _v30_visual_family(asset: dict[str, Any]) -> str:
+    text = _asset_text(asset).lower()
+    families = (
+        ("parking_vehicle", ("停车场", "停车", "车位", "汽车展厅", "parking", "car park")),
+        ("cta_people", ("手机", "评论", "咨询", "沟通", "顾问", "客户", "人物", "对话", "phone", "comment", "consultation")),
+        ("office", ("办公楼", "写字楼", "办公区", "白领", "office", "business district")),
+        ("campus", ("大学", "校园", "学生", "学院", "university", "campus", "student")),
+        ("city_landmark", ("双子塔", "klcc", "天际线", "城市航拍", "城市远景", "skyline", "twin tower", "drone city")),
+        ("street_market", ("菜市场", "老街", "街市", "市场", "夜市", "market street", "wet market", "night market")),
+        ("cafe", ("咖啡厅", "咖啡馆", "咖啡店", "cafe", "coffee shop")),
+        ("mall", ("商场", "购物中心", "商业中心", "mall", "shopping centre", "shopping center")),
+        ("school", ("学校", "小学", "中学", "国际学校", "school")),
+        ("hospital", ("医院", "诊所", "医疗", "hospital", "clinic")),
+        ("traffic", ("交通", "道路", "地铁", "轻轨", "车流", "road", "metro", "traffic")),
+        ("tenant", ("租客", "租房", "通勤人群", "tenant", "renter")),
+        ("contract", ("合同", "签字", "spa", "文件", "条款", "contract", "signing")),
+        ("residential", ("住宅", "公寓", "楼盘", "社区", "样板间", "apartment", "condo", "residential")),
+    )
+    for family, terms in families:
+        if any(term in text for term in terms):
+            return family
+    return ""
+
+
+def _v33_query_role(query: str) -> str:
+    text = _text(query)
+    if re.search(r"评论|留言|私信|告诉我|聊聊|关注|找我|帮你.*分析", text): return "cta"
+    if re.search(r"自住.*(?:投资|出租)|(?:投资|出租).*自住|出租.*转手|转手.*出租", text): return "comparison"
+    if re.search(r"租客来源|办公|大学|学生|白领", text): return "tenant_source"
+    if re.search(r"现在已经|已经有什么|现有|成熟度|目前已有", text): return "existing_amenity"
+    if re.search(r"价格|预算|首期|定金|付款", text): return "price"
+    if re.search(r"出租|租客|租房", text): return "rental"
+    if re.search(r"转手|二手|流动性", text): return "resale"
+    if re.search(r"自住", text): return "self_use"
+    if re.search(r"投资|回报|现金流", text): return "investment"
+    if re.search(r"区域|地段|位置|通勤|交通|商圈", text): return "location"
+    return "property" if any(term in text for term in _V33_PROPERTY_QUERY_TERMS) else "general"
+
+
+_V34_ROLE_POSITIVES: dict[str, tuple[str, ...]] = {
+    **_V33_ROLE_POSITIVES,
+    "tenant_source": ("租客", "租房", "办公楼", "写字楼", "办公区", "白领", "大学", "校园", "学生", "地铁", "通勤"),
+    "existing_amenity": ("商场", "超市", "学校", "医院", "地铁", "轻轨", "社区", "街区", "配套", "建成", "实景"),
+    "comparison": ("住宅", "公寓", "社区", "办公", "交通", "租客", "样板间", "楼盘", "看房"),
+    "cta": ("手机", "评论", "咨询", "沟通", "顾问", "客户", "人物", "看房", "样板间"),
+}
+
+
+def _v33_semantic_relevance(query: str, asset: dict[str, Any]) -> tuple[float, bool, str]:
+    q = _text(query).lower()
+    a = _asset_text(asset).lower()
+    role = _v33_query_role(q)
+    family = _v30_visual_family(asset)
+    explicit_lifestyle = any(term.lower() in q for term in _V33_EXPLICIT_LIFESTYLE_TERMS)
+    tourism_food = [term for term in _V33_TOURISM_FOOD_TERMS if term.lower() in a]
+    property_visual = [term for term in _V33_PROPERTY_VISUAL_TERMS if term.lower() in a]
+    skyline_only = family == "city_landmark" and not any(term in a for term in (
+        "住宅", "公寓", "社区", "商场", "学校", "医院", "地铁", "办公", "写字楼", "人物", "客户", "样板间"
+    ))
+
+    if role != "general" and tourism_food and not explicit_lifestyle and not property_visual:
+        return -999.0, False, "房产决策语义禁止使用纯旅游/餐饮/夜市兜底画面"
+    if role == "tenant_source" and not any(term in a for term in _V34_ROLE_POSITIVES["tenant_source"]):
+        return -998.0, False, "租客来源必须出现办公/大学/学生/白领/租客/通勤等具体客群画面"
+    if role == "existing_amenity" and not any(term in a for term in _V34_ROLE_POSITIVES["existing_amenity"]):
+        return -997.0, False, "现有配套必须出现商场/学校/医院/地铁/社区等已存在小场景"
+    if role == "cta" and family in {"parking_vehicle", "city_landmark", "street_market"}:
+        return -996.0, False, "CTA 禁止停车场、纯天际线或市场空镜，优先人物/手机/咨询互动"
+    if role == "cta" and not any(term in a for term in _V34_ROLE_POSITIVES["cta"]):
+        return -995.0, False, "CTA 必须使用人物、手机、顾问、客户或咨询互动画面"
+    if role == "comparison" and family in {"parking_vehicle", "street_market"}:
+        return -994.0, False, "自住/投资对比禁止停车场或市场画面"
+    if skyline_only and role not in {"location", "property"}:
+        return -993.0, False, f"语义角色 {role} 禁止使用纯双子塔/天际线兜底"
+
+    query_tokens = _tokens(q)
+    asset_tokens = _tokens(a)
+    lexical = len(query_tokens & asset_tokens) * 14.0
+    theme = len(_themes(q) & _themes(a)) * 26.0
+    entity = sum(1 for term in _ENTITY_TERMS if term in q and term in a) * 85.0
+    role_hits = sum(1 for term in _V34_ROLE_POSITIVES.get(role, ()) if term.lower() in a)
+    property_hits = len(property_visual)
+    family_bonus = {
+        "tenant_source": {"office": 95, "campus": 95, "tenant": 88, "traffic": 58, "residential": 35},
+        "existing_amenity": {"mall": 92, "school": 90, "hospital": 90, "traffic": 68, "residential": 42},
+        "cta": {"cta_people": 110, "residential": 26},
+        "comparison": {"residential": 78, "office": 60, "traffic": 46, "tenant": 55},
+    }.get(role, {}).get(family, 0)
+    score = lexical + theme + entity + role_hits * 38.0 + min(property_hits, 4) * 16.0 + family_bonus
+    if role != "general" and not property_visual and role_hits == 0:
+        score -= 95.0
+    if tourism_food and not explicit_lifestyle:
+        score -= 120.0
+    if family == "city_landmark":
+        score -= 34.0
+    passed = score >= (18.0 if role == "general" else 54.0)
+    reason = (
+        f"V34语义角色={role}；画面族={family or 'unknown'}；角色命中={role_hits}；"
+        f"房产画面命中={property_hits}；词义分={round(score,1)}"
+    )
+    return score, passed, reason
+
+
+def _v34_enforce_visual_family_quota(
+    settings: Any,
+    payload: dict[str, Any],
+    job_id: str,
+    plan: dict[str, Any],
+) -> dict[str, Any]:
+    candidates, _ = _candidate_assets(settings, payload)
+    with _REGISTRY_LOCK:
+        registry = _load_registry(settings)
+    clips = [dict(item) for item in (plan.get("clips") or []) if isinstance(item, dict)]
+    quota = max(1, int(math.ceil(len(clips) * V34_MAX_CITY_LANDMARK_RATIO))) if clips else 0
+    city_seen = 0
+    replacements = 0
+    use_count: dict[str, int] = {}
+    previous_id = ""
+    previous_family = ""
+    output: list[dict[str, Any]] = []
+
+    for index, clip in enumerate(clips, start=1):
+        narration = _text(clip.get("narration"))
+        role = _v33_query_role(narration)
+        family = _text(clip.get("visual_family") or _v30_visual_family(clip))
+        current_id = _text(clip.get("asset_id"))
+        force_replace = False
+        if family == "city_landmark":
+            city_seen += 1
+            force_replace = city_seen > quota or role in {"tenant_source", "existing_amenity", "cta", "comparison"}
+        if family == "parking_vehicle" and role in {"cta", "comparison", "tenant_source", "existing_amenity"}:
+            force_replace = True
+        if force_replace:
+            ranked = _v33_rank_assets(narration, candidates, registry, use_count, previous_id, previous_family)
+            replacement = next((asset for asset, _, _, _ in ranked if _v30_visual_family(asset) not in {"city_landmark", "parking_vehicle"}), None)
+            if replacement is not None:
+                clip = _v30_apply_asset(clip, replacement, registry, f"{job_id}|v34-quota|{index}|{narration}")
+                current_id = _text(clip.get("asset_id"))
+                family = _v30_visual_family(replacement)
+                relevance, _, reason = _v33_semantic_relevance(narration, replacement)
+                clip["semantic_relevance_score"] = round(relevance, 3)
+                clip["semantic_relevance_reason"] = reason
+                clip["selection_reason"] = "V34 具体实体锁定与城市地标配额替换"
+                clip["visual_family_quota_replaced"] = True
+                replacements += 1
+                if city_seen > quota:
+                    city_seen -= 1
+        clip["semantic_role"] = role
+        clip["visual_family"] = family
+        clip["sequence_guard"] = {
+            **(clip.get("sequence_guard") if isinstance(clip.get("sequence_guard"), dict) else {}),
+            "city_landmark_quota": quota,
+            "city_landmark_ratio_limit": V34_MAX_CITY_LANDMARK_RATIO,
+            "entity_locked": role in {"tenant_source", "existing_amenity", "cta", "comparison"},
+        }
+        output.append(clip)
+        previous_id = current_id
+        previous_family = family
+        if current_id:
+            use_count[current_id] = use_count.get(current_id, 0) + 1
+
+    result = dict(plan)
+    result["clips"] = output
+    report = dict(result.get("usage_report") or {})
+    final_city = sum(1 for item in output if _text(item.get("visual_family")) == "city_landmark")
+    report.update({
+        "entity_locked_retrieval": True,
+        "city_landmark_quota": quota,
+        "city_landmark_count": final_city,
+        "city_landmark_ratio": round(final_city / max(1, len(output)), 3),
+        "city_landmark_replacements": replacements,
+        "cta_people_scene_required": True,
+        "tenant_source_specific_scene_required": True,
+    })
+    result["usage_report"] = report
+    result["version"] = VERSION
+    result["sequence_policy"] = "entity_lock_then_semantic_fit_then_freshness_with_city_landmark_quota"
+    return result
+
+
+_V33_BUILD_PLAN_V34_BASE = build_plan
+
+
+def build_plan(settings: Any, payload: dict[str, Any], job_id: str) -> dict[str, Any]:
+    plan = _V33_BUILD_PLAN_V34_BASE(settings, payload, job_id)
+    plan = _v34_enforce_visual_family_quota(settings, payload, job_id, plan)
+    plan["version"] = VERSION
+    plan["asset_memory_policy"] = "entity_lock_semantic_fit_first_then_recent_memory"
+    plan["cadence_policy"] = "long_sentence_stable_concrete_entities_micro_cut_cta_people_close"
     return plan

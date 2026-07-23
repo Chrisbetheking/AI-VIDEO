@@ -31,6 +31,9 @@ export type ExistingR2Shot = {
   segmentSelectionReason?: string
   semanticScore?: number
   visualFamily?: string
+  semanticRole?: string
+  semanticRelevanceReason?: string
+  visualFamilyQuotaReplaced?: boolean
   sequenceGuard?: Record<string, unknown>
 }
 
@@ -205,6 +208,9 @@ export function mapExistingR2ClipsToShots(
       segmentSelectionReason,
       semanticScore: numberValue(0, clip.semantic_score, clip.semanticScore),
       visualFamily: textValue(clip.visual_family, clip.visualFamily),
+      semanticRole: textValue(clip.semantic_role, clip.semanticRole),
+      semanticRelevanceReason: textValue(clip.semantic_relevance_reason, clip.semanticRelevanceReason),
+      visualFamilyQuotaReplaced: Boolean(clip.visual_family_quota_replaced ?? clip.visualFamilyQuotaReplaced ?? false),
       sequenceGuard: clip.sequence_guard && typeof clip.sequence_guard === 'object'
         ? clip.sequence_guard as Record<string, unknown>
         : undefined,

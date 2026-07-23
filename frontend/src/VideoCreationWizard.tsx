@@ -81,6 +81,9 @@ type ShotPlan = {
   segmentSelectionReason?: string
   semanticScore?: number
   visualFamily?: string
+  semanticRole?: string
+  semanticRelevanceReason?: string
+  visualFamilyQuotaReplaced?: boolean
   sequenceGuard?: Record<string, unknown>
 }
 
@@ -3237,7 +3240,7 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
                 <label className="aiw-checkRow"><input type="checkbox" checked={selectedShot.preserveAudio !== false} onChange={(e) => updateShot(selectedShot.id, { preserveAudio: e.target.checked })} />保留该片段环境声</label>
                 <div className="aiw-existingMatchNote"><b>语义匹配分：{Number(selectedShot.semanticScore ?? selectedShot.matchScore ?? 0).toFixed(1)}</b><span>{selectedShot.analysisDescription || '等待豆包素材描述'}</span></div>
                 <div className="aiw-existingMatchNote"><b>剪辑节奏：{selectedShot.cadenceMode === 'entity_micro_cut' ? '具体地点逐项快切' : selectedShot.cadenceMode === 'long_sentence_hold' ? '完整长句保持主镜头' : '语义段稳定镜头'}</b><span>{selectedShot.beatReason || '按完整口播语义决定镜头边界，不按逗号和字幕碎片切镜。'}{selectedShot.speedReason ? `；${selectedShot.speedReason}` : ''}</span></div>
-                <div className="aiw-existingMatchNote"><b>素材记忆：历史 {Number(selectedShot.historyUseCount || 0)} 次 · 最近 3 条 {Number(selectedShot.recent3UseCount || 0)} 次</b><span>{selectedShot.selectionReason || '优先匹配最近未使用素材；旧素材明显更契合时允许复用。'}{selectedShot.segmentSelectionReason ? `；${selectedShot.segmentSelectionReason}` : ''}{selectedShot.visualFamily ? `；画面族：${selectedShot.visualFamily}` : ''}</span></div>
+                <div className="aiw-existingMatchNote"><b>素材记忆：历史 {Number(selectedShot.historyUseCount || 0)} 次 · 最近 3 条 {Number(selectedShot.recent3UseCount || 0)} 次</b><span>{selectedShot.selectionReason || '优先匹配最近未使用素材；旧素材明显更契合时允许复用。'}{selectedShot.segmentSelectionReason ? `；${selectedShot.segmentSelectionReason}` : ''}{selectedShot.visualFamily ? `；画面族：${selectedShot.visualFamily}` : ''}{selectedShot.semanticRole ? `；语义角色：${selectedShot.semanticRole}` : ''}{selectedShot.visualFamilyQuotaReplaced ? '；已因城市地标配额自动换镜头' : ''}</span></div>
               </>}
             </div>
           )}
@@ -3261,7 +3264,7 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
               placeholder="例如：0-3 秒问题钩子；核心对比用对比卡；三项提醒逐条出现；结尾完整说完并保留 0.5 秒尾音。此处只提供结构，不固定成片时长。"
             />
           </label>
-          <div className="aiw-info">目标时长只用于估算文案长度，不会裁剪真实 TTS。完整长句稳镜；交通、商圈、租客来源等具体小场景逐项切换；相邻重复素材和同类城市地标会被自动拦截。主字幕默认提升到 150px，关键词按真实发音时间单独弹到 158%；素材先过语义硬筛选，再考虑是否用过，纯旅游、夜市、餐饮画面不会再兜底房产决策文案。动态标注只保留圈选、下划线、对比箭头、风险条和评论气泡。</div>
+          <div className="aiw-info">目标时长只用于估算文案长度，不会裁剪真实 TTS。完整长句稳镜；交通、商圈、租客来源等具体小场景逐项切换；相邻重复素材和同类城市地标会被自动拦截。主字幕默认 154px；关键词从原字幕抽离后单独放大，不再上下重复。办公/大学/租客来源/现有配套按具体场景硬匹配，城市地标最多约 20%；结尾 CTA 强制人物或手机互动，并保留评论气泡。</div>
           {renderSubtitleLibrary()}
           <h4>当前素材上下文</h4>
           <div className="aiw-miniList">{selectedAssets.slice(0, 6).map((asset: any, index) => <div key={asset.id || asset.url || index}>{asset.name || asset.original_name || asset.filename || asset.url}</div>)}</div>

@@ -31,7 +31,8 @@ from app.services.a10_r4_output_guard_v10_40_8_12 import (
     measure_audio_loudness,
 )
 
-VERSION = "10.40.8.33-semantic-relevance-caption-hierarchy"
+VERSION = "10.40.8.34-dedup-keyword-entity-cta"
+# V10_40_8_34_DEDUP_KEYWORD_ENTITY_CTA
 # V10_40_8_33_SEMANTIC_RELEVANCE_CAPTION_HIERARCHY
 # V10_40_8_32_REFERENCE_KINETIC_TYPOGRAPHY
 # V10_40_8_31_CLEAN_TEXT_PRO_STICKERS

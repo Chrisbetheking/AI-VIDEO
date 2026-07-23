@@ -19,10 +19,11 @@ from typing import Any, Callable
 
 from fastapi import Depends, HTTPException, Request
 
-VERSION = "10.40.8.33-semantic-relevance-caption-hierarchy"
+VERSION = "10.40.8.34-dedup-keyword-entity-cta"
+# V10_40_8_34_DEDUP_KEYWORD_ENTITY_CTA
 # V10_40_8_33_SEMANTIC_RELEVANCE_CAPTION_HIERARCHY
 # V10_40_8_32_REFERENCE_KINETIC_TYPOGRAPHY
-INSTALL_MARKER = "V10_40_8_33_SEMANTIC_RELEVANCE_CAPTION_HIERARCHY"
+INSTALL_MARKER = "V10_40_8_34_DEDUP_KEYWORD_ENTITY_CTA"
 _INSTALLED = False
 _LOCK = threading.RLock()
 
@@ -5893,3 +5894,351 @@ def _build_audio_filters(plan: dict[str, Any], *, has_audio: bool, sfx_inputs: l
             + f"atrim=duration={duration:.3f},loudnorm=I=-15.5:LRA=8:TP=-1.5,alimiter=limit=0.96[aout]"
         )
     return ";".join(parts), "aout"
+
+# =============================================================================
+# V10.40.8.34 DEDUP KEYWORD + ENTITY LOCK + CTA CLOSE
+# =============================================================================
+V34_MARKER = "V10_40_8_34_DEDUP_KEYWORD_ENTITY_CTA"
+V34_IMPACT_GAP_SECONDS = 0.92
+V34_PAIR_TERMS = (
+    ("自住", "投资"), ("自住", "出租"), ("出租", "转手"),
+    ("价格", "价值"), ("现在", "未来"),
+)
+
+
+def _v34_remove_tokens(text: str, tokens: list[str]) -> str:
+    value = str(text or "")
+    for token in sorted({item for item in tokens if item}, key=len, reverse=True):
+        value = value.replace(token, "")
+    value = re.sub(r"[，,、]{2,}", "，", value)
+    value = re.sub(r"^[，,、。；：:！？?\s]+|[，,、；：:\s]+$", "", value)
+    value = re.sub(r"\s+", "", value)
+    return value.strip()
+
+
+def _v34_comparison_pair(text: str) -> tuple[str, str] | None:
+    clean = _v32_clean_keyword(text)
+    for left, right in V34_PAIR_TERMS:
+        if left in clean and right in clean:
+            return left, right
+    return None
+
+
+def _v34_base_caption_line(
+    raw_text: str,
+    focus_tokens: list[str],
+    keywords: list[str],
+    highlight: str,
+) -> str:
+    clean = _v34_remove_tokens(raw_text, focus_tokens)
+    if len([item for item in focus_tokens if item]) >= 2:
+        clean = re.sub(r"(?:还是说|还是|或者|或是|或|以及|和|与|VS|vs)", "", clean)
+        clean = re.sub(r"[，,、；：:\s]+$", "", clean).strip()
+    if not clean:
+        return ""
+    wrapped = _v32_wrap_caption(clean, 7)
+    return _highlight_ass(wrapped, [item for item in keywords if item not in focus_tokens], highlight)
+
+
+def write_dynamic_ass(
+    destination: Path,
+    timings: list[dict[str, Any]],
+    keywords: list[str],
+    *,
+    style_id: str,
+    events: list[dict[str, Any]] | None = None,
+) -> Path:
+    """V34: a punched keyword is removed from the base caption, so it never appears twice."""
+    preset = SUBTITLE_PRESETS.get(style_id) or SUBTITLE_PRESETS["dynamic_white_yellow"]
+    context = getattr(_V16_CONTEXT, "config", {}) or {}
+    requested = int(context.get("caption_size") or 154)
+    base_size = max(142, min(198, requested))
+    font_name = "Noto Sans CJK SC"
+    header = f"""[Script Info]
+ScriptType: v4.00+
+PlayResX: 1080
+PlayResY: 1920
+ScaledBorderAndShadow: yes
+WrapStyle: 2
+
+[V4+ Styles]
+Format: Name,Fontname,Fontsize,PrimaryColour,SecondaryColour,OutlineColour,BackColour,Bold,Italic,Underline,StrikeOut,ScaleX,ScaleY,Spacing,Angle,BorderStyle,Outline,Shadow,Alignment,MarginL,MarginR,MarginV,Encoding
+Style: Dynamic,{font_name},{base_size},{preset['primary']},{preset['highlight']},{preset['outline']},&H00000000,-1,0,0,0,100,100,1.2,0,1,8,2,5,44,44,0,1
+Style: Impact,{font_name},224,&H00FFFFFF,&H0000E8FF,&H00101010,&H00000000,-1,0,0,0,100,100,1.0,0,1,13,3,5,32,32,0,1
+Style: ImpactSmall,{font_name},112,&H00FFFFFF,&H0000E8FF,&H00101010,&H00000000,-1,0,0,0,100,100,1.0,0,1,9,2,5,32,32,0,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+"""
+    lines = [header]
+    last_impact = -999.0
+    duration = max((_safe_float(item.get("end"), 0.0) for item in timings), default=0.0)
+    max_impacts = max(6, min(12, int(math.ceil(max(1.0, duration) / 30.0 * 11))))
+    impact_count = 0
+    impact_candidates = 0
+    duplicate_suppressed = 0
+    comparison_pair_count = 0
+    cta_lockup_count = 0
+    impact_debug: list[dict[str, Any]] = []
+    role_colors = {
+        "risk": "&H003B6BFF&", "question": "&H00FFE04B&", "cta": "&H0047D2FF&",
+        "comparison": "&H00FFB347&", "data": "&H0000E8FF&", "list": "&H0068E083&", "hook": "&H0000E8FF&",
+    }
+    for item in timings:
+        start = _safe_float(item.get("start"), 0.0)
+        end = max(start + 0.30, _safe_float(item.get("end"), start + 0.85))
+        raw_text = _clean_caption_text(str(item.get("text") or ""))
+        role = _v30_semantic_role(raw_text, _classify(raw_text)) if '_v30_semantic_role' in globals() else _classify(raw_text)
+        pair = _v34_comparison_pair(raw_text) if role == "comparison" or re.search(r"自住|投资|出租|转手", raw_text) else None
+        focus = _v32_focus_keyword(raw_text, keywords, role)
+        impact_candidates += 1 if (focus or pair) else 0
+        can_impact = bool(
+            (focus or pair)
+            and impact_count < max_impacts
+            and start - last_impact >= V34_IMPACT_GAP_SECONDS
+        )
+        focus_tokens = list(pair) if pair and can_impact else ([focus] if focus and can_impact else [])
+        main_text = _v34_base_caption_line(raw_text, focus_tokens, keywords, str(preset["highlight"]))
+        short = len(_v32_clean_keyword(raw_text)) <= 7
+        line_size = min(190, base_size + (16 if short else 0))
+        position = 1410 if role not in {"hook", "question", "cta"} else 1345
+        if main_text:
+            animation = (
+                rf"{{\an5\pos(540,{position})\fs{line_size}\fscx94\fscy94"
+                rf"\t(0,105,\fscx105\fscy105)\t(105,225,\fscx100\fscy100)\fad(18,70)}}"
+            )
+            lines.append(f"Dialogue: 0,{_ass_time(start)},{_ass_time(end)},Dynamic,,0,0,0,,{animation}{main_text}\n")
+
+        if not can_impact:
+            continue
+        timing_target = pair[0] if pair else focus
+        impact_start, impact_end, timing_source = _v32_keyword_timing(item, timing_target)
+        if pair:
+            # A comparison uses the full spoken phrase window; both terms become the visual sentence.
+            impact_start = start
+            impact_end = max(start + 0.70, min(end, start + 1.55))
+        if impact_end <= impact_start + 0.18:
+            continue
+
+        if pair:
+            left, right = pair
+            color = role_colors.get("comparison", "&H00FFB347&")
+            left_anim = (
+                rf"{{\an5\pos(300,1080)\fs218\c{color}\bord13\shad3\frz-2"
+                rf"\fscx50\fscy50\t(0,100,\fscx154\fscy154\frz1)"
+                rf"\t(100,270,\fscx112\fscy112\frz0)\fad(10,90)}}"
+            )
+            right_anim = (
+                rf"{{\an5\pos(780,1080)\fs218\c&H0000E8FF&\bord13\shad3\frz2"
+                rf"\fscx50\fscy50\t(70,175,\fscx154\fscy154\frz-1)"
+                rf"\t(175,340,\fscx112\fscy112\frz0)\fad(10,90)}}"
+            )
+            vs_anim = rf"{{\an5\pos(540,1085)\fs94\c&H00FFFFFF&\bord8\shad2\fad(70,100)}}"
+            lines.append(f"Dialogue: 2,{_ass_time(impact_start)},{_ass_time(impact_end)},Impact,,0,0,0,,{left_anim}{_ass_escape(left)}\n")
+            lines.append(f"Dialogue: 2,{_ass_time(impact_start)},{_ass_time(impact_end)},Impact,,0,0,0,,{right_anim}{_ass_escape(right)}\n")
+            lines.append(f"Dialogue: 2,{_ass_time(impact_start)},{_ass_time(impact_end)},ImpactSmall,,0,0,0,,{vs_anim}VS\n")
+            comparison_pair_count += 1
+            duplicate_suppressed += 2
+            impact_debug.append({
+                "text": f"{left} VS {right}", "start": round(impact_start, 3), "end": round(impact_end, 3),
+                "timing_source": "comparison_phrase_window", "size": 218, "scale_peak": 154,
+                "base_caption_tokens_removed": [left, right],
+            })
+        else:
+            impact_size = 250 if len(focus) <= 3 else 224 if len(focus) <= 5 else 196
+            impact_y = 1055 if role in {"hook", "question", "risk", "comparison", "cta"} else 1165
+            color = role_colors.get(role, "&H0000E8FF&")
+            impact_animation = (
+                rf"{{\an5\pos(540,{impact_y})\fs{impact_size}\c{color}\bord13\shad3\frz-2"
+                rf"\fscx48\fscy48\t(0,95,\fscx154\fscy154\frz1)"
+                rf"\t(95,270,\fscx112\fscy112\frz0)\fad(10,95)}}"
+            )
+            lines.append(
+                f"Dialogue: 2,{_ass_time(impact_start)},{_ass_time(impact_end)},Impact,,0,0,0,,"
+                f"{impact_animation}{_ass_escape(focus)}\n"
+            )
+            duplicate_suppressed += 1
+            if role == "cta":
+                cta_lockup_count += 1
+            impact_debug.append({
+                "text": focus, "start": round(impact_start, 3), "end": round(impact_end, 3),
+                "timing_source": timing_source, "size": impact_size, "scale_peak": 154,
+                "base_caption_tokens_removed": [focus],
+            })
+        impact_count += 1
+        last_impact = impact_start
+
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_text("".join(lines), encoding="utf-8-sig")
+    try:
+        destination.with_suffix(".impact.json").write_text(
+            json.dumps({
+                "keyword_impact_count": impact_count,
+                "keyword_impact_candidates": impact_candidates,
+                "keyword_impact_coverage": round(impact_count / max(1, impact_candidates), 3),
+                "base_caption_size": base_size,
+                "duplicate_keyword_suppressed_count": duplicate_suppressed,
+                "comparison_pair_count": comparison_pair_count,
+                "cta_lockup_count": cta_lockup_count,
+                "impacts": impact_debug,
+            }, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+    except Exception:
+        pass
+    return destination
+
+
+_V33_DECORATE_EVENTS_V34_BASE = _decorate_events
+
+
+def _decorate_events(
+    events: list[dict[str, Any]],
+    duration: float,
+    *,
+    sfx_level: str,
+    sticker_level: str,
+) -> list[dict[str, Any]]:
+    result = _V33_DECORATE_EVENTS_V34_BASE(
+        events, duration, sfx_level=sfx_level, sticker_level=sticker_level,
+    )
+    forced_assets = {
+        "cta": ("comment_bubble.png", "caption_right"),
+        "comparison": ("split_arrows.png", "caption_center"),
+        "question": ("circle_scribble.png", "caption_center"),
+        "risk": ("warning_tape.png", "caption_center"),
+        "data": ("underline_brush.png", "caption_center"),
+        "turn": ("arrow_curve.png", "caption_right"),
+    }
+    role_gain_floor = {
+        "hook": 0.80, "question": 0.76, "turn": 0.72, "data": 0.74,
+        "risk": 0.80, "comparison": 0.78, "cta": 0.82,
+    }
+    last_asset = ""
+    for index, event in enumerate(result):
+        text = str(event.get("source_text") or event.get("focus_text") or "")
+        role = _v30_semantic_role(text, str(event.get("role") or "knowledge"))
+        event["role"] = role
+        forced = forced_assets.get(role)
+        if sticker_level != "off" and forced:
+            asset, position = forced
+            path = _sticker_root() / V33_ACCENT_PREFIX / asset
+            if path.is_file():
+                event["sticker"] = {
+                    "asset": f"{V33_ACCENT_PREFIX}{asset}",
+                    "start": round(_safe_float(event.get("start"), 0.0), 3),
+                    "end": round(max(_safe_float(event.get("start"), 0.0) + 0.95, min(_safe_float(event.get("end"), 0.0), _safe_float(event.get("start"), 0.0) + 1.55)), 3),
+                    "position": position,
+                    "size": 380 if role in {"cta", "comparison"} else 345,
+                    "semantic_motion_overlay": True,
+                    "counts_as_sticker": False,
+                    "v34_forced_semantic_overlay": True,
+                }
+        sfx = event.get("sfx") if isinstance(event.get("sfx"), dict) else None
+        if sfx is not None:
+            sfx["gain"] = round(max(role_gain_floor.get(role, 0.68), _safe_float(sfx.get("gain"), 0.0)), 4)
+        elif sfx_level != "off" and role in role_gain_floor:
+            asset, _ = _v16_choose_variant(role, event, index, last_asset)
+            if asset:
+                event["sfx"] = {"asset": asset, "gain": role_gain_floor[role], "role": role, "v34_forced": True}
+                last_asset = asset
+    return result
+
+
+_V33_BUILD_DYNAMIC_PLAN_V34_BASE = build_dynamic_plan
+
+
+def build_dynamic_plan(
+    payload: dict[str, Any],
+    timings: list[dict[str, Any]],
+    duration: float,
+    *,
+    intensity: str = "balanced",
+) -> dict[str, Any]:
+    plan = _V33_BUILD_DYNAMIC_PLAN_V34_BASE(payload, timings, duration, intensity=intensity)
+    plan["events"] = _decorate_events(
+        [dict(item) for item in (plan.get("events") or []) if isinstance(item, dict)],
+        duration,
+        sfx_level=str(payload.get("dynamic_sfx_level") or "light"),
+        sticker_level=str(payload.get("dynamic_sticker_level") or "light"),
+    )
+    delivery = dict(plan.get("effect_delivery") or {})
+    delivery.update({
+        "keyword_duplicate_suppression": True,
+        "comparison_pair_lockup": True,
+        "cta_comment_overlay_required": True,
+        "sfx_window_target_db": "-16_to_-20_relative_to_voice",
+        "text_box_count": 0,
+    })
+    plan["effect_delivery"] = delivery
+    plan["version"] = VERSION
+    plan["visual_pace"] = "dedup_keyword_entity_lock_cta_close"
+    return plan
+
+
+def _build_audio_filters(plan: dict[str, Any], *, has_audio: bool, sfx_inputs: list[dict[str, Any]]) -> tuple[str, str | None]:
+    """V34: normalize each SFX before gain, then mix without a second loudnorm pass that buries it."""
+    if not has_audio:
+        return "", None
+    duration = max(0.1, _safe_float(plan.get("render_duration"), _safe_float(plan.get("duration"), 30.0)))
+    duck_terms: list[str] = []
+    for item in sfx_inputs:
+        start = max(0.0, _safe_float((item.get("event") or {}).get("start"), 0.0))
+        duck_terms.append(f"-0.16*between(t,{start:.3f},{start + 0.52:.3f})")
+    duck = "1" + "".join(duck_terms)
+    parts = [
+        f"[0:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,"
+        f"apad=pad_dur={duration:.3f},atrim=duration={duration:.3f},"
+        f"loudnorm=I=-16:LRA=7:TP=-2.0,volume='{duck}':eval=frame[voice]"
+    ]
+    labels = ["voice"]
+    for index, item in enumerate(sfx_inputs, start=1):
+        event = item["event"]
+        sfx = item["sfx"]
+        inp = int(item["input_index"])
+        delay = int(max(0.0, _safe_float(event.get("start"), 0.0)) * 1000)
+        gain = max(0.72, min(1.00, _safe_float(sfx.get("gain"), 0.82)))
+        label = f"v34sfx{index}"
+        parts.append(
+            f"[{inp}:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,"
+            f"atrim=0:1.45,asetpts=PTS-STARTPTS,highpass=f=90,lowpass=f=14500,"
+            f"loudnorm=I=-19:LRA=5:TP=-3.0,volume={gain:.4f},"
+            f"pan=stereo|c0=1.00*c0|c1=0.72*c1,"
+            f"afade=t=in:st=0:d=0.008,afade=t=out:st=1.18:d=0.22,"
+            f"adelay={delay}|{delay}[{label}]"
+        )
+        labels.append(label)
+    if len(labels) == 1:
+        parts.append("[voice]alimiter=limit=0.94[aout]")
+    else:
+        parts.append(
+            "".join(f"[{label}]" for label in labels)
+            + f"amix=inputs={len(labels)}:duration=longest:dropout_transition=0:normalize=0,"
+            + f"atrim=duration={duration:.3f},alimiter=limit=0.96[aout]"
+        )
+    return ";".join(parts), "aout"
+
+
+_V33_RENDER_DYNAMIC_VIDEO_V34_BASE = render_dynamic_video
+
+
+def render_dynamic_video(input_path: Path, output_path: Path, ass_path: Path, plan: dict[str, Any]) -> dict[str, Any]:
+    report = _V33_RENDER_DYNAMIC_VIDEO_V34_BASE(input_path, output_path, ass_path, plan)
+    sidecar = ass_path.with_suffix(".impact.json")
+    meta: dict[str, Any] = {}
+    if sidecar.is_file():
+        try:
+            loaded = json.loads(sidecar.read_text(encoding="utf-8"))
+            meta = loaded if isinstance(loaded, dict) else {}
+        except Exception:
+            meta = {}
+    report.update({
+        "effect_engine": "v34_dedup_keyword_entity_cta",
+        "duplicate_keyword_suppressed_count": int(meta.get("duplicate_keyword_suppressed_count") or 0),
+        "comparison_pair_count": int(meta.get("comparison_pair_count") or 0),
+        "cta_lockup_count": int(meta.get("cta_lockup_count") or 0),
+        "keyword_duplicate_visible": False,
+        "sfx_window_target_db": "-16_to_-20_relative_to_voice",
+        "text_box_count": 0,
+    })
+    return report
