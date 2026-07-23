@@ -31,7 +31,8 @@ from app.services.a10_r4_output_guard_v10_40_8_12 import (
     measure_audio_loudness,
 )
 
-VERSION = "10.40.8.28-semantic-editor-engine"
+VERSION = "10.40.8.29-natural-cadence-asset-memory"
+# V10_40_8_29_NATURAL_CADENCE_ASSET_MEMORY
 # REAL_TTS_CHILD_MASTER_SYNC_R9
 # V10_40_8_12_A10_R4_SEMANTIC_SINGLE_USE_AUDIO: strict visual single-use, semantic coverage, fresh ending, -16 LUFS
 # V10_40_8_8_A10_R3_GLOBAL_VISUAL_DEDUP: whole-video repetition guard
@@ -719,7 +720,7 @@ def _normalize_clip(
 ) -> None:
     info = _probe(source)
     speed = max(0.75, min(1.5, float(speed or 1)))
-    duration = max(0.65, float(duration))
+    duration = max(0.20, float(duration))
     needed = duration * speed
     start = max(
         0.0,
@@ -875,6 +876,18 @@ def _url(settings: Any, path: Path, prefix: str) -> str:
     )
 
 
+def _default_natural_pause_ms(text: str, next_text: str = "") -> int:
+    value = str(text or "").strip()
+    following = str(next_text or "").strip()
+    if re.search(r"(第一|第二|第三|第四|最后|总结|所以|但是|不过|然而)", following):
+        return 190
+    if re.search(r"(为什么|怎么|到底|吗|呢|？|！)$", value):
+        return 210
+    if re.search(r"(评论|留言|关注|下一条|私信)", value):
+        return 230
+    return 120
+
+
 def _voice_segments(
     payload: dict[str, Any], parts: list[str]
 ) -> list[VoiceSegment]:
@@ -888,6 +901,15 @@ def _voice_segments(
             else {}
         )
         voice = settings_map.get(str(item.get("id") or f"seg_{index}")) or {}
+        explicit_pause = voice.get("pauseAfter")
+        if explicit_pause is None:
+            explicit_pause = voice.get("pause_after_ms")
+        next_text = parts[index] if index < len(parts) else ""
+        pause_ms = (
+            max(0, min(900, int(explicit_pause)))
+            if explicit_pause is not None
+            else _default_natural_pause_ms(text, next_text)
+        )
         result.append(
             VoiceSegment(
                 text=text,
@@ -901,11 +923,7 @@ def _voice_segments(
                 pitch_ratio=float(
                     voice.get("pitch") or voice.get("pitch_ratio") or 1
                 ),
-                pause_after_ms=int(
-                    voice.get("pauseAfter")
-                    or voice.get("pause_after_ms")
-                    or 220
-                ),
+                pause_after_ms=pause_ms,
             )
         )
     return result
@@ -931,7 +949,12 @@ def _build_semantic_speech_units(
             duration = _float(item.get("duration") or item.get("duration_seconds"), 0.0)
             if start >= 0 and duration > 0:
                 end = start + duration
-        normalized.append({"text": str(item.get("text") or ""), "start": start, "end": end})
+        normalized.append({
+            "text": str(item.get("text") or ""), "start": start, "end": end,
+            "word_timeline": [dict(x) for x in (item.get("word_timeline") or []) if isinstance(x, dict)],
+            "timing_source": str(item.get("timing_source") or ""),
+            "continuous_group_id": item.get("continuous_group_id"),
+        })
 
     valid_timeline = normalized and all(x["start"] >= 0 and x["end"] > x["start"] for x in normalized)
     if not valid_timeline:
@@ -952,12 +975,21 @@ def _build_semantic_speech_units(
             timing_index += 1
             if not wanted or len(collected) >= max(1, int(len(wanted) * 0.82)) or wanted in collected:
                 break
+        selected_timings = normalized[max(0, timing_index - 1):timing_index]
+        unit_words = [
+            dict(word)
+            for timing_item in selected_timings
+            for word in (timing_item.get("word_timeline") or [])
+            if isinstance(word, dict)
+        ]
         units.append({
             "index": part_index,
             "text": part,
             "start": round(start, 3),
             "end": round(max(start + 0.3, end), 3),
             "duration": round(max(0.3, end - start), 3),
+            "word_timeline": unit_words,
+            "timing_source": "volcengine_native_word_timestamp" if unit_words else "segment_duration_fallback",
         })
     if units:
         units[-1]["end"] = round(max(units[-1]["end"], target), 3)
@@ -1293,9 +1325,8 @@ async def _render(
                     float(info["duration"] or needed),
                     needed,
                 )
-                if clip.get("auto_start", True)
-                or float(clip.get("start_time") or 0) <= 0
-                else float(clip.get("start_time") or 0)
+                if bool(clip.get("auto_start", True))
+                else max(0.0, float(clip.get("start_time") or 0))
             )
             destination = work / "clips" / f"{position:03d}.mp4"
             destination.parent.mkdir(parents=True, exist_ok=True)

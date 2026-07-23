@@ -27,7 +27,9 @@ def sanitize_tts_text(value: Any) -> str:
     text = re.sub(r"\s+", "", text)
     text = re.sub(r"[，,]{2,}", "，", text)
     text = re.sub(r"，([。！？；])", r"\1", text)
-    return text.strip("，。 ")
+    # Keep sentence-final punctuation so the cloud voice can preserve falling,
+    # questioning and emphatic intonation. Only remove dangling comma separators.
+    return re.sub(r"[，,]+$", "", text).strip()
 
 def run_cmd(cmd: list[str], timeout: int = 120) -> subprocess.CompletedProcess[str]:
     return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, check=False)
@@ -596,3 +598,207 @@ async def synthesize_tts_segments(settings: Settings, segments: list[VoiceSegmen
             item['tts_audio_duration_seconds'] = round(final_duration, 4)
             item['tts_tail_hold_seconds'] = round(tail_seconds, 4)
     return output, final_duration, warning, timings
+
+
+# =============================================================================
+# V10.40.8.29 NATURAL CONTINUOUS TTS — GROUPED SEMANTIC DELIVERY
+# =============================================================================
+V29_MAX_GROUP_CHARS = 92
+V29_MAX_GROUP_SEGMENTS = 4
+_V28_SYNTHESIZE_TTS_SEGMENTS = synthesize_tts_segments
+
+
+def _v29_clean_alignment_text(value: Any) -> str:
+    return re.sub(r"[^\u4e00-\u9fffA-Za-z0-9%]+", "", str(value or ""))
+
+
+def _v29_same_voice_profile(left: VoiceSegment, right: VoiceSegment) -> bool:
+    return (
+        abs(float(left.speed_ratio) - float(right.speed_ratio)) <= 0.03
+        and abs(float(left.volume_ratio) - float(right.volume_ratio)) <= 0.05
+        and abs(float(left.pitch_ratio) - float(right.pitch_ratio)) <= 0.03
+        and str(left.emotion or "") == str(right.emotion or "")
+    )
+
+
+def _v29_strong_group_boundary(current: VoiceSegment, following: VoiceSegment | None) -> bool:
+    if following is None:
+        return True
+    current_text = sanitize_tts_text(current.text)
+    next_text = sanitize_tts_text(following.text)
+    if int(current.pause_after_ms or 0) >= 360:
+        return True
+    if not _v29_same_voice_profile(current, following):
+        return True
+    if re.match(r"^(第一|第二|第三|第四|最后|总结|注意|重点|评论|关注|下一条)", next_text):
+        return True
+    if re.search(r"(评论|留言|关注|下一条|私信)", current_text):
+        return True
+    return False
+
+
+def _v29_join_group_text(items: list[VoiceSegment]) -> str:
+    parts: list[str] = []
+    for segment in items:
+        value = sanitize_tts_text(segment.text)
+        if not value:
+            continue
+        if parts and not re.search(r"[。！？；，]$", parts[-1]):
+            parts[-1] += "，"
+        parts.append(value)
+    return "".join(parts)
+
+
+def _v29_group_voice_segments(segments: list[VoiceSegment]) -> tuple[list[VoiceSegment], list[list[int]]]:
+    usable = [segment for segment in segments[:30] if sanitize_tts_text(segment.text)]
+    groups: list[list[VoiceSegment]] = []
+    mappings: list[list[int]] = []
+    current: list[VoiceSegment] = []
+    current_indexes: list[int] = []
+    current_chars = 0
+
+    for index, segment in enumerate(usable):
+        value = sanitize_tts_text(segment.text)
+        next_chars = len(_v29_clean_alignment_text(value))
+        would_overflow = (
+            current
+            and (
+                len(current) >= V29_MAX_GROUP_SEGMENTS
+                or current_chars + next_chars > V29_MAX_GROUP_CHARS
+                or not _v29_same_voice_profile(current[-1], segment)
+            )
+        )
+        if would_overflow:
+            groups.append(current)
+            mappings.append(current_indexes)
+            current = []
+            current_indexes = []
+            current_chars = 0
+        current.append(segment)
+        current_indexes.append(index)
+        current_chars += next_chars
+        following = usable[index + 1] if index + 1 < len(usable) else None
+        if _v29_strong_group_boundary(segment, following):
+            groups.append(current)
+            mappings.append(current_indexes)
+            current = []
+            current_indexes = []
+            current_chars = 0
+    if current:
+        groups.append(current)
+        mappings.append(current_indexes)
+
+    grouped_segments: list[VoiceSegment] = []
+    for items in groups:
+        first = items[0]
+        last = items[-1]
+        grouped_segments.append(VoiceSegment(
+            text=_v29_join_group_text(items),
+            emotion=first.emotion,
+            speed_ratio=float(first.speed_ratio),
+            volume_ratio=float(first.volume_ratio),
+            pitch_ratio=float(first.pitch_ratio),
+            pause_after_ms=max(0, min(320, int(last.pause_after_ms or 0))),
+        ))
+    return grouped_segments, mappings
+
+
+def _v29_split_group_timing(
+    group_timing: dict[str, Any],
+    original_segments: list[VoiceSegment],
+    original_indexes: list[int],
+    group_id: int,
+) -> list[dict[str, Any]]:
+    group_start = float(group_timing.get("start") or 0.0)
+    group_end = max(group_start + 0.05, float(group_timing.get("end") or group_start))
+    words = [dict(item) for item in (group_timing.get("word_timeline") or []) if isinstance(item, dict)]
+    words.sort(key=lambda item: (float(item.get("start") or 0.0), float(item.get("end") or 0.0)))
+    lengths = [max(1, len(_v29_clean_alignment_text(original_segments[index].text))) for index in original_indexes]
+    total = max(1, sum(lengths))
+    output: list[dict[str, Any]] = []
+
+    if words:
+        word_lengths = [max(1, len(_v29_clean_alignment_text(item.get("word") or item.get("text")))) for item in words]
+        cumulative_words: list[int] = []
+        running = 0
+        for length in word_lengths:
+            running += length
+            cumulative_words.append(running)
+        word_cursor = 0
+        consumed_chars = 0
+        for local_index, (original_index, wanted_length) in enumerate(zip(original_indexes, lengths)):
+            consumed_chars += wanted_length
+            target_chars = max(1, round(cumulative_words[-1] * consumed_chars / total))
+            end_word = word_cursor
+            while end_word + 1 < len(words) and cumulative_words[end_word] < target_chars:
+                end_word += 1
+            selected = words[word_cursor : end_word + 1] or words[min(word_cursor, len(words) - 1): min(word_cursor, len(words) - 1) + 1]
+            seg_start = float(selected[0].get("start") or group_start)
+            seg_end = float(selected[-1].get("end") or seg_start + 0.05)
+            if local_index == len(original_indexes) - 1:
+                seg_end = max(seg_end, group_end)
+            output.append({
+                "index": original_index + 1,
+                "text": sanitize_tts_text(original_segments[original_index].text),
+                "start": round(seg_start, 3),
+                "end": round(max(seg_start + 0.05, seg_end), 3),
+                "duration": round(max(0.05, seg_end - seg_start), 3),
+                "word_timeline": selected,
+                "native_word_timestamp_count": len(selected),
+                "timing_source": "volcengine_native_word_timestamp",
+                "continuous_group_id": group_id,
+                "continuous_group_size": len(original_indexes),
+            })
+            word_cursor = min(len(words), end_word + 1)
+    else:
+        cursor = group_start
+        for local_index, (original_index, wanted_length) in enumerate(zip(original_indexes, lengths)):
+            seg_end = group_end if local_index == len(original_indexes) - 1 else cursor + (group_end - group_start) * wanted_length / total
+            output.append({
+                "index": original_index + 1,
+                "text": sanitize_tts_text(original_segments[original_index].text),
+                "start": round(cursor, 3),
+                "end": round(max(cursor + 0.05, seg_end), 3),
+                "duration": round(max(0.05, seg_end - cursor), 3),
+                "word_timeline": [],
+                "native_word_timestamp_count": 0,
+                "timing_source": "continuous_group_duration_fallback",
+                "continuous_group_id": group_id,
+                "continuous_group_size": len(original_indexes),
+            })
+            cursor = seg_end
+    return output
+
+
+async def synthesize_tts_segments(
+    settings: Settings,
+    segments: list[VoiceSegment],
+    voice: Optional[str] = None,
+    overall_rate: Optional[str] = None,
+) -> Tuple[Path, float, Optional[str], list[dict[str, Any]]]:
+    grouped_segments, mappings = _v29_group_voice_segments(segments)
+    if not grouped_segments:
+        raise RuntimeError("V29 连续配音分组后没有可合成文本")
+    output, duration, warning, grouped_timings = await _V28_SYNTHESIZE_TTS_SEGMENTS(
+        settings,
+        grouped_segments,
+        voice=voice,
+        overall_rate=overall_rate,
+    )
+    usable_original = [segment for segment in segments[:30] if sanitize_tts_text(segment.text)]
+    expanded: list[dict[str, Any]] = []
+    for group_index, original_indexes in enumerate(mappings, start=1):
+        timing = grouped_timings[group_index - 1] if group_index - 1 < len(grouped_timings) else {}
+        expanded.extend(_v29_split_group_timing(timing, usable_original, original_indexes, group_index))
+    expanded.sort(key=lambda item: int(item.get("index") or 0))
+    if len(expanded) != len(usable_original):
+        raise RuntimeError(
+            f"V29 连续配音时间展开数量错误：expected={len(usable_original)}, actual={len(expanded)}"
+        )
+    tail_seconds = max(0.0, duration - max((float(item.get("end") or 0.0) for item in expanded), default=duration))
+    for item in expanded:
+        item["tts_audio_duration_seconds"] = round(duration, 4)
+        item["tts_tail_hold_seconds"] = round(tail_seconds, 4)
+        item["continuous_tts"] = True
+        item["continuous_group_count"] = len(grouped_segments)
+    return output, duration, warning, expanded

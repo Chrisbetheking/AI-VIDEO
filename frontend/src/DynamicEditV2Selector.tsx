@@ -112,7 +112,7 @@ export default function DynamicEditV2Selector({shotCount=0}:{shotCount?:number})
 
   return <section className="dynamic-edit-v2-shell v19" data-dynamic-edit-v2="true" data-placement="shot-plan-section">
     <div className="v19-topline">
-      <div className="v19-title"><span>V10.40.8.28 · SEMANTIC EDITOR</span><h4>AI 教学口播精剪</h4><p>真实 TTS 决定最终时长；DeepSeek 只决定语义镜头、对比卡、流程卡、风险提醒、清单、CTA 和声音触发，不使用固定秒数裁剪。</p></div>
+      <div className="v19-title"><span>V10.40.8.29 · NATURAL CADENCE</span><h4>AI 教学口播精剪</h4><p>真实 TTS 决定最终时长；完整长句优先稳镜，具体地点逐项快切，慢推素材自动轻加速，并记录跨视频素材使用历史。</p></div>
       <div className="v19-shot-status"><strong>{shotCount}</strong><span>上一页镜头</span></div>
     </div>
 
@@ -121,7 +121,7 @@ export default function DynamicEditV2Selector({shotCount=0}:{shotCount?:number})
         <em>稳定版</em><strong>A10-R4</strong><small>保持原逻辑，不做 AI 动态包装。</small>
       </button>
       <button type="button" className={config.engine==='dynamic_v2'?'selected':''} onClick={()=>setConfig(c=>({...c,engine:'dynamic_v2'}))}>
-        <em>推荐</em><strong>AI 语义精剪</strong><small>普通语句少切镜；商场、学校、医院等并列实体逐项切镜。</small>
+        <em>推荐</em><strong>AI 语义精剪</strong><small>长句不乱切；咖啡厅、商场、学校、医院等具体地点逐项快切。</small>
       </button>
     </div>
 
@@ -130,9 +130,9 @@ export default function DynamicEditV2Selector({shotCount=0}:{shotCount?:number})
 
       {tab==='director' && <div className="v19-compact-grid">
         <article className="v19-ai-card primary"><div><b>DeepSeek 自动判断镜头边界</b><span>读取完整口播、TTS 时间、上一页镜头和 R2 素材描述后输出剪辑节拍。</span></div><i>AI 自动</i></article>
-        <article className="v19-rule"><b>常规解释</b><span>一个意思保持一个主镜头，字幕变动不触发切镜。</span></article>
-        <article className="v19-rule"><b>并列实体</b><span>商场 / 学校 / 医院 / 地铁等，一个实体对应一个镜头。</span></article>
-        <article className="v19-rule"><b>素材优先级</b><span>优先用上一页选定素材；缺 URL 时按素材 ID、文件名回查 R2。</span></article>
+        <article className="v19-rule"><b>常规解释</b><span>完整长句和同一意思保持 5–11 秒主镜头，逗号和字幕变化都不触发切镜。</span></article>
+        <article className="v19-rule"><b>并列实体</b><span>咖啡厅 / 商场 / 学校 / 医院 / 地铁等，按口播出现顺序一个地点对应一个相邻小镜头。</span></article>
+        <article className="v19-rule"><b>素材优先级</b><span>全库检索 300+ 素材；最近三条优先换新，旧素材明显更契合时允许复用。</span></article>
         <label className="v19-field"><span>画面动效密度</span><select value={config.intensity} onChange={(e:ChangeEvent<HTMLSelectElement>)=>setConfig(c=>({...c,intensity:e.target.value as DynamicEditIntensity}))}><option value="restrained">克制</option><option value="balanced">均衡（推荐）</option><option value="strong">加强</option></select></label>
       </div>}
 
@@ -154,7 +154,7 @@ export default function DynamicEditV2Selector({shotCount=0}:{shotCount?:number})
         <label className="v19-field"><span>教学组件位置</span><select value={config.stickerLayout} onChange={(e:ChangeEvent<HTMLSelectElement>)=>setConfig(c=>({...c,stickerLayout:e.target.value as DynamicStickerLayout}))}><option value="auto_safe">自动安全区</option><option value="top">上方两角</option><option value="side">左右侧边</option></select></label>
       </div>}
 
-      {tab==='rules' && <div className="v19-rule-grid"><article><b>镜头时长</b><span>来自口播时间和 AI beat，不再读人工“舒缓 / 均衡 / 紧凑”秒数。</span></article><article><b>素材一致性</b><span>上一页镜头作为优先素材池，缺 URL 自动回查 R2，不再出现 1 镜头 / 0 素材。</span></article><article><b>重复控制</b><span>同任务唯一素材优先，跨任务读取使用记录后降权。</span></article><article><b>音效规则</b><span>同音效不连续；普通段落至少间隔 4 秒，实体清单只在开头做一次轻提示。</span></article><article><b>字幕完整性</b><span>字幕动效和切镜解耦，完整词组不拆散。</span></article><article><b>音画收口</b><span>最终时长以音轨为准，尾部差值超过 0.25 秒直接失败。</span></article></div>}
+      {tab==='rules' && <div className="v19-rule-grid"><article><b>长句稳镜</b><span>同一意思即使有多个逗号也保持主镜头；只在完整句间或真实语义转折切换。</span></article><article><b>地点快切</b><span>咖啡厅、商场、学校等并列小场景按出现顺序逐项切换，不把普通长句拆碎。</span></article><article><b>素材记忆</b><span>记录素材、源片段、语义角色和速度；最近三条优先换新，高匹配旧素材允许复用。</span></article><article><b>慢镜加速</b><span>缓慢航拍、慢推和静态镜头自动使用约 1.10–1.20 倍速度；合同和文字特写保持原速。</span></article><article><b>连续配音</b><span>普通相邻句合并为连续 TTS 语义段，减少每句重新起调和过长人工停顿。</span></article><article><b>音画收口</b><span>最终时长以真实音轨为准，尾音安全区和字幕词组完整性继续强制校验。</span></article></div>}
     </div>}
   </section>
 }

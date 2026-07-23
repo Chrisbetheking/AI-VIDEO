@@ -19,8 +19,8 @@ from typing import Any, Callable
 
 from fastapi import Depends, HTTPException, Request
 
-VERSION = "10.40.8.28-semantic-editor-engine"
-INSTALL_MARKER = "V10_40_8_28_SEMANTIC_EDITOR_ENGINE"
+VERSION = "10.40.8.29-natural-cadence-asset-memory"
+INSTALL_MARKER = "V10_40_8_29_NATURAL_CADENCE_ASSET_MEMORY"
 _INSTALLED = False
 _LOCK = threading.RLock()
 
@@ -1482,7 +1482,7 @@ def _run_dynamic(settings: Any, proxy_job_id: str, payload: dict[str, Any]) -> N
             "effect_count": len(plan.get("events") or []),
             "events": plan.get("events") or [],
             "safe_effects": [
-                "semantic_master_timeline", "native_word_timestamp_alignment",
+                "semantic_master_timeline", "native_word_timestamp_alignment", "long_sentence_hold", "entity_micro_cut", "asset_memory", "slow_footage_auto_speed",
                 "single_ass_caption_layer", "inline_keyword_scale_pulse",
                 "professional_mixkit_sfx", "semantic_stickers", "camera_micro_effects",
             ],

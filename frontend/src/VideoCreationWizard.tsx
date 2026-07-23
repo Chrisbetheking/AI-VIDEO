@@ -71,6 +71,15 @@ type ShotPlan = {
   autoStart?: boolean
   timingSource?: 'pending_tts' | 'real_tts'
   durationProvisional?: boolean
+  beatReason?: string
+  cadenceMode?: string
+  historyUseCount?: number
+  recent3UseCount?: number
+  recent10UseCount?: number
+  selectionReason?: string
+  speedReason?: string
+  segmentSelectionReason?: string
+  semanticScore?: number
 }
 
 type JobPayload = {
@@ -892,9 +901,18 @@ function buildLockedExistingEditPlan(shots: any[]) {
       manual_locked: Boolean(assetUrl), asset_id: assetId, asset_ids: assetId ? [assetId] : [],
       asset_url: assetUrl, asset_name: assetName || title,
       start_time: Math.max(0, startTime), end_time: endTime > startTime ? endTime : Math.max(0, startTime) + duration,
-      auto_start: true, preserve_audio: Boolean(shot?.preserveAudio ?? shot?.preserve_audio ?? false),
+      auto_start: Boolean(shot?.autoStart ?? shot?.auto_start ?? (startTime <= 0)), preserve_audio: Boolean(shot?.preserveAudio ?? shot?.preserve_audio ?? false),
       speed: Math.max(0.75, Math.min(1.5, Number(shot?.speed || 1))),
       transition: String(shot?.transition || '轻柔淡化'), camera: String(shot?.camera || shot?.motion || '保留原片运镜'),
+      beat_reason: String(shot?.beatReason || shot?.beat_reason || ''),
+      cadence_mode: String(shot?.cadenceMode || shot?.cadence_mode || ''),
+      history_use_count: Number(shot?.historyUseCount ?? shot?.history_use_count ?? 0),
+      recent_3_use_count: Number(shot?.recent3UseCount ?? shot?.recent_3_use_count ?? 0),
+      recent_10_use_count: Number(shot?.recent10UseCount ?? shot?.recent_10_use_count ?? 0),
+      selection_reason: String(shot?.selectionReason || shot?.selection_reason || ''),
+      speed_reason: String(shot?.speedReason || shot?.speed_reason || ''),
+      segment_selection_reason: String(shot?.segmentSelectionReason || shot?.segment_selection_reason || ''),
+      semantic_score: Number(shot?.semanticScore ?? shot?.semantic_score ?? shot?.matchScore ?? 0),
     }
   }).filter(Boolean)
   return { clips, source: 'step3_ai_asset_pool', locked: clips.length > 0 && clips.every((clip: any) => Boolean(clip.asset_url)) }
@@ -3190,7 +3208,11 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
               <button key={shot.id} className={selectedShot?.id === shot.id ? 'active' : ''} onClick={() => setSelectedShotId(shot.id)}>
                 <span>{String(shot.index).padStart(2, '0')}</span>
                 <b>{shot.title}</b>
-                <em>{shot.durationProvisional || !shot.duration ? '配音后确定' : `${shot.duration.toFixed(1)}s`} · {shot.source}</em>
+                <em>
+                  {shot.durationProvisional || !shot.duration ? '配音后确定' : `${shot.duration.toFixed(1)}s`} · {shot.source}
+                  {shot.cadenceMode ? ` · ${shot.cadenceMode === 'entity_micro_cut' ? '地点快切' : shot.cadenceMode === 'long_sentence_hold' ? '长句稳镜' : '语义稳镜'}` : ''}
+                  {Number(shot.speed || 1) > 1.001 ? ` · ×${Number(shot.speed || 1).toFixed(2)}` : ''}
+                </em>
               </button>
             ))}
           </div>
@@ -3211,7 +3233,9 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
                 <label>素材起点秒<input type="number" min="0" step="0.1" value={selectedShot.startTime || 0} onChange={(e) => updateShot(selectedShot.id, { startTime: Number(e.target.value), autoStart: false })} /></label>
                 <label>播放速度<input type="number" min="0.75" max="1.5" step="0.05" value={selectedShot.speed || 1} onChange={(e) => updateShot(selectedShot.id, { speed: Number(e.target.value) })} /></label>
                 <label className="aiw-checkRow"><input type="checkbox" checked={selectedShot.preserveAudio !== false} onChange={(e) => updateShot(selectedShot.id, { preserveAudio: e.target.checked })} />保留该片段环境声</label>
-                <div className="aiw-existingMatchNote"><b>语义匹配分：{Number(selectedShot.matchScore || 0).toFixed(1)}</b><span>{selectedShot.analysisDescription || '等待豆包素材描述'}</span></div>
+                <div className="aiw-existingMatchNote"><b>语义匹配分：{Number(selectedShot.semanticScore ?? selectedShot.matchScore ?? 0).toFixed(1)}</b><span>{selectedShot.analysisDescription || '等待豆包素材描述'}</span></div>
+                <div className="aiw-existingMatchNote"><b>剪辑节奏：{selectedShot.cadenceMode === 'entity_micro_cut' ? '具体地点逐项快切' : selectedShot.cadenceMode === 'long_sentence_hold' ? '完整长句保持主镜头' : '语义段稳定镜头'}</b><span>{selectedShot.beatReason || '按完整口播语义决定镜头边界，不按逗号和字幕碎片切镜。'}{selectedShot.speedReason ? `；${selectedShot.speedReason}` : ''}</span></div>
+                <div className="aiw-existingMatchNote"><b>素材记忆：历史 {Number(selectedShot.historyUseCount || 0)} 次 · 最近 3 条 {Number(selectedShot.recent3UseCount || 0)} 次</b><span>{selectedShot.selectionReason || '优先匹配最近未使用素材；旧素材明显更契合时允许复用。'}{selectedShot.segmentSelectionReason ? `；${selectedShot.segmentSelectionReason}` : ''}</span></div>
               </>}
             </div>
           )}
@@ -3235,7 +3259,7 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
               placeholder="例如：0-3 秒问题钩子；核心对比用对比卡；三项提醒逐条出现；结尾完整说完并保留 0.5 秒尾音。此处只提供结构，不固定成片时长。"
             />
           </label>
-          <div className="aiw-info">目标时长只用于估算文案长度，不会裁剪真实 TTS。镜头时长、字幕、效果和最终总长均以真实配音时间为准。</div>
+          <div className="aiw-info">目标时长只用于估算文案长度，不会裁剪真实 TTS。完整长句优先稳镜；咖啡厅、商场、学校等具体地点按出现顺序逐项快切；慢推和静态素材自动轻加速。</div>
           {renderSubtitleLibrary()}
           <h4>当前素材上下文</h4>
           <div className="aiw-miniList">{selectedAssets.slice(0, 6).map((asset: any, index) => <div key={asset.id || asset.url || index}>{asset.name || asset.original_name || asset.filename || asset.url}</div>)}</div>
