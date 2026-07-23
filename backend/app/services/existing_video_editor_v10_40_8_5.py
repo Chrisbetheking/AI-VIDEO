@@ -31,7 +31,8 @@ from app.services.a10_r4_output_guard_v10_40_8_12 import (
     measure_audio_loudness,
 )
 
-VERSION = "10.40.8.22-caption-phrase-safe-clean-render-gate"
+VERSION = "10.40.8.23-real-tts-child-master-sync-gate"
+# REAL_TTS_CHILD_MASTER_SYNC_R9
 # V10_40_8_12_A10_R4_SEMANTIC_SINGLE_USE_AUDIO: strict visual single-use, semantic coverage, fresh ending, -16 LUFS
 # V10_40_8_8_A10_R3_GLOBAL_VISUAL_DEDUP: whole-video repetition guard
 # V10_40_8_8_A10_R2_ADAPTIVE_QUALITY_GATE_FIX: adaptive quality gate

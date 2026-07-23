@@ -19,8 +19,8 @@ from typing import Any, Callable
 
 from fastapi import Depends, HTTPException, Request
 
-VERSION = "10.40.8.22-caption-phrase-safe-clean-render-gate"
-INSTALL_MARKER = "V10_40_8_22_CAPTION_PHRASE_SAFE_CLEAN_RENDER_GATE"
+VERSION = "10.40.8.23-real-tts-child-master-sync-gate"
+INSTALL_MARKER = "V10_40_8_23_REAL_TTS_CHILD_MASTER_SYNC_GATE"
 _INSTALLED = False
 _LOCK = threading.RLock()
 
@@ -1060,6 +1060,112 @@ def _validate_clean_render_plan(
     }
     return plan
 
+def _clip_master_signature(item: dict[str, Any]) -> tuple[str, str, int, str]:
+    """Stable identity for validating that V2 did not reshape the child master timeline."""
+    raw_duration = item.get("duration") or item.get("duration_seconds") or 0
+    try:
+        duration_ms = int(round(float(raw_duration) * 1000))
+    except (TypeError, ValueError):
+        duration_ms = 0
+    return (
+        str(item.get("id") or item.get("clip_id") or ""),
+        str(item.get("asset_id") or item.get("source_asset_id") or ""),
+        duration_ms,
+        str(item.get("narration") or item.get("text") or "").strip(),
+    )
+
+
+def _resolve_authoritative_semantic_master(
+    base_job: dict[str, Any],
+    preview_plan: dict[str, Any] | None,
+    applied_clips: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Promote the post-real-TTS child plan; pre-TTS preview count is informational only."""
+    child_plan = dict(base_job.get("edit_plan") or {})
+    child_clips = [
+        dict(item) for item in (base_job.get("clips") or child_plan.get("clips") or [])
+        if isinstance(item, dict)
+    ]
+    raw_count = (
+        child_plan.get("semantic_master_shot_count")
+        or base_job.get("semantic_master_shot_count")
+        or base_job.get("shot_count")
+        or len(child_clips)
+    )
+    try:
+        child_count = int(raw_count)
+    except (TypeError, ValueError):
+        child_count = len(child_clips)
+
+    if child_count <= 0 or not child_clips:
+        raise ValueError("R9 真实 TTS 子任务语义主时间线为空")
+    if len(child_clips) != child_count:
+        raise ValueError(
+            "R9 子任务语义主时间线内部数量不一致："
+            f"metadata={child_count}, clips={len(child_clips)}"
+        )
+    if len(applied_clips) != child_count:
+        raise ValueError(
+            "R9 V2 应用镜头数量偏离真实 TTS 子任务主时间线："
+            f"child={child_count}, applied={len(applied_clips)}"
+        )
+
+    child_signatures = [_clip_master_signature(item) for item in child_clips]
+    applied_signatures = [_clip_master_signature(item) for item in applied_clips]
+    if child_signatures != applied_signatures:
+        raise ValueError("R9 V2 应用镜头顺序或素材偏离真实 TTS 子任务主时间线")
+
+    preview_clips = [
+        dict(item) for item in ((preview_plan or {}).get("clips") or [])
+        if isinstance(item, dict)
+    ]
+    preview_count = len(preview_clips)
+    asset_ids: list[str] = []
+    for item in child_clips:
+        asset_id = str(item.get("asset_id") or item.get("source_asset_id") or "").strip()
+        if asset_id and asset_id not in asset_ids:
+            asset_ids.append(asset_id)
+
+    coverage = dict(child_plan.get("coverage") or base_job.get("coverage") or {})
+    coverage.update({
+        "semantic_master_timeline": True,
+        "real_tts_child_master_promoted": True,
+        "preview_semantic_shot_count": preview_count,
+        "real_tts_semantic_shot_count": child_count,
+        "preview_count_changed_after_real_tts": bool(preview_count and preview_count != child_count),
+        "timing_source": coverage.get("timing_source") or "real_tts_segments",
+    })
+
+    authoritative_plan = dict(child_plan)
+    authoritative_plan.update({
+        "clips": child_clips,
+        "coverage": coverage,
+        "semantic_master_shot_count": child_count,
+        "preview_semantic_shot_count": preview_count,
+        "real_tts_child_master_promoted": True,
+        "preview_plan_is_non_authoritative": True,
+        "version": VERSION,
+    })
+
+    base_asset_report = dict(base_job.get("asset_usage_report") or {})
+    base_asset_report.update({
+        "asset_ids": asset_ids,
+        "asset_count": len(asset_ids),
+        "selected_asset_count": len(asset_ids),
+        "unique_asset_count": len(asset_ids),
+        "source": "real_tts_child_master",
+    })
+
+    return {
+        "plan": authoritative_plan,
+        "clips": child_clips,
+        "count": child_count,
+        "preview_count": preview_count,
+        "asset_ids": asset_ids,
+        "asset_usage_report": base_asset_report,
+        "coverage": coverage,
+    }
+
 def _run_dynamic(settings: Any, proxy_job_id: str, payload: dict[str, Any]) -> None:
     classic = _classic()
     work = _work_dir(settings, proxy_job_id)
@@ -1118,15 +1224,32 @@ def _run_dynamic(settings: Any, proxy_job_id: str, payload: dict[str, Any]) -> N
             or ((classic_payload.get("edit_plan") or {}).get("clips") if isinstance(classic_payload.get("edit_plan"), dict) else None)
             or []
         )
-        expected_semantic_clips = list((semantic_plan or {}).get("clips") or [])
-        if not expected_semantic_clips:
-            raise ValueError("R8 语义主时间线为空")
-        if len(applied_clips) != len(expected_semantic_clips):
-            raise ValueError(
-                "R8 语义主时间线镜头数量不一致："
-                f"expected={len(expected_semantic_clips)}, actual={len(applied_clips)}"
-            )
-        # CAPTION_PHRASE_SAFE_CLEAN_RENDER_R8
+        authoritative_master = _resolve_authoritative_semantic_master(
+            base_job, semantic_plan, applied_clips
+        )
+        semantic_plan = authoritative_master["plan"]
+        authoritative_clips = authoritative_master["clips"]
+        authoritative_count = authoritative_master["count"]
+        authoritative_asset_ids = authoritative_master["asset_ids"]
+        _update_proxy(
+            settings,
+            proxy_job_id,
+            semantic_plan=semantic_plan,
+            edit_plan=semantic_plan,
+            clips=authoritative_clips,
+            applied_clips=authoritative_clips,
+            shot_count=authoritative_count,
+            semantic_shot_count=authoritative_count,
+            semantic_master_shot_count=authoritative_count,
+            asset_count=len(authoritative_asset_ids),
+            selected_asset_count=len(authoritative_asset_ids),
+            unique_asset_count=len(authoritative_asset_ids),
+            asset_usage_report=authoritative_master["asset_usage_report"],
+            coverage=authoritative_master["coverage"],
+            preview_semantic_shot_count=authoritative_master["preview_count"],
+            real_tts_child_master_promoted=True,
+        )
+        # REAL_TTS_CHILD_MASTER_SYNC_R9
         if hasattr(classic, "_record_asset_usage") and applied_clips:
             classic._record_asset_usage(settings, proxy_job_id, applied_clips)
 
@@ -1333,6 +1456,9 @@ def install_dynamic_edit_v2(app: Any, get_settings: Callable[..., Any]) -> None:
                 "phrase_safe_caption_segmentation": True,
                 "caption_phrase_boundary_gate": True,
                 "clean_single_caption_layer": True,
+                "real_tts_child_master_promoted": True,
+                "parent_job_semantic_metadata_synced": True,
+                "preview_plan_non_authoritative": True,
                 "unapproved_sfx_disabled": True,
                 "random_stickers_disabled": True,
                 "reference_subtitle_pack": True,

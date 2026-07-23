@@ -12,7 +12,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-VERSION = "10.40.8.22-caption-phrase-safe-clean-render-gate"
+VERSION = "10.40.8.23-real-tts-child-master-sync-gate"
+# REAL_TTS_CHILD_MASTER_SYNC_R9
 REGISTRY_FILE = "existing_edit_asset_usage.json"
 _REGISTRY_LOCK = threading.RLock()
 
