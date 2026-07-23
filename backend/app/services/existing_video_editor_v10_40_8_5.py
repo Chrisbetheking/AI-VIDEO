@@ -31,7 +31,7 @@ from app.services.a10_r4_output_guard_v10_40_8_12 import (
     measure_audio_loudness,
 )
 
-VERSION = "10.40.8.24-runtime-child-job-binding-gate"
+VERSION = "10.40.8.26-native-word-sync-pro-effects-gate"
 # REAL_TTS_CHILD_MASTER_SYNC_R9
 # V10_40_8_12_A10_R4_SEMANTIC_SINGLE_USE_AUDIO: strict visual single-use, semantic coverage, fresh ending, -16 LUFS
 # V10_40_8_8_A10_R3_GLOBAL_VISUAL_DEDUP: whole-video repetition guard
@@ -1142,7 +1142,14 @@ async def _render(
                             ),
                             "real_tts_replanned": True,
                             "semantic_tts_replanned": True,
-                            "timing_source": "real_tts_segments",
+                            "timing_source": (
+                                "volcengine_native_word_timestamp"
+                                if any((item.get("word_timeline") or []) for item in normalized_timings)
+                                else "segment_duration_fallback"
+                            ),
+                            "native_word_timestamp_count": sum(
+                                len(item.get("word_timeline") or []) for item in normalized_timings
+                            ),
                             "tts_segment_count": len(normalized_timings),
                             "semantic_sentence_count": len(semantic_speech_units),
                             "semantic_master_timeline": True,
@@ -1175,6 +1182,19 @@ async def _render(
                     target_duration_override=target,
                 )
             clips = [dict(item) for item in plan["clips"]]
+
+        # Preserve native TTS word timestamps separately. Subtitle directors may
+        # fragment cues, but must not replace the authoritative word clock.
+        tts_timings_native = [dict(item) for item in timings]
+        native_word_timestamp_count = sum(
+            len(item.get('word_timeline') or []) for item in tts_timings_native
+            if isinstance(item, dict)
+        )
+        native_timing_source = (
+            'volcengine_native_word_timestamp'
+            if native_word_timestamp_count > 0
+            else 'segment_duration_fallback'
+        )
 
         # V10_40_8_7_A9_R3_SPLIT_SOURCE_CONTRACT: runtime director
         director_result = await direct_existing_video(
@@ -1395,6 +1415,9 @@ async def _render(
             manual_selected_assets=final_plan.get("manual_selected_assets"),
             auto_selected_assets=final_plan.get("auto_selected_assets"),
             timings=timings,
+            tts_timings_native=tts_timings_native,
+            subtitle_timing_source=native_timing_source,
+            native_word_timestamp_count=native_word_timestamp_count,
             subtitle_director=director_result.get("subtitle_report"),
             edit_director=director_result.get("edit_report"),
             director_report=director_result.get("report"),

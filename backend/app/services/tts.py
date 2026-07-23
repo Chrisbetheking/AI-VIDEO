@@ -161,6 +161,7 @@ async def synthesize_volcengine_v1(settings: Settings, text: str, voice: Optiona
                 'text': text,
                 'text_type': 'plain',
                 'operation': 'query',
+                'with_timestamp': 1,
             },
         }
         headers = {
@@ -193,6 +194,7 @@ async def synthesize_volcengine_v1(settings: Settings, text: str, voice: Optiona
                 'text': text,
                 'text_type': 'plain',
                 'operation': 'query',
+                'with_timestamp': 1,
             },
         }
         headers = {
@@ -222,9 +224,111 @@ async def synthesize_volcengine_v1(settings: Settings, text: str, voice: Optiona
     output = settings.outputs_dir / f'tts_{uuid.uuid4().hex}.mp3'
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_bytes(base64.b64decode(audio_b64))
+    audio_duration = probe_duration(output)
+    native_words = _extract_volcengine_word_timestamps(data, audio_duration=audio_duration)
+    _timestamp_sidecar(output).write_text(
+        json.dumps({
+            'source': 'volcengine_native_word_timestamp' if native_words else 'timestamp_unavailable',
+            'request_id': reqid,
+            'log_id': resp.headers.get('X-Tt-Logid') or resp.headers.get('x-tt-logid'),
+            'audio_duration': round(audio_duration, 4),
+            'words': native_words,
+        }, ensure_ascii=False, indent=2),
+        encoding='utf-8',
+    )
     return output
 
 
+
+
+def _jsonish(value: Any) -> Any:
+    current = value
+    for _ in range(4):
+        if not isinstance(current, str):
+            break
+        stripped = current.strip()
+        if not stripped or stripped[0] not in "[{":
+            break
+        try:
+            current = json.loads(stripped)
+        except Exception:
+            break
+    return current
+
+
+def _extract_volcengine_word_timestamps(payload: Any, *, audio_duration: float = 0.0) -> list[dict[str, Any]]:
+    """Extract V1/V3 timestamp words from dicts, lists, or JSON-encoded addition fields."""
+    candidates: list[dict[str, Any]] = []
+
+    def visit(value: Any) -> None:
+        value = _jsonish(value)
+        if isinstance(value, dict):
+            word = value.get("word") if value.get("word") is not None else value.get("text")
+            start = next((value.get(k) for k in ("startTime", "start_time", "start", "begin_time", "beginTime") if value.get(k) is not None), None)
+            end = next((value.get(k) for k in ("endTime", "end_time", "end", "finish_time", "finishTime") if value.get(k) is not None), None)
+            if word is not None and start is not None and end is not None:
+                try:
+                    candidates.append({"word": str(word), "start": float(start), "end": float(end), "confidence": value.get("confidence")})
+                except Exception:
+                    pass
+            for child in value.values():
+                visit(child)
+        elif isinstance(value, list):
+            for child in value:
+                visit(child)
+
+    visit(payload)
+    if not candidates:
+        return []
+    # Deduplicate recursive hits. Some responses expose the same timestamp list
+    # both as parsed JSON and as a JSON-encoded `addition` field.
+    unique: dict[tuple[str, float, float], dict[str, Any]] = {}
+    for item in candidates:
+        key = (str(item.get("word") or ""), round(float(item["start"]), 6), round(float(item["end"]), 6))
+        unique[key] = item
+    candidates = list(unique.values())
+    candidates.sort(key=lambda item: (item["start"], item["end"], len(str(item.get("word") or ""))))
+    maximum = max(item["end"] for item in candidates)
+    # V3 examples use seconds; V1 timestamp payloads commonly use milliseconds.
+    # Compare against the actual audio duration so long (>180 s) clips are not
+    # accidentally divided by 1000.
+    if maximum > 1000.0 or (audio_duration > 0 and maximum > audio_duration * 4.0 + 5.0):
+        for item in candidates:
+            item["start"] /= 1000.0
+            item["end"] /= 1000.0
+
+    # If both a sentence-level interval and finer word/character intervals are
+    # returned, keep the finer intervals and drop the enclosing aggregate.
+    fine_candidates: list[dict[str, Any]] = []
+    for index, item in enumerate(candidates):
+        contained = 0
+        for other_index, other in enumerate(candidates):
+            if index == other_index:
+                continue
+            if float(item["start"]) <= float(other["start"]) and float(other["end"]) <= float(item["end"]):
+                if (float(other["end"]) - float(other["start"])) < (float(item["end"]) - float(item["start"])) - 0.001:
+                    contained += 1
+        if contained >= 2 and len(str(item.get("word") or "")) > 1:
+            continue
+        fine_candidates.append(item)
+    candidates = fine_candidates or candidates
+    candidates.sort(key=lambda item: (item["start"], item["end"]))
+
+    cleaned: list[dict[str, Any]] = []
+    last_end = 0.0
+    for item in candidates:
+        word = str(item.get("word") or "")
+        start = max(0.0, float(item["start"]))
+        end = max(start + 0.001, float(item["end"]))
+        if end + 0.02 < last_end:
+            continue
+        cleaned.append({"word": word, "start": round(start, 4), "end": round(end, 4), "confidence": item.get("confidence"), "source": "volcengine_native_timestamp"})
+        last_end = max(last_end, end)
+    return cleaned
+
+
+def _timestamp_sidecar(path: Path) -> Path:
+    return path.with_suffix(path.suffix + ".timestamps.json")
 
 def parse_sapi_rate(rate: Optional[str]) -> int:
     if not rate:
@@ -330,10 +434,19 @@ async def synthesize_tts_segments(settings: Settings, segments: list[VoiceSegmen
                         volume_ratio=segment.volume_ratio,
                         pitch_ratio=segment.pitch_ratio,
                     )
+                    native_meta: dict[str, Any] = {}
+                    sidecar = _timestamp_sidecar(raw)
+                    if sidecar.is_file():
+                        try:
+                            loaded = json.loads(sidecar.read_text(encoding='utf-8'))
+                            native_meta = loaded if isinstance(loaded, dict) else {}
+                        except Exception:
+                            native_meta = {}
                     wav = tmp_dir / f'{index:02d}_voice.wav'
                     await asyncio.to_thread(_convert_to_standard_wav, raw, wav)
                     try:
                         raw.unlink(missing_ok=True)
+                        sidecar.unlink(missing_ok=True)
                     except Exception:
                         pass
                 elif provider in {'sapi', 'windows', 'local'}:
@@ -345,12 +458,32 @@ async def synthesize_tts_segments(settings: Settings, segments: list[VoiceSegmen
                 seg_duration = probe_duration(wav) or estimate_speech_duration(text)
                 start_time = cursor
                 end_time = start_time + seg_duration
+                native_words = []
+                if provider in {'volcengine', 'doubao', 'bytedance'}:
+                    for word in native_meta.get('words') or []:
+                        if not isinstance(word, dict):
+                            continue
+                        try:
+                            native_words.append({
+                                **word,
+                                'start': round(start_time + float(word.get('start') or 0.0), 4),
+                                'end': round(start_time + float(word.get('end') or 0.0), 4),
+                            })
+                        except Exception:
+                            continue
                 timings.append({
                     'index': index,
                     'text': text,
                     'start': round(start_time, 3),
                     'end': round(end_time, 3),
                     'duration': round(seg_duration, 3),
+                    'word_timeline': native_words,
+                    'native_word_timestamp_count': len(native_words),
+                    'timing_source': (
+                        'volcengine_native_word_timestamp'
+                        if native_words
+                        else 'segment_duration_fallback'
+                    ),
                 })
                 wav_parts.append(wav)
                 cursor = end_time

@@ -1,0 +1,50 @@
+{
+  "version": "mixkit-pro-v26",
+  "license": "Mixkit Free License",
+  "license_url": "https://mixkit.co/license/",
+  "source_pages": [
+    "https://mixkit.co/free-sound-effects/whoosh/",
+    "https://mixkit.co/free-sound-effects/transition/",
+    "https://mixkit.co/free-sound-effects/notification/"
+  ],
+  "assets": [
+    {
+      "filename": "mixkit-cinematic-whoosh-fast-transition-1492.mp3",
+      "title": "Cinematic whoosh fast transition",
+      "url": "https://assets.mixkit.co/active_storage/sfx/1492/1492-preview.mp3",
+      "role": [
+        "hook",
+        "risk"
+      ]
+    },
+    {
+      "filename": "mixkit-air-woosh-1489.mp3",
+      "title": "Air woosh",
+      "url": "https://assets.mixkit.co/active_storage/sfx/1489/1489-preview.mp3",
+      "role": [
+        "turn"
+      ]
+    },
+    {
+      "filename": "mixkit-fast-small-sweep-transition-166.mp3",
+      "title": "Fast small sweep transition",
+      "url": "https://assets.mixkit.co/active_storage/sfx/166/166-preview.mp3",
+      "role": [
+        "turn",
+        "comparison",
+        "data",
+        "list"
+      ]
+    },
+    {
+      "filename": "mixkit-interface-hint-notification-911.mp3",
+      "title": "Interface hint notification",
+      "url": "https://assets.mixkit.co/active_storage/sfx/911/911-preview.mp3",
+      "role": [
+        "question",
+        "cta",
+        "evidence"
+      ]
+    }
+  ]
+}

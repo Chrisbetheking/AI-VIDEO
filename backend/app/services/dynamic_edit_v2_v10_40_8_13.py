@@ -19,8 +19,8 @@ from typing import Any, Callable
 
 from fastapi import Depends, HTTPException, Request
 
-VERSION = "10.40.8.25-caption-boundary-auto-repair-gate"
-INSTALL_MARKER = "V10_40_8_25_CAPTION_BOUNDARY_AUTO_REPAIR_GATE"
+VERSION = "10.40.8.26-native-word-sync-pro-effects-gate"
+INSTALL_MARKER = "V10_40_8_26_NATIVE_WORD_SYNC_PRO_EFFECTS_GATE"
 _INSTALLED = False
 _LOCK = threading.RLock()
 
@@ -483,8 +483,106 @@ def _spread_chunks(chunks: list[str], start: float, end: float) -> list[dict[str
     return result
 
 
+def _v26_clean_token_text(value: Any) -> str:
+    return re.sub(r"[^\u4e00-\u9fffA-Za-z0-9%]+", "", str(value or ""))
+
+
+def _v26_character_clock(words: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    clock: list[dict[str, Any]] = []
+    for word in words:
+        if not isinstance(word, dict):
+            continue
+        token = _v26_clean_token_text(word.get("word") or word.get("text"))
+        if not token:
+            continue
+        start = _safe_float(word.get("start") if word.get("start") is not None else word.get("startTime"), -1.0)
+        end = _safe_float(word.get("end") if word.get("end") is not None else word.get("endTime"), -1.0)
+        if start < 0 or end <= start:
+            continue
+        span = end - start
+        for index, char in enumerate(token):
+            char_start = start + span * index / len(token)
+            char_end = start + span * (index + 1) / len(token)
+            clock.append({"char": char, "start": char_start, "end": char_end})
+    return clock
+
+
+def _v26_align_chunks_to_native_words(chunks: list[str], words: list[dict[str, Any]], fallback_start: float, fallback_end: float) -> list[dict[str, Any]]:
+    clock = _v26_character_clock(words)
+    expected = "".join(_v26_clean_token_text(chunk) for chunk in chunks)
+    actual = "".join(item["char"] for item in clock)
+    if not clock or not expected:
+        fallback = _spread_chunks(chunks, fallback_start, fallback_end)
+        for cue in fallback:
+            cue["timing_source"] = "segment_duration_fallback"
+            cue["native_word_timestamp"] = False
+            cue["native_word_count"] = 0
+        return fallback
+
+    exact_match = expected == actual
+    result: list[dict[str, Any]] = []
+    cursor = 0
+    expected_cursor = 0
+    expected_total = max(1, len(expected))
+
+    for chunk_index, chunk in enumerate(chunks):
+        token = _v26_clean_token_text(chunk)
+        if not token:
+            continue
+
+        if exact_match:
+            end_cursor = cursor + len(token)
+        else:
+            # Volcengine timestamp text is TN-normalized (for example 100 may
+            # become Chinese words). Keep native time boundaries by mapping the
+            # original caption chunk ratio onto the returned native clock.
+            expected_cursor += len(token)
+            end_cursor = (
+                len(clock)
+                if chunk_index == len(chunks) - 1
+                else max(cursor + 1, round(expected_cursor / expected_total * len(clock)))
+            )
+
+        end_cursor = min(len(clock), max(cursor + 1, end_cursor))
+        selection = clock[cursor:end_cursor]
+        if not selection:
+            fallback = _spread_chunks(chunks, fallback_start, fallback_end)
+            for cue in fallback:
+                cue["timing_source"] = "segment_duration_fallback"
+                cue["native_word_timestamp"] = False
+                cue["native_word_count"] = 0
+            return fallback
+
+        result.append({
+            "text": chunk,
+            "start": round(float(selection[0]["start"]), 3),
+            "end": round(max(float(selection[-1]["end"]), float(selection[0]["start"]) + 0.08), 3),
+            "timing_source": (
+                "volcengine_native_word_timestamp"
+                if exact_match
+                else "volcengine_native_word_timestamp_fuzzy_tn"
+            ),
+            "native_word_timestamp": True,
+            "native_word_count": len(selection),
+        })
+        cursor = end_cursor
+        if exact_match:
+            expected_cursor += len(token)
+
+    if result:
+        result[-1]["end"] = round(max(result[-1]["start"] + 0.08, float(clock[-1]["end"])), 3)
+    return result
+
+
 def _normalize_timings(payload: dict[str, Any], base_job: dict[str, Any], duration: float) -> list[dict[str, Any]]:
-    raw = base_job.get("timings") or base_job.get("subtitle_segments") or payload.get("segments") or payload.get("script_segments") or []
+    raw = (
+        base_job.get("tts_timings_native")
+        or base_job.get("timings")
+        or base_job.get("subtitle_segments")
+        or payload.get("segments")
+        or payload.get("script_segments")
+        or []
+    )
     items: list[dict[str, Any]] = []
     for raw_item in raw if isinstance(raw, list) else []:
         if not isinstance(raw_item, dict):
@@ -492,28 +590,40 @@ def _normalize_timings(payload: dict[str, Any], base_job: dict[str, Any], durati
         text = _text_of_segment(raw_item)
         if not text:
             continue
-        start = _safe_float(raw_item.get("start") or raw_item.get("start_time"), -1.0)
-        end = _safe_float(raw_item.get("end") or raw_item.get("end_time"), -1.0)
-        items.append({"text": text, "start": start, "end": end})
+        start = _safe_float(raw_item.get("start") if raw_item.get("start") is not None else raw_item.get("start_time"), -1.0)
+        end = _safe_float(raw_item.get("end") if raw_item.get("end") is not None else raw_item.get("end_time"), -1.0)
+        items.append({
+            "text": text,
+            "start": start,
+            "end": end,
+            "word_timeline": list(raw_item.get("word_timeline") or []),
+            "timing_source": str(raw_item.get("timing_source") or ""),
+        })
 
     if items and all(item["start"] >= 0 and item["end"] > item["start"] for item in items):
         fragmented: list[dict[str, Any]] = []
         for item in items:
-            fragmented.extend(_spread_chunks(_caption_chunks(item["text"]), item["start"], item["end"]))
+            chunks = _caption_chunks(item["text"])
+            if item["word_timeline"]:
+                aligned = _v26_align_chunks_to_native_words(
+                    chunks, item["word_timeline"], item["start"], item["end"]
+                )
+            else:
+                aligned = _spread_chunks(chunks, item["start"], item["end"])
+                for cue in aligned:
+                    cue["timing_source"] = "segment_duration_fallback"
+                    cue["native_word_timestamp"] = False
+            fragmented.extend(aligned)
         return fragmented
 
     script = str(payload.get("script_text") or payload.get("script") or "").strip()
     if not script and items:
         script = "。".join(item["text"] for item in items)
     chunks = _caption_chunks(script or "动态精剪")
-    weights = [max(2, len(_clean_caption_text(item))) for item in chunks]
-    total = max(1, sum(weights))
-    cursor = 0.0
-    normalized: list[dict[str, Any]] = []
-    for index, (chunk, weight) in enumerate(zip(chunks, weights)):
-        end = duration if index == len(chunks) - 1 else min(duration, cursor + duration * weight / total)
-        normalized.append({"text": chunk, "start": round(cursor, 3), "end": round(end, 3)})
-        cursor = end
+    normalized = _spread_chunks(chunks, 0.0, duration)
+    for cue in normalized:
+        cue["timing_source"] = "whole_script_duration_fallback"
+        cue["native_word_timestamp"] = False
     return normalized
 
 
@@ -613,13 +723,13 @@ def build_dynamic_plan(
         tail.update(effect="cta_tag" if tail["role"] == "cta" else "keyword_focus", start=max(0.0, min(duration - 1.3, tail["start"])), end=min(duration, max(tail["start"] + 1.1, tail["end"])))
         selected.append(tail)
     selected.sort(key=lambda x: x["start"])
-    sfx_level = "off"  # R8 hard quality gate
-    sticker_level = "off"  # R8 hard quality gate
+    sfx_level = str(payload.get("dynamic_sfx_level") or "light")
+    sticker_level = str(payload.get("dynamic_sticker_level") or "light")
     selected = _decorate_events(
         selected,
         duration,
-        sfx_level = "off",  # R8 hard quality gate
-        sticker_level = "off",  # R8 hard quality gate
+        sfx_level=sfx_level,
+        sticker_level=sticker_level,
     )
     return {
         "version": VERSION,
@@ -1339,13 +1449,11 @@ def _run_dynamic(settings: Any, proxy_job_id: str, payload: dict[str, Any]) -> N
         timings = _normalize_timings(payload, base, duration)
         intensity = str(payload.get("dynamic_edit_intensity") or "balanced")
         style_id = str(payload.get("dynamic_subtitle_style") or "dynamic_white_yellow")
-        sfx_level = "off"  # R8 hard quality gate
-        sticker_level = "off"  # R8 hard quality gate
+        sfx_level = str(payload.get("dynamic_sfx_level") or "light")
+        sticker_level = str(payload.get("dynamic_sticker_level") or "light")
         payload["ai_shot_beats"] = semantic_plan.get("beats") or []
         plan = build_dynamic_plan(payload, timings, duration, intensity=intensity)
-        plan = _validate_clean_render_plan(
-            _apply_clean_single_caption_policy(plan), timings
-        )  # CAPTION_PHRASE_SAFE_CLEAN_RENDER_R8
+        plan = _validate_v26_effect_plan(plan, timings, sfx_level, sticker_level)
         plan["ai_shot_beats"] = semantic_plan.get("beats") or []
         plan["ai_director_report"] = semantic_plan.get("director_report") or {}
         plan["subtitle_style"] = style_id
@@ -1353,9 +1461,16 @@ def _run_dynamic(settings: Any, proxy_job_id: str, payload: dict[str, Any]) -> N
         plan_path = work / "dynamic_effect_timeline.json"
         plan_path.write_text(json.dumps(plan, ensure_ascii=False, indent=2), encoding="utf-8")
 
-        _update_proxy(settings, proxy_job_id, stage="dynamic_render", progress=86, message="正在渲染单层安全字幕和克制镜头动效", dynamic_effect_timeline=plan)
+        _update_proxy(settings, proxy_job_id, stage="dynamic_render", progress=86, message="正在渲染原生字级字幕、专业音效、语义贴纸和关键词强调", dynamic_effect_timeline=plan)
         output_path = Path(getattr(settings, "outputs_dir", _data_dir(settings) / "outputs")) / f"{proxy_job_id}_dynamic_v2.mp4"
         render_report = render_dynamic_video(source_path, output_path, ass_path, plan)
+        if sfx_level != "off" and int(render_report.get("sfx_count") or 0) <= 0:
+            raise ValueError("已请求音效但实际渲染数量为 0")
+        if sticker_level != "off" and int(render_report.get("sticker_count") or 0) <= 0:
+            raise ValueError("已请求贴纸但实际渲染数量为 0")
+        if int(plan.get("keyword_impact_count") or 0) <= 0:
+            raise ValueError("关键词强调没有实际渲染")
+
         report = {
             "version": VERSION,
             "job_id": proxy_job_id,
@@ -1364,11 +1479,19 @@ def _run_dynamic(settings: Any, proxy_job_id: str, payload: dict[str, Any]) -> N
             "subtitle_style": style_id,
             "effect_count": len(plan.get("events") or []),
             "events": plan.get("events") or [],
-            "safe_effects": ["semantic_master_timeline", "single_ass_caption_layer", "phrase_safe_caption_segmentation", "clean_fade"],
+            "safe_effects": [
+                "semantic_master_timeline", "native_word_timestamp_alignment",
+                "single_ass_caption_layer", "inline_keyword_scale_pulse",
+                "professional_mixkit_sfx", "semantic_stickers", "camera_micro_effects",
+            ],
             "sfx_level": sfx_level,
             "sticker_level": sticker_level,
             "sfx_count": render_report.get("sfx_count", 0),
             "sticker_count": render_report.get("sticker_count", 0),
+            "keyword_impact_count": int(plan.get("keyword_impact_count") or 0),
+            "subtitle_timing_source": plan.get("subtitle_timing_source"),
+            "native_word_timestamp_count": int(plan.get("native_word_timestamp_count") or 0),
+            "sfx_pack_version": "mixkit-pro-v26",
             "shot_plan_applied": bool((classic_payload.get("edit_plan") or {}).get("clips")),
             "locked_shot_plan_count": len((classic_payload.get("edit_plan") or {}).get("clips") or []),
             "semantic_shot_plan": semantic_plan,
@@ -1416,7 +1539,16 @@ def _run_dynamic(settings: Any, proxy_job_id: str, payload: dict[str, Any]) -> N
             shot_plan_applied=bool((classic_payload.get("edit_plan") or {}).get("clips")),
             locked_shot_plan_count=len((classic_payload.get("edit_plan") or {}).get("clips") or []),
             semantic_shot_plan=semantic_plan,
-            asset_usage_report=usage_written,
+            asset_usage_report={
+                **dict(authoritative_master.get("asset_usage_report") or {}),
+                "record_success": usage_written,
+                "asset_ids": authoritative_asset_ids,
+                "asset_count": len(authoritative_asset_ids),
+                "unique_asset_count": len(set(authoritative_asset_ids)),
+            },
+            asset_count=len(authoritative_asset_ids),
+            selected_asset_count=len(authoritative_asset_ids),
+            unique_asset_count=len(set(authoritative_asset_ids)),
             audio_tail_guard=render_report.get("audio_tail_guard") or {},
             base_job_id=classic_job_id,
             fal_used=False,
@@ -1462,8 +1594,8 @@ def start_dynamic(settings: Any, payload: dict[str, Any]) -> dict[str, Any]:
         "edit_engine": "dynamic_v2",
         "dynamic_edit_intensity": str(payload.get("dynamic_edit_intensity") or "balanced"),
         "dynamic_subtitle_style": str(payload.get("dynamic_subtitle_style") or "dynamic_white_yellow"),
-        "dynamic_sfx_level": "off",
-        "dynamic_sticker_level": "off",
+        "dynamic_sfx_level": str(payload.get("dynamic_sfx_level") or "light"),
+        "dynamic_sticker_level": str(payload.get("dynamic_sticker_level") or "light"),
         "dynamic_visual_pace": str(payload.get("dynamic_visual_pace") or "balanced"),
         "dynamic_caption_size": str(payload.get("dynamic_caption_size") or "standard"),
         "dynamic_caption_motion": str(payload.get("dynamic_caption_motion") or "smart_mix"),
@@ -1520,7 +1652,7 @@ def install_dynamic_edit_v2(app: Any, get_settings: Callable[..., Any]) -> None:
                 "semantic_scene_boundaries": True,
                 "deepseek_ai_beat_director": True,
                 "entity_burst_one_entity_one_shot": True,
-                "professional_cc0_sfx_bank": False,
+                "professional_cc0_sfx_bank": True,
                 "locked_previous_page_shot_plan": True,
                 "persistent_asset_usage_recorder": True,
                 "audio_tail_guard": True,
@@ -1531,13 +1663,18 @@ def install_dynamic_edit_v2(app: Any, get_settings: Callable[..., Any]) -> None:
                 "parent_job_semantic_metadata_synced": True,
                 "preview_plan_non_authoritative": True,
                 "runtime_child_job_binding": True,
+                "volcengine_native_word_timestamps": True,
+                "mixkit_professional_sfx_v26": True,
+                "inline_keyword_scale_pulse": True,
+                "semantic_sticker_effects": True,
+                "effect_delivery_quality_gate": True,
                 "unapproved_sfx_disabled": True,
                 "random_stickers_disabled": True,
                 "reference_subtitle_pack": True,
                 "keyword_highlight": True,
-                "micro_sfx": False,
-                "real_sfx_assets": False,
-                "semantic_transparent_stickers": False,
+                "micro_sfx": True,
+                "real_sfx_assets": True,
+                "semantic_transparent_stickers": True,
                 "large_caption_pack": False,
                 "person_cutout_quality_gate": "phase_2",
                 "fal_forbidden": True,
@@ -1554,8 +1691,8 @@ def install_dynamic_edit_v2(app: Any, get_settings: Callable[..., Any]) -> None:
         duration = _safe_float(payload.get("target_duration_seconds"), 30.0)
         timings = _normalize_timings(payload, {}, duration)
         intensity = str(request.query_params.get("intensity") or payload.get("dynamic_edit_intensity") or "balanced")
-        payload["dynamic_sfx_level"] = "off"  # R8 hard quality gate
-        payload["dynamic_sticker_level"] = "off"  # R8 hard quality gate
+        payload["dynamic_sfx_level"] = str(request.query_params.get("sfx_level") or payload.get("dynamic_sfx_level") or "light")
+        payload["dynamic_sticker_level"] = str(request.query_params.get("sticker_level") or payload.get("dynamic_sticker_level") or "light")
         payload["dynamic_visual_pace"] = "ai_auto"
         payload["dynamic_caption_size"] = str(request.query_params.get("caption_size") or payload.get("dynamic_caption_size") or "standard")
         payload["dynamic_caption_motion"] = str(request.query_params.get("caption_motion") or payload.get("dynamic_caption_motion") or "smart_mix")
@@ -1564,7 +1701,11 @@ def install_dynamic_edit_v2(app: Any, get_settings: Callable[..., Any]) -> None:
         payload["dynamic_sticker_layout"] = str(request.query_params.get("sticker_layout") or payload.get("dynamic_sticker_layout") or "auto_safe")
         payload["dynamic_sticker_style"] = str(request.query_params.get("sticker_style") or payload.get("dynamic_sticker_style") or "smart_mix")
         result = build_dynamic_plan(payload, timings, duration, intensity=intensity)
-        result = _validate_clean_render_plan(_apply_clean_single_caption_policy(result), timings)
+        result = _validate_v26_effect_plan(
+            result, timings,
+            str(payload.get("dynamic_sfx_level") or "light"),
+            str(payload.get("dynamic_sticker_level") or "light"),
+        )
         return {"ok": True, "version": VERSION, "plan": result, "timings": timings}
 
     @app.post("/api/video/existing-edit-v2/start")
@@ -1576,8 +1717,8 @@ def install_dynamic_edit_v2(app: Any, get_settings: Callable[..., Any]) -> None:
             payload = dict(payload)
             payload["dynamic_edit_intensity"] = str(request.query_params.get("intensity") or payload.get("dynamic_edit_intensity") or "balanced")
             payload["dynamic_subtitle_style"] = str(request.query_params.get("subtitle_style") or payload.get("dynamic_subtitle_style") or "dynamic_white_yellow")
-            payload["dynamic_sfx_level"] = "off"  # R8 hard quality gate
-            payload["dynamic_sticker_level"] = "off"  # R8 hard quality gate
+            payload["dynamic_sfx_level"] = str(request.query_params.get("sfx_level") or payload.get("dynamic_sfx_level") or "light")
+            payload["dynamic_sticker_level"] = str(request.query_params.get("sticker_level") or payload.get("dynamic_sticker_level") or "light")
             payload["dynamic_visual_pace"] = "ai_auto"
             payload["dynamic_caption_size"] = str(request.query_params.get("caption_size") or payload.get("dynamic_caption_size") or "standard")
             payload["dynamic_caption_motion"] = str(request.query_params.get("caption_motion") or payload.get("dynamic_caption_motion") or "smart_mix")
@@ -2804,4 +2945,270 @@ def _build_audio_filters(
         + f"amix=inputs={len(labels)}:duration=first:dropout_transition=0:normalize=0,"
         "alimiter=limit=0.88,loudnorm=I=-16:LRA=7:TP=-2.0[aout]"
     )
+    return ";".join(parts), "aout"
+
+
+# =============================================================================
+# V10.40.8.26 NATIVE WORD SYNC + PROFESSIONAL EFFECT DELIVERY OVERRIDES
+# =============================================================================
+V26_MARKER = "V10_40_8_26_NATIVE_WORD_SYNC_PRO_EFFECTS"
+V26_PRO_SFX_DIR = Path(os.getenv("AI_VIDEO_PRO_SFX_DIR_V26", "/data/ai-video/sfx-professional-v26"))
+
+SFX_VARIANT_BANKS = {
+    "hook": [("mixkit-cinematic-whoosh-fast-transition-1492.mp3", 0.82)],
+    "question": [("mixkit-interface-hint-notification-911.mp3", 0.66)],
+    "turn": [("mixkit-air-woosh-1489.mp3", 0.72), ("mixkit-fast-small-sweep-transition-166.mp3", 0.68)],
+    "data": [("mixkit-fast-small-sweep-transition-166.mp3", 0.58)],
+    "risk": [("mixkit-cinematic-whoosh-fast-transition-1492.mp3", 0.68)],
+    "comparison": [("mixkit-fast-small-sweep-transition-166.mp3", 0.62)],
+    "list": [("mixkit-fast-small-sweep-transition-166.mp3", 0.52)],
+    "evidence": [("mixkit-interface-hint-notification-911.mp3", 0.48)],
+    "cta": [("mixkit-interface-hint-notification-911.mp3", 0.62)],
+}
+SFX_LEVELS = {
+    "off": {"label": "关闭", "volume": 0.0, "max_per_30s": 0, "min_gap": 99.0},
+    "light": {"label": "专业轻量", "volume": 0.090, "max_per_30s": 3, "min_gap": 4.2},
+    "balanced": {"label": "专业标准", "volume": 0.120, "max_per_30s": 4, "min_gap": 3.5},
+    "strong": {"label": "专业强化", "volume": 0.150, "max_per_30s": 5, "min_gap": 3.0},
+}
+V26_SFX_META = {
+    "mixkit-cinematic-whoosh-fast-transition-1492.mp3": (0.0, 1.38),
+    "mixkit-air-woosh-1489.mp3": (0.0, 1.05),
+    "mixkit-fast-small-sweep-transition-166.mp3": (0.0, 0.85),
+    "mixkit-interface-hint-notification-911.mp3": (0.0, 1.20),
+}
+
+
+def _sfx_root() -> Path:
+    return V26_PRO_SFX_DIR
+
+
+def _v16_choose_sticker(event: dict[str, Any], index: int, style: str, last_asset: str) -> str:
+    text = str(event.get("source_text") or "")
+    rules = [
+        (r"学校|学区|教育", ["pin", "map"]),
+        (r"医院|医疗", ["pin", "map"]),
+        (r"超市|商场|购物|配套", ["shopping", "map"]),
+        (r"交通|通勤|地铁|路线", ["metro", "car", "map"]),
+        (r"价格|预算|金额|回报|收益", ["money", "chart"]),
+        (r"风险|踩坑|注意", ["warning"]),
+        (r"评论|告诉我|一对一|咨询", ["comment", "point"]),
+        (r"区域|位置|附近", ["pin", "map"]),
+        (r"房|住宅|自住", ["house", "key"]),
+        (r"租客|人群", ["people"]),
+    ]
+    candidates: list[str] = []
+    for pattern, options in rules:
+        if re.search(pattern, text):
+            candidates.extend(options)
+            break
+    if not candidates:
+        role = str(event.get("role") or "knowledge")
+        candidates = {
+            "hook": ["point"], "question": ["question"], "turn": ["map"],
+            "data": ["chart"], "risk": ["warning"], "comparison": ["chart"],
+            "list": ["check"], "evidence": ["search"], "cta": ["comment"],
+        }.get(role, [])
+    candidates = [name for name in candidates if name != last_asset and (_sticker_root() / f"{name}.png").is_file()]
+    return _deterministic_choice(candidates, f"v26:{event.get('id')}:{index}") if candidates else ""
+
+
+def _v26_ensure_effect_delivery(
+    plan: dict[str, Any],
+    timings: list[dict[str, Any]],
+    duration: float,
+    *,
+    sfx_level: str,
+    sticker_level: str,
+) -> dict[str, Any]:
+    events = [dict(item) for item in (plan.get("events") or []) if isinstance(item, dict)]
+    if not events and timings:
+        first = timings[0]
+        events = [{
+            "id": "v26_fallback_fx_01",
+            "segment_index": 0,
+            "start": max(0.0, _safe_float(first.get("start"), 0.0)),
+            "end": min(duration, max(0.65, _safe_float(first.get("end"), 1.1))),
+            "role": "hook",
+            "effect": "hook_punch",
+            "focus_text": _pick_focus(str(first.get("text") or ""), plan.get("keywords") or []),
+            "source_text": str(first.get("text") or ""),
+            "priority": 11,
+        }]
+
+    if sfx_level != "off" and not any(isinstance(item.get("sfx"), dict) for item in events):
+        target = events[0] if events else None
+        if target is not None:
+            role = str(target.get("role") or "hook")
+            if role not in SFX_VARIANT_BANKS:
+                role = "hook"
+            asset, role_gain = _v16_choose_variant(role, target, 0, "")
+            if not asset:
+                fallback_name = "mixkit-air-woosh-1489.mp3"
+                if (_sfx_root() / fallback_name).is_file():
+                    asset, role_gain = fallback_name, 0.62
+            cfg = SFX_LEVELS.get(sfx_level) or SFX_LEVELS["light"]
+            if asset and float(cfg.get("volume") or 0.0) > 0:
+                target["sfx"] = {
+                    "asset": asset,
+                    "gain": round(float(cfg["volume"]) * max(0.45, role_gain), 4),
+                    "role": role,
+                }
+
+    if sticker_level != "off" and not any(isinstance(item.get("sticker"), dict) for item in events):
+        for index, target in enumerate(events):
+            asset = _v16_choose_sticker(target, index, "smart_mix", "")
+            if not asset:
+                continue
+            start = max(0.0, _safe_float(target.get("start"), 0.0))
+            end = min(duration, max(start + 0.90, _safe_float(target.get("end"), start + 1.15)))
+            target["sticker"] = {
+                "asset": f"{asset}.png",
+                "position": "upper_right" if index % 2 == 0 else "upper_left",
+                "size": 136,
+                "start": round(start, 3),
+                "end": round(min(end, start + 1.20), 3),
+            }
+            break
+
+    plan["events"] = events
+    return plan
+
+
+_V25_BUILD_DYNAMIC_PLAN = build_dynamic_plan
+
+
+def build_dynamic_plan(payload: dict[str, Any], timings: list[dict[str, Any]], duration: float, *, intensity: str = "balanced") -> dict[str, Any]:
+    plan = _V25_BUILD_DYNAMIC_PLAN(payload, timings, duration, intensity=intensity)
+    sfx_level = str(payload.get("dynamic_sfx_level") or "light")
+    sticker_level = str(payload.get("dynamic_sticker_level") or "light")
+    raw_events = []
+    for event in plan.get("events") or []:
+        item = dict(event)
+        item.pop("sfx", None)
+        item.pop("sticker", None)
+        raw_events.append(item)
+    plan["events"] = _decorate_events(raw_events, duration, sfx_level=sfx_level, sticker_level=sticker_level)
+    plan = _v26_ensure_effect_delivery(
+        plan, timings, duration, sfx_level=sfx_level, sticker_level=sticker_level
+    )
+    plan["sfx_level"] = sfx_level
+    plan["sticker_level"] = sticker_level
+    plan["subtitle_timing_source"] = (
+        "volcengine_native_word_timestamp"
+        if any(item.get("native_word_timestamp") for item in timings)
+        else "segment_duration_fallback"
+    )
+    plan["native_word_timestamp_count"] = sum(int(item.get("native_word_count") or 0) for item in timings)
+    impact_roles = {"hook", "question", "turn", "data", "risk", "comparison", "cta"}
+    impact_count = 0
+    for item in timings:
+        text = _clean_caption_text(str(item.get("text") or ""))
+        if _classify(text) in impact_roles or any(keyword and keyword in text for keyword in plan.get("keywords") or []):
+            impact_count += 1
+    plan["keyword_impact_count"] = min(4, impact_count)
+    plan["effect_delivery"] = {
+        "requested_sfx_level": sfx_level,
+        "requested_sticker_level": sticker_level,
+        "planned_sfx_count": sum(1 for event in plan["events"] if event.get("sfx")),
+        "planned_sticker_count": sum(1 for event in plan["events"] if event.get("sticker")),
+        "keyword_impact_count": plan["keyword_impact_count"],
+        "sfx_pack": "mixkit-pro-v26",
+    }
+    return plan
+
+
+def _validate_v26_effect_plan(plan: dict[str, Any], timings: list[dict[str, Any]], sfx_level: str, sticker_level: str) -> dict[str, Any]:
+    events = list(plan.get("events") or [])
+    sfx_count = sum(1 for event in events if isinstance(event.get("sfx"), dict))
+    sticker_count = sum(1 for event in events if isinstance(event.get("sticker"), dict))
+    if sfx_level != "off" and sfx_count <= 0:
+        raise ValueError("专业音效计划为空")
+    if sticker_level != "off" and sticker_count <= 0:
+        raise ValueError("语义贴纸计划为空")
+    if int(plan.get("keyword_impact_count") or 0) <= 0:
+        raise ValueError("关键词强调计划为空")
+    joined_expected = "".join(_v26_clean_token_text(item.get("text")) for item in timings)
+    if not joined_expected:
+        raise ValueError("字幕时间线为空")
+    return plan
+
+
+def _highlight_ass(text: str, keywords: list[str], highlight: str) -> str:
+    escaped = _ass_escape(text)
+    for keyword in sorted((item for item in keywords if item), key=len, reverse=True):
+        safe = _ass_escape(keyword)
+        if safe in escaped:
+            pulse = rf"{{\c{highlight}\fscx116\fscy116\t(0,160,\fscx100\fscy100)}}{safe}{{\c&H00FFFFFF&\fscx100\fscy100}}"
+            return escaped.replace(safe, pulse, 1)
+    role = _classify(text)
+    if role in {"hook", "question", "turn", "data", "risk", "comparison", "cta"}:
+        return rf"{{\fscx110\fscy110\t(0,150,\fscx100\fscy100)}}{escaped}"
+    return escaped
+
+
+def _build_video_filters(work: Path, plan: dict[str, Any], ass_path: Path, sticker_inputs: list[dict[str, Any]], *, width: int = 1080, height: int = 1920) -> str:
+    events = plan.get("events") or []
+    limits = plan.get("limits") or {}
+    zoom_strength = _safe_float(limits.get("zoom_strength"), 0.034)
+    micro_strength = _safe_float(limits.get("micro_zoom_strength"), 0.007)
+    zoom_terms: list[str] = []
+    for index, start in enumerate([float(value) for value in (plan.get("caption_beats") or [])[:48]]):
+        if index % 4:
+            continue
+        span = 0.82
+        zoom_terms.append(f"+{micro_strength:.4f}*between(t,{start:.3f},{start+span:.3f})*sin(PI*(t-{start:.3f})/{span:.3f})")
+    for event in events:
+        if event.get("effect") not in {"hook_punch", "question_pulse", "turn_focus", "risk_alert", "data_card"}:
+            continue
+        start = _safe_float(event.get("start"), 0.0)
+        end = max(start + 0.35, _safe_float(event.get("end"), start + 0.90))
+        span = max(0.25, end - start)
+        strength = zoom_strength * (1.0 if event.get("effect") in {"hook_punch", "data_card"} else 0.65)
+        zoom_terms.append(f"+{strength:.4f}*between(t,{start:.3f},{end:.3f})*sin(PI*(t-{start:.3f})/{span:.3f})")
+    factor = "1" + "".join(zoom_terms)
+    chain = [
+        f"[0:v]scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height},setsar=1[base]",
+        f"[base]scale=w='{width}*({factor})':h='{height}*({factor})':eval=frame,crop={width}:{height}:(iw-{width})/2:(ih-{height})/2[v0]",
+    ]
+    current = "v0"
+    position_xy = {"upper_left": ("54", "250"), "upper_right": ("W-w-54", "270"), "side_left": ("48", "560"), "side_right": ("W-w-48", "580")}
+    for index, item in enumerate(sticker_inputs, start=1):
+        sticker = item["sticker"]
+        input_index = int(item["input_index"])
+        start = _safe_float(sticker.get("start"), 0.0)
+        end = max(start + 0.70, _safe_float(sticker.get("end"), start + 1.05))
+        span = max(0.70, end - start)
+        size = max(108, min(166, int(sticker.get("size") or 136)))
+        x_expr, y_base = position_xy.get(str(sticker.get("position") or "upper_right"), position_xy["upper_right"])
+        sticker_label = f"sticker{index}"
+        next_label = f"vstk{index}"
+        chain.append(f"[{input_index}:v]format=rgba,scale={size}:{size}:force_original_aspect_ratio=decrease,pad={size+20}:{size+20}:(ow-iw)/2:(oh-ih)/2:color=0x00000000,trim=duration={span:.3f},fade=t=in:st=0:d=0.10:alpha=1,fade=t=out:st={max(0.1,span-0.14):.3f}:d=0.14:alpha=1,setpts=PTS-STARTPTS+{start:.3f}/TB[{sticker_label}]")
+        chain.append(f"[{current}][{sticker_label}]overlay=x='{x_expr}':y='{y_base}+5*sin(2*PI*(t-{start:.3f})/1.4)':eof_action=pass:shortest=0:enable='between(t,{start:.3f},{end:.3f})'[{next_label}]")
+        current = next_label
+    chain.append(f"[{current}]ass='{_ffmpeg_escape_path(ass_path)}'[vout]")
+    return ";".join(chain)
+
+
+def _build_audio_filters(plan: dict[str, Any], *, has_audio: bool, sfx_inputs: list[dict[str, Any]]) -> tuple[str, str | None]:
+    if not has_audio:
+        return "", None
+    render_duration = max(0.1, _safe_float(plan.get("render_duration"), _safe_float(plan.get("duration"), 30.0)))
+    voice_chain = f"[0:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,apad=pad_dur=0.16,atrim=duration={render_duration:.3f},afade=t=out:st={max(0.0,render_duration-0.14):.3f}:d=0.14[voice]"
+    if not sfx_inputs:
+        return voice_chain + ";[voice]loudnorm=I=-16:LRA=7:TP=-1.8[aout]", "aout"
+    parts = [voice_chain]
+    labels = ["voice"]
+    for index, item in enumerate(sfx_inputs, start=1):
+        event, sfx = item["event"], item["sfx"]
+        input_index = int(item["input_index"])
+        delay = int(max(0.0, _safe_float(event.get("start"), 0.0)) * 1000)
+        asset_name = Path(str(item.get("path") or "")).name
+        trim_start, trim_duration = V26_SFX_META.get(asset_name, (0.0, 0.90))
+        gain = max(0.025, min(0.115, _safe_float(sfx.get("gain"), 0.060)))
+        fade_out_start = max(0.18, trim_duration - min(0.20, trim_duration * 0.24))
+        label = f"sfx{index}"
+        parts.append(f"[{input_index}:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,atrim=start={trim_start:.3f}:duration={trim_duration:.3f},asetpts=PTS-STARTPTS,highpass=f=90,lowpass=f=12500,acompressor=threshold=0.10:ratio=2.2:attack=4:release=80,volume={gain:.4f},afade=t=in:st=0:d=0.012,afade=t=out:st={fade_out_start:.3f}:d={max(0.08,trim_duration-fade_out_start):.3f},adelay={delay}|{delay}[{label}]")
+        labels.append(label)
+    parts.append("".join(f"[{label}]" for label in labels) + f"amix=inputs={len(labels)}:duration=first:dropout_transition=0:normalize=0,alimiter=limit=0.91,loudnorm=I=-16:LRA=7:TP=-1.8[aout]")
     return ";".join(parts), "aout"
