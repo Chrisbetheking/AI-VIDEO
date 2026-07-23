@@ -12,8 +12,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-VERSION = "10.40.8.30-stable-sequence-effects"
-# V10_40_8_30_STABLE_SEQUENCE_EFFECTS
+VERSION = "10.40.8.31-clean-text-pro-stickers"
+# V10_40_8_31_CLEAN_TEXT_PRO_STICKERS
 # REAL_TTS_CHILD_MASTER_SYNC_R9
 REGISTRY_FILE = "existing_edit_asset_usage.json"
 _REGISTRY_LOCK = threading.RLock()

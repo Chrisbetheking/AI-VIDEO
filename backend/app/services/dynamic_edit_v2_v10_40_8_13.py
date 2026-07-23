@@ -19,8 +19,8 @@ from typing import Any, Callable
 
 from fastapi import Depends, HTTPException, Request
 
-VERSION = "10.40.8.30-stable-sequence-effects"
-INSTALL_MARKER = "V10_40_8_30_STABLE_SEQUENCE_EFFECTS"
+VERSION = "10.40.8.31-clean-text-pro-stickers"
+INSTALL_MARKER = "V10_40_8_31_CLEAN_TEXT_PRO_STICKERS"
 _INSTALLED = False
 _LOCK = threading.RLock()
 
@@ -4500,5 +4500,353 @@ def render_dynamic_video(input_path: Path, output_path: Path, ass_path: Path, pl
     report["effect_engine"] = "v30_clean_semantic_effects"
     report["legacy_sticker_forbidden"] = True
     report["semantic_component_count"] = len(_collect_sticker_inputs(plan))
+    report["audible_sfx_count"] = sum(1 for event in plan.get("events") or [] if isinstance(event.get("sfx"), dict))
+    return report
+
+
+# =============================================================================
+# V10.40.8.31 CLEAN TEXT + PROFESSIONAL SEMANTIC STICKERS
+# =============================================================================
+# Default delivery is now pure ASS text emphasis plus small semantic stickers.
+# Large opaque semantic text cards are forbidden unless a future explicit mode
+# opts into them. This override is intentionally last so all render-time global
+# lookups use the clean R21 implementations below.
+V31_PRO_STICKER_DIR = _sticker_root() / "pro_r21"
+V31_PRO_STICKER_PREFIX = "pro_r21/"
+
+
+def _v31_sticker_asset(event: dict[str, Any], index: int = 0) -> str:
+    text = _clean_caption_text(str(event.get("source_text") or event.get("focus_text") or ""))
+    role = str(event.get("role") or "knowledge")
+    rules: list[tuple[re.Pattern[str], str]] = [
+        (re.compile(r"(咖啡|咖啡厅|咖啡店|cafe)", re.I), "coffee.png"),
+        (re.compile(r"(商场|商圈|购物|超市|餐饮|shopping|mall)", re.I), "mall.png"),
+        (re.compile(r"(学校|大学|学区|教育|国际学校)", re.I), "school.png"),
+        (re.compile(r"(医院|医疗|诊所)", re.I), "hospital.png"),
+        (re.compile(r"(地铁|交通|通勤|公交|车站|轻轨|MRT|LRT)", re.I), "train.png"),
+        (re.compile(r"(位置|区域|地段|生活半径|附近|周边)", re.I), "location.png"),
+        (re.compile(r"(对比|还是|VS|vs|自住.*投资|投资.*自住)", re.I), "compare.png"),
+        (re.compile(r"(自住|居住|家庭|生活方式|家人)", re.I), "home.png"),
+        (re.compile(r"(投资|回报|升值|出租|收益|转手)", re.I), "investment.png"),
+        (re.compile(r"(风险|注意|避坑|误区|别被|不要只|搞错)", re.I), "warning.png"),
+        (re.compile(r"(三件事|三项|第一|第二|第三|清单|确认|核对)", re.I), "checklist.png"),
+        (re.compile(r"(合同|SPA|定金|首期|文件|签署|抵扣|条款)", re.I), "document.png"),
+        (re.compile(r"(租客|客群|人群|客户|上班族|学生群体)", re.I), "people.png"),
+        (re.compile(r"(价格|预算|房价|马币|RM|金额|首付)", re.I), "money.png"),
+        (re.compile(r"(评论|私信|留言|告诉我|关注|下一条)", re.I), "comment.png"),
+        (re.compile(r"(为什么|什么|怎么|到底|吗|？|\?)", re.I), "question.png"),
+    ]
+    for pattern, asset in rules:
+        if pattern.search(text):
+            return V31_PRO_STICKER_PREFIX + asset
+    fallback = {
+        "hook": "spark.png",
+        "question": "question.png",
+        "cta": "comment.png",
+        "risk": "warning.png",
+        "comparison": "compare.png",
+        "list": "checklist.png",
+        "data": "document.png",
+        "turn": "location.png",
+    }.get(role, "")
+    return V31_PRO_STICKER_PREFIX + fallback if fallback else ""
+
+
+def _v31_sticker_limit(level: str, duration: float) -> int:
+    per_30 = {"off": 0, "light": 3, "balanced": 5, "rich": 7}.get(level, 3)
+    if per_30 <= 0:
+        return 0
+    limit = int(math.ceil(max(1.0, duration) / 30.0 * per_30))
+    if duration >= 12.0:
+        limit = max(2, limit)
+    return min(10, limit)
+
+
+def _decorate_events(events: list[dict[str, Any]], duration: float, *, sfx_level: str, sticker_level: str) -> list[dict[str, Any]]:
+    cleaned: list[dict[str, Any]] = []
+    for index, source in enumerate(events):
+        event = dict(source)
+        # Remove every previous text card / emoji / duplicate overlay layer.
+        for key in ("sticker", "callout", "sfx", "sfx_skip_reason", "sticker_candidate", "sticker_skip_reason", "legacy_sticker", "keyword_overlay", "impact_overlay", "semantic_card"):
+            event.pop(key, None)
+        text = str(event.get("source_text") or event.get("focus_text") or "")
+        event["role"] = _v30_semantic_role(text, str(event.get("role") or "knowledge"))
+        asset = _v31_sticker_asset(event, index)
+        event["sticker_candidate"] = asset or None
+        cleaned.append(event)
+
+    # Keep the audible role-bound SFX policy from V30, but do not attach text cards.
+    max_sfx = 0 if sfx_level == "off" else max(3, min(6, int(math.ceil(max(1.0, duration) / 9.5))))
+    sfx_gap = 3.0
+    last_sfx = -999.0
+    sfx_count = 0
+    sfx_roles = {"hook", "comparison", "risk", "question", "data", "list", "cta", "turn"}
+    for index, event in enumerate(cleaned):
+        role = str(event.get("role") or "knowledge")
+        start = max(0.0, _safe_float(event.get("start"), 0.0))
+        if sfx_count >= max_sfx or role not in sfx_roles or (role != "cta" and start - last_sfx < sfx_gap):
+            continue
+        bank = SFX_VARIANT_BANKS.get(role) or SFX_VARIANT_BANKS.get("turn") or []
+        if not bank:
+            continue
+        asset, _ = bank[index % len(bank)]
+        if not (_sfx_root() / asset).is_file():
+            event["sfx_skip_reason"] = "asset_missing"
+            continue
+        gain = {
+            "hook": 0.56, "comparison": 0.50, "risk": 0.48,
+            "question": 0.45, "data": 0.44, "list": 0.43,
+            "turn": 0.40, "cta": 0.52,
+        }.get(role, 0.42)
+        event["sfx"] = {"asset": asset, "gain": gain, "role": role, "audible_mix": True}
+        sfx_count += 1
+        last_sfx = start
+
+    max_stickers = _v31_sticker_limit(sticker_level, duration)
+    min_gap = {"light": 4.0, "balanced": 2.8, "rich": 2.0}.get(sticker_level, 3.6)
+    positions = ["upper_right", "upper_left", "side_right", "side_left"]
+    last_start = -999.0
+    used = 0
+    last_asset = ""
+    for event in cleaned:
+        asset = str(event.get("sticker_candidate") or "")
+        start = max(0.0, _safe_float(event.get("start"), 0.0))
+        end = max(start + 0.72, _safe_float(event.get("end"), start + 1.2))
+        role = str(event.get("role") or "knowledge")
+        if not asset:
+            event["sticker_skip_reason"] = "no_semantic_match"
+            continue
+        path = _sticker_root() / asset
+        if not path.is_file():
+            event["sticker_skip_reason"] = "asset_missing"
+            continue
+        if used >= max_stickers:
+            event["sticker_skip_reason"] = "level_limit"
+            continue
+        if role != "cta" and start - last_start < min_gap:
+            event["sticker_skip_reason"] = "minimum_gap"
+            continue
+        if asset == last_asset and role != "cta":
+            event["sticker_skip_reason"] = "adjacent_duplicate"
+            continue
+        span = 1.05 if role not in {"hook", "risk", "cta"} else 1.28
+        event["sticker"] = {
+            "asset": asset,
+            "position": positions[used % len(positions)],
+            "size": 154 + (used % 2) * 12,
+            "start": round(start, 3),
+            "end": round(min(duration, max(start + 0.72, min(end, start + span))), 3),
+            "semantic_icon": True,
+            "no_text_box": True,
+        }
+        event.pop("sticker_skip_reason", None)
+        used += 1
+        last_start = start
+        last_asset = asset
+
+    # CTA must have a visible comment sticker when stickers are enabled.
+    if sticker_level != "off" and max_stickers > 0:
+        cta = next((event for event in reversed(cleaned) if str(event.get("role")) == "cta"), None)
+        if cta is not None and not isinstance(cta.get("sticker"), dict):
+            asset = V31_PRO_STICKER_PREFIX + "comment.png"
+            if (_sticker_root() / asset).is_file():
+                if used >= max_stickers:
+                    removable = next((event for event in cleaned if isinstance(event.get("sticker"), dict) and str(event.get("role")) not in {"hook", "risk"}), None)
+                    if removable is not None:
+                        removable.pop("sticker", None)
+                        removable["sticker_skip_reason"] = "reserved_for_cta"
+                        used -= 1
+                if used < max_stickers:
+                    start = max(0.0, _safe_float(cta.get("start"), 0.0))
+                    end = max(start + 0.8, _safe_float(cta.get("end"), start + 1.4))
+                    cta["sticker"] = {
+                        "asset": asset, "position": "upper_right", "size": 170,
+                        "start": round(start, 3), "end": round(min(duration, max(start + 0.9, min(end, start + 1.35))), 3),
+                        "semantic_icon": True, "no_text_box": True,
+                    }
+                    cta.pop("sticker_skip_reason", None)
+    return cleaned
+
+
+def build_dynamic_plan(payload: dict[str, Any], timings: list[dict[str, Any]], duration: float, *, intensity: str = "balanced") -> dict[str, Any]:
+    plan = _V29_BUILD_DYNAMIC_PLAN_CLEAN_EFFECTS(payload, timings, duration, intensity=intensity)
+    sfx_level = str(payload.get("dynamic_sfx_level") or "light")
+    sticker_level = str(payload.get("dynamic_sticker_level") or "light")
+    raw_events = [dict(item) for item in (plan.get("events") or []) if isinstance(item, dict)]
+    events = _decorate_events(raw_events, duration, sfx_level=sfx_level, sticker_level=sticker_level)
+    plan["events"] = events
+    plan["version"] = VERSION
+    plan["sfx_level"] = sfx_level
+    plan["sticker_level"] = sticker_level
+    plan["visual_pace"] = "stable_sequence_clean_text_pro_stickers"
+    plan["legacy_sticker_forbidden"] = True
+    plan["semantic_component_only"] = False
+    plan["large_text_card_forbidden"] = True
+    plan["pure_caption_emphasis"] = True
+    planned = [event for event in events if isinstance(event.get("sticker"), dict)]
+    candidates = [event for event in events if event.get("sticker_candidate")]
+    skip_reasons: dict[str, int] = {}
+    for event in events:
+        reason = str(event.get("sticker_skip_reason") or "")
+        if reason:
+            skip_reasons[reason] = skip_reasons.get(reason, 0) + 1
+    plan["effect_delivery"] = {
+        "requested_sfx_level": sfx_level,
+        "requested_sticker_level": sticker_level,
+        "planned_sfx_count": sum(1 for event in events if isinstance(event.get("sfx"), dict)),
+        "sticker_candidates_count": len(candidates),
+        "sticker_applied_count": len(planned),
+        "planned_sticker_count": len(planned),
+        "sticker_skip_reasons": skip_reasons,
+        "planned_callout_count": 0,
+        "keyword_impact_count": int(plan.get("keyword_impact_count") or 0),
+        "sfx_pack": "mixkit-pro-v31-audible",
+        "sticker_pack": "pro-line-stickers-r21",
+        "text_box_count": 0,
+    }
+    return plan
+
+
+def _collect_sticker_inputs(plan: dict[str, Any]) -> list[dict[str, Any]]:
+    result: list[dict[str, Any]] = []
+    for event in plan.get("events") or []:
+        sticker = event.get("sticker")
+        if not isinstance(sticker, dict):
+            continue
+        asset = str(sticker.get("asset") or "")
+        if not asset.startswith(V31_PRO_STICKER_PREFIX):
+            continue
+        path = _sticker_root() / asset
+        if path.is_file():
+            result.append({"event": event, "sticker": sticker, "path": path})
+    return result
+
+
+def _highlight_ass(text: str, keywords: list[str], highlight: str) -> str:
+    escaped = _ass_escape(text)
+    for keyword in sorted((item for item in keywords if item), key=len, reverse=True):
+        safe = _ass_escape(keyword)
+        if safe in escaped:
+            pulse = (
+                rf"{{\c{highlight}\bord10\shad2\fscx142\fscy142"
+                rf"\t(0,165,\fscx100\fscy100\bord7\shad1)}}{safe}"
+                rf"{{\c&H00FFFFFF&\bord7\shad1\fscx100\fscy100}}"
+            )
+            return escaped.replace(safe, pulse, 1)
+    return escaped
+
+
+def write_dynamic_ass(destination: Path, timings: list[dict[str, Any]], keywords: list[str], *, style_id: str, events: list[dict[str, Any]] | None = None) -> Path:
+    preset = SUBTITLE_PRESETS.get(style_id) or SUBTITLE_PRESETS["dynamic_white_yellow"]
+    context = getattr(_V16_CONTEXT, "config", {}) or {}
+    base_size = max(92, min(150, int(context.get("caption_size") or 118)))
+    font_name = "Noto Sans CJK SC"
+    header = f"""[Script Info]
+ScriptType: v4.00+
+PlayResX: 1080
+PlayResY: 1920
+ScaledBorderAndShadow: yes
+WrapStyle: 2
+
+[V4+ Styles]
+Format: Name,Fontname,Fontsize,PrimaryColour,SecondaryColour,OutlineColour,BackColour,Bold,Italic,Underline,StrikeOut,ScaleX,ScaleY,Spacing,Angle,BorderStyle,Outline,Shadow,Alignment,MarginL,MarginR,MarginV,Encoding
+Style: Dynamic,{font_name},{base_size},{preset['primary']},{preset['highlight']},{preset['outline']},&H00000000,-1,0,0,0,100,100,0.8,0,1,{preset['outline_width']},{preset['shadow']},5,55,55,0,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+"""
+    lines = [header]
+    for index, item in enumerate(timings):
+        start = _safe_float(item.get("start"), 0.0)
+        end = max(start + 0.30, _safe_float(item.get("end"), start + 0.85))
+        raw_text = _clean_caption_text(str(item.get("text") or ""))
+        role = _classify(raw_text)
+        text = _highlight_ass(raw_text, keywords, str(preset["highlight"]))
+        y = 1415 + (index % 2) * 86
+        if role in {"hook", "comparison", "risk", "question", "cta"}:
+            animation = rf"{{\an5\pos(540,{y})\fscx116\fscy116\t(0,145,\fscx100\fscy100)\fad(30,60)}}"
+        else:
+            animation = rf"{{\an5\move(540,{y+28},540,{y},0,140)\fad(45,65)}}"
+        lines.append(f"Dialogue: 0,{_ass_time(start)},{_ass_time(end)},Dynamic,,0,0,0,,{animation}{text}\n")
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_text("".join(lines), encoding="utf-8-sig")
+    return destination
+
+
+def _build_video_filters(work: Path, plan: dict[str, Any], ass_path: Path, sticker_inputs: list[dict[str, Any]], *, width: int = 1080, height: int = 1920) -> str:
+    duration = max(0.1, _safe_float(plan.get("render_duration"), _safe_float(plan.get("duration"), 30.0)))
+    events = list(plan.get("events") or [])
+    limits = plan.get("limits") or {}
+    zoom_strength = _safe_float(limits.get("zoom_strength"), 0.050)
+    zoom_terms: list[str] = []
+    for event in events:
+        role = str(event.get("role") or "knowledge")
+        if role not in {"hook", "comparison", "risk", "question", "data", "cta"}:
+            continue
+        start = _safe_float(event.get("start"), 0.0)
+        span = 0.72
+        multiplier = {"hook": 1.10, "comparison": 0.82, "risk": 0.78, "question": 0.66, "data": 0.70, "cta": 0.55}.get(role, 0.6)
+        strength = zoom_strength * multiplier
+        zoom_terms.append(f"+{strength:.4f}*between(t,{start:.3f},{start+span:.3f})*sin(PI*(t-{start:.3f})/{span:.3f})")
+    factor = "1" + "".join(zoom_terms)
+    chain = [
+        f"[0:v]scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height},setsar=1[base]",
+        f"[base]scale=w='{width}*({factor})':h='{height}*({factor})':eval=frame,crop={width}:{height}:(iw-{width})/2:(ih-{height})/2[v0]",
+    ]
+    current = "v0"
+    positions = {
+        "upper_left": ("70", "260"), "upper_right": ("W-w-70", "275"),
+        "side_left": ("62", "620"), "side_right": ("W-w-62", "640"),
+    }
+    for index, item in enumerate(sticker_inputs, start=1):
+        sticker = item["sticker"]
+        input_index = int(item["input_index"])
+        start = _safe_float(sticker.get("start"), 0.0)
+        end = max(start + 0.72, _safe_float(sticker.get("end"), start + 1.05))
+        span = max(0.72, end - start)
+        size = max(138, min(190, int(sticker.get("size") or 160)))
+        x_expr, y_base = positions.get(str(sticker.get("position") or "upper_right"), positions["upper_right"])
+        label = f"v31sticker{index}"
+        output = f"v31out{index}"
+        chain.append(
+            f"[{input_index}:v]format=rgba,scale={size}:{size}:force_original_aspect_ratio=decrease,"
+            f"pad={size+18}:{size+18}:(ow-iw)/2:(oh-ih)/2:color=0x00000000,"
+            f"trim=duration={span:.3f},fade=t=in:st=0:d=0.08:alpha=1,"
+            f"fade=t=out:st={max(0.1,span-0.14):.3f}:d=0.14:alpha=1,"
+            f"setpts=PTS-STARTPTS+{start:.3f}/TB[{label}]"
+        )
+        chain.append(
+            f"[{current}][{label}]overlay=x='{x_expr}':y='{y_base}+7*sin(2*PI*(t-{start:.3f})/1.25)':"
+            f"eof_action=pass:shortest=0:enable='between(t,{start:.3f},{end:.3f})'[{output}]"
+        )
+        current = output
+    chain.append(f"[{current}]ass='{_ffmpeg_escape_path(ass_path)}',tpad=stop_mode=clone:stop_duration=1,trim=duration={duration:.3f}[vout]")
+    return ";".join(chain)
+
+
+def _validate_v26_effect_plan(plan: dict[str, Any], timings: list[dict[str, Any]], sfx_level: str, sticker_level: str) -> dict[str, Any]:
+    events = list(plan.get("events") or [])
+    sfx_count = sum(1 for event in events if isinstance(event.get("sfx"), dict))
+    stickers = [event.get("sticker") for event in events if isinstance(event.get("sticker"), dict)]
+    bad = [item for item in stickers if not str(item.get("asset") or "").startswith(V31_PRO_STICKER_PREFIX)]
+    if sfx_level != "off" and sfx_count <= 0:
+        raise ValueError("V31 可听音效计划为空")
+    if sticker_level != "off" and not stickers:
+        raise ValueError("V31 专业语义贴纸计划为空")
+    if bad:
+        raise ValueError(f"V31 检测到非专业贴纸或文本卡：{len(bad)}")
+    if int(plan.get("keyword_impact_count") or 0) <= 0:
+        raise ValueError("V31 关键词冲击计划为空")
+    return plan
+
+
+def render_dynamic_video(input_path: Path, output_path: Path, ass_path: Path, plan: dict[str, Any]) -> dict[str, Any]:
+    report = _V29_RENDER_DYNAMIC_VIDEO_CLEAN_EFFECTS(input_path, output_path, ass_path, plan)
+    sticker_inputs = _collect_sticker_inputs(plan)
+    report["effect_engine"] = "v31_clean_text_pro_stickers"
+    report["large_text_card_forbidden"] = True
+    report["text_box_count"] = 0
+    report["professional_sticker_count"] = len(sticker_inputs)
+    report["sticker_assets"] = [item["path"].name for item in sticker_inputs]
     report["audible_sfx_count"] = sum(1 for event in plan.get("events") or [] if isinstance(event.get("sfx"), dict))
     return report
