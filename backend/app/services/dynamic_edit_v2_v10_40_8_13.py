@@ -19,8 +19,8 @@ from typing import Any, Callable
 
 from fastapi import Depends, HTTPException, Request
 
-VERSION = "10.40.8.24-runtime-child-job-binding-gate"
-INSTALL_MARKER = "V10_40_8_24_RUNTIME_CHILD_JOB_BINDING_GATE"
+VERSION = "10.40.8.25-caption-boundary-auto-repair-gate"
+INSTALL_MARKER = "V10_40_8_25_CAPTION_BOUNDARY_AUTO_REPAIR_GATE"
 _INSTALLED = False
 _LOCK = threading.RLock()
 
@@ -2419,23 +2419,83 @@ def _caption_chunks(text: str, *, max_chars: int = 9) -> list[str]:
     if expected != actual:
         raise ValueError("字幕安全切分发生文字丢失")
 
-    # A protected phrase may never cross two caption cards.
-    joined = "".join(compact)
-    boundaries: set[int] = set()
+    # V25_CAPTION_BOUNDARY_AUTO_REPAIR
+    # 保护词跨过标点生成的字幕卡时，自动合并相邻卡片，
+    # 禁止再因为字幕排版问题杀死整条视频任务。
+    repaired = [item for item in compact if item]
+    repair_limit = max(8, len(repaired) + len(protected) + 4)
+
+    for _ in range(repair_limit):
+        joined = "".join(repaired)
+
+        boundaries: list[tuple[int, int]] = []
+        cursor = 0
+        for card_index, item in enumerate(repaired[:-1]):
+            cursor += len(item)
+            boundaries.append((card_index, cursor))
+
+        crossing: tuple[int, str] | None = None
+
+        for term in protected:
+            search_start = 0
+
+            while True:
+                index = joined.find(term, search_start)
+                if index < 0:
+                    break
+
+                for card_index, boundary in boundaries:
+                    if index < boundary < index + len(term):
+                        crossing = (card_index, term)
+                        break
+
+                if crossing is not None:
+                    break
+
+                search_start = index + 1
+
+            if crossing is not None:
+                break
+
+        if crossing is None:
+            break
+
+        card_index, _term = crossing
+
+        if card_index + 1 >= len(repaired):
+            raise ValueError(f"字幕词组边界无法自动修复：{_term}")
+
+        repaired[card_index : card_index + 2] = [
+            repaired[card_index] + repaired[card_index + 1]
+        ]
+    else:
+        raise ValueError("字幕词组边界自动修复超过安全上限")
+
+    joined = "".join(repaired)
+    final_boundaries: set[int] = set()
     cursor = 0
-    for item in compact[:-1]:
+
+    for item in repaired[:-1]:
         cursor += len(item)
-        boundaries.add(cursor)
+        final_boundaries.add(cursor)
+
     for term in protected:
-        start = 0
+        search_start = 0
+
         while True:
-            index = joined.find(term, start)
+            index = joined.find(term, search_start)
             if index < 0:
                 break
-            if any(index < boundary < index + len(term) for boundary in boundaries):
-                raise ValueError(f"字幕词组被腰斩：{term}")
-            start = index + 1
-    return [item for item in compact if item]
+
+            if any(
+                index < boundary < index + len(term)
+                for boundary in final_boundaries
+            ):
+                raise ValueError(f"字幕词组边界自动修复失败：{term}")
+
+            search_start = index + 1
+
+    return repaired
 
 def _normalize_locked_shot_plan(payload: dict[str, Any]) -> dict[str, Any]:
     raw_candidates: list[Any] = []
