@@ -31,7 +31,8 @@ from app.services.a10_r4_output_guard_v10_40_8_12 import (
     measure_audio_loudness,
 )
 
-VERSION = "10.40.8.31-clean-text-pro-stickers"
+VERSION = "10.40.8.32-reference-kinetic-typography"
+# V10_40_8_32_REFERENCE_KINETIC_TYPOGRAPHY
 # V10_40_8_31_CLEAN_TEXT_PRO_STICKERS
 # REAL_TTS_CHILD_MASTER_SYNC_R9
 # V10_40_8_12_A10_R4_SEMANTIC_SINGLE_USE_AUDIO: strict visual single-use, semantic coverage, fresh ending, -16 LUFS
