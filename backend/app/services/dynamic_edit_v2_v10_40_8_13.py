@@ -19,8 +19,8 @@ from typing import Any, Callable
 
 from fastapi import Depends, HTTPException, Request
 
-VERSION = "10.40.8.23-real-tts-child-master-sync-gate"
-INSTALL_MARKER = "V10_40_8_23_REAL_TTS_CHILD_MASTER_SYNC_GATE"
+VERSION = "10.40.8.24-runtime-child-job-binding-gate"
+INSTALL_MARKER = "V10_40_8_24_RUNTIME_CHILD_JOB_BINDING_GATE"
 _INSTALLED = False
 _LOCK = threading.RLock()
 
@@ -1075,6 +1075,75 @@ def _clip_master_signature(item: dict[str, Any]) -> tuple[str, str, int, str]:
     )
 
 
+
+def _select_runtime_real_tts_child_job(scope: dict[str, Any]) -> dict[str, Any]:
+    """Select the completed existing-edit child job from the current _run_dynamic scope."""
+    ranked: list[tuple[int, str, dict[str, Any]]] = []
+    ignored = {
+        "payload", "semantic_plan", "plan", "authoritative_master",
+        "asset_usage_report", "coverage", "proxy_job",
+    }
+    for name, value in scope.items():
+        if name in ignored or not isinstance(value, dict):
+            continue
+        child_plan = value.get("edit_plan")
+        child_plan = child_plan if isinstance(child_plan, dict) else {}
+        clips = value.get("clips") or child_plan.get("clips") or []
+        if not isinstance(clips, list) or not clips:
+            continue
+        score = 0
+        status = str(value.get("status") or "").lower()
+        stage = str(value.get("stage") or "").lower()
+        job_id = str(value.get("job_id") or value.get("id") or "")
+        coverage = child_plan.get("coverage") or value.get("coverage") or {}
+        if status in {"done", "finished", "completed", "success"}:
+            score += 6
+        if stage in {"done", "finished", "completed", "success"}:
+            score += 4
+        if job_id.startswith("existing_edit_"):
+            score += 5
+        if child_plan.get("clips"):
+            score += 5
+        if value.get("clips"):
+            score += 3
+        if isinstance(coverage, dict) and (
+            coverage.get("real_tts_replanned")
+            or coverage.get("semantic_tts_replanned")
+            or coverage.get("timing_source") == "real_tts_segments"
+        ):
+            score += 6
+        raw_count = (
+            child_plan.get("semantic_master_shot_count")
+            or value.get("semantic_master_shot_count")
+            or value.get("shot_count")
+            or len(clips)
+        )
+        try:
+            if int(raw_count) == len(clips):
+                score += 4
+        except (TypeError, ValueError):
+            pass
+        ranked.append((score, name, value))
+
+    if not ranked:
+        available = sorted(
+            name for name, value in scope.items()
+            if isinstance(value, dict)
+        )
+        raise ValueError(
+            "R10 未在动态任务作用域中找到真实 TTS 子任务；"
+            f"dict_vars={available}"
+        )
+
+    ranked.sort(key=lambda item: (item[0], item[1]), reverse=True)
+    best_score, best_name, best_job = ranked[0]
+    if best_score < 8:
+        raise ValueError(
+            "R10 找到的候选不足以确认为真实 TTS 子任务："
+            f"name={best_name}, score={best_score}"
+        )
+    return best_job
+
 def _resolve_authoritative_semantic_master(
     base_job: dict[str, Any],
     preview_plan: dict[str, Any] | None,
@@ -1224,9 +1293,11 @@ def _run_dynamic(settings: Any, proxy_job_id: str, payload: dict[str, Any]) -> N
             or ((classic_payload.get("edit_plan") or {}).get("clips") if isinstance(classic_payload.get("edit_plan"), dict) else None)
             or []
         )
+        runtime_base_job = _select_runtime_real_tts_child_job(locals())
         authoritative_master = _resolve_authoritative_semantic_master(
-            base_job, semantic_plan, applied_clips
+            runtime_base_job, semantic_plan, applied_clips
         )
+        # R10_RUNTIME_CHILD_JOB_BINDING
         semantic_plan = authoritative_master["plan"]
         authoritative_clips = authoritative_master["clips"]
         authoritative_count = authoritative_master["count"]
@@ -1459,6 +1530,7 @@ def install_dynamic_edit_v2(app: Any, get_settings: Callable[..., Any]) -> None:
                 "real_tts_child_master_promoted": True,
                 "parent_job_semantic_metadata_synced": True,
                 "preview_plan_non_authoritative": True,
+                "runtime_child_job_binding": True,
                 "unapproved_sfx_disabled": True,
                 "random_stickers_disabled": True,
                 "reference_subtitle_pack": True,
