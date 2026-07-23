@@ -12,7 +12,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-VERSION = "10.40.8.32-reference-kinetic-typography"
+VERSION = "10.40.8.33-semantic-relevance-caption-hierarchy"
+# V10_40_8_33_SEMANTIC_RELEVANCE_CAPTION_HIERARCHY
 # V10_40_8_32_REFERENCE_KINETIC_TYPOGRAPHY
 # V10_40_8_31_CLEAN_TEXT_PRO_STICKERS
 # REAL_TTS_CHILD_MASTER_SYNC_R9
@@ -1381,4 +1382,289 @@ def build_plan(settings: Any, payload: dict[str, Any], job_id: str) -> dict[str,
     plan["version"] = VERSION
     plan["cadence_policy"] = "stable_long_sentence_concrete_scene_micro_cut"
     plan["asset_memory_policy"] = "recent_memory_plus_adjacent_visual_family_guard"
+    return plan
+
+# =============================================================================
+# V10.40.8.33 SEMANTIC RELEVANCE GATE + CAPTION-AWARE SHOT HIERARCHY
+# =============================================================================
+V33_MARKER = "V10_40_8_33_SEMANTIC_RELEVANCE_CAPTION_HIERARCHY"
+V33_MAX_ORDINARY_BROLL_SECONDS = 4.6
+
+_V33_PROPERTY_QUERY_TERMS = (
+    "买房", "房产", "楼盘", "公寓", "住宅", "自住", "投资", "出租", "租客", "转手",
+    "价格", "预算", "回报", "现金流", "区域", "地段", "通勤", "商圈", "学区", "合同", "定金", "首期",
+)
+_V33_PROPERTY_VISUAL_TERMS = (
+    "住宅", "公寓", "楼盘", "社区", "小区", "样板间", "售楼", "户型", "合同", "签约", "文件",
+    "办公", "写字楼", "地铁", "轻轨", "道路", "通勤", "学校", "医院", "商场", "超市", "租房",
+    "租客", "看房", "钥匙", "建筑", "城市住宅", "residential", "apartment", "condo", "property",
+)
+_V33_TOURISM_FOOD_TERMS = (
+    "观光", "旅游", "观光车", "景区", "游客", "夜市", "摊位", "餐桌", "吃饭", "聚餐", "饮料",
+    "美食", "餐饮", "饭店", "烧烤", "tour", "tourism", "sightseeing", "night market", "food stall", "dining table",
+)
+_V33_EXPLICIT_LIFESTYLE_TERMS = (
+    "咖啡厅", "咖啡馆", "餐厅", "美食", "夜市", "生活配套", "餐饮", "商场", "购物", "超市",
+)
+_V33_ROLE_POSITIVES: dict[str, tuple[str, ...]] = {
+    "price": ("价格", "报价", "预算", "付款", "合同", "楼盘", "公寓", "售楼", "首期", "定金"),
+    "rental": ("出租", "租客", "租房", "办公", "大学", "通勤", "地铁", "公寓", "住宅"),
+    "resale": ("转手", "二手", "交易", "流动性", "区域", "地段", "交通", "公寓", "楼盘"),
+    "self_use": ("自住", "住宅", "公寓", "社区", "学校", "医院", "商场", "超市", "生活"),
+    "investment": ("投资", "回报", "现金流", "租客", "办公", "交通", "区域", "公寓", "价格"),
+    "location": ("区域", "地段", "位置", "交通", "道路", "地铁", "商圈", "地图", "城市住宅"),
+}
+
+
+def _v33_query_role(query: str) -> str:
+    text = _text(query)
+    if re.search(r"价格|预算|首期|定金|付款", text): return "price"
+    if re.search(r"出租|租客|租房", text): return "rental"
+    if re.search(r"转手|二手|流动性", text): return "resale"
+    if re.search(r"自住", text): return "self_use"
+    if re.search(r"投资|回报|现金流", text): return "investment"
+    if re.search(r"区域|地段|位置|通勤|交通|商圈", text): return "location"
+    return "property" if any(term in text for term in _V33_PROPERTY_QUERY_TERMS) else "general"
+
+
+def _v33_semantic_relevance(query: str, asset: dict[str, Any]) -> tuple[float, bool, str]:
+    q = _text(query).lower()
+    a = _asset_text(asset).lower()
+    role = _v33_query_role(q)
+    explicit_lifestyle = any(term.lower() in q for term in _V33_EXPLICIT_LIFESTYLE_TERMS)
+    tourism_food = [term for term in _V33_TOURISM_FOOD_TERMS if term.lower() in a]
+    property_visual = [term for term in _V33_PROPERTY_VISUAL_TERMS if term.lower() in a]
+
+    if role != "general" and tourism_food and not explicit_lifestyle and not property_visual:
+        return -999.0, False, "房产决策语义禁止使用纯旅游/餐饮/夜市兜底画面"
+
+    query_tokens = _tokens(q)
+    asset_tokens = _tokens(a)
+    lexical = len(query_tokens & asset_tokens) * 14.0
+    theme = len(_themes(q) & _themes(a)) * 26.0
+    entity = sum(1 for term in _ENTITY_TERMS if term in q and term in a) * 85.0
+    role_hits = sum(1 for term in _V33_ROLE_POSITIVES.get(role, ()) if term.lower() in a)
+    property_hits = len(property_visual)
+    score = lexical + theme + entity + role_hits * 34.0 + min(property_hits, 4) * 16.0
+
+    if role != "general" and not property_visual and role_hits == 0:
+        score -= 85.0
+    if tourism_food and not explicit_lifestyle:
+        score -= 110.0
+    passed = score >= (18.0 if role == "general" else 42.0)
+    reason = (
+        f"语义角色={role}；角色命中={role_hits}；房产画面命中={property_hits}；"
+        f"词义分={round(score,1)}"
+    )
+    return score, passed, reason
+
+
+def _v33_rank_assets(
+    query: str,
+    candidates: list[dict[str, Any]],
+    registry: dict[str, Any],
+    use_count: dict[str, int],
+    previous_id: str,
+    previous_family: str = "",
+) -> list[tuple[dict[str, Any], float, float, str]]:
+    ranked: list[tuple[dict[str, Any], float, float, str]] = []
+    for asset in candidates:
+        aid = _asset_id(asset)
+        if not _asset_url(asset) or (previous_id and aid == previous_id):
+            continue
+        relevance, passed, reason = _v33_semantic_relevance(query, asset)
+        if not passed:
+            continue
+        family = _v30_visual_family(asset) if '_v30_visual_family' in globals() else ''
+        if previous_family and family == previous_family and family in {"city_landmark", "street_market", "contract"}:
+            continue
+        memory_score = _score_asset(query, asset, registry, use_count.get(aid, 0), previous_id)
+        total = relevance * 10.0 + memory_score
+        ranked.append((asset, total, relevance, reason))
+    ranked.sort(key=lambda item: item[1], reverse=True)
+    return ranked
+
+
+def _choose_asset(query: str, candidates: list[dict[str, Any]], registry: dict[str, Any], use_count: dict[str, int], previous_id: str) -> dict[str, Any]:
+    valid = [asset for asset in candidates if _asset_url(asset)]
+    if not valid:
+        raise ValueError("R2 素材库没有可解析的视频 URL")
+    ranked = _v33_rank_assets(query, valid, registry, use_count, previous_id)
+    if not ranked:
+        role = _v33_query_role(query)
+        raise ValueError(f"缺少通过 V33 语义硬筛选的素材：role={role}；已阻止旅游/餐饮等错配画面")
+
+    chosen, total, relevance, relevance_reason = ranked[0]
+    chosen_id = _asset_id(chosen)
+    best_recent3 = _recent_use_count(registry, chosen_id, 3)
+    selection_reason = "语义契合优先，随后再考虑素材新鲜度"
+    if best_recent3 > 0 or use_count.get(chosen_id, 0) > 0:
+        fresh = [item for item in ranked[1:] if _recent_use_count(registry, _asset_id(item[0]), 3) == 0 and use_count.get(_asset_id(item[0]), 0) == 0]
+        if fresh:
+            alt, alt_total, alt_relevance, alt_reason = fresh[0]
+            # Only explore when semantic relevance is genuinely close.
+            if alt_relevance >= relevance - 7.0 and alt_total >= total - 28.0:
+                chosen, total, relevance, relevance_reason = alt, alt_total, alt_relevance, alt_reason
+                chosen_id = _asset_id(chosen)
+                selection_reason = "语义分接近，优先采用最近三条未使用素材"
+            else:
+                selection_reason = "旧素材语义明显更契合，允许高匹配复用"
+
+    result = dict(chosen)
+    result["_semantic_match_status"] = "v33_hard_relevance_pass"
+    result["_semantic_requested_intents"] = _requested_intents(query)
+    result["_semantic_score"] = round(total, 3)
+    result["_v33_relevance_score"] = round(relevance, 3)
+    result["_v33_relevance_reason"] = relevance_reason
+    result["_v33_semantic_gate_passed"] = True
+    result["_selection_reason"] = selection_reason
+    result["_recent_3_use_count"] = _recent_use_count(registry, chosen_id, 3)
+    result["_recent_10_use_count"] = _recent_use_count(registry, chosen_id, 10)
+    result["_alternatives"] = [
+        {
+            "asset_id": _asset_id(asset),
+            "asset_name": _asset_name(asset),
+            "semantic_relevance": round(rel, 2),
+            "score": round(score, 2),
+        }
+        for asset, score, rel, _ in ranked[1:4]
+    ]
+    return result
+
+
+def _v30_rank_distinct_asset(
+    query: str,
+    candidates: list[dict[str, Any]],
+    registry: dict[str, Any],
+    use_count: dict[str, int],
+    previous_id: str,
+    previous_family: str,
+) -> dict[str, Any] | None:
+    ranked = _v33_rank_assets(query, candidates, registry, use_count, previous_id, previous_family)
+    if not ranked:
+        return None
+    asset, _, relevance, reason = ranked[0]
+    result = dict(asset)
+    result["_v33_relevance_score"] = round(relevance, 3)
+    result["_v33_relevance_reason"] = reason
+    result["_v33_semantic_gate_passed"] = True
+    return result
+
+
+def _v33_split_long_broll(
+    settings: Any,
+    payload: dict[str, Any],
+    job_id: str,
+    plan: dict[str, Any],
+) -> dict[str, Any]:
+    candidates, _ = _candidate_assets(settings, payload)
+    with _REGISTRY_LOCK:
+        registry = _load_registry(settings)
+    output: list[dict[str, Any]] = []
+    use_count: dict[str, int] = {}
+    previous_id = ""
+    previous_family = ""
+    split_count = 0
+
+    for source_index, source in enumerate(plan.get("clips") or [], start=1):
+        clip = dict(source)
+        duration = max(0.55, _safe_float(clip.get("duration"), 0.0))
+        beat_type = _text(clip.get("beat_type") or "hold")
+        reading_visual = bool(re.search(r"合同|条款|表格|流程图|户型图|文件", _text(clip.get("narration"))))
+        parts = 1 if reading_visual or beat_type == "entity_burst" else max(1, int(math.ceil(duration / V33_MAX_ORDINARY_BROLL_SECONDS)))
+        if parts == 1:
+            candidates_parts = [clip]
+        else:
+            split_count += parts - 1
+            speech_start = _safe_float(clip.get("speech_start"), 0.0)
+            speech_end = max(speech_start + duration, _safe_float(clip.get("speech_end"), speech_start + duration))
+            candidates_parts = []
+            for part_index in range(parts):
+                part = dict(clip)
+                part_start = speech_start + (speech_end - speech_start) * part_index / parts
+                part_end = speech_end if part_index == parts - 1 else speech_start + (speech_end - speech_start) * (part_index + 1) / parts
+                part_duration = max(0.55, part_end - part_start)
+                part["id"] = f"{clip.get('id') or 'clip'}_v33_{part_index+1}"
+                part["duration"] = round(part_duration, 3)
+                part["duration_seconds"] = round(part_duration, 3)
+                part["speech_start"] = round(part_start, 3)
+                part["speech_end"] = round(part_end, 3)
+                part["cadence_mode"] = "semantic_hold_two_angle" if parts == 2 else "semantic_hold_multi_angle"
+                part["beat_reason"] = (_text(part.get("beat_reason")) + "；同一长句最多每4.6秒换同语义角度").strip("；")
+                candidates_parts.append(part)
+
+        for part_index, part in enumerate(candidates_parts, start=1):
+            narration = _text(part.get("narration"))
+            current_id = _text(part.get("asset_id"))
+            current_asset = next((asset for asset in candidates if _asset_id(asset) == current_id), None)
+            family = _v30_visual_family(current_asset or part)
+            relevance, passed, relevance_reason = _v33_semantic_relevance(narration, current_asset or part)
+            must_replace = (
+                not current_asset
+                or not passed
+                or (previous_id and current_id == previous_id)
+                or (previous_family and family == previous_family and family in {"city_landmark", "street_market", "contract"})
+                or (len(candidates_parts) > 1 and part_index > 1)
+            )
+            if must_replace:
+                replacement = _v30_rank_distinct_asset(
+                    narration,
+                    candidates,
+                    registry,
+                    use_count,
+                    previous_id,
+                    previous_family,
+                )
+                if replacement is not None:
+                    part = _v30_apply_asset(part, replacement, registry, f"{job_id}|v33|{source_index}|{part_index}|{narration}")
+                    current_id = _text(part.get("asset_id"))
+                    family = _v30_visual_family(replacement)
+                    relevance = _safe_float(replacement.get("_v33_relevance_score"), 0.0)
+                    relevance_reason = _text(replacement.get("_v33_relevance_reason"))
+                    part["selection_reason"] = "V33 语义契合硬筛选通过后，再进行去重与探索"
+                elif not passed:
+                    raise ValueError(f"V33 无法为口播找到语义正确素材：{narration[:36]}")
+            part["visual_family"] = family
+            part["semantic_relevance_score"] = round(relevance, 3)
+            part["semantic_relevance_reason"] = relevance_reason
+            part["semantic_relevance_gate_passed"] = True
+            part["max_broll_segment_seconds"] = V33_MAX_ORDINARY_BROLL_SECONDS
+            source_start = max(0.0, _safe_float(part.get("start_time"), 0.0))
+            source_speed = max(0.75, _safe_float(part.get("speed"), 1.0))
+            part["end_time"] = round(source_start + _safe_float(part.get("duration"), 0.0) * source_speed, 3)
+            if current_id:
+                use_count[current_id] = use_count.get(current_id, 0) + 1
+            output.append(part)
+            previous_id = current_id
+            previous_family = family
+
+    for index, clip in enumerate(output, start=1):
+        clip["index"] = index
+    result = dict(plan)
+    result["clips"] = output
+    result["target_duration_seconds"] = round(sum(_safe_float(item.get("duration"), 0.0) for item in output), 3)
+    report = dict(result.get("usage_report") or {})
+    report.update({
+        "clip_count": len(output),
+        "semantic_relevance_gate": True,
+        "semantic_wrong_scene_rejection": True,
+        "long_broll_split_count": split_count,
+        "max_ordinary_broll_seconds": V33_MAX_ORDINARY_BROLL_SECONDS,
+        "priority_policy": "semantic_fit_then_freshness_then_history",
+    })
+    result["usage_report"] = report
+    result["version"] = VERSION
+    result["sequence_policy"] = "semantic_relevance_first_plus_max_4_6s_ordinary_broll"
+    return result
+
+
+_V32_BUILD_PLAN_SEMANTIC_RELEVANCE_BASE = build_plan
+
+
+def build_plan(settings: Any, payload: dict[str, Any], job_id: str) -> dict[str, Any]:
+    plan = _V32_BUILD_PLAN_SEMANTIC_RELEVANCE_BASE(settings, payload, job_id)
+    plan = _v33_split_long_broll(settings, payload, job_id, plan)
+    plan["version"] = VERSION
+    plan["asset_memory_policy"] = "semantic_fit_first_then_recent_memory_exploration"
+    plan["cadence_policy"] = "long_sentence_one_theme_max_two_angles_concrete_entity_micro_cut"
     return plan

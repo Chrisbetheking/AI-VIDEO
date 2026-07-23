@@ -19,9 +19,10 @@ from typing import Any, Callable
 
 from fastapi import Depends, HTTPException, Request
 
-VERSION = "10.40.8.32-reference-kinetic-typography"
+VERSION = "10.40.8.33-semantic-relevance-caption-hierarchy"
+# V10_40_8_33_SEMANTIC_RELEVANCE_CAPTION_HIERARCHY
 # V10_40_8_32_REFERENCE_KINETIC_TYPOGRAPHY
-INSTALL_MARKER = "V10_40_8_32_REFERENCE_KINETIC_TYPOGRAPHY"
+INSTALL_MARKER = "V10_40_8_33_SEMANTIC_RELEVANCE_CAPTION_HIERARCHY"
 _INSTALLED = False
 _LOCK = threading.RLock()
 
@@ -5405,3 +5406,490 @@ def render_dynamic_video(input_path: Path, output_path: Path, ass_path: Path, pl
         if isinstance(item, dict)
     )
     return report
+
+# =============================================================================
+# V10.40.8.33 LARGE CAPTION HIERARCHY + SEMANTIC MOTION OVERLAYS
+# =============================================================================
+V33_MARKER = "V10_40_8_33_SEMANTIC_RELEVANCE_CAPTION_HIERARCHY"
+V33_ACCENT_PREFIX = "pro_r22/"
+V33_IMPACT_GAP_SECONDS = 1.10
+V33_KEYWORD_LEXICON = (
+    "评论区", "现金流", "国际学校", "生活半径", "第一笔钱", "预订定金", "10%首期",
+    "价格", "出租", "区域", "转手", "租客", "自住", "投资", "预算", "回报", "通勤",
+    "商圈", "学校", "医院", "商场", "咖啡厅", "合同", "定金", "首期", "风险", "买房",
+)
+
+
+def _v32_focus_keyword(text: str, keywords: list[str], role: str) -> str:
+    clean = _v32_clean_keyword(text)
+    candidates: list[str] = []
+    for keyword in keywords:
+        token = _v32_clean_keyword(keyword)
+        if token and token in clean:
+            candidates.append(token[:8])
+    for token in V33_KEYWORD_LEXICON:
+        cleaned = _v32_clean_keyword(token)
+        if cleaned and cleaned in clean:
+            candidates.append(cleaned[:8])
+    role_rules = {
+        "question": ("最看重什么", "为什么", "怎么选", "什么"),
+        "cta": ("评论区", "评论告诉我", "留言", "关注", "帮你分析"),
+        "risk": ("别只看", "不要只", "风险", "注意", "避坑"),
+        "comparison": ("自住", "投资", "出租", "转手", "对比"),
+        "data": ("价格", "预算", "回报", "首期", "定金", "交通"),
+        "list": ("三件事", "三项", "第一", "第二", "第三"),
+        "hook": ("买房", "第一眼", "很多人", "重点"),
+    }
+    for token in role_rules.get(role, ()):
+        cleaned = _v32_clean_keyword(token)
+        if cleaned and cleaned in clean:
+            candidates.append(cleaned[:8])
+    if candidates:
+        # Prefer a meaningful 2-6 character noun phrase, not the whole sentence.
+        candidates = sorted(set(candidates), key=lambda value: (2 <= len(value) <= 6, len(value)), reverse=True)
+        return candidates[0]
+    if len(clean) <= 6:
+        return clean
+    return clean[:4]
+
+
+def write_dynamic_ass(
+    destination: Path,
+    timings: list[dict[str, Any]],
+    keywords: list[str],
+    *,
+    style_id: str,
+    events: list[dict[str, Any]] | None = None,
+) -> Path:
+    preset = SUBTITLE_PRESETS.get(style_id) or SUBTITLE_PRESETS["dynamic_white_yellow"]
+    context = getattr(_V16_CONTEXT, "config", {}) or {}
+    requested = int(context.get("caption_size") or 150)
+    base_size = max(138, min(196, requested))
+    font_name = "Noto Sans CJK SC"
+    header = f"""[Script Info]
+ScriptType: v4.00+
+PlayResX: 1080
+PlayResY: 1920
+ScaledBorderAndShadow: yes
+WrapStyle: 2
+
+[V4+ Styles]
+Format: Name,Fontname,Fontsize,PrimaryColour,SecondaryColour,OutlineColour,BackColour,Bold,Italic,Underline,StrikeOut,ScaleX,ScaleY,Spacing,Angle,BorderStyle,Outline,Shadow,Alignment,MarginL,MarginR,MarginV,Encoding
+Style: Dynamic,{font_name},{base_size},{preset['primary']},{preset['highlight']},{preset['outline']},&H00000000,-1,0,0,0,100,100,1.2,0,1,8,2,5,44,44,0,1
+Style: Impact,{font_name},218,&H00FFFFFF,&H0000E8FF,&H00101010,&H00000000,-1,0,0,0,100,100,1.0,0,1,13,3,5,32,32,0,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+"""
+    lines = [header]
+    last_impact = -999.0
+    duration = max((_safe_float(item.get("end"), 0.0) for item in timings), default=0.0)
+    max_impacts = max(5, min(10, int(math.ceil(max(1.0, duration) / 30.0 * 10))))
+    impact_count = 0
+    impact_candidates = 0
+    impact_debug: list[dict[str, Any]] = []
+    role_colors = {
+        "risk": "&H003B6BFF&", "question": "&H00FFE04B&", "cta": "&H0047D2FF&",
+        "comparison": "&H00FFB347&", "data": "&H0000E8FF&", "list": "&H0068E083&", "hook": "&H0000E8FF&",
+    }
+    for index, item in enumerate(timings):
+        start = _safe_float(item.get("start"), 0.0)
+        end = max(start + 0.30, _safe_float(item.get("end"), start + 0.85))
+        raw_text = _clean_caption_text(str(item.get("text") or ""))
+        role = _classify(raw_text)
+        wrapped = _v32_wrap_caption(raw_text, 7)
+        main_text = _highlight_ass(wrapped, keywords, str(preset["highlight"]))
+        short = len(_v32_clean_keyword(raw_text)) <= 7
+        line_size = min(188, base_size + (18 if short else 0))
+        position = 1410 if role not in {"hook", "question", "cta"} else 1345
+        animation = (
+            rf"{{\an5\pos(540,{position})\fs{line_size}\fscx92\fscy92"
+            rf"\t(0,115,\fscx106\fscy106)\t(115,235,\fscx100\fscy100)\fad(20,70)}}"
+        )
+        lines.append(f"Dialogue: 0,{_ass_time(start)},{_ass_time(end)},Dynamic,,0,0,0,,{animation}{main_text}\n")
+
+        focus = _v32_focus_keyword(raw_text, keywords, role)
+        if focus:
+            impact_candidates += 1
+        if not focus or len(focus) > 8 or impact_count >= max_impacts or start - last_impact < V33_IMPACT_GAP_SECONDS:
+            continue
+        impact_start, impact_end, timing_source = _v32_keyword_timing(item, focus)
+        if impact_end <= impact_start + 0.18:
+            continue
+        impact_size = 244 if len(focus) <= 3 else 218 if len(focus) <= 5 else 192
+        impact_y = 1055 if role in {"hook", "question", "risk", "comparison"} else 1165
+        color = role_colors.get(role, "&H0000E8FF&")
+        impact_text = _ass_escape(focus)
+        impact_animation = (
+            rf"{{\an5\pos(540,{impact_y})\fs{impact_size}\c{color}\bord13\shad3\frz-2"
+            rf"\fscx52\fscy52\t(0,105,\fscx158\fscy158\frz1)"
+            rf"\t(105,285,\fscx116\fscy116\frz0)\fad(12,95)}}"
+        )
+        lines.append(
+            f"Dialogue: 2,{_ass_time(impact_start)},{_ass_time(impact_end)},Impact,,0,0,0,,"
+            f"{impact_animation}{impact_text}\n"
+        )
+        impact_debug.append({
+            "text": focus, "start": round(impact_start, 3), "end": round(impact_end, 3),
+            "timing_source": timing_source, "size": impact_size, "scale_peak": 158,
+        })
+        impact_count += 1
+        last_impact = impact_start
+
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_text("".join(lines), encoding="utf-8-sig")
+    try:
+        destination.with_suffix(".impact.json").write_text(
+            json.dumps({
+                "keyword_impact_count": impact_count,
+                "keyword_impact_candidates": impact_candidates,
+                "keyword_impact_coverage": round(impact_count / max(1, impact_candidates), 3),
+                "base_caption_size": base_size,
+                "impacts": impact_debug,
+            }, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+    except Exception:
+        pass
+    return destination
+
+
+def _v33_accent_asset(event: dict[str, Any]) -> str:
+    text = _clean_caption_text(str(event.get("source_text") or event.get("focus_text") or ""))
+    role = str(event.get("role") or "knowledge")
+    rules = [
+        (re.compile(r"评论|留言|私信|告诉我|关注|下一条"), "comment_bubble.png", "caption_right"),
+        (re.compile(r"风险|避坑|别被|不要只|别只看|搞错|注意"), "warning_tape.png", "caption_center"),
+        (re.compile(r"对比|还是|VS|vs|自住.*投资|投资.*自住|自住.*出租"), "split_arrows.png", "caption_center"),
+        (re.compile(r"为什么|什么|怎么|到底|吗|？|\?"), "circle_scribble.png", "caption_center"),
+        (re.compile(r"价格|预算|回报|现金流|定金|首期|重点|关键|核心"), "underline_brush.png", "caption_center"),
+        (re.compile(r"区域|地段|位置|交通|商圈|附近|周边|生活半径"), "arrow_curve.png", "caption_right"),
+    ]
+    for pattern, asset, position in rules:
+        if pattern.search(text):
+            return f"{V33_ACCENT_PREFIX}{asset}|{position}"
+    fallback = {
+        "cta": ("comment_bubble.png", "caption_right"),
+        "risk": ("warning_tape.png", "caption_center"),
+        "comparison": ("split_arrows.png", "caption_center"),
+        "question": ("circle_scribble.png", "caption_center"),
+        "data": ("underline_brush.png", "caption_center"),
+        "turn": ("arrow_curve.png", "caption_right"),
+    }.get(role)
+    return f"{V33_ACCENT_PREFIX}{fallback[0]}|{fallback[1]}" if fallback else ""
+
+
+def _decorate_events(
+    events: list[dict[str, Any]],
+    duration: float,
+    *,
+    sfx_level: str,
+    sticker_level: str,
+) -> list[dict[str, Any]]:
+    cleaned: list[dict[str, Any]] = []
+    for source in events:
+        event = dict(source)
+        for key in (
+            "sticker", "callout", "sfx", "sfx_skip_reason", "sticker_candidate",
+            "sticker_skip_reason", "legacy_sticker", "keyword_overlay",
+            "impact_overlay", "semantic_card",
+        ):
+            event.pop(key, None)
+        text = str(event.get("source_text") or event.get("focus_text") or "")
+        event["role"] = _v30_semantic_role(text, str(event.get("role") or "knowledge"))
+        candidate = _v33_accent_asset(event)
+        if candidate:
+            asset, position = candidate.split("|", 1)
+            event["sticker_candidate"] = asset
+            event["accent_position"] = position
+        else:
+            event["sticker_candidate"] = None
+        cleaned.append(event)
+
+    max_sfx = 0 if sfx_level == "off" else max(4, min(8, int(math.ceil(max(1.0, duration) / 6.5))))
+    sfx_gap = 1.85
+    last_sfx = -999.0
+    sfx_count = 0
+    sfx_roles = {"hook", "comparison", "risk", "question", "data", "list", "cta", "turn"}
+    for index, event in enumerate(cleaned):
+        role = str(event.get("role") or "knowledge")
+        start = max(0.0, _safe_float(event.get("start"), 0.0))
+        if sfx_count >= max_sfx or role not in sfx_roles or (role != "cta" and start - last_sfx < sfx_gap):
+            continue
+        bank = SFX_VARIANT_BANKS.get(role) or SFX_VARIANT_BANKS.get("turn") or []
+        if not bank:
+            continue
+        asset, _ = bank[index % len(bank)]
+        if not (_sfx_root() / asset).is_file():
+            event["sfx_skip_reason"] = "asset_missing"
+            continue
+        gain = {
+            "hook": 0.68, "comparison": 0.62, "risk": 0.60,
+            "question": 0.58, "data": 0.56, "list": 0.54,
+            "turn": 0.52, "cta": 0.64,
+        }.get(role, 0.54)
+        event["sfx"] = {"asset": asset, "gain": gain, "role": role, "audible_mix": True}
+        sfx_count += 1
+        last_sfx = start
+
+    per_30 = {"off": 0, "light": 3, "balanced": 4, "rich": 5}.get(sticker_level, 3)
+    max_accents = min(6, int(math.ceil(max(1.0, duration) / 30.0 * per_30))) if per_30 else 0
+    if duration >= 8 and max_accents:
+        max_accents = max(2, max_accents)
+    gap = {"light": 3.2, "balanced": 2.4, "rich": 1.9}.get(sticker_level, 3.0)
+    last_start = -999.0
+    last_asset = ""
+    used = 0
+    skip_reasons: dict[str, int] = {}
+    for event in cleaned:
+        asset = str(event.get("sticker_candidate") or "")
+        start = max(0.0, _safe_float(event.get("start"), 0.0))
+        end = max(start + 0.75, _safe_float(event.get("end"), start + 1.35))
+        role = str(event.get("role") or "knowledge")
+        if not asset:
+            event["sticker_skip_reason"] = "no_semantic_motion_overlay"
+        elif not (_sticker_root() / asset).is_file():
+            event["sticker_skip_reason"] = "asset_missing"
+        elif used >= max_accents and role != "cta":
+            event["sticker_skip_reason"] = "level_limit"
+        elif role != "cta" and start - last_start < gap:
+            event["sticker_skip_reason"] = "minimum_gap"
+        elif asset == last_asset and role != "cta":
+            event["sticker_skip_reason"] = "adjacent_duplicate"
+        else:
+            asset_name = Path(asset).name
+            width = {
+                "underline_brush.png": 390, "warning_tape.png": 380,
+                "split_arrows.png": 355, "comment_bubble.png": 330,
+                "circle_scribble.png": 360, "arrow_curve.png": 350,
+            }.get(asset_name, 340)
+            span = 1.30 if role not in {"hook", "risk", "cta"} else 1.55
+            event["sticker"] = {
+                "asset": asset,
+                "position": str(event.get("accent_position") or "caption_center"),
+                "size": width,
+                "start": round(start, 3),
+                "end": round(min(duration, max(start + 0.95, min(end, start + span))), 3),
+                "reference_motion_accent": True,
+                "semantic_motion_overlay": True,
+                "taxonomy": "motion_accent_not_cartoon_sticker",
+                "counts_as_sticker": False,
+                "no_text_box": True,
+            }
+            event.pop("sticker_skip_reason", None)
+            used += 1
+            last_start = start
+            last_asset = asset
+        reason = str(event.get("sticker_skip_reason") or "")
+        if reason:
+            skip_reasons[reason] = skip_reasons.get(reason, 0) + 1
+    return cleaned
+
+
+_V32_BUILD_DYNAMIC_PLAN_V33_BASE = build_dynamic_plan
+
+
+def build_dynamic_plan(
+    payload: dict[str, Any],
+    timings: list[dict[str, Any]],
+    duration: float,
+    *,
+    intensity: str = "balanced",
+) -> dict[str, Any]:
+    plan = _V32_BUILD_DYNAMIC_PLAN_V33_BASE(payload, timings, duration, intensity=intensity)
+    sfx_level = str(payload.get("dynamic_sfx_level") or "light")
+    sticker_level = str(payload.get("dynamic_sticker_level") or "light")
+    raw_events = [dict(item) for item in (plan.get("events") or []) if isinstance(item, dict)]
+    events = _decorate_events(raw_events, duration, sfx_level=sfx_level, sticker_level=sticker_level)
+    plan["events"] = events
+    plan["version"] = VERSION
+    plan["visual_pace"] = "large_caption_keyword_punch_semantic_motion_overlay"
+    plan["legacy_sticker_forbidden"] = True
+    plan["large_text_card_forbidden"] = True
+    plan["pure_caption_emphasis"] = True
+    plan["native_keyword_impact"] = True
+    planned = [event for event in events if isinstance(event.get("sticker"), dict)]
+    candidates = [event for event in events if event.get("sticker_candidate")]
+    skip_reasons: dict[str, int] = {}
+    for event in events:
+        reason = str(event.get("sticker_skip_reason") or "")
+        if reason:
+            skip_reasons[reason] = skip_reasons.get(reason, 0) + 1
+    plan["effect_delivery"] = {
+        "requested_sfx_level": sfx_level,
+        "requested_sticker_level": sticker_level,
+        "planned_sfx_count": sum(1 for event in events if isinstance(event.get("sfx"), dict)),
+        "motion_overlay_candidates_count": len(candidates),
+        "motion_overlay_applied_count": len(planned),
+        "sticker_candidates_count": len(candidates),
+        "sticker_applied_count": 0,
+        "legacy_sticker_count": 0,
+        "sticker_skip_reasons": skip_reasons,
+        "keyword_impact_count": int(plan.get("keyword_impact_count") or 0),
+        "sfx_pack": "mixkit-pro-v33-audible",
+        "overlay_pack": "reference-motion-accents-v33",
+        "text_box_count": 0,
+    }
+    return plan
+
+
+def _collect_sticker_inputs(plan: dict[str, Any]) -> list[dict[str, Any]]:
+    result: list[dict[str, Any]] = []
+    for event in plan.get("events") or []:
+        sticker = event.get("sticker")
+        if not isinstance(sticker, dict) or sticker.get("semantic_motion_overlay") is not True:
+            continue
+        asset = str(sticker.get("asset") or "")
+        if not asset.startswith(V33_ACCENT_PREFIX):
+            continue
+        path = _sticker_root() / asset
+        if path.is_file():
+            result.append({"event": event, "sticker": sticker, "path": path})
+    return result
+
+
+def _build_video_filters(
+    work: Path,
+    plan: dict[str, Any],
+    ass_path: Path,
+    sticker_inputs: list[dict[str, Any]],
+    *,
+    width: int = 1080,
+    height: int = 1920,
+) -> str:
+    duration = max(0.1, _safe_float(plan.get("render_duration"), _safe_float(plan.get("duration"), 30.0)))
+    events = list(plan.get("events") or [])
+    limits = plan.get("limits") or {}
+    zoom_strength = _safe_float(limits.get("zoom_strength"), 0.050)
+    zoom_terms: list[str] = []
+    for event in events:
+        role = str(event.get("role") or "knowledge")
+        if role not in {"hook", "comparison", "risk", "question", "data", "cta"}:
+            continue
+        start = _safe_float(event.get("start"), 0.0)
+        span = 0.66
+        strength = zoom_strength * {"hook": 1.0, "comparison": 0.78, "risk": 0.76, "question": 0.64, "data": 0.62, "cta": 0.52}.get(role, 0.60)
+        zoom_terms.append(f"+{strength:.4f}*between(t,{start:.3f},{start+span:.3f})*sin(PI*(t-{start:.3f})/{span:.3f})")
+    factor = "1" + "".join(zoom_terms)
+    chain = [
+        f"[0:v]scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height},setsar=1[base]",
+        f"[base]scale=w='{width}*({factor})':h='{height}*({factor})':eval=frame,crop={width}:{height}:(iw-{width})/2:(ih-{height})/2[v0]",
+    ]
+    current = "v0"
+    positions = {
+        "caption_center": ("(W-w)/2", "1030"),
+        "caption_left": ("95", "1030"),
+        "caption_right": ("W-w-95", "1010"),
+    }
+    for index, item in enumerate(sticker_inputs, start=1):
+        sticker = item["sticker"]
+        input_index = int(item["input_index"])
+        start = _safe_float(sticker.get("start"), 0.0)
+        end = max(start + 0.85, _safe_float(sticker.get("end"), start + 1.30))
+        span = max(0.85, end - start)
+        size = max(300, min(420, int(sticker.get("size") or 350)))
+        x_expr, y_base = positions.get(str(sticker.get("position") or "caption_center"), positions["caption_center"])
+        label = f"v33overlay{index}"
+        output = f"v33out{index}"
+        chain.append(
+            f"[{input_index}:v]format=rgba,scale=w={size}:h=-1:force_original_aspect_ratio=decrease,"
+            f"pad={size+34}:{size+34}:(ow-iw)/2:(oh-ih)/2:color=0x00000000,"
+            f"trim=duration={span:.3f},fade=t=in:st=0:d=0.06:alpha=1,"
+            f"fade=t=out:st={max(0.12,span-0.17):.3f}:d=0.17:alpha=1,"
+            f"setpts=PTS-STARTPTS+{start:.3f}/TB[{label}]"
+        )
+        chain.append(
+            f"[{current}][{label}]overlay=x='{x_expr}+7*sin(2*PI*(t-{start:.3f})/1.05)':"
+            f"y='{y_base}+7*sin(2*PI*(t-{start:.3f})/1.28)':"
+            f"eof_action=pass:shortest=0:enable='between(t,{start:.3f},{end:.3f})'[{output}]"
+        )
+        current = output
+    chain.append(f"[{current}]ass='{_ffmpeg_escape_path(ass_path)}',tpad=stop_mode=clone:stop_duration=1,trim=duration={duration:.3f}[vout]")
+    return ";".join(chain)
+
+
+def _validate_v26_effect_plan(
+    plan: dict[str, Any],
+    timings: list[dict[str, Any]],
+    sfx_level: str,
+    sticker_level: str,
+) -> dict[str, Any]:
+    events = list(plan.get("events") or [])
+    sfx_count = sum(1 for event in events if isinstance(event.get("sfx"), dict))
+    overlays = [event.get("sticker") for event in events if isinstance(event.get("sticker"), dict)]
+    bad = [item for item in overlays if item.get("semantic_motion_overlay") is not True or not str(item.get("asset") or "").startswith(V33_ACCENT_PREFIX)]
+    if sfx_level != "off" and sfx_count <= 0:
+        raise ValueError("V33 可听音效计划为空")
+    if sticker_level != "off" and not overlays:
+        raise ValueError("V33 语义动态标注计划为空")
+    if bad:
+        raise ValueError(f"V33 检测到旧式低质贴纸或随机角标：{len(bad)}")
+    return plan
+
+
+_V32_RENDER_DYNAMIC_VIDEO_V33_BASE = render_dynamic_video
+
+
+def render_dynamic_video(input_path: Path, output_path: Path, ass_path: Path, plan: dict[str, Any]) -> dict[str, Any]:
+    report = _V32_RENDER_DYNAMIC_VIDEO_V33_BASE(input_path, output_path, ass_path, plan)
+    overlay_inputs = _collect_sticker_inputs(plan)
+    impact_sidecar = ass_path.with_suffix(".impact.json")
+    impact_meta: dict[str, Any] = {}
+    if impact_sidecar.is_file():
+        try:
+            loaded = json.loads(impact_sidecar.read_text(encoding="utf-8"))
+            impact_meta = loaded if isinstance(loaded, dict) else {}
+        except Exception:
+            impact_meta = {}
+    report["effect_engine"] = "v33_semantic_relevance_caption_hierarchy"
+    report["large_text_card_forbidden"] = True
+    report["text_box_count"] = 0
+    report["legacy_sticker_count"] = 0
+    report["semantic_motion_overlay_count"] = len(overlay_inputs)
+    report["motion_overlay_assets"] = [item["path"].name for item in overlay_inputs]
+    report["kinetic_keyword_count"] = int(impact_meta.get("keyword_impact_count") or 0)
+    report["keyword_impact_candidates"] = int(impact_meta.get("keyword_impact_candidates") or 0)
+    report["keyword_impact_coverage"] = float(impact_meta.get("keyword_impact_coverage") or 0.0)
+    report["base_caption_size"] = int(impact_meta.get("base_caption_size") or 0)
+    return report
+
+
+def _build_audio_filters(plan: dict[str, Any], *, has_audio: bool, sfx_inputs: list[dict[str, Any]]) -> tuple[str, str | None]:
+    """V33 audible but clean mix: SFX is actually present while speech remains dominant."""
+    if not has_audio:
+        return "", None
+    duration = max(0.1, _safe_float(plan.get("render_duration"), _safe_float(plan.get("duration"), 30.0)))
+    duck_terms: list[str] = []
+    for item in sfx_inputs:
+        start = max(0.0, _safe_float((item.get("event") or {}).get("start"), 0.0))
+        duck_terms.append(f"-0.12*between(t,{start:.3f},{start + 0.48:.3f})")
+    duck = "1" + "".join(duck_terms)
+    parts = [
+        f"[0:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,"
+        f"apad=pad_dur={duration:.3f},atrim=duration={duration:.3f},"
+        f"loudnorm=I=-16:LRA=7:TP=-2.0,volume='{duck}':eval=frame[voice]"
+    ]
+    labels = ["voice"]
+    for index, item in enumerate(sfx_inputs, start=1):
+        event = item["event"]
+        sfx = item["sfx"]
+        inp = int(item["input_index"])
+        delay = int(max(0.0, _safe_float(event.get("start"), 0.0)) * 1000)
+        gain = max(0.48, min(0.72, _safe_float(sfx.get("gain"), 0.56)))
+        label = f"v33sfx{index}"
+        parts.append(
+            f"[{inp}:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,"
+            f"atrim=0:1.45,asetpts=PTS-STARTPTS,highpass=f=90,lowpass=f=14500,"
+            f"volume={gain:.4f},afade=t=in:st=0:d=0.010,afade=t=out:st=1.18:d=0.22,"
+            f"adelay={delay}|{delay}[{label}]"
+        )
+        labels.append(label)
+    if len(labels) == 1:
+        parts.append("[voice]alimiter=limit=0.94[aout]")
+    else:
+        parts.append(
+            "".join(f"[{label}]" for label in labels)
+            + f"amix=inputs={len(labels)}:duration=longest:dropout_transition=0:normalize=0,"
+            + f"atrim=duration={duration:.3f},loudnorm=I=-15.5:LRA=8:TP=-1.5,alimiter=limit=0.96[aout]"
+        )
+    return ";".join(parts), "aout"

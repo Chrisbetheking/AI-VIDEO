@@ -3261,7 +3261,7 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
               placeholder="例如：0-3 秒问题钩子；核心对比用对比卡；三项提醒逐条出现；结尾完整说完并保留 0.5 秒尾音。此处只提供结构，不固定成片时长。"
             />
           </label>
-          <div className="aiw-info">目标时长只用于估算文案长度，不会裁剪真实 TTS。完整长句稳镜；交通、商圈、租客来源等具体小场景逐项切换；相邻重复素材和同类城市地标会被自动拦截。主字幕默认加大，关键词按真实发音时间单独弹出；贴纸改为箭头、圈选、下划线和互动气泡，不再使用小线稿图标或大文本框。</div>
+          <div className="aiw-info">目标时长只用于估算文案长度，不会裁剪真实 TTS。完整长句稳镜；交通、商圈、租客来源等具体小场景逐项切换；相邻重复素材和同类城市地标会被自动拦截。主字幕默认提升到 150px，关键词按真实发音时间单独弹到 158%；素材先过语义硬筛选，再考虑是否用过，纯旅游、夜市、餐饮画面不会再兜底房产决策文案。动态标注只保留圈选、下划线、对比箭头、风险条和评论气泡。</div>
           {renderSubtitleLibrary()}
           <h4>当前素材上下文</h4>
           <div className="aiw-miniList">{selectedAssets.slice(0, 6).map((asset: any, index) => <div key={asset.id || asset.url || index}>{asset.name || asset.original_name || asset.filename || asset.url}</div>)}</div>

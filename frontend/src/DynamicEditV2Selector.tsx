@@ -31,7 +31,7 @@ export interface StoredConfig {
 const STORAGE_KEY = 'ai-video-semantic-editor-v28'
 const DEFAULT_CONFIG: StoredConfig = {
   engine: 'dynamic_v2', intensity: 'balanced', shotDirector: 'ai_auto',
-  subtitleStyle: 'dynamic_white_yellow', captionSize: 132, captionMotion: 'smart_mix', captionPosition: 'auto',
+  subtitleStyle: 'dynamic_white_yellow', captionSize: 150, captionMotion: 'smart_mix', captionPosition: 'auto',
   sfxLevel: 'light', sfxPack: 'pro_short_video', stickerLevel: 'balanced', stickerLayout: 'auto_safe', stickerStyle: 'icons',
 }
 
@@ -54,7 +54,7 @@ const SUBTITLE_PRESETS = [
   {id:'red_question',label:'红黄疑问重击',sample:'为什么',previewClass:'red-hook'},
   {id:'list_rhythm',label:'清单节奏短句',sample:'第一项',previewClass:'list-rhythm'},
 ]
-const FONT_SIZES = [{label:'标准大字',value:120},{label:'推荐',value:132},{label:'冲击大字',value:148},{label:'超大',value:166}]
+const FONT_SIZES = [{label:'标准大字',value:138},{label:'推荐',value:150},{label:'冲击大字',value:166},{label:'超大',value:184}]
 
 function valid<T extends string>(value: unknown, options: readonly T[], fallback: T): T {
   return options.includes(value as T) ? value as T : fallback
@@ -68,7 +68,7 @@ function loadConfig(): StoredConfig {
       intensity: valid(parsed.intensity,['restrained','balanced','strong'] as const,'balanced'),
       shotDirector: 'ai_auto',
       subtitleStyle: valid(parsed.subtitleStyle,SUBTITLE_PRESETS.map(x=>x.id),'dynamic_white_yellow'),
-      captionSize: Math.max(116,Math.min(176,Number(parsed.captionSize)||132)),
+      captionSize: Number(parsed.captionSize)<138?150:Math.max(138,Math.min(196,Number(parsed.captionSize)||150)),
       captionMotion: valid(parsed.captionMotion,MOTIONS.map(x=>x.id),'smart_mix'),
       captionPosition: valid(parsed.captionPosition,['auto','lower','middle'] as const,'auto'),
       sfxLevel: valid(parsed.sfxLevel,['off','light','balanced','strong'] as const,'light'),
@@ -112,7 +112,7 @@ export default function DynamicEditV2Selector({shotCount=0}:{shotCount?:number})
 
   return <section className="dynamic-edit-v2-shell v19" data-dynamic-edit-v2="true" data-placement="shot-plan-section">
     <div className="v19-topline">
-      <div className="v19-title"><span>V10.40.8.32 · KINETIC TYPE + MOTION ACCENTS</span><h4>AI 教学口播精剪</h4><p>默认使用更大的主字幕；关键词按真实发音时间独立弹出放大。贴纸改为参考视频式箭头、圈选、下划线和互动标注，不再使用小线稿图标或大文本框。</p></div>
+      <div className="v19-title"><span>V10.40.8.33 · SEMANTIC FIT + LARGE KINETIC TYPE</span><h4>AI 教学口播精剪</h4><p>普通字幕默认提升到 150px；价格、出租、区域、转手、租客、自住、投资等重点词按真实发音时间独立弹出。素材先过语义硬筛选，再考虑新鲜度；纯旅游、夜市、餐饮画面不能再兜底房产决策文案。</p></div>
       <div className="v19-shot-status"><strong>{shotCount}</strong><span>上一页镜头</span></div>
     </div>
 
@@ -139,7 +139,7 @@ export default function DynamicEditV2Selector({shotCount=0}:{shotCount?:number})
       {tab==='captions' && <div className="v19-caption-layout">
         <MiniPreview motion={config.captionMotion} sample={motion.sample} styleClass={style.previewClass}/>
         <div className="v19-caption-controls">
-          <div className="v19-font-row"><label><span>字号</span><strong>{config.captionSize}px</strong></label><input type="range" min="116" max="176" step="2" value={config.captionSize} onChange={(e:ChangeEvent<HTMLInputElement>)=>setConfig(c=>({...c,captionSize:Number(e.target.value)}))}/><div>{FONT_SIZES.map(x=><button key={x.value} type="button" className={config.captionSize===x.value?'selected':''} onClick={()=>setConfig(c=>({...c,captionSize:x.value}))}>{x.label}</button>)}</div></div>
+          <div className="v19-font-row"><label><span>字号</span><strong>{config.captionSize}px</strong></label><input type="range" min="138" max="196" step="2" value={config.captionSize} onChange={(e:ChangeEvent<HTMLInputElement>)=>setConfig(c=>({...c,captionSize:Number(e.target.value)}))}/><div>{FONT_SIZES.map(x=><button key={x.value} type="button" className={config.captionSize===x.value?'selected':''} onClick={()=>setConfig(c=>({...c,captionSize:x.value}))}>{x.label}</button>)}</div></div>
           <div className="v19-two-fields"><label className="v19-field"><span>字幕动效</span><select value={config.captionMotion} onChange={(e:ChangeEvent<HTMLSelectElement>)=>setConfig(c=>({...c,captionMotion:e.target.value as DynamicCaptionMotion}))}>{MOTIONS.map(x=><option key={x.id} value={x.id}>{x.label}</option>)}</select></label><label className="v19-field"><span>字幕位置</span><select value={config.captionPosition} onChange={(e:ChangeEvent<HTMLSelectElement>)=>setConfig(c=>({...c,captionPosition:e.target.value as DynamicCaptionPosition}))}><option value="auto">智能避让</option><option value="lower">底部安全区</option><option value="middle">中部强调区</option></select></label></div>
           <div className="v19-style-row">{SUBTITLE_PRESETS.map(p=><button type="button" key={p.id} className={config.subtitleStyle===p.id?'selected':''} onClick={()=>setConfig(c=>({...c,subtitleStyle:p.id}))}><span className={p.previewClass}>{p.sample}</span><small>{p.label}</small></button>)}</div>
         </div>
@@ -150,11 +150,11 @@ export default function DynamicEditV2Selector({shotCount=0}:{shotCount?:number})
         <label className="v19-field"><span>音效强度</span><select value={config.sfxLevel} onChange={(e:ChangeEvent<HTMLSelectElement>)=>setConfig(c=>({...c,sfxLevel:e.target.value as DynamicSfxLevel}))}><option value="off">关闭</option><option value="light">专业轻量（推荐）</option><option value="balanced">专业标准</option><option value="strong">专业强化</option></select></label>
         <label className="v19-field"><span>音效风格</span><select value={config.sfxPack} onChange={(e:ChangeEvent<HTMLSelectElement>)=>setConfig(c=>({...c,sfxPack:e.target.value as DynamicSfxPack}))}><option value="pro_short_video">短视频通用</option><option value="pro_clean_ui">干净 UI / Pop</option><option value="pro_cinematic_light">轻电影感</option></select></label>
         <label className="v19-field"><span>动态标注密度</span><select value={config.stickerLevel} onChange={(e:ChangeEvent<HTMLSelectElement>)=>setConfig(c=>({...c,stickerLevel:e.target.value as DynamicStickerLevel}))}><option value="off">关闭</option><option value="light">少量（推荐）</option><option value="balanced">均衡</option><option value="rich">丰富</option></select></label>
-        <label className="v19-field"><span>贴纸风格</span><select value={config.stickerStyle} onChange={(e:ChangeEvent<HTMLSelectElement>)=>setConfig(c=>({...c,stickerStyle:e.target.value as DynamicStickerStyle}))}><option value="icons">参考视频动态标注（推荐）</option><option value="smart_mix">极简功能点缀</option><option value="doodles">手写圈选与箭头</option></select></label>
+        <label className="v19-field"><span>动态标注样式</span><select value={config.stickerStyle} onChange={(e:ChangeEvent<HTMLSelectElement>)=>setConfig(c=>({...c,stickerStyle:e.target.value as DynamicStickerStyle}))}><option value="icons">参考视频动态标注（推荐）</option><option value="smart_mix">极简功能点缀</option><option value="doodles">手写圈选与箭头</option></select></label>
         <label className="v19-field"><span>贴纸位置</span><select value={config.stickerLayout} onChange={(e:ChangeEvent<HTMLSelectElement>)=>setConfig(c=>({...c,stickerLayout:e.target.value as DynamicStickerLayout}))}><option value="auto_safe">自动安全区</option><option value="top">上方两角</option><option value="side">左右侧边</option></select></label>
       </div>}
 
-      {tab==='rules' && <div className="v19-rule-grid"><article><b>长句稳镜</b><span>同一意思不按逗号乱切；相邻镜头禁止复用同一素材或同类城市地标画面。</span></article><article><b>地点快切</b><span>咖啡厅、商场、学校等并列小场景按出现顺序逐项切换，不把普通长句拆碎。</span></article><article><b>素材记忆</b><span>记录素材、源片段、语义角色和速度；最近三条优先换新，高匹配旧素材允许复用。</span></article><article><b>慢镜加速</b><span>缓慢航拍、慢推和静态镜头自动使用约 1.10–1.20 倍速度；合同和文字特写保持原速。</span></article><article><b>连续配音</b><span>普通解释尽量一次连续合成，只在真实 CTA 或明确长停顿处分组，避免 0.4 秒以上硬拼接。</span></article><article><b>收尾结构</b><span>长结尾按风险提醒、互动问题、评论 CTA 拆成不同画面，禁止单一双子塔空镜拖满。</span></article><article><b>参考字效</b><span>主字幕默认不少于 116px；关键词按真实发音时间单独弹到 148%，并配合圈选、箭头、下划线等动态标注。旧 Emoji、小线稿图标和大文本框全部禁用。</span></article></div>}
+      {tab==='rules' && <div className="v19-rule-grid"><article><b>长句稳镜</b><span>同一意思不按逗号乱切；相邻镜头禁止复用同一素材或同类城市地标画面。</span></article><article><b>地点快切</b><span>咖啡厅、商场、学校等并列小场景按出现顺序逐项切换，不把普通长句拆碎。</span></article><article><b>素材记忆</b><span>记录素材、源片段、语义角色和速度；最近三条优先换新，高匹配旧素材允许复用。</span></article><article><b>慢镜加速</b><span>缓慢航拍、慢推和静态镜头自动使用约 1.10–1.20 倍速度；合同和文字特写保持原速。</span></article><article><b>连续配音</b><span>普通解释尽量一次连续合成，只在真实 CTA 或明确长停顿处分组，避免 0.4 秒以上硬拼接。</span></article><article><b>收尾结构</b><span>长结尾按风险提醒、互动问题、评论 CTA 拆成不同画面，禁止单一双子塔空镜拖满。</span></article><article><b>参考字效</b><span>主字幕默认不少于 138px；关键词按真实发音时间单独弹到 158%，并配合圈选、箭头、下划线等动态标注。旧 Emoji、小线稿图标、大文本框和随机角标全部禁用。语义契合优先级高于素材新鲜度。</span></article></div>}
     </div>}
   </section>
 }
