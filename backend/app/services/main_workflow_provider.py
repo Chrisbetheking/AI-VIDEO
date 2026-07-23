@@ -18,7 +18,7 @@ from fastapi import BackgroundTasks, Body, FastAPI, HTTPException
 from fastapi.encoders import jsonable_encoder
 
 
-VERSION = "10.40.7"
+VERSION = "10.40.8.35-final-master-integrity-workflow-cleanup"
 MODE = "engine_source_fix_hub"
 
 BASE = Path(os.getenv("AI_VIDEO_BASE", "/opt/ai-video"))
@@ -1091,17 +1091,21 @@ async def _load_job(
     app: FastAPI,
     job_id: str,
 ) -> Dict[str, Any]:
-    status, data = await _internal_json(
-        app,
-        "GET",
-        f"/api/video/full-ai/one-scene/job/{job_id}",
-        timeout=60,
-    )
+    endpoints: List[str] = []
+    if job_id.startswith(("dynamic_edit_v2_", "existing_edit_")):
+        endpoints.append(f"/api/video/existing-edit/jobs/{job_id}")
+    endpoints.append(f"/api/video/full-ai/one-scene/job/{job_id}")
 
-    if status < 400 and data:
-        returned_job_id = _string(
-            data.get("job_id")
+    for endpoint in endpoints:
+        status, data = await _internal_json(
+            app,
+            "GET",
+            endpoint,
+            timeout=60,
         )
+        if status >= 400 or not data:
+            continue
+        returned_job_id = _string(data.get("job_id"))
         if returned_job_id and returned_job_id != job_id:
             raise HTTPException(
                 status_code=409,

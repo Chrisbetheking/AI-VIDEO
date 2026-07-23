@@ -19,11 +19,12 @@ from typing import Any, Callable
 
 from fastapi import Depends, HTTPException, Request
 
-VERSION = "10.40.8.34-dedup-keyword-entity-cta"
+VERSION = "10.40.8.35-final-master-integrity-workflow-cleanup"
+# V10_40_8_35_FINAL_MASTER_INTEGRITY_WORKFLOW_CLEANUP
 # V10_40_8_34_DEDUP_KEYWORD_ENTITY_CTA
 # V10_40_8_33_SEMANTIC_RELEVANCE_CAPTION_HIERARCHY
 # V10_40_8_32_REFERENCE_KINETIC_TYPOGRAPHY
-INSTALL_MARKER = "V10_40_8_34_DEDUP_KEYWORD_ENTITY_CTA"
+INSTALL_MARKER = "V10_40_8_35_FINAL_MASTER_INTEGRITY_WORKFLOW_CLEANUP"
 _INSTALLED = False
 _LOCK = threading.RLock()
 
@@ -245,6 +246,33 @@ def _work_dir(settings: Any, job_id: str) -> Path:
     path = _data_dir(settings) / "tmp" / "dynamic_edit_v2" / job_id
     path.mkdir(parents=True, exist_ok=True)
     return path
+
+
+
+def _cleanup_stale_dynamic_workdirs(
+    settings: Any, *, keep_job_id: str = "", max_age_hours: float = 24.0,
+) -> dict[str, Any]:
+    root = _data_dir(settings) / "tmp" / "dynamic_edit_v2"
+    if not root.exists():
+        return {"removed": 0, "reclaimed_bytes": 0}
+    cutoff = time.time() - max(1.0, max_age_hours) * 3600.0
+    removed = 0
+    reclaimed = 0
+    for path in list(root.iterdir()):
+        if not path.is_dir() or path.name == keep_job_id:
+            continue
+        try:
+            if path.stat().st_mtime >= cutoff:
+                continue
+            size = sum(item.stat().st_size for item in path.rglob("*") if item.is_file())
+            shutil.rmtree(path, ignore_errors=False)
+            removed += 1
+            reclaimed += size
+        except FileNotFoundError:
+            continue
+        except Exception:
+            continue
+    return {"removed": removed, "reclaimed_bytes": reclaimed}
 
 
 def _update_proxy(settings: Any, job_id: str, **updates: Any) -> dict[str, Any]:
@@ -1304,11 +1332,23 @@ def _resolve_authoritative_semantic_master(
         if isinstance(item, dict)
     ]
     preview_count = len(preview_clips)
-    asset_ids: list[str] = []
-    for item in child_clips:
-        asset_id = str(item.get("asset_id") or item.get("source_asset_id") or "").strip()
-        if asset_id and asset_id not in asset_ids:
-            asset_ids.append(asset_id)
+    raw_asset_ids = [
+        str(item.get("asset_id") or item.get("source_asset_id") or "").strip()
+        for item in child_clips
+    ]
+    if any(not item for item in raw_asset_ids):
+        raise ValueError("V35 真实 TTS 子任务包含未绑定素材的最终镜头")
+    duplicate_ids = sorted({item for item in raw_asset_ids if raw_asset_ids.count(item) > 1})
+    integrity = dict(
+        child_plan.get("final_master_integrity")
+        or base_job.get("final_master_integrity")
+        or {}
+    )
+    if duplicate_ids:
+        raise ValueError(f"V35 真实 TTS 最终镜头仍重复：{duplicate_ids}")
+    if integrity and integrity.get("passed") is not True:
+        raise ValueError(f"V35 子任务最终镜头完整性报告未通过：{integrity}")
+    asset_ids = list(raw_asset_ids)
 
     coverage = dict(child_plan.get("coverage") or base_job.get("coverage") or {})
     coverage.update({
@@ -1336,7 +1376,9 @@ def _resolve_authoritative_semantic_master(
         "asset_ids": asset_ids,
         "asset_count": len(asset_ids),
         "selected_asset_count": len(asset_ids),
-        "unique_asset_count": len(asset_ids),
+        "unique_asset_count": len(set(asset_ids)),
+        "repeat_count": len(asset_ids) - len(set(asset_ids)),
+        "final_master_integrity": integrity,
         "source": "real_tts_child_master",
     })
 
@@ -1352,7 +1394,9 @@ def _resolve_authoritative_semantic_master(
 
 def _run_dynamic(settings: Any, proxy_job_id: str, payload: dict[str, Any]) -> None:
     classic = _classic()
+    _cleanup_stale_dynamic_workdirs(settings, keep_job_id=proxy_job_id)
     work = _work_dir(settings, proxy_job_id)
+    completed = False
     try:
         _update_proxy(settings, proxy_job_id, status="running", stage="semantic_plan", progress=2, message="正在读取上一页镜头并生成语义切镜计划")
         from app.services.semantic_shot_director_v10_40_8_19 import prepare_classic_payload
@@ -1550,6 +1594,8 @@ def _run_dynamic(settings: Any, proxy_job_id: str, payload: dict[str, Any]) -> N
                 "asset_ids": authoritative_asset_ids,
                 "asset_count": len(authoritative_asset_ids),
                 "unique_asset_count": len(set(authoritative_asset_ids)),
+                "repeat_count": len(authoritative_asset_ids) - len(set(authoritative_asset_ids)),
+                "final_master_integrity": (semantic_plan or {}).get("final_master_integrity") or {},
             },
             asset_count=len(authoritative_asset_ids),
             selected_asset_count=len(authoritative_asset_ids),
@@ -1560,6 +1606,7 @@ def _run_dynamic(settings: Any, proxy_job_id: str, payload: dict[str, Any]) -> N
             billing_guard="dynamic_v2_wraps_existing_edit_no_fal",
             finished_at=_now(),
         )
+        completed = True
     except Exception as exc:
         error_type = type(exc).__name__
         error_detail = " ".join(str(exc).split())[:240] or error_type
@@ -1579,6 +1626,10 @@ def _run_dynamic(settings: Any, proxy_job_id: str, payload: dict[str, Any]) -> N
             billing_guard="dynamic_v2_no_fal",
             finished_at=_now(),
         )
+    finally:
+        if completed:
+            shutil.rmtree(work, ignore_errors=True)
+        _cleanup_stale_dynamic_workdirs(settings, keep_job_id=proxy_job_id)
 
 
 def _thread(settings: Any, job_id: str, payload: dict[str, Any]) -> None:
@@ -1665,6 +1716,9 @@ def install_dynamic_edit_v2(app: Any, get_settings: Callable[..., Any]) -> None:
                 "caption_phrase_boundary_gate": True,
                 "clean_single_caption_layer": True,
                 "real_tts_child_master_promoted": True,
+                "post_tts_final_master_integrity": True,
+                "strict_actual_repeat_count_gate": True,
+                "successful_dynamic_workdir_cleanup": True,
                 "parent_job_semantic_metadata_synced": True,
                 "preview_plan_non_authoritative": True,
                 "runtime_child_job_binding": True,

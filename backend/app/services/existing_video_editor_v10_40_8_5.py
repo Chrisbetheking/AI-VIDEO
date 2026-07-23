@@ -8,6 +8,7 @@ import re
 import shutil
 import subprocess
 import threading
+import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -31,7 +32,8 @@ from app.services.a10_r4_output_guard_v10_40_8_12 import (
     measure_audio_loudness,
 )
 
-VERSION = "10.40.8.34-dedup-keyword-entity-cta"
+VERSION = "10.40.8.35-final-master-integrity-workflow-cleanup"
+# V10_40_8_35_FINAL_MASTER_INTEGRITY_WORKFLOW_CLEANUP
 # V10_40_8_34_DEDUP_KEYWORD_ENTITY_CTA
 # V10_40_8_33_SEMANTIC_RELEVANCE_CAPTION_HIERARCHY
 # V10_40_8_32_REFERENCE_KINETIC_TYPOGRAPHY
@@ -286,6 +288,371 @@ def _load_library_assets(settings: Any) -> list[dict[str, Any]]:
         if _eligible_video(asset):
             result.append(asset)
     return result
+
+
+# V10.40.8.35: final post-TTS master integrity.  The semantic director may
+# legitimately rebuild the shot count after native TTS timestamps arrive, but
+# the plan that reaches FFmpeg must still obey hard production constraints.
+_V35_GENERIC_FAMILIES = {
+    "residential", "city_landmark", "office", "traffic", "mall", "people",
+}
+
+
+def _v35_visual_family(value: Any) -> str:
+    text = str(value or "").lower()
+    rules = (
+        ("school", r"学校|大学|学院|校园|学生|international school|university|college|campus"),
+        ("hospital", r"医院|医疗|诊所|医务|hospital|clinic|medical"),
+        ("mall", r"商场|购物|商业配套|超市|餐饮|零售|shopping|mall|retail|supermarket"),
+        ("construction", r"施工|工地|在建|建设现场|交付进度|construction|building site"),
+        ("map", r"地图|区位|路线图|规划图|总平图|map|location plan|master plan"),
+        ("traffic", r"通勤|交通|地铁|轻轨|单轨|轨道|车流|道路|高速|公交|metro|rail|train|road|commute"),
+        ("city_landmark", r"航拍|天际线|双子塔|klcc|地标|高空俯拍|aerial|skyline|landmark|twin tower"),
+        ("office", r"办公|写字楼|商务区|公司|工作场景|白领办公|office|business district|cowork"),
+        ("people", r"访客|客户|工作人员|签约|咨询|交流|看房活动|主持人|主播|评论|留言|人物出镜|visitor|customer|staff|presenter|host|talking head|people interacting"),
+        ("parking", r"停车场|停车位|parking"),
+        ("residential", r"住宅|公寓|户型|样板间|楼盘|售楼处|沙盘|社区|condo|apartment|residential|showroom|sales gallery"),
+    )
+    for family, pattern in rules:
+        if re.search(pattern, text, re.I):
+            return family
+    return "other"
+
+
+def _v35_clip_identity(clip: dict[str, Any]) -> str:
+    return str(
+        clip.get("asset_id")
+        or clip.get("source_asset_id")
+        or clip.get("asset_url")
+        or ""
+    ).strip()
+
+
+def _v35_clip_text(clip: dict[str, Any]) -> str:
+    values = [
+        clip.get("asset_name"), clip.get("title"), clip.get("scene"),
+        clip.get("description"), clip.get("analysis_description"),
+    ]
+    return " ".join(str(value or "") for value in values)
+
+
+def _v35_intent_keys(values: Any) -> set[str]:
+    if isinstance(values, str):
+        items = [values]
+    elif isinstance(values, list):
+        items = [str(item or "") for item in values]
+    else:
+        items = []
+    keys: set[str] = set()
+    for raw in items:
+        value = raw.lower()
+        if re.search(r"学校|大学|学院|校园|学生|school|university|campus", value, re.I):
+            keys.add("school")
+        if re.search(r"医院|医疗|诊所|hospital|clinic|medical", value, re.I):
+            keys.add("hospital")
+        if re.search(r"商场|购物|商业配套|超市|餐饮|mall|shopping|retail", value, re.I):
+            keys.add("mall")
+        if re.search(r"施工|工地|在建|交付|construction", value, re.I):
+            keys.add("construction")
+        if re.search(r"地图|区位|位置|路线|规划图|map|location", value, re.I):
+            keys.add("map")
+        if re.search(r"通勤|交通|地铁|轻轨|轨道|道路|metro|rail|road|commute", value, re.I):
+            keys.add("traffic")
+        if re.search(r"办公|写字楼|商务|公司|office|business", value, re.I):
+            keys.add("office")
+        if re.search(r"租客|租客来源|白领|人群|客户|访客|tenant|people|customer", value, re.I):
+            keys.update({"people", "office", "school"})
+        if re.search(r"住宅|自住|公寓|户型|社区|residential|apartment|condo", value, re.I):
+            keys.add("residential")
+    return keys
+
+
+def _v35_asset_intent_keys(asset: dict[str, Any]) -> set[str]:
+    text = _asset_text(asset)
+    family = _v35_visual_family(text)
+    keys = {family} if family != "other" else set()
+    # A single real scene can satisfy more than one concrete intent.
+    if re.search(r"租客|白领|学生|访客|客户|工作人员|tenant|visitor|customer|staff", text, re.I):
+        keys.add("people")
+    if re.search(r"大学|学校|学院|校园|student|university|school|campus", text, re.I):
+        keys.add("school")
+    if re.search(r"写字楼|办公|商务区|office|business district", text, re.I):
+        keys.add("office")
+    return keys
+
+
+def _v35_intent_match(
+    requested: set[str], candidate_keys: set[str], family: str,
+) -> bool:
+    if not requested:
+        return True
+    if requested & candidate_keys:
+        return True
+    if "residential" in requested and family in {"residential", "people", "office"}:
+        return True
+    tenant_group = {"people", "office", "school"}
+    if requested & tenant_group and family in tenant_group:
+        return True
+    return False
+
+
+def _v35_is_final_cta(clip: dict[str, Any], index: int, total: int) -> bool:
+    if index != total - 1:
+        return False
+    text = str(clip.get("narration") or clip.get("text") or "")
+    beat = str(clip.get("beat_type") or "").lower()
+    return bool(
+        beat in {"cta", "question"}
+        or re.search(r"评论|留言|私信|关注|你.*(?:吗|呢|？|\?)|自住还是投资", text, re.I)
+    )
+
+
+def _v35_apply_asset_to_clip(
+    clip: dict[str, Any], asset: dict[str, Any], *, reason: str,
+) -> dict[str, Any]:
+    updated = dict(clip)
+    intel = _asset_intelligence(asset)
+    aid = _asset_id(asset)
+    url = _asset_url(asset)
+    title = str(
+        asset.get("ai_title") or intel.get("title")
+        or asset.get("original_name") or asset.get("filename") or aid
+    )
+    description = str(
+        asset.get("ai_description") or intel.get("description") or title
+    )
+    name = str(asset.get("original_name") or asset.get("filename") or title)
+    family = _v35_visual_family(_asset_text(asset))
+    updated.update({
+        "title": title,
+        "scene": description,
+        "description": description,
+        "analysis_description": description,
+        "source": "r2",
+        "selection_source": "auto",
+        "manual_locked": False,
+        "asset_id": aid,
+        "source_asset_id": aid,
+        "asset_ids": [aid],
+        "asset_url": url,
+        "asset_name": name,
+        "start_time": 0.0,
+        "end_time": float(updated.get("duration") or updated.get("duration_seconds") or 0.0),
+        "auto_start": True,
+        "speed": 1.0,
+        "visual_family": family,
+        "segment_selection_reason": reason,
+        "selection_reason": reason,
+        "v35_replaced": True,
+    })
+    return updated
+
+
+def _v35_finalize_real_tts_master(
+    settings: Any,
+    clips: list[dict[str, Any]],
+    target_duration: float,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Return the exact FFmpeg master, not a deduplicated statistics shadow."""
+    originals = [dict(item) for item in clips if isinstance(item, dict)]
+    if not originals:
+        raise ValueError("V35 最终语义镜头计划为空")
+
+    library = _load_library_assets(settings)
+    by_id = {_asset_id(asset): asset for asset in library if _asset_id(asset)}
+    used: set[str] = set()
+    family_counts: dict[str, int] = {}
+    intent_counts: dict[str, int] = {}
+    finalized: list[dict[str, Any]] = []
+    replacements: list[dict[str, Any]] = []
+    max_landmarks = max(1, int(len(originals) * 0.20))
+
+    for index, original in enumerate(originals):
+        clip = dict(original)
+        aid = _v35_clip_identity(clip)
+        family = str(clip.get("visual_family") or "").strip().lower()
+        inferred_family = _v35_visual_family(_v35_clip_text(clip))
+        if not family or family == "general":
+            family = inferred_family
+        # Trust a concrete entity classifier over a stale generic family label.
+        if inferred_family in {"school", "hospital", "mall", "construction", "map", "traffic", "people", "office"}:
+            family = inferred_family
+        requested = _v35_intent_keys(clip.get("semantic_requested_intents") or [])
+        cta = _v35_is_final_cta(clip, index, len(originals))
+        current_keys = {family} if family != "other" else set()
+        if family == "people":
+            current_keys.add("people")
+        previous_family = str(finalized[-1].get("visual_family") or "") if finalized else ""
+
+        invalid_reasons: list[str] = []
+        if not aid or not str(clip.get("asset_url") or "").strip():
+            invalid_reasons.append("missing_asset_binding")
+        if aid and aid in used:
+            invalid_reasons.append("duplicate_asset_id")
+        if not _v35_intent_match(requested, current_keys, family):
+            invalid_reasons.append("requested_intent_mismatch")
+        if cta and family != "people":
+            invalid_reasons.append("cta_requires_people_scene")
+        if family == "city_landmark" and family_counts.get(family, 0) >= max_landmarks:
+            invalid_reasons.append("landmark_share_cap")
+        if previous_family and family == previous_family and family in _V35_GENERIC_FAMILIES:
+            invalid_reasons.append("adjacent_generic_family")
+
+        if invalid_reasons:
+            alternative_ids = {
+                str(item.get("asset_id") or "").strip()
+                for item in (clip.get("alternative_assets") or [])
+                if isinstance(item, dict)
+            }
+            narration = str(clip.get("narration") or clip.get("text") or "")
+            query = " ".join([
+                narration,
+                " ".join(str(item or "") for item in (clip.get("semantic_requested_intents") or [])),
+            ])
+            ranked: list[tuple[float, dict[str, Any], str, set[str]]] = []
+            for asset in library:
+                candidate_id = _asset_id(asset)
+                if not candidate_id or candidate_id in used or not _asset_url(asset):
+                    continue
+                candidate_text = _asset_text(asset)
+                candidate_family = _v35_visual_family(candidate_text)
+                candidate_keys = _v35_asset_intent_keys(asset)
+                overlap = requested & candidate_keys
+                if not _v35_intent_match(requested, candidate_keys, candidate_family):
+                    continue
+                if cta and candidate_family != "people":
+                    continue
+                if candidate_family == "city_landmark" and family_counts.get("city_landmark", 0) >= max_landmarks:
+                    continue
+                score = _score(query, asset, 0)
+                score += 150.0 * len(overlap)
+                score += sum(90.0 / (1 + intent_counts.get(key, 0)) for key in overlap)
+                if candidate_id in alternative_ids:
+                    score += 45.0
+                if previous_family and candidate_family == previous_family and candidate_family in _V35_GENERIC_FAMILIES:
+                    continue
+                if previous_family and candidate_family != previous_family:
+                    score += 35.0
+                if candidate_family == "city_landmark" and not re.search(r"吉隆坡|klcc|双子塔|地标", narration, re.I):
+                    score -= 220.0
+                ranked.append((score, asset, candidate_family, candidate_keys))
+
+            ranked.sort(key=lambda item: item[0], reverse=True)
+            if not ranked:
+                raise ValueError(
+                    "V35 最终镜头硬门禁无法找到合格唯一素材："
+                    f"index={index + 1}, reasons={invalid_reasons}, "
+                    f"requested={sorted(requested)}, narration={narration[:80]}"
+                )
+            score, chosen, family, current_keys = ranked[0]
+            old_id = aid
+            reason = "V35 最终主时间线硬修复：" + ",".join(invalid_reasons)
+            clip = _v35_apply_asset_to_clip(clip, chosen, reason=reason)
+            aid = _v35_clip_identity(clip)
+            replacements.append({
+                "index": index + 1,
+                "old_asset_id": old_id,
+                "new_asset_id": aid,
+                "new_asset_name": clip.get("asset_name"),
+                "reasons": invalid_reasons,
+                "score": round(score, 3),
+            })
+        else:
+            clip["visual_family"] = family
+
+        if not aid or aid in used:
+            raise ValueError(f"V35 最终镜头仍存在重复或空素材：index={index + 1}, asset_id={aid}")
+        previous_asset_id = _v35_clip_identity(finalized[-1]) if finalized else ""
+        previous_family = str(finalized[-1].get("visual_family") or "") if finalized else ""
+        clip["sequence_guard"] = {
+            "adjacent_same_asset_forbidden": True,
+            "adjacent_generic_family_forbidden": True,
+            "previous_asset_id": previous_asset_id,
+            "previous_visual_family": previous_family,
+            "passed": True,
+            "version": VERSION,
+        }
+        clip["index"] = index + 1
+        used.add(aid)
+        family_counts[family] = family_counts.get(family, 0) + 1
+        for key in current_keys:
+            intent_counts[key] = intent_counts.get(key, 0) + 1
+        finalized.append(clip)
+
+    total = sum(float(item.get("duration") or item.get("duration_seconds") or 0.0) for item in finalized)
+    if total <= 0:
+        raise ValueError("V35 最终镜头总时长无效")
+    delta = float(target_duration) - total
+    if abs(delta) > 0.001:
+        final_duration = max(0.3, float(finalized[-1].get("duration") or 0.0) + delta)
+        finalized[-1]["duration"] = round(final_duration, 3)
+        finalized[-1]["duration_seconds"] = round(final_duration, 3)
+
+    identities = [_v35_clip_identity(item) for item in finalized]
+    duplicates = sorted({item for item in identities if identities.count(item) > 1})
+    mismatches: list[dict[str, Any]] = []
+    adjacent_family_violations: list[dict[str, Any]] = []
+    for index, clip in enumerate(finalized):
+        requested = _v35_intent_keys(clip.get("semantic_requested_intents") or [])
+        family = str(clip.get("visual_family") or "")
+        if not _v35_intent_match(requested, {family}, family):
+            mismatches.append({"index": index + 1, "family": family, "requested": sorted(requested)})
+        if index > 0:
+            previous = str(finalized[index - 1].get("visual_family") or "")
+            if family == previous and family in _V35_GENERIC_FAMILIES:
+                adjacent_family_violations.append({"index": index + 1, "family": family})
+    report = {
+        "version": VERSION,
+        "passed": not duplicates and not mismatches and not adjacent_family_violations,
+        "clip_count": len(finalized),
+        "unique_asset_count": len(set(identities)),
+        "repeat_count": len(identities) - len(set(identities)),
+        "duplicate_asset_ids": duplicates,
+        "requested_intent_mismatches": mismatches,
+        "adjacent_family_violations": adjacent_family_violations,
+        "replacement_count": len(replacements),
+        "replacements": replacements,
+        "family_counts": family_counts,
+        "landmark_count": family_counts.get("city_landmark", 0),
+        "landmark_limit": max_landmarks,
+        "fresh_ending_asset": bool(finalized and identities[-1] not in identities[:-1]),
+        "previous_family_recomputed": True,
+        "source": "post_real_tts_pre_ffmpeg_master",
+    }
+    if report["passed"] is not True:
+        raise ValueError(f"V35 最终镜头完整性门禁失败：{report}")
+    return finalized, report
+
+
+def _v35_existing_work_root(settings: Any) -> Path:
+    return Path(settings.tmp_dir) / "existing_video_edit"
+
+
+def _v35_cleanup_stale_existing_workdirs(
+    settings: Any, *, keep_job_id: str = "", max_age_hours: float = 24.0,
+) -> dict[str, Any]:
+    root = _v35_existing_work_root(settings)
+    if not root.exists():
+        return {"removed": 0, "reclaimed_bytes": 0}
+    cutoff = time.time() - max(1.0, max_age_hours) * 3600.0
+    removed = 0
+    reclaimed = 0
+    active = set(_ACTIVE)
+    for path in list(root.iterdir()):
+        if not path.is_dir() or path.name == keep_job_id or path.name in active:
+            continue
+        try:
+            if path.stat().st_mtime >= cutoff:
+                continue
+            size = sum(item.stat().st_size for item in path.rglob("*") if item.is_file())
+            shutil.rmtree(path, ignore_errors=False)
+            removed += 1
+            reclaimed += size
+        except FileNotFoundError:
+            continue
+        except Exception:
+            continue
+    return {"removed": removed, "reclaimed_bytes": reclaimed}
 
 
 def _merge_candidates(
@@ -1021,6 +1388,7 @@ async def _render(
     settings: Any, job_id: str, payload: dict[str, Any]
 ) -> None:
     work = settings.tmp_dir / "existing_video_edit" / job_id
+    _v35_cleanup_stale_existing_workdirs(settings, keep_job_id=job_id)
     work.mkdir(parents=True, exist_ok=True)
     try:
         parts = _speech_parts(payload)
@@ -1268,7 +1636,25 @@ async def _render(
             })
         else:
             clips = directed_clips
-        plan = {**plan, "clips": clips, "director": director_result["report"]}
+
+        clips, final_master_integrity = _v35_finalize_real_tts_master(
+            settings, clips, target
+        )
+        director_result.setdefault("report", {})
+        director_result["report"]["v35_final_master_integrity"] = final_master_integrity
+        plan = {
+            **plan,
+            "clips": clips,
+            "director": director_result["report"],
+            "final_master_integrity": final_master_integrity,
+        }
+        plan.setdefault("coverage", {})
+        plan["coverage"].update({
+            "v35_final_master_integrity": True,
+            "final_unique_asset_count": final_master_integrity["unique_asset_count"],
+            "final_repeat_count": final_master_integrity["repeat_count"],
+            "final_replacement_count": final_master_integrity["replacement_count"],
+        })
         if semantic_master:
             semantic_master_shot_count = len(clips)
             plan["semantic_master_shot_count"] = semantic_master_shot_count
@@ -1461,6 +1847,7 @@ async def _render(
             edit_quality_gate=director_result.get("edit_quality_gate"),
             global_repeat_report=director_result.get("global_repeat_report"),
             a10_r4_report=director_result.get("a10_r4_report"),
+            final_master_integrity=final_master_integrity,
             audio_normalization_report=audio_normalization_report,
             tts_warning=warning,
             fal_used=False,
@@ -1481,8 +1868,12 @@ async def _render(
             finished_at=_now(),
         )
     finally:
+        final_status = str((_load_jobs(settings).get(job_id) or {}).get("status") or "")
+        if final_status == "done":
+            shutil.rmtree(work, ignore_errors=True)
         with _LOCK:
             _ACTIVE.discard(job_id)
+        _v35_cleanup_stale_existing_workdirs(settings, keep_job_id=job_id)
 
 
 def _thread(settings: Any, job_id: str, payload: dict[str, Any]) -> None:
@@ -1572,6 +1963,7 @@ def install_existing_video_editor(
         return
 
     _repair(get_settings())
+    _v35_cleanup_stale_existing_workdirs(get_settings())
 
     @app.get("/api/video/existing-edit/health")
     def health(settings: Any = Depends(get_settings)) -> dict[str, Any]:
@@ -1629,6 +2021,9 @@ def install_existing_video_editor(
                 "diversity_aware_shot_count": True,
                 "source_interval_overlap_guard": True,
                 "whole_video_repeat_report": True,
+                "post_tts_final_master_integrity": True,
+                "successful_workdir_cleanup": True,
+                "stale_workdir_cleanup_24h": True,
             "strict_visual_single_use": True,
             "semantic_scene_diversity": True,
             "fresh_ending_shot": True,
