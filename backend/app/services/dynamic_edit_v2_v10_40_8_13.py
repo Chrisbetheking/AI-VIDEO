@@ -19,8 +19,8 @@ from typing import Any, Callable
 
 from fastapi import Depends, HTTPException, Request
 
-VERSION = "10.40.8.27-reference-driven-teaching-effects-gate"
-INSTALL_MARKER = "V10_40_8_27_REFERENCE_DRIVEN_TEACHING_EFFECTS_GATE"
+VERSION = "10.40.8.28-semantic-editor-engine"
+INSTALL_MARKER = "V10_40_8_28_SEMANTIC_EDITOR_ENGINE"
 _INSTALLED = False
 _LOCK = threading.RLock()
 
@@ -1645,16 +1645,16 @@ def install_dynamic_edit_v2(app: Any, get_settings: Callable[..., Any]) -> None:
                 "semantic_effect_timeline": True,
                 "dynamic_zoom": True,
                 "hook_punch": True,
-                "data_cards": False,
+                "data_cards": True,
                 "risk_alerts": True,
-                "list_cards": False,
+                "list_cards": True,
                 "no_text_boxes": True,
                 "micro_caption_fragments": True,
                 "dynamic_dense_base_clips": False,
                 "semantic_scene_boundaries": True,
                 "deepseek_ai_beat_director": True,
                 "entity_burst_one_entity_one_shot": True,
-                "professional_cc0_sfx_bank": True,
+                "professional_licensed_sfx_bank": True,
                 "locked_previous_page_shot_plan": True,
                 "persistent_asset_usage_recorder": True,
                 "audio_tail_guard": True,
@@ -1673,9 +1673,12 @@ def install_dynamic_edit_v2(app: Any, get_settings: Callable[..., Any]) -> None:
                 "effect_delivery_quality_gate": True,
                 "reference_driven_teaching_effects": True,
                 "semantic_callout_cards": True,
-                "pro_sticker_pack_v27": True,
+                "semantic_information_cards_v28": True,
                 "audible_sfx_mix_gate": True,
-                "effect_density_guard_v27": True,
+                "effect_density_guard_v28": True,
+                "real_tts_authoritative_duration": True,
+                "fixed_duration_cut_forbidden": True,
+                "tts_end_integrity_guard": True,
                 "unapproved_sfx_disabled": True,
                 "random_stickers_disabled": True,
                 "reference_subtitle_pack": True,
@@ -4060,3 +4063,180 @@ def render_dynamic_video(
         )
     return report
 
+
+
+# =============================================================================
+# V10.40.8.28 SEMANTIC EDITOR ENGINE
+# =============================================================================
+V28_COMPONENT_ROOT = Path('/tmp/ai-video-v28-components')
+V28_COMPONENT_ROOT.mkdir(parents=True, exist_ok=True)
+
+
+def _v28_role(text: str, fallback: str = 'knowledge') -> str:
+    value = _clean_caption_text(text)
+    if re.search(r'(评论|留言|关注|下一条|告诉我|私信)', value): return 'cta'
+    if re.search(r'(三件事|三点|分别|①|②|③|清单|确认)', value): return 'list'
+    if re.search(r'(不等于|≠|自住.*投资|投资.*自住|对比|区别)', value): return 'comparison'
+    if re.search(r'(风险|注意|别被|不要|误区|搞错)', value): return 'risk'
+    if re.search(r'(为什么|怎么|到底|吗|？)', value): return 'question'
+    if re.search(r'(第一步|第二步|流程|签署|支付|抵扣)', value): return 'data'
+    return fallback
+
+
+def _v28_component_label(role: str, text: str) -> tuple[str, str]:
+    clean = _clean_caption_text(text)
+    if role == 'comparison':
+        return ('自住  VS  投资' if ('自住' in clean and '投资' in clean) else '核心对比', clean[:22])
+    if role == 'list': return ('三项确认', clean[:24])
+    if role == 'risk': return ('风险提醒', clean[:24])
+    if role == 'cta': return ('下一步', clean[:24])
+    if role == 'question': return ('先问清楚', clean[:24])
+    if role == 'data': return ('关键流程', clean[:24])
+    return ('重点', clean[:24])
+
+
+def _v28_render_component(event: dict[str, Any]) -> Path:
+    from PIL import Image, ImageDraw, ImageFont
+    role = str(event.get('role') or 'knowledge')
+    title, body = _v28_component_label(role, str(event.get('source_text') or event.get('focus_text') or ''))
+    digest = hashlib.sha256(f'{role}|{title}|{body}'.encode('utf-8')).hexdigest()[:20]
+    path = V28_COMPONENT_ROOT / f'{digest}.png'
+    if path.exists(): return path
+    width, height = 620, 230
+    image = Image.new('RGBA', (width, height), (0,0,0,0))
+    draw = ImageDraw.Draw(image)
+    palette = {
+        'risk': ((47,14,22,238),(255,78,92,255)),
+        'comparison': ((13,22,42,238),(109,94,252,255)),
+        'list': ((17,30,39,238),(34,197,94,255)),
+        'cta': ((19,22,38,238),(250,204,21,255)),
+        'question': ((22,24,43,238),(56,189,248,255)),
+        'data': ((18,27,47,238),(245,158,11,255)),
+    }
+    bg, accent = palette.get(role, ((18,24,38,238),(196,181,253,255)))
+    draw.rounded_rectangle((6,6,width-6,height-6), radius=38, fill=bg, outline=(255,255,255,48), width=2)
+    draw.rounded_rectangle((24,28,38,height-28), radius=7, fill=accent)
+    font_path='/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc'
+    title_font=ImageFont.truetype(font_path, 48)
+    body_font=ImageFont.truetype(font_path, 34)
+    draw.text((66,36), title, font=title_font, fill=accent)
+    if body and body != title:
+        draw.text((66,112), body, font=body_font, fill=(255,255,255,245))
+    image.save(path)
+    return path
+
+
+def _decorate_events(events: list[dict[str, Any]], duration: float, *, sfx_level: str, sticker_level: str) -> list[dict[str, Any]]:
+    result=[]
+    max_sfx = 0 if sfx_level == 'off' else max(2, min(6, int(math.ceil(duration/12.0))))
+    max_cards = 0 if sticker_level == 'off' else max(2, min(4, int(math.ceil(duration/15.0))))
+    card_gap = 4.0
+    last_card=-999.0
+    sfx_used=0
+    card_used=0
+    for index, source in enumerate(events):
+        event=dict(source)
+        text=str(event.get('source_text') or event.get('focus_text') or '')
+        role=_v28_role(text, str(event.get('role') or 'knowledge'))
+        event['role']=role
+        event['component_type']={
+            'comparison':'comparison','list':'checklist','risk':'risk','cta':'cta',
+            'question':'question','data':'flow'
+        }.get(role,'caption_emphasis')
+        if sfx_used < max_sfx and role in {'hook','comparison','list','risk','cta','question','data','turn'}:
+            bank = SFX_VARIANT_BANKS.get(role) or SFX_VARIANT_BANKS.get('turn') or []
+            if bank:
+                asset,gain=bank[index % len(bank)]
+                event['sfx']={'asset':asset,'gain':round(max(0.16,min(0.34,float(gain)*0.30)),4)}
+                sfx_used += 1
+        start=_safe_float(event.get('start'),0.0)
+        if card_used < max_cards and role in {'comparison','list','risk','cta','question','data'} and start-last_card >= card_gap:
+            event['sticker']={
+                'asset':'__v28_semantic_component__', 'position':'upper_left' if card_used%2==0 else 'upper_right',
+                'size':500, 'start':round(start,3),
+                'end':round(min(duration,max(start+1.25,_safe_float(event.get('end'),start+1.6))),3),
+            }
+            card_used += 1
+            last_card=start
+        result.append(event)
+    return result
+
+
+def _collect_sticker_inputs(plan: dict[str, Any]) -> list[dict[str, Any]]:
+    result=[]
+    for event in plan.get('events') or []:
+        sticker=event.get('sticker')
+        if not isinstance(sticker,dict): continue
+        if sticker.get('asset') == '__v28_semantic_component__':
+            path=_v28_render_component(event)
+        else:
+            path=_sticker_root()/str(sticker.get('asset') or '')
+        if path.is_file(): result.append({'event':event,'sticker':sticker,'path':path})
+    return result
+
+
+def _build_video_filters(work: Path, plan: dict[str, Any], ass_path: Path, sticker_inputs: list[dict[str, Any]], *, width: int = 1080, height: int = 1920) -> str:
+    duration=max(0.1,_safe_float(plan.get('render_duration'),_safe_float(plan.get('duration'),30.0)))
+    events=list(plan.get('events') or [])
+    zoom_terms=[]
+    for event in events:
+        role=str(event.get('role') or 'knowledge')
+        if role not in {'hook','comparison','risk','question','data','cta'}: continue
+        start=_safe_float(event.get('start'),0.0); span=0.72
+        strength={'hook':0.042,'comparison':0.030,'risk':0.026,'question':0.022,'data':0.025,'cta':0.018}.get(role,0.018)
+        zoom_terms.append(f'+{strength:.4f}*between(t,{start:.3f},{start+span:.3f})*sin(PI*(t-{start:.3f})/{span:.3f})')
+    factor='1'+''.join(zoom_terms)
+    chain=[
+        f'[0:v]scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height},setsar=1[base]',
+        f"[base]scale=w='{width}*({factor})':h='{height}*({factor})':eval=frame,crop={width}:{height}:(iw-{width})/2:(ih-{height})/2[v0]",
+    ]
+    current='v0'
+    positions={'upper_left':('46','260'),'upper_right':('W-w-46','280'),'side_left':('44','650'),'side_right':('W-w-44','670')}
+    for index,item in enumerate(sticker_inputs,1):
+        sticker=item['sticker']; inp=int(item['input_index'])
+        start=_safe_float(sticker.get('start'),0.0); end=max(start+0.8,_safe_float(sticker.get('end'),start+1.4)); span=end-start
+        width_px=max(340,min(560,int(sticker.get('size') or 500)))
+        x,y=positions.get(str(sticker.get('position') or 'upper_right'),positions['upper_right'])
+        lab=f'v28card{index}'; out=f'v28out{index}'
+        chain.append(f'[{inp}:v]format=rgba,scale={width_px}:-1:force_original_aspect_ratio=decrease,trim=duration={span:.3f},fade=t=in:st=0:d=0.10:alpha=1,fade=t=out:st={max(0.1,span-0.18):.3f}:d=0.18:alpha=1,setpts=PTS-STARTPTS+{start:.3f}/TB[{lab}]')
+        chain.append(f"[{current}][{lab}]overlay=x='{x}':y='{y}':eof_action=pass:shortest=0:enable='between(t,{start:.3f},{end:.3f})'[{out}]")
+        current=out
+    chain.append(f"[{current}]ass='{_ffmpeg_escape_path(ass_path)}',tpad=stop_mode=clone:stop_duration=1,trim=duration={duration:.3f}[vout]")
+    return ';'.join(chain)
+
+
+def _build_audio_filters(plan: dict[str, Any], *, has_audio: bool, sfx_inputs: list[dict[str, Any]]) -> tuple[str, str | None]:
+    if not has_audio: return '',None
+    duration=max(0.1,_safe_float(plan.get('render_duration'),_safe_float(plan.get('duration'),30.0)))
+    parts=[f'[0:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,apad=pad_dur={duration:.3f},atrim=duration={duration:.3f},loudnorm=I=-16:LRA=7:TP=-2.0[voice]']
+    labels=['voice']
+    for index,item in enumerate(sfx_inputs,1):
+        event=item['event']; sfx=item['sfx']; inp=int(item['input_index'])
+        delay=int(max(0.0,_safe_float(event.get('start'),0.0))*1000)
+        gain=max(0.14,min(0.36,_safe_float(sfx.get('gain'),0.22)))
+        label=f'v28sfx{index}'
+        parts.append(f'[{inp}:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,atrim=0:1.35,asetpts=PTS-STARTPTS,highpass=f=80,lowpass=f=14500,volume={gain:.4f},afade=t=in:st=0:d=0.012,afade=t=out:st=1.10:d=0.20,adelay={delay}|{delay}[{label}]')
+        labels.append(label)
+    if len(labels)==1:
+        parts.append('[voice]alimiter=limit=0.94[aout]')
+    else:
+        parts.append(''.join(f'[{x}]' for x in labels)+f'amix=inputs={len(labels)}:duration=longest:dropout_transition=0:normalize=0,atrim=duration={duration:.3f},alimiter=limit=0.94[aout]')
+    return ';'.join(parts),'aout'
+
+
+_V27_RENDER_FINAL = render_dynamic_video
+
+
+def render_dynamic_video(input_path: Path, output_path: Path, ass_path: Path, plan: dict[str, Any]) -> dict[str, Any]:
+    source_info=_probe(input_path)
+    target=max(_safe_float(source_info.get('audio_duration'),0.0),_safe_float(source_info.get('duration'),0.0),_safe_float(plan.get('duration'),0.0))
+    plan=dict(plan); plan['render_duration']=round(target,4); plan['duration']=round(target,4)
+    report=_V27_RENDER_FINAL(input_path,output_path,ass_path,plan)
+    final=_probe(output_path)
+    final_duration=_safe_float(final.get('duration'),0.0)
+    if final_duration < target-0.08:
+        raise ValueError(f'V28 输出截断：target={target:.3f}, output={final_duration:.3f}')
+    report['audio_tail_guard']={'target_duration':round(target,4),'output_duration':round(final_duration,4),'shortest_cut_forbidden':True,'passed':True}
+    report['semantic_component_count']=len(_collect_sticker_inputs(plan))
+    report['effect_engine']='v28_semantic_editor_engine'
+    return report

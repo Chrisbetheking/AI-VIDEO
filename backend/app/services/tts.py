@@ -548,3 +548,51 @@ async def synthesize_tts(settings: Settings, text: str, voice: Optional[str] = N
         await asyncio.to_thread(create_silent_audio, output, duration)
         warning = f'TTS 失败，已按 ALLOW_MOCK_TTS 降级为静音：{exc}'
         return output, duration, warning
+
+
+# =============================================================================
+# V10.40.8.28 SEMANTIC EDITOR ENGINE — TTS END INTEGRITY
+# =============================================================================
+V28_TTS_END_PAD_SECONDS = 0.58
+_V27_SYNTHESIZE_TTS_SEGMENTS = synthesize_tts_segments
+
+
+def _v28_append_audio_tail(path: Path, seconds: float = V28_TTS_END_PAD_SECONDS) -> float:
+    """Append a real silence tail. Never trim or time-stretch the spoken suffix."""
+    original = probe_duration(path)
+    if original <= 0:
+        return original
+    temporary = path.with_name(path.stem + '_v28_tail' + path.suffix)
+    command = [
+        'ffmpeg', '-y', '-hide_banner', '-loglevel', 'error',
+        '-i', str(path),
+        '-af', f'apad=pad_dur={max(0.35, seconds):.3f}',
+        '-c:a', 'libmp3lame', '-q:a', '2',
+        str(temporary),
+    ]
+    proc = run_cmd(command, timeout=180)
+    if proc.returncode != 0 or not temporary.exists():
+        raise RuntimeError(f'V28 配音尾部保护失败：{proc.stderr[-900:]}')
+    temporary.replace(path)
+    final = probe_duration(path)
+    if final < original + max(0.28, seconds - 0.12):
+        raise RuntimeError(f'V28 配音尾部保护长度不足：before={original:.3f}, after={final:.3f}')
+    return final
+
+
+async def synthesize_tts_segments(settings: Settings, segments: list[VoiceSegment], voice: Optional[str] = None, overall_rate: Optional[str] = None) -> Tuple[Path, float, Optional[str], list[dict[str, Any]]]:
+    output, duration, warning, timings = await _V27_SYNTHESIZE_TTS_SEGMENTS(
+        settings, segments, voice=voice, overall_rate=overall_rate
+    )
+    speech_end = max((float(item.get('end') or 0.0) for item in timings if isinstance(item, dict)), default=duration)
+    final_duration = await asyncio.to_thread(_v28_append_audio_tail, output)
+    tail_seconds = max(0.0, final_duration - speech_end)
+    if tail_seconds < 0.32:
+        raise RuntimeError(
+            f'V28 配音尾部安全区不足：speech_end={speech_end:.3f}, audio={final_duration:.3f}'
+        )
+    for item in timings:
+        if isinstance(item, dict):
+            item['tts_audio_duration_seconds'] = round(final_duration, 4)
+            item['tts_tail_hold_seconds'] = round(tail_seconds, 4)
+    return output, final_duration, warning, timings

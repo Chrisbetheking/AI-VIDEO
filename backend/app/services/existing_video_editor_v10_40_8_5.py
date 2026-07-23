@@ -31,7 +31,7 @@ from app.services.a10_r4_output_guard_v10_40_8_12 import (
     measure_audio_loudness,
 )
 
-VERSION = "10.40.8.27-reference-driven-teaching-effects-gate"
+VERSION = "10.40.8.28-semantic-editor-engine"
 # REAL_TTS_CHILD_MASTER_SYNC_R9
 # V10_40_8_12_A10_R4_SEMANTIC_SINGLE_USE_AUDIO: strict visual single-use, semantic coverage, fresh ending, -16 LUFS
 # V10_40_8_8_A10_R3_GLOBAL_VISUAL_DEDUP: whole-video repetition guard
@@ -1674,3 +1674,64 @@ def install_existing_video_editor(
         return item
 
     _INSTALLED = True
+
+
+# =============================================================================
+# V10.40.8.28 SEMANTIC EDITOR ENGINE — AUDIO-AUTHORITATIVE FINAL LENGTH
+# =============================================================================
+_V27_MIX = _mix
+
+
+def _mix(base: Path, tts: Path | None, mode: str, destination: Path) -> dict[str, Any]:
+    """The final duration follows the complete TTS file, never a UI duration hint."""
+    base_info = _probe(base)
+    base_duration = max(0.1, float(base_info.get('duration') or 0.0))
+    if mode == 'retain_original' or not tts:
+        _V27_MIX(base, tts, mode, destination)
+        result = _probe(destination)
+        return {
+            'source': 'original_audio',
+            'base_duration': round(base_duration, 4),
+            'output_duration': round(float(result.get('duration') or 0.0), 4),
+        }
+
+    tts_duration = max(0.1, float((_probe(tts) or {}).get('duration') or 0.0))
+    target = tts_duration
+    loudnorm = 'loudnorm=I=-16:LRA=7:TP=-1.8:linear=true:print_format=summary'
+    chains = [
+        f'[0:v]tpad=stop_mode=clone:stop_duration={max(0.0,target-base_duration+1.0):.3f},trim=duration={target:.3f},setpts=PTS-STARTPTS[v]',
+        f'[1:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,atrim=0:{target:.3f},apad=pad_dur={target:.3f},atrim=duration={target:.3f},volume=1[voice]',
+    ]
+    if mode == 'tts_with_ambient' and base_info.get('has_audio'):
+        chains.append(
+            f'[0:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,'
+            f'atrim=0:{target:.3f},apad=pad_dur={target:.3f},atrim=duration={target:.3f},volume=0.10[amb]'
+        )
+        chains.append(f'[amb][voice]amix=inputs=2:duration=longest:normalize=0,{loudnorm},atrim=duration={target:.3f}[a]')
+    else:
+        chains.append(f'[voice]{loudnorm},atrim=duration={target:.3f}[a]')
+    command = [
+        'ffmpeg', '-y', '-hide_banner', '-loglevel', 'error',
+        '-i', str(base), '-i', str(tts),
+        '-filter_complex', ';'.join(chains),
+        '-map', '[v]', '-map', '[a]',
+        '-t', f'{target:.3f}',
+        '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-pix_fmt', 'yuv420p',
+        '-c:a', 'aac', '-b:a', '192k', '-ar', '48000', '-ac', '2',
+        '-movflags', '+faststart', str(destination),
+    ]
+    _run(command, 3600)
+    result = _probe(destination)
+    output_duration = float(result.get('duration') or 0.0)
+    if output_duration < target - 0.08:
+        raise RuntimeError(
+            f'V28 成片短于完整配音：tts={target:.3f}, output={output_duration:.3f}'
+        )
+    return {
+        'source': 'real_tts_audio',
+        'base_duration': round(base_duration, 4),
+        'tts_duration': round(tts_duration, 4),
+        'output_duration': round(output_duration, 4),
+        'shortest_disabled': True,
+        'picture_tail_extended': target > base_duration,
+    }

@@ -28,7 +28,7 @@ export interface StoredConfig {
   stickerStyle: DynamicStickerStyle
 }
 
-const STORAGE_KEY = 'ai-video-dynamic-edit-v2-v20'
+const STORAGE_KEY = 'ai-video-semantic-editor-v28'
 const DEFAULT_CONFIG: StoredConfig = {
   engine: 'dynamic_v2', intensity: 'balanced', shotDirector: 'ai_auto',
   subtitleStyle: 'dynamic_white_yellow', captionSize: 118, captionMotion: 'smart_mix', captionPosition: 'auto',
@@ -112,7 +112,7 @@ export default function DynamicEditV2Selector({shotCount=0}:{shotCount?:number})
 
   return <section className="dynamic-edit-v2-shell v19" data-dynamic-edit-v2="true" data-placement="shot-plan-section">
     <div className="v19-topline">
-      <div className="v19-title"><span>V10.40.8.20 · REAL TTS DIRECTOR</span><h4>剪辑引擎与动效</h4><p>V10_40_8_20_REAL_TTS_SEMANTIC_GENERATION_FIX：生成任务先完成逐句 TTS，再按真实 start/end 重排镜头；页面不再用平均秒数冒充最终时长。</p></div>
+      <div className="v19-title"><span>V10.40.8.28 · SEMANTIC EDITOR</span><h4>AI 教学口播精剪</h4><p>真实 TTS 决定最终时长；DeepSeek 只决定语义镜头、对比卡、流程卡、风险提醒、清单、CTA 和声音触发，不使用固定秒数裁剪。</p></div>
       <div className="v19-shot-status"><strong>{shotCount}</strong><span>上一页镜头</span></div>
     </div>
 
@@ -146,12 +146,12 @@ export default function DynamicEditV2Selector({shotCount=0}:{shotCount?:number})
       </div>}
 
       {tab==='sound' && <div className="v19-compact-grid">
-        <article className="v19-ai-card primary"><div><b>专业短视频 CC0 音效库</b><span>使用独立 whoosh、impact、pop、camera、success 音效；不再使用旧版自制 WAV，也不再统一裁成 0.62 秒。</span></div><i>PRO</i></article>
+        <article className="v19-ai-card primary"><div><b>官方许可专业音效库</b><span>按钩子、对比、流程、风险、证据和 CTA 分配不同声音；记录来源与许可证，不使用旧版自制垃圾 WAV。</span></div><i>PRO</i></article>
         <label className="v19-field"><span>音效强度</span><select value={config.sfxLevel} onChange={(e:ChangeEvent<HTMLSelectElement>)=>setConfig(c=>({...c,sfxLevel:e.target.value as DynamicSfxLevel}))}><option value="off">关闭</option><option value="light">专业轻量（推荐）</option><option value="balanced">专业标准</option><option value="strong">专业强化</option></select></label>
         <label className="v19-field"><span>音效风格</span><select value={config.sfxPack} onChange={(e:ChangeEvent<HTMLSelectElement>)=>setConfig(c=>({...c,sfxPack:e.target.value as DynamicSfxPack}))}><option value="pro_short_video">短视频通用</option><option value="pro_clean_ui">干净 UI / Pop</option><option value="pro_cinematic_light">轻电影感</option></select></label>
-        <label className="v19-field"><span>贴纸密度</span><select value={config.stickerLevel} onChange={(e:ChangeEvent<HTMLSelectElement>)=>setConfig(c=>({...c,stickerLevel:e.target.value as DynamicStickerLevel}))}><option value="off">关闭</option><option value="light">少量（推荐）</option><option value="balanced">均衡</option><option value="rich">丰富</option></select></label>
-        <label className="v19-field"><span>贴纸风格</span><select value={config.stickerStyle} onChange={(e:ChangeEvent<HTMLSelectElement>)=>setConfig(c=>({...c,stickerStyle:e.target.value as DynamicStickerStyle}))}><option value="smart_mix">图标 + 手绘</option><option value="icons">主题图标</option><option value="doodles">手绘线条</option></select></label>
-        <label className="v19-field"><span>贴纸位置</span><select value={config.stickerLayout} onChange={(e:ChangeEvent<HTMLSelectElement>)=>setConfig(c=>({...c,stickerLayout:e.target.value as DynamicStickerLayout}))}><option value="auto_safe">自动安全区</option><option value="top">上方两角</option><option value="side">左右侧边</option></select></label>
+        <label className="v19-field"><span>教学组件密度</span><select value={config.stickerLevel} onChange={(e:ChangeEvent<HTMLSelectElement>)=>setConfig(c=>({...c,stickerLevel:e.target.value as DynamicStickerLevel}))}><option value="off">关闭</option><option value="light">少量（推荐）</option><option value="balanced">均衡</option><option value="rich">丰富</option></select></label>
+        <label className="v19-field"><span>教学组件风格</span><select value={config.stickerStyle} onChange={(e:ChangeEvent<HTMLSelectElement>)=>setConfig(c=>({...c,stickerStyle:e.target.value as DynamicStickerStyle}))}><option value="smart_mix">语义信息卡（推荐）</option><option value="icons">极简图标卡</option><option value="doodles">轻量标注线</option></select></label>
+        <label className="v19-field"><span>教学组件位置</span><select value={config.stickerLayout} onChange={(e:ChangeEvent<HTMLSelectElement>)=>setConfig(c=>({...c,stickerLayout:e.target.value as DynamicStickerLayout}))}><option value="auto_safe">自动安全区</option><option value="top">上方两角</option><option value="side">左右侧边</option></select></label>
       </div>}
 
       {tab==='rules' && <div className="v19-rule-grid"><article><b>镜头时长</b><span>来自口播时间和 AI beat，不再读人工“舒缓 / 均衡 / 紧凑”秒数。</span></article><article><b>素材一致性</b><span>上一页镜头作为优先素材池，缺 URL 自动回查 R2，不再出现 1 镜头 / 0 素材。</span></article><article><b>重复控制</b><span>同任务唯一素材优先，跨任务读取使用记录后降权。</span></article><article><b>音效规则</b><span>同音效不连续；普通段落至少间隔 4 秒，实体清单只在开头做一次轻提示。</span></article><article><b>字幕完整性</b><span>字幕动效和切镜解耦，完整词组不拆散。</span></article><article><b>音画收口</b><span>最终时长以音轨为准，尾部差值超过 0.25 秒直接失败。</span></article></div>}

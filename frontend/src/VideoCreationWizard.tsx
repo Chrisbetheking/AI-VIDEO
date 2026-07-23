@@ -367,7 +367,7 @@ const STEP_TITLES: Record<WizardStep, string> = {
 }
 
 const STEP_DESC: Record<WizardStep, string> = {
-  1: '主题、同行来源、目标时长、城市和关键词先确定。',
+  1: '主题、同行来源、文案长度参考、城市和关键词先确定；成片不按预设秒数裁剪。',
   2: '保留逐句调语速、语调、语气、音量和停顿；不点句子不展开。',
   3: '默认生成 3 个同主题动态角度，不再九宫格；画面会轻微推拉和平移。',
   4: '调用原有 TTS-first 后端，成片后继续接 OpenClaw 人工待处理。',
@@ -730,13 +730,6 @@ function buildPrompt(city: string, scene: string, _narration: string, index = 1)
   return `Premium 9:16 cinematic vertical video for Malaysia real-estate content.\nShot ${index} main scene: ${scene}.\n${klRule}\nVisual-only rule: never render narration, subtitles, captions, headlines, stickers, labels, UI, logos, watermarks, signs, letters, numbers or pseudo-text inside the generated image. The picture must contain zero readable or unreadable text. Single-scene rule: one full-screen continuous camera shot only, not a montage, not split screen and not a panel layout. Ultra realistic, natural lighting, clean composition, high detail, smooth camera movement, no black borders, no documents, no papers, no charts, no screenshots.`
 }
 
-// V10_40_8_20_REAL_TTS_SEMANTIC_GENERATION_FIX: do not invent equal 3.5-second shots before TTS exists.
-// Other Step 3 summaries still use this helper to estimate card count.
-// It is intentionally preserved, but never used to assign shot durations.
-function targetShotCount(duration: number) {
-  return Math.max(4, Math.min(12, Math.ceil(Number(duration || 20) / 4)))
-}
-
 function segmentRealTtsDuration(segment?: ScriptSegment): number {
   const item = (segment || {}) as ScriptSegment & Record<string, any>
   const start = Number(item.start ?? item.start_time ?? item.speech_start)
@@ -962,6 +955,7 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
   const [manualKeywords, setManualKeywords] = useState(String(initialDraft.manualKeywords || ''))
   const [manualKeywordDraft, setManualKeywordDraft] = useState(String(initialDraft.manualKeywordDraft || ''))
   const [script, setScript] = useState(() => { const raw = String(initialDraft.script || project.script || ''); return scriptLooksPolluted(raw) ? '' : raw })
+  const [productionBrief, setProductionBrief] = useState(String(initialDraft.productionBrief || project.productionBrief || ''))
   const [selectedSegmentId, setSelectedSegmentId] = useState(String(initialDraft.selectedSegmentId || 'seg_1'))
   const [voiceSettings, setVoiceSettings] = useState<Record<string, SegmentVoiceSetting>>((initialDraft.voiceSettings || project.segment_voice_settings || {}) as Record<string, SegmentVoiceSetting>)
   const [shotPlan, setShotPlan] = useState<ShotPlan[]>(Array.isArray(initialDraft.shotPlan) ? initialDraft.shotPlan : [])
@@ -1007,7 +1001,7 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
   const wizardDraftSnapshot = useMemo(() => ({
     step, sourceMode, creationMode, existingVoiceMode, outputRatio, editPace,
     topic, market, city, contentType, scriptMode, targetDuration,
-    competitorSource, manualKeywords, manualKeywordDraft, script,
+    competitorSource, manualKeywords, manualKeywordDraft, script, productionBrief,
     selectedSegmentId, voiceSettings, shotPlan, selectedShotId,
     jobId, job, sourceResult, selectedKnowledgeIds, disabledKeywordValues,
     aiKeywordInsights, aiStatus, buttonStatus, subtitleEnabled,
@@ -1015,7 +1009,7 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
   }), [
     step, sourceMode, creationMode, existingVoiceMode, outputRatio, editPace,
     topic, market, city, contentType, scriptMode, targetDuration,
-    competitorSource, manualKeywords, manualKeywordDraft, script,
+    competitorSource, manualKeywords, manualKeywordDraft, script, productionBrief,
     selectedSegmentId, voiceSettings, shotPlan, selectedShotId,
     jobId, job, sourceResult, selectedKnowledgeIds, disabledKeywordValues,
     aiKeywordInsights, aiStatus, buttonStatus, subtitleEnabled,
@@ -1105,7 +1099,6 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
       currentJob.audio_duration_seconds
       || coverage.actual_tts_seconds
       || plan.target_duration_seconds
-      || targetDuration
       || 0,
     )
     const manualCount = Number(coverage.manual_selected_count || selectedVideos.length || 0)
@@ -1132,7 +1125,7 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
       realTtsReplanned: Boolean(coverage.real_tts_replanned),
       status: String(coverage.status || (uniqueSourceSeconds >= actualTtsSeconds ? 'covered' : 'waiting_tts')),
     }
-  }, [job, selectedVideos, targetDuration])
+  }, [job, selectedVideos])
   const avatarConfig = project.avatar_config || null
   const currentTaskLeads = asArray(project.current_task_leads).filter((item: any) => {
     const bound = String(item?.job_id || item?.run_id || item?.video_job_id || '')
@@ -1850,8 +1843,9 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
       creation_mode: 'existing_edit',
       script_text: script,
       script,
-      target_duration_seconds: targetDuration,
-      duration_seconds: targetDuration,
+      duration_hint_seconds: targetDuration,
+      duration_policy: 'real_tts_authoritative_no_fixed_cut',
+      production_brief: productionBrief,
       output_ratio: outputRatio,
       edit_pace: editPace,
       voice_mode: existingVoiceMode,
@@ -1875,7 +1869,7 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
           description: shot.analysisDescription || shot.scene,
           narration: shot.narration,
           duration: shot.duration,
-          duration_seconds: shot.duration,
+          ...(shot.duration > 0 && !shot.durationProvisional ? { duration_seconds: shot.duration } : {}),
           source: 'r2',
           asset_id: shot.assetId || shot.assetIds[0] || '',
           asset_ids: shot.assetIds,
@@ -2084,6 +2078,7 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
       ignored_brain_cards: nonVideoBrainCards.map((card) => ({ id: card.id, title: card.title, type: card.type })),
       source_result: sourceData,
       current_script: script,
+      production_brief: productionBrief,
       require_llm: true,
     }
   }
@@ -2461,7 +2456,6 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
       selected_assets: cleanAssets,
       r2_material_context: cleanAssets,
     })
-    const requiredShotCount = targetShotCount(targetDuration)
     const baseShots = shotPlan.length
       ? shotPlan.map((shot, index) => {
           const segment = cleanSegments[index % Math.max(cleanSegments.length, 1)]
@@ -2477,8 +2471,10 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
         })
       : []
     const generatedShots = generateShotPlan(cleanSegments, targetDuration, city, finalProject)
-    const finalShots = Array.from({ length: requiredShotCount }, (_, index) => {
-      const source = baseShots[index] || generatedShots[index]
+    // V28 R15: rendering shot count follows semantic sentence/plan count, never the UI length hint.
+    const semanticShotCount = Math.max(cleanSegments.length, baseShots.length, generatedShots.length, 1)
+    const finalShots = Array.from({ length: semanticShotCount }, (_, index) => {
+      const source = baseShots[index] || generatedShots[index] || generatedShots[generatedShots.length - 1]
       const segment = cleanSegments[index % Math.max(cleanSegments.length, 1)]
       return {
         ...source,
@@ -2488,7 +2484,7 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
         prompt: buildPrompt(city, source?.scene || generatedShots[index]?.scene || '', '', index + 1),
       }
     })
-    const renderShotCount = requiredShotCount
+    const renderShotCount = finalShots.length
 
     setScript(cleanScript)
     if (cleanAssets.length !== selectedAssets.length) {
@@ -2503,8 +2499,9 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
       content_type: contentType,
       script_mode: scriptMode,
       script_text: cleanScript,
-      target_duration_seconds: targetDuration,
-      duration_seconds: targetDuration,
+      duration_hint_seconds: targetDuration,
+      duration_policy: 'real_tts_authoritative_no_fixed_cut',
+      production_brief: productionBrief,
       width: 1080,
       height: 1920,
       fps: 30,
@@ -2514,7 +2511,7 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
         visual_prompt: buildPrompt(city, shot.scene, '', shot.index),
         negative_prompt: 'text, subtitles, captions, title, headline, sticker, label, logo, watermark, sign, letters, numbers, pseudo text, gibberish text, UI, split screen, collage, black border',
         narration_segment: cleanSegmentText(shot.narration),
-        duration_seconds: shot.duration,
+        ...(shot.duration > 0 && !shot.durationProvisional ? { duration_seconds: shot.duration } : {}),
         source: shot.source,
         asset_ids: shot.assetIds,
         reject_embedded_text: true,
@@ -2522,7 +2519,7 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
       max_shots: renderShotCount,
       fal_fill_shots: renderShotCount,
       dynamic_shot_count: renderShotCount,
-      min_unique_shots: Math.max(4, Math.min(renderShotCount, 8)),
+      min_unique_shots: Math.max(1, Math.min(renderShotCount, 8)),
       no_repeat_visuals: true,
       shot_duration_policy: 'follow_audio_duration_no_repeat',
       visual_policy: 'real_condo_tour_no_office_no_papers_no_text',
@@ -2739,7 +2736,7 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
             <label>市场<input value={market} onChange={(e) => setMarket(e.target.value)} /></label>
             <label>城市<select value={city} onChange={(e) => setCity(e.target.value)}>{CITY_OPTIONS.map((item) => <option key={item.key} value={item.key}>{item.label}</option>)}</select></label>
             <label>主题/选题<input value={topic} onChange={(e) => setTopic(e.target.value)} placeholder={sourceMode === 'custom' ? '直接输入要生成的视频主题' : '采集结果会结合这个主题生成文案'} /></label>
-            <label>目标时长<select value={targetDuration} onChange={(e) => setTargetDuration(Number(e.target.value))}><option value={15}>15 秒</option><option value={20}>20 秒</option><option value={30}>30 秒</option><option value={45}>45 秒</option><option value={60}>60 秒</option></select></label>
+            <label>文案长度参考（不裁剪）<select value={targetDuration} onChange={(e) => setTargetDuration(Number(e.target.value))}><option value={15}>15 秒</option><option value={20}>20 秒</option><option value={30}>30 秒</option><option value={45}>45 秒</option><option value={60}>60 秒</option></select></label>
             <label>内容方向<select value={contentType} onChange={(e) => setContentType(e.target.value as ContentType)}>{Object.entries(CONTENT_LABELS).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label>
             <label>文案模式<select value={scriptMode} onChange={(e) => setScriptMode(e.target.value as ScriptMode)}>{Object.entries(SCRIPT_LABELS).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label>
             <label>来源状态<input readOnly value={sourceResult ? '已下发/已返回采集任务' : sourceMode === 'custom' ? '不采集，直接生成' : '等待下发真实采集'} /></label>
@@ -3193,7 +3190,7 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
               <button key={shot.id} className={selectedShot?.id === shot.id ? 'active' : ''} onClick={() => setSelectedShotId(shot.id)}>
                 <span>{String(shot.index).padStart(2, '0')}</span>
                 <b>{shot.title}</b>
-                <em>{shot.duration}s · {shot.source}</em>
+                <em>{shot.durationProvisional || !shot.duration ? '配音后确定' : `${shot.duration.toFixed(1)}s`} · {shot.source}</em>
               </button>
             ))}
           </div>
@@ -3205,7 +3202,7 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
               <label>镜头标题<input value={selectedShot.title} onChange={(e) => updateShot(selectedShot.id, { title: e.target.value })} /></label>
               <label>画面主体<textarea value={selectedShot.scene} onChange={(e) => updateShot(selectedShot.id, { scene: e.target.value, title: e.target.value })} /></label>
               <label>对应口播<textarea value={selectedShot.narration} onChange={(e) => updateShot(selectedShot.id, { narration: e.target.value })} /></label>
-              <label>时长秒<input type="number" value={selectedShot.duration} onChange={(e) => updateShot(selectedShot.id, { duration: Number(e.target.value) })} /></label>
+              <label>镜头时长<input type="text" readOnly value={selectedShot.durationProvisional || !selectedShot.duration ? '真实配音后自动确定' : `${selectedShot.duration.toFixed(2)} 秒（真实 TTS）`} /></label>
               <label>素材来源<select value={selectedShot.source} onChange={(e) => updateShot(selectedShot.id, { source: e.target.value as MaterialSource })}><option value="r2">R2 素材</option><option value="real">真实素材</option><option value="ai">AI 补足</option><option value="mixed">混合</option></select></label>
               <label>运镜<input value={selectedShot.camera} onChange={(e) => updateShot(selectedShot.id, { camera: e.target.value })} /></label>
               <label>转场<input value={selectedShot.transition} onChange={(e) => updateShot(selectedShot.id, { transition: e.target.value })} /></label>
@@ -3228,6 +3225,17 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
             <textarea className="aiw-promptBox" value={selectedShot.prompt} onChange={(e) => updateShot(selectedShot.id, { prompt: e.target.value })} />
             <div className="aiw-chipRow">{selectedShot.avoid.map((item) => <span className="aiw-badPill" key={item}>{item}</span>)}</div>
           </>}
+
+          <h4>AI 剪辑策划</h4>
+          <label className="aiw-form one">
+            <span>素材包 / 教学结构摘要（可选）</span>
+            <textarea
+              value={productionBrief}
+              onChange={(e) => setProductionBrief(e.target.value)}
+              placeholder="例如：0-3 秒问题钩子；核心对比用对比卡；三项提醒逐条出现；结尾完整说完并保留 0.5 秒尾音。此处只提供结构，不固定成片时长。"
+            />
+          </label>
+          <div className="aiw-info">目标时长只用于估算文案长度，不会裁剪真实 TTS。镜头时长、字幕、效果和最终总长均以真实配音时间为准。</div>
           {renderSubtitleLibrary()}
           <h4>当前素材上下文</h4>
           <div className="aiw-miniList">{selectedAssets.slice(0, 6).map((asset: any, index) => <div key={asset.id || asset.url || index}>{asset.name || asset.original_name || asset.filename || asset.url}</div>)}</div>
@@ -3463,8 +3471,8 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
             <div>
               <span>镜头 / R2</span>
               <b>
-                {job?.shot_count || 1} 个镜头 /{' '}
-                {selectedAssets.length} 个素材
+                {Number(job?.shot_count || job?.semantic_master_shot_count || job?.semantic_shot_plan?.clips?.length || shotPlan.length || 0)} 个镜头 /{' '}
+                {Number(job?.asset_usage_report?.unique_asset_count || job?.unique_asset_count || job?.selected_asset_count || selectedAssets.length || 0)} 个素材
               </b>
             </div>
             <div>

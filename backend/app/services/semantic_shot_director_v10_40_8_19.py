@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-VERSION = "10.40.8.27-reference-driven-teaching-effects-gate"
+VERSION = "10.40.8.28-semantic-editor-engine"
 # REAL_TTS_CHILD_MASTER_SYNC_R9
 REGISTRY_FILE = "existing_edit_asset_usage.json"
 _REGISTRY_LOCK = threading.RLock()
@@ -789,3 +789,63 @@ def record_success(settings: Any, job_id: str, clips: list[dict[str, Any]]) -> d
         jobs[job_id] = {"asset_ids": ids, "unique_asset_ids": list(dict.fromkeys(ids)), "created_at": _now()}
         _save_registry(settings, data)
     return {"ok": True, "job_id": job_id, "asset_ids": ids, "unique_asset_count": len(set(ids)), "repeat_count": max(0, len(ids) - len(set(ids))), "registry_file": str(_registry_path(settings))}
+
+
+# =============================================================================
+# V10.40.8.28 SEMANTIC EDITOR ENGINE — TEACHING COMPONENT PLAN
+# =============================================================================
+def _v28_component_type(text: str, beat_type: str = '') -> str:
+    value = _text(text)
+    if re.search(r'(流程|第一步|第二步|第三步|签署|支付.*抵扣)', value):
+        return 'flow'
+    if re.search(r'(三件事|三点|分别|①|②|③|清单|确认)', value):
+        return 'checklist'
+    if re.search(r'(不等于|≠|不是.*而是|自住.*投资|投资.*自住|对比|区别)', value):
+        return 'comparison'
+    if re.search(r'(风险|注意|别被|不要|避免|误区|搞错)', value):
+        return 'risk'
+    if re.search(r'(评论|留言|关注|下一条|告诉我|私信)', value):
+        return 'cta'
+    if re.search(r'(为什么|怎么|到底|吗|？)', value):
+        return 'question'
+    if beat_type == 'entity_burst':
+        return 'entity_labels'
+    if beat_type in {'evidence'}:
+        return 'evidence'
+    return 'caption_emphasis'
+
+
+_V27_BUILD_PLAN = build_plan
+
+
+def build_plan(settings: Any, payload: dict[str, Any], job_id: str) -> dict[str, Any]:
+    # UI target duration is a planning hint only. Real start/end values win.
+    next_payload = dict(payload)
+    units = next_payload.get('semantic_speech_units') or next_payload.get('tts_segments') or []
+    real_end = max(
+        (_safe_float(item.get('end'), 0.0) for item in units if isinstance(item, dict)),
+        default=0.0,
+    )
+    if real_end > 0:
+        next_payload['target_duration_seconds'] = real_end
+        next_payload['duration'] = real_end
+    plan = _V27_BUILD_PLAN(settings, next_payload, job_id)
+    components = []
+    for index, clip in enumerate(plan.get('clips') or [], start=1):
+        narration = _text(clip.get('narration'))
+        beat_type = _text(clip.get('beat_type'))
+        component = _v28_component_type(narration, beat_type)
+        clip['teaching_component'] = component
+        if component != 'caption_emphasis':
+            components.append({
+                'id': f'component_{index}',
+                'clip_id': clip.get('id'),
+                'type': component,
+                'text': narration[:42],
+                'start': _safe_float(clip.get('start_time'), 0.0),
+                'duration': _safe_float(clip.get('duration'), 0.0),
+            })
+    plan['teaching_components'] = components
+    plan['duration_policy'] = 'real_tts_authoritative_no_fixed_cut'
+    plan['production_brief_used'] = bool(_text(next_payload.get('production_brief')))
+    return plan
