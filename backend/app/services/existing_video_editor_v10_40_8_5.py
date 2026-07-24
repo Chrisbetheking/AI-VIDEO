@@ -32,8 +32,8 @@ from app.services.a10_r4_output_guard_v10_40_8_12 import (
     measure_audio_loudness,
 )
 
-VERSION = "10.40.8.37.1.2-semantic-cta-visual-fallback"
-# V10_40_8_37_1_2_SEMANTIC_CTA_VISUAL_FALLBACK
+VERSION = "10.40.8.37.1.3-global-capacity-preconsolidation"
+# V10_40_8_37_1_3_GLOBAL_CAPACITY_PRECONSOLIDATION
 # V10_40_8_37_1_1_CTA_CLASSIFIER_TRAFFIC_INTENT_HOTFIX
 # V10_40_8_37_1_ADAPTIVE_UNIQUE_ASSET_CAPACITY
 # V10_40_8_37_INLINE_KEYWORD_ENTITY_MICROCUT_CTA
@@ -506,6 +506,329 @@ def _v3712_cta_has_concrete_intent(
     )
 
 
+
+_V3713_PROXIMITY_PATTERN = re.compile(
+    r"地图|步行|分钟|附近|周边|半径|范围|路线|距离|生活圈|map|walk|minute|nearby|radius|route|distance",
+    re.I,
+)
+_V3713_AMENITY_INTENTS = {
+    "mall", "school", "hospital", "office", "residential",
+}
+
+
+def _v3713_contextual_intent_match(
+    requested: set[str],
+    candidate_keys: set[str],
+    family: str,
+    narration: str = "",
+) -> bool:
+    """Match a real scene without treating a map-led amenity check as wrong.
+
+    A sentence such as "打开地图，看步行十分钟内有没有超市" is visually
+    valid on either a POI/route map or a real supermarket shot.  Earlier final
+    gates only saw requested=[mall], rejected the map, and then aborted when no
+    unused mall asset existed.
+    """
+    if _v35_intent_match(requested, candidate_keys, family):
+        return True
+
+    text = str(narration or "")
+    proximity = bool(_V3713_PROXIMITY_PATTERN.search(text))
+    has_map = "map" in candidate_keys or family == "map"
+    has_traffic = "traffic" in candidate_keys or family == "traffic"
+
+    if proximity and requested & _V3713_AMENITY_INTENTS and (has_map or has_traffic):
+        return True
+    if proximity and requested == {"map"} and (
+        candidate_keys & _V3713_AMENITY_INTENTS or has_traffic
+    ):
+        return True
+    return False
+
+
+def _v3713_clip_requested(clip: dict[str, Any]) -> set[str]:
+    return _v35_intent_keys(clip.get("semantic_requested_intents") or [])
+
+
+def _v3713_pair_merge_score(
+    previous: dict[str, Any],
+    current: dict[str, Any],
+    *,
+    index: int,
+    total: int,
+    identity_counts: dict[str, int] | None = None,
+) -> float | None:
+    previous_duration = float(
+        previous.get("duration") or previous.get("duration_seconds") or 0.0
+    )
+    current_duration = float(
+        current.get("duration") or current.get("duration_seconds") or 0.0
+    )
+    combined = previous_duration + current_duration
+    if combined <= 0 or combined > 8.2:
+        return None
+
+    previous_focus = _v371_focus_entity(previous)
+    current_focus = _v371_focus_entity(current)
+    distinct_micro = bool(
+        previous_focus
+        and current_focus
+        and previous_focus != current_focus
+        and (previous.get("entity_micro_cut") or current.get("entity_micro_cut"))
+    )
+
+    previous_requested = _v3713_clip_requested(previous)
+    current_requested = _v3713_clip_requested(current)
+    previous_family = str(previous.get("visual_family") or "").strip().lower()
+    current_family = str(current.get("visual_family") or "").strip().lower()
+    previous_id = _v35_clip_identity(previous)
+    current_id = _v35_clip_identity(current)
+    narration = " ".join([
+        str(previous.get("narration") or previous.get("text") or ""),
+        str(current.get("narration") or current.get("text") or ""),
+    ])
+
+    score = 0.0
+    counts = identity_counts or {}
+    if previous_id and previous_id == current_id:
+        score += 220.0
+    elif previous_id and current_id:
+        previous_repeated = counts.get(previous_id, 0) > 1
+        current_repeated = counts.get(current_id, 0) > 1
+        if previous_repeated != current_repeated:
+            # Prefer a merge that removes one repeated binding while retaining
+            # a unique, semantically usable neighbor.
+            score += 125.0
+
+    merged_requested = previous_requested | current_requested
+    previous_binding_score = _v3713_binding_match_score(
+        previous, merged_requested, narration
+    )
+    current_binding_score = _v3713_binding_match_score(
+        current, merged_requested, narration
+    )
+    if (previous_binding_score >= 0) != (current_binding_score >= 0):
+        score += 145.0
+
+    if previous_requested & current_requested:
+        score += 150.0
+    if previous_family and previous_family == current_family:
+        score += 105.0
+    if not previous_requested or not current_requested:
+        score += 20.0
+
+    map_amenity_bridge = bool(
+        _V3713_PROXIMITY_PATTERN.search(narration)
+        and (
+            ("map" in previous_requested or previous_family == "map")
+            and bool(current_requested & _V3713_AMENITY_INTENTS)
+            or ("map" in current_requested or current_family == "map")
+            and bool(previous_requested & _V3713_AMENITY_INTENTS)
+        )
+    )
+    if map_amenity_bridge:
+        score += 190.0
+
+    traffic_map_bridge = bool(
+        (previous_requested | {previous_family}) & {"traffic", "map"}
+        and (current_requested | {current_family}) & {"traffic", "map"}
+    )
+    if traffic_map_bridge:
+        score += 120.0
+
+    if _v35_is_final_cta(current, index, total):
+        if previous_requested & current_requested:
+            score += 130.0
+        elif map_amenity_bridge or traffic_map_bridge:
+            score += 90.0
+
+    if distinct_micro:
+        score -= 260.0
+    score -= combined * 3.0
+
+    # Do not merge unrelated, concrete beats just to satisfy a counter.  At
+    # least one real semantic bridge must exist.
+    if score < 45.0:
+        return None
+    return score
+
+
+
+_V3713_VISUAL_BINDING_KEYS = (
+    "asset_id", "source_asset_id", "asset_ids", "asset_url", "asset_name",
+    "title", "scene", "description", "analysis_description", "visual_family",
+    "source", "selection_source", "manual_locked", "auto_start", "speed",
+)
+
+
+def _v3713_binding_match_score(
+    clip: dict[str, Any], requested: set[str], narration: str,
+) -> float:
+    family = str(clip.get("visual_family") or "").strip().lower()
+    if not family or family == "general":
+        family = _v35_visual_family(_v35_clip_text(clip))
+    keys = _v361_clip_intent_keys(clip, family)
+    if not _v3713_contextual_intent_match(requested, keys, family, narration):
+        return -1000.0
+    overlap = requested & keys
+    score = 100.0 + 80.0 * len(overlap)
+    if family == "map" and _V3713_PROXIMITY_PATTERN.search(narration):
+        score += 60.0
+    return score
+
+
+def _v3713_merge_adjacent_pair(
+    previous: dict[str, Any],
+    current: dict[str, Any],
+    *,
+    reasons: list[str],
+    identity_counts: dict[str, int],
+) -> dict[str, Any]:
+    merged = _v371_merge_into_previous(previous, current, reasons=reasons)
+    requested = _v3713_clip_requested(previous) | _v3713_clip_requested(current)
+    narration = " ".join([
+        str(previous.get("narration") or previous.get("text") or ""),
+        str(current.get("narration") or current.get("text") or ""),
+    ])
+
+    previous_id = _v35_clip_identity(previous)
+    current_id = _v35_clip_identity(current)
+    previous_score = _v3713_binding_match_score(previous, requested, narration)
+    current_score = _v3713_binding_match_score(current, requested, narration)
+
+    # Prefer a semantically valid binding that is less duplicated globally.
+    previous_score -= 35.0 * max(0, identity_counts.get(previous_id, 0) - 1)
+    current_score -= 35.0 * max(0, identity_counts.get(current_id, 0) - 1)
+
+    source = current if current_score > previous_score else previous
+    if source is current:
+        for key in _V3713_VISUAL_BINDING_KEYS:
+            if key in current:
+                merged[key] = current[key]
+        merged["capacity_visual_binding_source"] = "current"
+    else:
+        merged["capacity_visual_binding_source"] = "previous"
+    return merged
+
+
+def _v3713_preconsolidate_to_bound_capacity(
+    clips: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Reduce planned shots before the hard gate when bound unique assets are fewer.
+
+    This is the missing global step.  V37.1.x only tried to repair one failed
+    shot at a time, so 11 planned shots backed by 8 unique assets could still
+    reach an impossible final gate.  We now merge the safest adjacent semantic
+    pairs first, while preserving concrete entity micro-cuts whenever possible.
+    """
+    working = [dict(item) for item in clips if isinstance(item, dict)]
+    unique_bound = {
+        _v35_clip_identity(item)
+        for item in working
+        if _v35_clip_identity(item)
+    }
+    target = len(unique_bound)
+    if target <= 0 or len(working) <= target:
+        return working, []
+
+    consolidations: list[dict[str, Any]] = []
+    while len(working) > target:
+        identity_counts: dict[str, int] = {}
+        for item in working:
+            identity = _v35_clip_identity(item)
+            if identity:
+                identity_counts[identity] = identity_counts.get(identity, 0) + 1
+
+        candidates: list[tuple[float, int]] = []
+        total = len(working)
+        for idx in range(1, total):
+            score = _v3713_pair_merge_score(
+                working[idx - 1],
+                working[idx],
+                index=idx,
+                total=total,
+                identity_counts=identity_counts,
+            )
+            if score is not None:
+                candidates.append((score, idx))
+
+        if not candidates:
+            break
+
+        candidates.sort(key=lambda item: (item[0], -item[1]), reverse=True)
+        score, idx = candidates[0]
+        previous = dict(working[idx - 1])
+        current = dict(working[idx])
+        merged = _v3713_merge_adjacent_pair(
+            previous,
+            current,
+            reasons=["global_unique_asset_capacity_preconsolidation"],
+            identity_counts=identity_counts,
+        )
+        merged["global_capacity_preconsolidated"] = True
+        merged["capacity_merge_score"] = round(score, 3)
+        working[idx - 1:idx + 1] = [merged]
+        consolidations.append({
+            "source_index": current.get("index") or idx + 1,
+            "merged_into_index": idx,
+            "asset_id": _v35_clip_identity(merged),
+            "visual_family": merged.get("visual_family"),
+            "duration": merged.get("duration"),
+            "score": round(score, 3),
+            "mode": "global_capacity_preconsolidation",
+        })
+
+    for idx, clip in enumerate(working, start=1):
+        clip["index"] = idx
+    return working, consolidations
+
+
+def _v3713_can_merge_contextual_capacity_hold(
+    previous: dict[str, Any] | None,
+    current: dict[str, Any],
+    *,
+    total: int,
+    index: int,
+) -> bool:
+    if not previous:
+        return False
+    if _v371_distinct_concrete_focus(previous, current):
+        return False
+
+    previous_duration = float(
+        previous.get("duration") or previous.get("duration_seconds") or 0.0
+    )
+    current_duration = float(
+        current.get("duration") or current.get("duration_seconds") or 0.0
+    )
+    if previous_duration + current_duration > 8.2:
+        return False
+
+    previous_requested = _v3713_clip_requested(previous)
+    current_requested = _v3713_clip_requested(current)
+    previous_family = str(previous.get("visual_family") or "").strip().lower()
+    current_family = str(current.get("visual_family") or "").strip().lower()
+    narration = " ".join([
+        str(previous.get("narration") or previous.get("text") or ""),
+        str(current.get("narration") or current.get("text") or ""),
+    ])
+
+    map_amenity_bridge = bool(
+        _V3713_PROXIMITY_PATTERN.search(narration)
+        and (
+            ("map" in previous_requested or previous_family == "map")
+            and bool(current_requested & _V3713_AMENITY_INTENTS)
+            or ("map" in current_requested or current_family == "map")
+            and bool(previous_requested & _V3713_AMENITY_INTENTS)
+        )
+    )
+    same_asset = bool(
+        _v35_clip_identity(previous)
+        and _v35_clip_identity(previous) == _v35_clip_identity(current)
+    )
+    return bool(map_amenity_bridge or same_asset)
+
+
 def _v35_apply_asset_to_clip(
     clip: dict[str, Any], asset: dict[str, Any], *, reason: str,
 ) -> dict[str, Any]:
@@ -695,6 +1018,9 @@ def _v35_finalize_real_tts_master(
     if not originals:
         raise ValueError("V35 最终语义镜头计划为空")
 
+    originals, capacity_preconsolidations = \
+        _v3713_preconsolidate_to_bound_capacity(originals)
+
     library = _load_library_assets(settings)
     by_id = {_asset_id(asset): asset for asset in library if _asset_id(asset)}
     used: set[str] = set()
@@ -702,7 +1028,7 @@ def _v35_finalize_real_tts_master(
     intent_counts: dict[str, int] = {}
     finalized: list[dict[str, Any]] = []
     replacements: list[dict[str, Any]] = []
-    consolidations: list[dict[str, Any]] = []
+    consolidations: list[dict[str, Any]] = list(capacity_preconsolidations)
     max_landmarks = max(1, int(len(originals) * 0.20))
 
     for index, original in enumerate(originals):
@@ -728,7 +1054,10 @@ def _v35_finalize_real_tts_master(
             invalid_reasons.append("missing_asset_binding")
         if aid and aid in used:
             invalid_reasons.append("duplicate_asset_id")
-        if not _v35_intent_match(requested, current_keys, family):
+        narration = str(clip.get("narration") or clip.get("text") or "")
+        if not _v3713_contextual_intent_match(
+            requested, current_keys, family, narration
+        ):
             invalid_reasons.append("requested_intent_mismatch")
         if cta_people_required and family != "people":
             invalid_reasons.append("cta_requires_people_scene")
@@ -759,7 +1088,9 @@ def _v35_finalize_real_tts_master(
                 candidate_family = _v35_visual_family(candidate_text)
                 candidate_keys = _v35_asset_intent_keys(asset)
                 overlap = requested & candidate_keys
-                if not _v35_intent_match(requested, candidate_keys, candidate_family):
+                if not _v3713_contextual_intent_match(
+                    requested, candidate_keys, candidate_family, narration
+                ):
                     continue
                 if cta_people_required and candidate_family != "people":
                     continue
@@ -795,13 +1126,23 @@ def _v35_finalize_real_tts_master(
             ranked.sort(key=lambda item: item[0], reverse=True)
             if not ranked:
                 previous_clip = finalized[-1] if finalized else None
+                merge_mode = ""
                 if _v371_can_merge_as_semantic_hold(
                     previous_clip, clip, total=len(originals), index=index
                 ):
+                    merge_mode = "adaptive_semantic_hold"
+                elif _v3713_can_merge_contextual_capacity_hold(
+                    previous_clip, clip, total=len(originals), index=index
+                ):
+                    merge_mode = "contextual_capacity_hold"
+
+                if merge_mode:
                     old_previous = dict(previous_clip or {})
                     merged = _v371_merge_into_previous(
                         old_previous, clip, reasons=invalid_reasons
                     )
+                    if merge_mode == "contextual_capacity_hold":
+                        merged["contextual_capacity_hold_merged"] = True
                     finalized[-1] = merged
                     consolidations.append({
                         "source_index": index + 1,
@@ -810,11 +1151,11 @@ def _v35_finalize_real_tts_master(
                         "visual_family": merged.get("visual_family"),
                         "reasons": list(invalid_reasons),
                         "duration": merged.get("duration"),
-                        "mode": "adaptive_semantic_hold",
+                        "mode": merge_mode,
                     })
                     continue
                 raise ValueError(
-                    "V37.1.2 最终镜头容量门禁无法找到唯一素材且不可安全合并："
+                    "V37.1.3 最终镜头容量门禁无法找到唯一素材且不可安全合并："
                     f"index={index + 1}, reasons={invalid_reasons}, "
                     f"requested={sorted(requested)}, narration={narration[:80]}"
                 )
@@ -870,7 +1211,10 @@ def _v35_finalize_real_tts_master(
         requested = _v35_intent_keys(clip.get("semantic_requested_intents") or [])
         family = str(clip.get("visual_family") or "")
         final_keys = _v361_clip_intent_keys(clip, family)
-        if not _v35_intent_match(requested, final_keys, family):
+        narration = str(clip.get("narration") or clip.get("text") or "")
+        if not _v3713_contextual_intent_match(
+            requested, final_keys, family, narration
+        ):
             mismatches.append({
                 "index": index + 1,
                 "family": family,
@@ -904,6 +1248,9 @@ def _v35_finalize_real_tts_master(
         "semantic_cta_visual_policy": True,
         "cta_people_scene_only_without_concrete_intent": True,
         "cta_semantic_hold_when_unique_asset_exhausted": True,
+        "global_capacity_preconsolidation": True,
+        "map_amenity_contextual_match": True,
+        "capacity_preconsolidation_count": len(capacity_preconsolidations),
         "family_counts": family_counts,
         "landmark_count": family_counts.get("city_landmark", 0),
         "landmark_limit": max_landmarks,
@@ -2326,6 +2673,9 @@ def install_existing_video_editor(
                 "semantic_cta_prefers_concrete_intent": True,
                 "cta_people_scene_only_without_concrete_intent": True,
                 "cta_semantic_hold_when_unique_asset_exhausted": True,
+                "global_capacity_preconsolidation": True,
+                "map_amenity_contextual_match": True,
+                "contextual_capacity_hold": True,
                 "successful_workdir_cleanup": True,
                 "stale_workdir_cleanup_24h": True,
             "strict_visual_single_use": True,
