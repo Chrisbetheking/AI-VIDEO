@@ -55,6 +55,66 @@ def _segment_count(duration: int) -> int:
     return max(3, min(18, round(duration / 4)))
 
 
+V37_CTA_VERSION = "10.40.8.37-actionable-cta-embedded"
+V37_ACTIONABLE_CTA_RE = re.compile(
+    r"评论|留言|私信|发来|发给我|告诉我|写下|把.{0,18}发|我帮你|需要.{0,12}清单|你最|你更|你正在|哪一项|哪一个|[？?]",
+    re.I,
+)
+
+
+def _v37_cta_template(topic: str, script: str, brief: dict[str, Any]) -> str:
+    templates = (
+        "把你正在看的项目和关键报价发来，我按这套方法帮你核一遍。",
+        "你现在最想核对哪一项？把具体问题留在评论区。",
+        "需要这份核对清单，告诉我你在看的区域和用途。",
+        "把合同或费用表里的关键页面发来，我帮你标出要确认的地方。",
+        "你更担心成本、交付还是出租？把项目情况发来，我按真实资料拆解。",
+    )
+    seed = sum(ord(char) for char in f"{topic}|{script}|{brief.get('recommended_angle')}|{brief.get('recommended_structure')}")
+    return templates[seed % len(templates)]
+
+
+def _v37_ensure_actionable_cta(
+    topic: str,
+    script: str,
+    segments: list[Any],
+    cta: str,
+    brief: dict[str, Any],
+) -> tuple[str, list[dict[str, Any]], str, bool]:
+    clean_cta = re.sub(r"\s+", "", str(cta or "")).strip()
+    replaced = not clean_cta or len(clean_cta) < 8 or not V37_ACTIONABLE_CTA_RE.search(clean_cta)
+    if replaced:
+        clean_cta = _v37_cta_template(topic, script, brief)
+    normalized_script = re.sub(r"\s+", "", str(script or ""))
+    appended = clean_cta not in normalized_script[-max(80, len(clean_cta) + 20):]
+    final_script = str(script or "").rstrip()
+    if appended:
+        final_script = (final_script + "\n" + clean_cta).strip()
+
+    clean_segments: list[dict[str, Any]] = []
+    for index, item in enumerate(segments or [], start=1):
+        if isinstance(item, dict):
+            row = dict(item)
+            text = str(row.get("text") or "").strip()
+        else:
+            row = {}
+            text = str(item or "").strip()
+        if text:
+            row["index"] = int(row.get("index") or index)
+            row["text"] = text
+            clean_segments.append(row)
+    if not clean_segments or clean_cta not in re.sub(r"\s+", "", str(clean_segments[-1].get("text") or "")):
+        clean_segments.append({
+            "index": len(clean_segments) + 1,
+            "text": clean_cta,
+            "duration": 3.2,
+            "visual_type": "consultation_interaction",
+            "edit": "CTA 使用全片新的人物互动镜头",
+            "is_cta": True,
+        })
+    return final_script, clean_segments, clean_cta, replaced or appended
+
+
 def _fallback(req: FullAIScriptPlanRequest, brief: dict[str, Any]) -> Dict[str, Any]:
     n = _segment_count(req.duration_seconds)
     angle = str(brief.get("recommended_angle") or "数据核验")
@@ -157,7 +217,8 @@ def _call_deepseek(
 2. 每次生成都要参考历史查重冷却，不能只做同义词替换；
 3. 不承诺收益率，不编造楼盘、户型、价格、学校、交通、周边；
 4. 视频画面不让 AI 生成任何文字，字幕由后端烧录；
-5. 镜头按语义密度规划，不使用固定 3 秒/4 秒机械切镜。"""
+5. 镜头按语义密度规划，不使用固定 3 秒/4 秒机械切镜；
+6. CTA 必须是观众可执行的下一步，不能只做内容总结，并且 CTA 必须逐字包含在 script 最后一段。"""
 
     user = f"""
 市场：{req.market}
@@ -235,6 +296,8 @@ def health():
             "automatic_similarity_rewrite": True,
             "angle_structure_cooldown": True,
             "hard_block_over_82": True,
+            "actionable_cta_embedded_in_script": True,
+            "cta_rotation_guard": True,
         },
     }
 
@@ -281,8 +344,20 @@ def plan(req: FullAIScriptPlanRequest):
             out["deepseek_error"] = str(exc)
         script = str(out.get("script") or "").strip()
         segments = out.get("segments") if isinstance(out.get("segments"), list) else []
+        raw_cta = str(out.get("cta") or (segments[-1].get("text") if segments and isinstance(segments[-1], dict) else ""))
+        script, segments, cta, cta_repaired = _v37_ensure_actionable_cta(
+            req.topic, script, segments, raw_cta, brief
+        )
+        out["script"] = script
+        out["segments"] = segments
+        out["cta"] = cta
+        out["cta_contract"] = {
+            "version": V37_CTA_VERSION,
+            "actionable": True,
+            "embedded_in_script": True,
+            "repaired_or_appended": cta_repaired,
+        }
         hook = str(out.get("hook") or (segments[0].get("text") if segments and isinstance(segments[0], dict) else ""))
-        cta = str(out.get("cta") or (segments[-1].get("text") if segments and isinstance(segments[-1], dict) else ""))
         report = dedup.analyze(
             script=script,
             topic=req.topic,

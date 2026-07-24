@@ -32,7 +32,8 @@ from app.services.a10_r4_output_guard_v10_40_8_12 import (
     measure_audio_loudness,
 )
 
-VERSION = "10.40.8.36.1-final-intent-validation-hotfix"
+VERSION = "10.40.8.37-inline-keyword-entity-microcut-cta"
+# V10_40_8_37_INLINE_KEYWORD_ENTITY_MICROCUT_CTA
 # V10_40_8_36_1_FINAL_INTENT_VALIDATION_HOTFIX
 # V10_40_8_35_FINAL_MASTER_INTEGRITY_WORKFLOW_CLEANUP
 # V10_40_8_34_DEDUP_KEYWORD_ENTITY_CTA
@@ -2067,6 +2068,9 @@ def install_existing_video_editor(
                 "whole_video_repeat_report": True,
                 "post_tts_final_master_integrity": True,
                 "final_intent_metadata_revalidation": True,
+                "concrete_entity_micro_cut": True,
+                "semantic_density_pacing": True,
+                "parallel_entity_one_item_one_shot": True,
                 "successful_workdir_cleanup": True,
                 "stale_workdir_cleanup_24h": True,
             "strict_visual_single_use": True,
@@ -2209,3 +2213,180 @@ def _mix(base: Path, tts: Path | None, mode: str, destination: Path) -> dict[str
         'shortest_disabled': True,
         'picture_tail_extended': target > base_duration,
     }
+
+
+# =============================================================================
+# V10.40.8.37 CONCRETE ENTITY MICRO-CUT DIRECTOR
+# =============================================================================
+V37_ENTITY_RULES: tuple[tuple[str, re.Pattern[str], tuple[str, ...], tuple[str, ...]], ...] = (
+    ("物业费", re.compile(r"物业费|管理费"), ("物业账单", "管理处"), ("物业费", "账单", "物业管理")),
+    ("门牌税", re.compile(r"门牌税|地税|房产税"), ("税费单据",), ("门牌税", "税单", "政府税费")),
+    ("维修基金", re.compile(r"维修基金|维修储备金|维修费"), ("维修基金", "维修现场"), ("维修基金", "公寓维修", "账单")),
+    ("空置期", re.compile(r"空置期|空置时间|空置"), ("空置房",), ("空置期", "空房", "出租")),
+    ("实际租金", re.compile(r"实际租金|真实租金|成交租金|租金"), ("租赁报价", "租约合同"), ("真实租金", "租赁报价", "租约")),
+    ("净回报", re.compile(r"净回报|净收益|净现金流|现金流"), ("计算器", "现金流表"), ("净回报", "计算器", "现金流")),
+    ("律师费", re.compile(r"律师费|律师审核"), ("律师文件", "合同"), ("律师费", "合同审核")),
+    ("印花税", re.compile(r"印花税"), ("税费单据", "合同"), ("印花税", "税单")),
+    ("贷款利息", re.compile(r"贷款利息|月供|贷款"), ("贷款文件", "银行"), ("贷款", "月供", "银行")),
+    ("合同", re.compile(r"合同|付款节点|定金|首期"), ("合同", "付款计划"), ("合同", "付款节点", "定金")),
+    ("商场", re.compile(r"商场|购物中心|商业配套|商圈"), ("商场",), ("商场", "商圈", "商业配套")),
+    ("学校", re.compile(r"国际学校|学校|大学|校园"), ("学校", "大学"), ("学校", "大学", "学生")),
+    ("医院", re.compile(r"医院|诊所|医疗"), ("医院",), ("医院", "医疗配套")),
+    ("办公", re.compile(r"写字楼|办公区|办公室|办公"), ("办公", "写字楼"), ("办公楼", "白领", "写字楼")),
+    ("交通", re.compile(r"地铁|轻轨|通勤|车程|交通"), ("通勤", "轨道交通"), ("地铁", "轻轨", "通勤")),
+    ("超市", re.compile(r"超市|便利店|菜市场"), ("超市",), ("超市", "生活配套")),
+    ("租客", re.compile(r"租客|白领|学生租客|家庭租客"), ("租客", "人物"), ("租客", "白领", "学生")),
+)
+
+
+def _v37_clean_speech_text(value: Any) -> str:
+    return re.sub(r"[^\u4e00-\u9fffA-Za-z0-9%]+", "", str(value or ""))
+
+
+def _v37_entity_mentions(text: str) -> list[dict[str, Any]]:
+    clean = _v37_clean_speech_text(text)
+    candidates: list[dict[str, Any]] = []
+    for canonical, pattern, intents, keywords in V37_ENTITY_RULES:
+        for match in pattern.finditer(clean):
+            candidates.append({
+                "canonical": canonical,
+                "start": match.start(),
+                "end": match.end(),
+                "matched": match.group(0),
+                "intents": list(intents),
+                "asset_keywords": list(keywords),
+            })
+    candidates.sort(key=lambda item: (item["start"], -(item["end"] - item["start"])))
+    selected: list[dict[str, Any]] = []
+    used_canonical: set[str] = set()
+    for item in candidates:
+        if item["canonical"] in used_canonical:
+            continue
+        if any(not (item["end"] <= old["start"] or item["start"] >= old["end"]) for old in selected):
+            continue
+        selected.append(item)
+        used_canonical.add(item["canonical"])
+    return sorted(selected, key=lambda item: item["start"])
+
+
+def _v37_word_clock(words: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    clock: list[dict[str, Any]] = []
+    for word in words:
+        if not isinstance(word, dict):
+            continue
+        token = _v37_clean_speech_text(word.get("word") or word.get("text"))
+        start = _float(word.get("start") if word.get("start") is not None else word.get("startTime"), -1.0)
+        end = _float(word.get("end") if word.get("end") is not None else word.get("endTime"), -1.0)
+        if not token or start < 0 or end <= start:
+            continue
+        span = end - start
+        for index, char in enumerate(token):
+            clock.append({
+                "char": char,
+                "start": start + span * index / len(token),
+                "end": start + span * (index + 1) / len(token),
+            })
+    return clock
+
+
+def _v37_split_unit_by_entities(unit: dict[str, Any]) -> list[dict[str, Any]]:
+    text = _v37_clean_speech_text(unit.get("text"))
+    mentions = _v37_entity_mentions(text)
+    start = _float(unit.get("start"), 0.0)
+    end = max(start + 0.3, _float(unit.get("end"), start + _float(unit.get("duration"), 0.3)))
+    duration = end - start
+    if len(mentions) < 2 or duration < len(mentions) * 0.56:
+        return [dict(unit)]
+    mentions = mentions[:6]
+
+    char_boundaries = [0]
+    conjunctions = {"和", "与", "或", "或者", "以及", "还是", "再加上", "还有"}
+    for left, right in zip(mentions, mentions[1:]):
+        gap = text[left["end"]:right["start"]]
+        if gap in conjunctions:
+            boundary = left["end"]
+        else:
+            boundary = max(
+                left["end"],
+                min(right["start"], round((left["end"] + right["start"]) / 2)),
+            )
+        char_boundaries.append(boundary)
+    char_boundaries.append(len(text))
+
+    clock = _v37_word_clock([dict(item) for item in (unit.get("word_timeline") or []) if isinstance(item, dict)])
+    exact_clock = bool(clock) and "".join(item["char"] for item in clock) == text
+
+    def time_at(char_index: int) -> float:
+        if char_index <= 0:
+            return start
+        if char_index >= len(text):
+            return end
+        if exact_clock and char_index < len(clock):
+            return max(start, min(end, (float(clock[char_index - 1]["end"]) + float(clock[char_index]["start"])) / 2))
+        return start + duration * char_index / max(1, len(text))
+
+    time_boundaries = [time_at(index) for index in char_boundaries]
+    raw_durations = [time_boundaries[i + 1] - time_boundaries[i] for i in range(len(mentions))]
+    if min(raw_durations) < 0.48:
+        step = duration / len(mentions)
+        time_boundaries = [start + step * index for index in range(len(mentions) + 1)]
+        time_boundaries[-1] = end
+
+    result: list[dict[str, Any]] = []
+    for index, mention in enumerate(mentions):
+        left_char = char_boundaries[index]
+        right_char = char_boundaries[index + 1]
+        chunk_text = text[left_char:right_char] or mention["matched"]
+        child = dict(unit)
+        child.update({
+            "index": index,
+            "text": chunk_text,
+            "start": round(time_boundaries[index], 3),
+            "end": round(time_boundaries[index + 1], 3),
+            "duration": round(max(0.3, time_boundaries[index + 1] - time_boundaries[index]), 3),
+            "focus_entity": mention["canonical"],
+            "entity": mention["canonical"],
+            "micro_entity": mention["canonical"],
+            "entity_micro_cut": True,
+            "cadence_mode": "concrete_entity_micro_cut",
+            "semantic_requested_intents": mention["intents"],
+            "asset_keywords": mention["asset_keywords"],
+            "parent_sentence_index": unit.get("index"),
+            "micro_cut_index": index + 1,
+            "micro_cut_count": len(mentions),
+            "timing_source": "volcengine_native_entity_boundary" if exact_clock else "entity_ratio_boundary",
+        })
+        child["word_timeline"] = []
+        result.append(child)
+    return result
+
+
+_V36_BUILD_SEMANTIC_SPEECH_UNITS_V37_BASE = _build_semantic_speech_units
+
+
+def _build_semantic_speech_units(
+    parts: list[str], timings: list[dict[str, Any]], target: float,
+) -> list[dict[str, Any]]:
+    base_units = _V36_BUILD_SEMANTIC_SPEECH_UNITS_V37_BASE(parts, timings, target)
+    expanded: list[dict[str, Any]] = []
+    for unit in base_units:
+        expanded.extend(_v37_split_unit_by_entities(dict(unit)))
+    for index, unit in enumerate(expanded):
+        unit["index"] = index
+    if expanded:
+        expanded[-1]["end"] = round(max(_float(expanded[-1].get("end"), 0.0), target), 3)
+        expanded[-1]["duration"] = round(expanded[-1]["end"] - _float(expanded[-1].get("start"), 0.0), 3)
+    return expanded
+
+
+_V36_DESIRED_CLIP_COUNT_V37_BASE = _desired_clip_count
+
+
+def _desired_clip_count(parts: list[str], manual_count: int, target: float, pace: str) -> int:
+    pace_key = str(pace or "normal").lower()
+    if not pace_key.startswith("dynamic_"):
+        return _V36_DESIRED_CLIP_COUNT_V37_BASE(parts, manual_count, target, pace)
+    entity_extra = sum(max(0, len(_v37_entity_mentions(part)) - 1) for part in parts)
+    dense_extra = sum(1 for part in parts if len(_v37_clean_speech_text(part)) >= 26 and len(_v37_entity_mentions(part)) < 2)
+    semantic_count = len(parts) + entity_extra + dense_extra
+    return max(1, min(27, max(manual_count, semantic_count)))

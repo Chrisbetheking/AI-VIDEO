@@ -28,6 +28,55 @@ BAD_WORDS = {
     "吉隆坡素材优先级", "再拆判断标准", "素材库", "生成视频", "逐句配音",
 }
 
+
+V37_CTA_VERSION = "10.40.8.37-actionable-cta-embedded"
+V37_ACTIONABLE_CTA_RE = re.compile(
+    r"评论|留言|私信|发来|发给我|告诉我|写下|把.{0,18}发|我帮你|需要.{0,12}清单|你最|你更|你正在|哪一项|哪一个|[？?]",
+    re.I,
+)
+
+
+def _v37_cta_template(topic: str, script: str, brief: dict[str, Any]) -> str:
+    templates = (
+        "把你正在看的项目和关键报价发来，我按这套方法帮你核一遍。",
+        "你现在最想核对哪一项？把具体问题留在评论区。",
+        "需要这份核对清单，告诉我你在看的区域和用途。",
+        "把合同或费用表里的关键页面发来，我帮你标出要确认的地方。",
+        "你更担心成本、交付还是出租？把项目情况发来，我按真实资料拆解。",
+    )
+    seed = sum(ord(char) for char in f"{topic}|{script}|{brief.get('recommended_angle')}|{brief.get('recommended_structure')}")
+    return templates[seed % len(templates)]
+
+
+def _v37_ensure_actionable_cta(
+    topic: str,
+    script: str,
+    segments: list[dict[str, Any]],
+    cta: str,
+    brief: dict[str, Any],
+) -> tuple[str, list[dict[str, Any]], str, bool]:
+    clean_cta = re.sub(r"\s+", "", str(cta or "")).strip()
+    repaired = not clean_cta or len(clean_cta) < 8 or not V37_ACTIONABLE_CTA_RE.search(clean_cta)
+    if repaired:
+        clean_cta = _v37_cta_template(topic, script, brief)
+    normalized_script = re.sub(r"\s+", "", str(script or ""))
+    appended = clean_cta not in normalized_script[-max(80, len(clean_cta) + 20):]
+    final_script = str(script or "").rstrip()
+    if appended:
+        final_script = (final_script + "\n" + clean_cta).strip()
+    final_segments = [dict(item) for item in segments if isinstance(item, dict) and str(item.get("text") or "").strip()]
+    if not final_segments or clean_cta not in re.sub(r"\s+", "", str(final_segments[-1].get("text") or "")):
+        final_segments.append({
+            "id": f"seg_{len(final_segments) + 1}",
+            "index": len(final_segments) + 1,
+            "text": clean_cta,
+            "is_cta": True,
+            "visual_type": "consultation_interaction",
+            "edit": "CTA 使用全片新的人物互动镜头",
+        })
+    return final_script, final_segments, clean_cta, repaired or appended
+
+
 class KeywordRequest(BaseModel):
     topic: str = ""
     market: str = "马来西亚"
@@ -251,7 +300,7 @@ def _fallback_voice(segments: list[dict[str, Any]], script_mode: str) -> dict[st
 @router.get("/health")
 def health() -> dict[str, Any]:
     cfg = _deepseek_cfg()
-    return {"ok": True, "provider": "wizard_ai_deepseek_v36", "script_dedup_version": SCRIPT_DEDUP_VERSION, "deepseek_configured": cfg["configured"], "model": cfg["model"], "base_url": cfg["base_url"]}
+    return {"ok": True, "provider": "wizard_ai_deepseek_v37", "script_dedup_version": SCRIPT_DEDUP_VERSION, "cta_contract_version": V37_CTA_VERSION, "deepseek_configured": cfg["configured"], "model": cfg["model"], "base_url": cfg["base_url"], "features": {"actionable_cta_embedded_in_script": True, "cta_rotation_guard": True}}
 
 
 @router.post("/generate-topic")
@@ -346,6 +395,7 @@ def generate_script(req: ScriptRequest) -> dict[str, Any]:
 - 最近已用角度：{json.dumps(brief.get('recent_angles') or [], ensure_ascii=False)}，这些进入冷却，不能继续做主角度。
 - 最近已用结构：{json.dumps(brief.get('recent_structures') or [], ensure_ascii=False)}，这些进入冷却。
 - 禁止只做同义词替换；开头钩子、主体论证路径、结尾 CTA 至少更换两项。
+- CTA 必须是观众可执行的下一步，不能只是总结句，并且必须逐字写进 script 最后一段和 segments 最后一段。
 - 根据 script_mode 区分：lead 引流，professional 专业，life 生活日常，sales 成交承接。
 - 必须过滤无意义词：纯数字、62、风格、模板、OpenClaw、内容大脑、镜头、房产、选题、评论区答疑模板、数字人模板、成片沉淀。
 - 不能编造具体楼盘、户型、价格、收益、学校、ROI、官方信息。
@@ -391,7 +441,19 @@ def generate_script(req: ScriptRequest) -> dict[str, Any]:
                 clean_segments.append({"id": str(seg.get("id") or f"seg_{idx}"), "index": int(seg.get("index") or idx), "text": text})
         clean_segments = clean_segments or _fallback_segments(script)
         hook = _clean(data.get("hook")) or (clean_segments[0]["text"] if clean_segments else "")
-        cta = _clean(data.get("cta")) or (clean_segments[-1]["text"] if clean_segments else "")
+        raw_cta = _clean(data.get("cta")) or (clean_segments[-1]["text"] if clean_segments else "")
+        script, clean_segments, cta, cta_repaired = _v37_ensure_actionable_cta(
+            req.topic, script, clean_segments, raw_cta, brief
+        )
+        data["script"] = script
+        data["segments"] = clean_segments
+        data["cta"] = cta
+        data["cta_contract"] = {
+            "version": V37_CTA_VERSION,
+            "actionable": True,
+            "embedded_in_script": True,
+            "repaired_or_appended": cta_repaired,
+        }
         report = dedup.analyze(
             script=script,
             topic=req.topic,

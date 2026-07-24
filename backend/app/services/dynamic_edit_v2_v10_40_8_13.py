@@ -19,13 +19,14 @@ from typing import Any, Callable
 
 from fastapi import Depends, HTTPException, Request
 
-VERSION = "10.40.8.36.1-final-intent-validation-hotfix"
+VERSION = "10.40.8.37-inline-keyword-entity-microcut-cta"
+# V10_40_8_37_INLINE_KEYWORD_ENTITY_MICROCUT_CTA
 # V10_40_8_36_1_FINAL_INTENT_VALIDATION_HOTFIX
 # V10_40_8_35_FINAL_MASTER_INTEGRITY_WORKFLOW_CLEANUP
 # V10_40_8_34_DEDUP_KEYWORD_ENTITY_CTA
 # V10_40_8_33_SEMANTIC_RELEVANCE_CAPTION_HIERARCHY
 # V10_40_8_32_REFERENCE_KINETIC_TYPOGRAPHY
-INSTALL_MARKER = "V10_40_8_36_1_FINAL_INTENT_VALIDATION_HOTFIX"
+INSTALL_MARKER = "V10_40_8_37_INLINE_KEYWORD_ENTITY_MICROCUT_CTA"
 _INSTALLED = False
 _LOCK = threading.RLock()
 
@@ -1728,6 +1729,11 @@ def install_dynamic_edit_v2(app: Any, get_settings: Callable[..., Any]) -> None:
                 "mixkit_professional_sfx_v26": True,
                 "mixkit_professional_sfx_v27": True,
                 "inline_keyword_scale_pulse": True,
+                "inline_keyword_order_integrity": True,
+                "separate_keyword_overlay_forbidden": True,
+                "concrete_entity_micro_cut": True,
+                "semantic_density_pacing": True,
+                "actionable_cta_scene_contract": True,
                 "semantic_sticker_effects": True,
                 "effect_delivery_quality_gate": True,
                 "reference_driven_teaching_effects": True,
@@ -6296,5 +6302,246 @@ def render_dynamic_video(input_path: Path, output_path: Path, ass_path: Path, pl
         "keyword_duplicate_visible": False,
         "sfx_window_target_db": "-16_to_-20_relative_to_voice",
         "text_box_count": 0,
+    })
+    return report
+
+
+# =============================================================================
+# V10.40.8.37 INLINE KEYWORD + CAPTION ORDER INTEGRITY
+# =============================================================================
+V37_CAPTION_PROTECTED_TERMS = (
+    "一年小一万", "一年一万", "每月每平米", "每平方米", "物业费", "管理费",
+    "门牌税", "地税", "维修基金", "空置期", "实际租金", "净回报", "现金流",
+    "最高预期", "真实成交租金", "持有成本", "律师费", "印花税", "贷款利息",
+    "生活半径", "国际学校", "写字楼", "办公区", "租客来源", "自住还是投资",
+    "吉隆坡买房", "评论区", "把项目发来", "帮你核一遍",
+    "或者", "以及", "但是", "不过", "所以", "而且", "然后", "才能",
+)
+
+
+def _v37_protected_spans(text: str) -> list[tuple[int, int]]:
+    spans: list[tuple[int, int]] = []
+    for term in V37_CAPTION_PROTECTED_TERMS:
+        cursor = 0
+        while term and (index := text.find(term, cursor)) >= 0:
+            spans.append((index, index + len(term)))
+            cursor = index + len(term)
+    number_pattern = re.compile(
+        r"(?:\d+(?:\.\d+)?|[零〇一二三四五六七八九十百千万亿两]+)"
+        r"(?:%|％|万|千|百|亿|元|块|马币|年|月|天|套|个|平米|平方米|每平米|每平方米)?"
+    )
+    spans.extend((m.start(), m.end()) for m in number_pattern.finditer(text))
+    return sorted(set(spans))
+
+
+def _v37_cut_inside_protected(cut: int, spans: list[tuple[int, int]]) -> bool:
+    return any(start < cut < end for start, end in spans)
+
+
+def _caption_chunks(text: str, *, max_chars: int = 10) -> list[str]:
+    """Phrase-safe caption splitting. Never extracts keywords from sentence order."""
+    clean = _clean_caption_text(text)
+    if not clean:
+        return []
+    phrases = [item for item in re.split(r"[，,。！？!?；;、：:]+", clean) if item] or [clean]
+    output: list[str] = []
+    boundary_left = set("了的是要会能才再先后与和或但却把对从在到按看算问说")
+    boundary_right = ("如果", "但是", "不过", "所以", "而且", "或者", "以及", "然后", "才能", "再看", "先看")
+
+    for phrase in phrases:
+        remaining = phrase
+        while len(remaining) > max_chars:
+            spans = _v37_protected_spans(remaining)
+            candidates: list[tuple[float, int]] = []
+            lower = max(4, max_chars - 3)
+            upper = min(len(remaining) - 2, max_chars + 2)
+            for cut in range(lower, upper + 1):
+                if _v37_cut_inside_protected(cut, spans):
+                    continue
+                left, right = remaining[:cut], remaining[cut:]
+                if len(right) <= 2:
+                    continue
+                score = -abs(cut - max_chars) * 1.5
+                if left[-1:] in boundary_left:
+                    score += 3.0
+                if any(right.startswith(term) for term in boundary_right):
+                    score += 4.0
+                if re.search(r"(?:费|税|金|期|租金|回报|成本)$", left):
+                    score += 2.5
+                if re.match(r"^(?:费|税|金|期|租金|回报|成本)", right):
+                    score -= 4.0
+                candidates.append((score, cut))
+            cut = max(candidates)[1] if candidates else min(max_chars, len(remaining) - 2)
+            output.append(remaining[:cut])
+            remaining = remaining[cut:]
+        if remaining:
+            if len(remaining) <= 2 and output and len(output[-1]) + len(remaining) <= max_chars + 2:
+                output[-1] += remaining
+            else:
+                output.append(remaining)
+
+    expected = re.sub(r"[^\u4e00-\u9fffA-Za-z0-9%]+", "", clean)
+    actual = re.sub(r"[^\u4e00-\u9fffA-Za-z0-9%]+", "", "".join(output))
+    if expected != actual:
+        raise ValueError("V37 字幕安全切分发生文字丢失或重排")
+    return [item for item in output if item]
+
+
+def _v37_inline_keyword_ass(raw_text: str, keywords: list[str], role: str, preset: dict[str, Any]) -> tuple[str, list[str]]:
+    """Render emphasis at the keyword's original position in the one caption layer."""
+    clean = _clean_caption_text(raw_text)
+    pair = _v34_comparison_pair(clean) if role == "comparison" else None
+    focus = _v32_focus_keyword(clean, keywords, role)
+    targets: list[tuple[str, str]] = []
+    if pair:
+        targets = [(pair[0], "&H00FFB347&"), (pair[1], "&H0000E8FF&")]
+    elif focus and focus in clean:
+        color = {
+            "risk": "&H003B6BFF&", "question": "&H00FFE04B&", "cta": "&H0047D2FF&",
+            "comparison": "&H00FFB347&", "data": "&H0000E8FF&", "list": "&H0068E083&",
+            "hook": "&H0000E8FF&",
+        }.get(role, str(preset.get("highlight") or "&H0000E8FF&"))
+        targets = [(focus, color)]
+
+    spans: list[tuple[int, int, str, str]] = []
+    for token, color in targets:
+        index = clean.find(token)
+        if index < 0:
+            continue
+        end = index + len(token)
+        if any(not (end <= left or index >= right) for left, right, _, _ in spans):
+            continue
+        spans.append((index, end, token, color))
+    spans.sort()
+
+    pieces: list[str] = []
+    cursor = 0
+    applied: list[str] = []
+    for start, end, token, color in spans:
+        pieces.append(_ass_escape(clean[cursor:start]))
+        pieces.append(
+            rf"{{\c{color}\b1\bord11\fscx108\fscy108\t(0,130,\fscx100\fscy100)}}"
+            + _ass_escape(token)
+            + r"{\rDynamic}"
+        )
+        applied.append(token)
+        cursor = end
+    pieces.append(_ass_escape(clean[cursor:]))
+    return "".join(pieces), applied
+
+
+_V36_BUILD_DYNAMIC_PLAN_V37_BASE = build_dynamic_plan
+
+
+def build_dynamic_plan(
+    payload: dict[str, Any], timings: list[dict[str, Any]], duration: float, *, intensity: str = "balanced",
+) -> dict[str, Any]:
+    plan = _V36_BUILD_DYNAMIC_PLAN_V37_BASE(payload, timings, duration, intensity=intensity)
+    plan["version"] = VERSION
+    plan["visual_pace"] = "semantic_density_with_concrete_entity_microcuts"
+    plan["inline_keyword_only"] = True
+    plan["separate_keyword_text_layer"] = False
+    plan["caption_order_integrity"] = True
+    delivery = dict(plan.get("effect_delivery") or {})
+    delivery.update({
+        "inline_keyword_only": True,
+        "separate_keyword_overlay_count": 0,
+        "caption_order_preserved": True,
+        "base_caption_tokens_removed": False,
+    })
+    plan["effect_delivery"] = delivery
+    return plan
+
+
+def write_dynamic_ass(
+    destination: Path,
+    timings: list[dict[str, Any]],
+    keywords: list[str],
+    *,
+    style_id: str,
+    events: list[dict[str, Any]] | None = None,
+) -> Path:
+    """V37: complete caption stays intact; keyword emphasis is inline and never reorders speech."""
+    preset = SUBTITLE_PRESETS.get(style_id) or SUBTITLE_PRESETS["dynamic_white_yellow"]
+    context = getattr(_V16_CONTEXT, "config", {}) or {}
+    requested = int(context.get("caption_size") or 154)
+    base_size = max(142, min(194, requested))
+    font_name = "Noto Sans CJK SC"
+    header = f"""[Script Info]
+ScriptType: v4.00+
+PlayResX: 1080
+PlayResY: 1920
+ScaledBorderAndShadow: yes
+WrapStyle: 2
+
+[V4+ Styles]
+Format: Name,Fontname,Fontsize,PrimaryColour,SecondaryColour,OutlineColour,BackColour,Bold,Italic,Underline,StrikeOut,ScaleX,ScaleY,Spacing,Angle,BorderStyle,Outline,Shadow,Alignment,MarginL,MarginR,MarginV,Encoding
+Style: Dynamic,{font_name},{base_size},{preset['primary']},{preset['highlight']},{preset['outline']},&H00000000,-1,0,0,0,100,100,1.2,0,1,8,2,5,44,44,0,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+"""
+    lines = [header]
+    applied_total = 0
+    debug: list[dict[str, Any]] = []
+    for index, item in enumerate(timings):
+        start = _safe_float(item.get("start"), 0.0)
+        end = max(start + 0.30, _safe_float(item.get("end"), start + 0.85))
+        raw_text = _clean_caption_text(str(item.get("text") or ""))
+        role = _v30_semantic_role(raw_text, _classify(raw_text)) if "_v30_semantic_role" in globals() else _classify(raw_text)
+        inline_text, applied = _v37_inline_keyword_ass(raw_text, keywords, role, preset)
+        applied_total += len(applied)
+        short = len(_v32_clean_keyword(raw_text)) <= 7
+        line_size = min(188, base_size + (14 if short else 0))
+        position = 1370 if role in {"hook", "question", "cta"} else 1430
+        animation = (
+            rf"{{\an5\pos(540,{position})\fs{line_size}\fscx94\fscy94"
+            rf"\t(0,105,\fscx104\fscy104)\t(105,225,\fscx100\fscy100)\fad(18,70)}}"
+        )
+        lines.append(
+            f"Dialogue: 0,{_ass_time(start)},{_ass_time(end)},Dynamic,,0,0,0,,{animation}{inline_text}\n"
+        )
+        debug.append({
+            "index": index,
+            "text": raw_text,
+            "inline_keywords": applied,
+            "caption_order_preserved": True,
+            "base_caption_tokens_removed": [],
+        })
+
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_text("".join(lines), encoding="utf-8-sig")
+    destination.with_suffix(".impact.json").write_text(
+        json.dumps({
+            "keyword_impact_count": applied_total,
+            "keyword_impact_candidates": applied_total,
+            "keyword_impact_coverage": 1.0 if applied_total else 0.0,
+            "base_caption_size": base_size,
+            "duplicate_keyword_suppressed_count": 0,
+            "comparison_pair_count": sum(1 for item in debug if len(item["inline_keywords"]) == 2),
+            "cta_lockup_count": 0,
+            "inline_keyword_only": True,
+            "separate_keyword_overlay_count": 0,
+            "caption_order_preserved": True,
+            "base_caption_tokens_removed": False,
+            "impacts": debug,
+        }, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    return destination
+
+
+_V36_RENDER_DYNAMIC_VIDEO_V37_BASE = render_dynamic_video
+
+
+def render_dynamic_video(input_path: Path, output_path: Path, ass_path: Path, plan: dict[str, Any]) -> dict[str, Any]:
+    report = _V36_RENDER_DYNAMIC_VIDEO_V37_BASE(input_path, output_path, ass_path, plan)
+    report.update({
+        "effect_engine": "v37_inline_keyword_entity_microcut_cta",
+        "inline_keyword_only": True,
+        "separate_keyword_overlay_count": 0,
+        "caption_order_preserved": True,
+        "base_caption_tokens_removed": False,
+        "keyword_duplicate_visible": False,
     })
     return report
