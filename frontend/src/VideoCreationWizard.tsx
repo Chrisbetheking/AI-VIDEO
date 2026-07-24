@@ -19,6 +19,33 @@ type MaterialSource = 'r2' | 'real' | 'ai' | 'mixed'
 type ContentType = 'investment' | 'own_stay' | 'second_home' | 'rental' | 'education'
 type ScriptMode = 'lead' | 'professional' | 'life' | 'sales'
 
+type ScriptDedupMatch = {
+  id?: string
+  title?: string
+  source?: string
+  similarity?: number
+  angle?: string
+  structure?: string
+  script_preview?: string
+  created_at?: string
+}
+
+type ScriptDedupReport = {
+  decision?: 'pass' | 'warn' | 'rewrite' | 'block' | string
+  originality_score?: number
+  similarity_score?: number
+  angle?: string
+  structure?: string
+  hook_type?: string
+  cta_type?: string
+  rewrite_required?: boolean
+  blocked?: boolean
+  history_count?: number
+  top_matches?: ScriptDedupMatch[]
+  cooldown?: Record<string, any>
+  thresholds?: Record<string, number>
+}
+
 type KeywordInsight = {
   id: string
   category: string
@@ -510,52 +537,67 @@ function keywordTextForScript(keywords: KeywordInsight[]) {
 
 function generateScript(topic: string, city: string, duration: number, contentType: ContentType, keywords: KeywordInsight[], scriptMode: ScriptMode = 'professional') {
   const baseTopic = topic.trim() || DEFAULT_TOPIC
+  const cityName = city === 'kuala_lumpur' ? '吉隆坡' : cityLabel(city).split('/')[0].trim()
   const keywordText = keywordTextForScript(keywords)
-  const isKl = city === 'kuala_lumpur'
-  const cityName = isKl ? '吉隆坡' : cityLabel(city).split('/')[0].trim()
-  const topicLine = baseTopic.replace(/[。！？!?]+$/g, '')
-  const isLife = scriptMode === 'life'
-  const isLead = scriptMode === 'lead'
-  const isSales = scriptMode === 'sales'
+  const seedText = `${baseTopic}|${city}|${contentType}|${scriptMode}|${Date.now()}`
+  let seed = 0
+  for (let index = 0; index < seedText.length; index += 1) seed = (seed * 31 + seedText.charCodeAt(index)) | 0
+  const pick = <T,>(items: T[], offset = 0) => items[Math.abs(seed + offset) % items.length]
 
-  const hook = isLife
-    ? `很多人想象中的${cityName}生活，和真正住下来感受到的并不一样。`
-    : isLead
-      ? `${topicLine}，这个问题很多人第一步就问错了。`
-      : `${topicLine}，别先看表面的价格和宣传图。`
-
-  let body = ''
-  if (isLife) {
-    body = `先看生活半径：吃饭、通勤、商场、华语环境和周末活动，决定你是不是真的住得舒服。再看预算，不同区域的日常成本差别很大。`
-  } else if (isKl) {
-    if (contentType === 'own_stay') {
-      body = '如果是自住，重点不是短期涨跌，而是生活便利、社区品质、通勤距离和长期居住舒适度。'
-    } else if (contentType === 'rental' || contentType === 'investment') {
-      body = '如果是投资，先看租客从哪里来，再看通勤、商圈、公共设施和未来转手流动性。'
-    } else if (contentType === 'education') {
-      body = '如果考虑家庭和教育，要把通勤、社区安全感、中文生活环境和长期持有需求放在前面。'
-    } else {
-      body = '如果是第二家园，要先看生活便利、医疗、社区氛围和长期居住适应度，不要只看度假感。'
-    }
-    body += ' TRX、Mont Kiara、生活半径和社区品质只是判断区域的锚点，不代表每个项目都适合你。'
-  } else {
-    body = `${cityName}适合的人群和吉隆坡不一样，自住、投资、养老和第二家园的判断标准也不一样，要先把用途筛清楚。`
-  }
-
-  const logic = isSales
-    ? '所以看房前先回答三个问题：预算多少、买来做什么、准备持有多久。答案不同，推荐区域和产品会完全不同。'
-    : isLead
-      ? '真正要看的不是哪个项目最火，而是哪一个区域和你的用途匹配。否则看了很多房，最后还是会被价格牵着走。'
-      : '专业一点看，先判断区域成熟度，再判断真实需求，最后才比较价格、户型和配套。顺序错了，很容易买到不适合自己的房子。'
-
-  const keyLine = keywordText ? `这条重点围绕：${keywordText}。` : ''
-  const cta = isLife
-    ? '你最关心这里的吃饭、语言，还是生活成本？评论区说一下。'
-    : isSales
-      ? '你是自住、投资还是出租？把预算和用途打出来，我按区域逻辑帮你拆。'
-      : '你现在更关心预算、区域，还是未来出租和转手？评论区打出来。'
-
-  return normalizeScriptLength([hook, body, logic, keyLine, cta].filter(Boolean).join(' '), duration, city)
+  const plans = [
+    {
+      angle: '持有成本',
+      hook: `买${cityName}房子，成交价只是第一张账单。`,
+      body: '物业费、税费、维修和空置期，才决定你每年真正要承担多少。把一次性费用和长期费用分开算，再判断现金流是否舒服。',
+      cta: '你最担心哪一项长期费用？把问题留下来。',
+    },
+    {
+      angle: '合同付款',
+      hook: `同一个${cityName}项目，付款节点不同，资金压力可能完全不同。`,
+      body: '定金、签约、施工和交付分别什么时候付款，要先排进自己的现金流表。口头承诺不算证据，看不懂的条款必须逐项确认。',
+      cta: '拿到付款表后，先别急着签，先看最紧的那个节点。',
+    },
+    {
+      angle: '户型实用',
+      hook: '样板间看起来大，不等于实际住起来顺手。',
+      body: '先模拟每天的动线，再看采光、收纳和家具摆放。自住要代入一家人的生活，出租要代入租客的真实使用。',
+      cta: '下一次看房，先把一天怎么住走一遍。',
+    },
+    {
+      angle: '交付核验',
+      hook: '规划可以听，但每一句都要找到对应证据。',
+      body: '把已经建成、正在施工和仍停留在宣传阶段的内容分开。资料不足的地方明确标记待确认，不用想象替代事实。',
+      cta: '先确认今天已经有什么，再判断未来值不值得等。',
+    },
+    {
+      angle: '客户案例',
+      hook: '有位客户预算没问题，却差点因为排序错了选错房。',
+      body: '他一直比较总价，后来才发现真正优先的是家庭居住和通勤。案例不是让你照抄答案，而是提醒你先把自己的需求排序。',
+      cta: '先写出你最不能妥协的一项，再开始看项目。',
+    },
+    {
+      angle: '现场实测',
+      hook: `地图上的十分钟，不一定等于${cityName}高峰期的十分钟。`,
+      body: '通勤、商场、学校和医院要按真实路线走一遍。具体对象出现时再切镜，普通解释不用机械地每三秒换画面。',
+      cta: '看房当天，把最常走的一条路线亲自走一次。',
+    },
+  ]
+  const preferred = contentType === 'education'
+    ? plans[5]
+    : contentType === 'own_stay'
+      ? plans[2]
+      : contentType === 'rental'
+        ? plans[0]
+        : pick(plans)
+  const modeLine = scriptMode === 'life'
+    ? `这次不堆专业词，只讲一个真实生活判断：${preferred.angle}。`
+    : scriptMode === 'lead'
+      ? `这条只解决一个问题：${preferred.angle}，不把所有卖点塞在一起。`
+      : scriptMode === 'sales'
+        ? `先把${preferred.angle}讲清楚，再决定是否进入项目匹配。`
+        : `专业判断要可核验，本次只聚焦${preferred.angle}。`
+  const keyLine = keywordText ? `你给出的关键词里，本次只保留和这个角度直接相关的部分：${keywordText}。` : ''
+  return normalizeScriptLength([preferred.hook, modeLine, preferred.body, keyLine, preferred.cta].filter(Boolean).join(' '), duration, city)
 }
 
 function cleanSpeechArtifacts(value: string) {
@@ -978,6 +1020,7 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
   const [manualKeywords, setManualKeywords] = useState(String(initialDraft.manualKeywords || ''))
   const [manualKeywordDraft, setManualKeywordDraft] = useState(String(initialDraft.manualKeywordDraft || ''))
   const [script, setScript] = useState(() => { const raw = String(initialDraft.script || project.script || ''); return scriptLooksPolluted(raw) ? '' : raw })
+  const [scriptDedupReport, setScriptDedupReport] = useState<ScriptDedupReport | null>((initialDraft.scriptDedupReport || project.script_dedup_report || null) as ScriptDedupReport | null)
   const [productionBrief, setProductionBrief] = useState(String(initialDraft.productionBrief || project.productionBrief || ''))
   const [selectedSegmentId, setSelectedSegmentId] = useState(String(initialDraft.selectedSegmentId || 'seg_1'))
   const [voiceSettings, setVoiceSettings] = useState<Record<string, SegmentVoiceSetting>>((initialDraft.voiceSettings || project.segment_voice_settings || {}) as Record<string, SegmentVoiceSetting>)
@@ -1015,6 +1058,7 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
   const [voicePreviewError, setVoicePreviewError] = useState('')
   const [segmentEditDraft, setSegmentEditDraft] = useState('')
   const segmentEditorRef = useRef<HTMLTextAreaElement | null>(null)
+  const lastSavedScriptRef = useRef('')
   const reviewLaunchRef = useRef('')
   const pollFailureRef = useRef(0)
   const pollInFlightRef = useRef(false)
@@ -1024,7 +1068,7 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
   const wizardDraftSnapshot = useMemo(() => ({
     step, sourceMode, creationMode, existingVoiceMode, outputRatio, editPace,
     topic, market, city, contentType, scriptMode, targetDuration,
-    competitorSource, manualKeywords, manualKeywordDraft, script, productionBrief,
+    competitorSource, manualKeywords, manualKeywordDraft, script, scriptDedupReport, productionBrief,
     selectedSegmentId, voiceSettings, shotPlan, selectedShotId,
     jobId, job, sourceResult, selectedKnowledgeIds, disabledKeywordValues,
     aiKeywordInsights, aiStatus, buttonStatus, subtitleEnabled,
@@ -1032,7 +1076,7 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
   }), [
     step, sourceMode, creationMode, existingVoiceMode, outputRatio, editPace,
     topic, market, city, contentType, scriptMode, targetDuration,
-    competitorSource, manualKeywords, manualKeywordDraft, script, productionBrief,
+    competitorSource, manualKeywords, manualKeywordDraft, script, scriptDedupReport, productionBrief,
     selectedSegmentId, voiceSettings, shotPlan, selectedShotId,
     jobId, job, sourceResult, selectedKnowledgeIds, disabledKeywordValues,
     aiKeywordInsights, aiStatus, buttonStatus, subtitleEnabled,
@@ -1772,6 +1816,7 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
     setManualKeywords('')
     setManualKeywordDraft('')
     setScript('')
+    setScriptDedupReport(null)
     setVoiceSettings({})
     setShotPlan([])
     setJobId('')
@@ -2158,11 +2203,11 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
     }
   }
 
-  async function aiGenerateScriptAndVoice(sourceData: any = sourceResult) {
+  async function aiGenerateScriptAndVoice(sourceData: any = sourceResult, options: { forceNewAngle?: boolean } = {}) {
     setError('')
     setSourceError('')
     setAiBusy('DeepSeek 正在生成文案')
-    setAiStatus('正在调用 DeepSeek 结合内容大脑、关键词和业务目标生成文案，不再本地秒出假文案...')
+    setAiStatus(options.forceNewAngle ? '正在读取历史文案并强制换角度重写...' : '正在调用 DeepSeek 结合历史查重、内容大脑和业务目标生成文案...')
     try {
       let activeKeywords = keywords
       if (!aiKeywordInsights.length) {
@@ -2178,9 +2223,16 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
       const data = await apiPost('/api/video/wizard-ai/generate-script', {
         ...wizardAiPayload(sourceData),
         keywords: activeKeywords,
-      }, 240000)
+        dedup_enabled: true,
+        dedup_auto_rewrite: true,
+        dedup_max_rewrites: 2,
+        force_new_angle: Boolean(options.forceNewAngle),
+        save_history: true,
+      }, 300000)
       const nextScript = String(data?.script || '').trim()
-      if (!nextScript) throw new Error('DeepSeek 没有返回有效文案。')
+      if (!nextScript) throw new Error(data?.message || 'DeepSeek 没有返回有效文案。')
+      const nextDedupReport = (data?.dedup_report || null) as ScriptDedupReport | null
+      setScriptDedupReport(nextDedupReport)
       const selectedKeywords = Array.isArray(data?.selected_keywords) ? data.selected_keywords.map(normalizeKeywordInsight).filter(Boolean) as KeywordInsight[] : []
       if (selectedKeywords.length) {
         activeKeywords = mergeKeywordInsights(selectedKeywords, activeKeywords)
@@ -2189,12 +2241,14 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
       const nextSegments = normalizeBackendSegments(data?.segments || [], nextScript, activeKeywords)
       const nextShots = generateShotPlan(nextSegments, targetDuration, city, project)
       setScript(nextScript)
+      lastSavedScriptRef.current = nextScript
       setShotPlan(nextShots)
       setSelectedSegmentId(nextSegments[0]?.id || 'seg_1')
       setSelectedShotId(nextShots[0]?.id || 'shot_1')
-      setAiStatus(`DeepSeek 文案生成完成：${nextScript.length} 字，${nextSegments.length} 句；继续判断逐句配音。`)
+      const originality = Number(nextDedupReport?.originality_score ?? 100)
+      setAiStatus(`DeepSeek 文案生成完成：${nextScript.length} 字，${nextSegments.length} 句；原创度 ${originality.toFixed(0)}%，继续判断逐句配音。`)
       const nextVoiceSettings = await aiTuneVoiceAll(nextScript, nextSegments, activeKeywords)
-      syncProject({ script: nextScript, segments: nextSegments, script_segments: nextSegments, segment_voice_settings: nextVoiceSettings, manual_shot_plan: nextShots, shot_overrides: nextShots, ai_keyword_insights: activeKeywords, ai_status: 'DeepSeek 文案与逐句配音已完成' })
+      syncProject({ script: nextScript, segments: nextSegments, script_segments: nextSegments, segment_voice_settings: nextVoiceSettings, manual_shot_plan: nextShots, shot_overrides: nextShots, ai_keyword_insights: activeKeywords, script_dedup_report: nextDedupReport, ai_status: 'DeepSeek 文案、查重与逐句配音已完成' })
       return nextScript
     } catch (err: any) {
       const msg = err?.message || String(err)
@@ -2203,6 +2257,67 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
       throw err
     } finally {
       setAiBusy('')
+    }
+  }
+
+
+  function dedupPayload(targetScript = script, source = 'wizard_manual') {
+    const clean = String(targetScript || '').trim()
+    const parts = splitScript(clean)
+    return {
+      title: topic,
+      topic,
+      hook: parts[0]?.text || '',
+      script: clean,
+      cta: parts[parts.length - 1]?.text || '',
+      source,
+      status: source.includes('manual') ? 'manual_saved' : 'generated',
+      metadata: {
+        city: cityLabel(city),
+        market,
+        content_type: contentType,
+        script_mode: scriptMode,
+        target_duration_seconds: targetDuration,
+      },
+    }
+  }
+
+  async function checkScriptDedup(targetScript = script) {
+    const clean = String(targetScript || '').trim()
+    if (clean.length < 12) {
+      setError('文案太短，至少写完整一句再查重。')
+      return null
+    }
+    setAiBusy('正在查重')
+    setError('')
+    try {
+      const report = await apiPost('/api/video/script-dedup/check', dedupPayload(clean, 'wizard_check'), 120000)
+      setScriptDedupReport(report as ScriptDedupReport)
+      setAiStatus(`查重完成：原创度 ${Number(report?.originality_score ?? 100).toFixed(0)}%，最高相似度 ${Number(report?.similarity_score ?? 0).toFixed(0)}%。`)
+      syncProject({ script_dedup_report: report })
+      return report
+    } catch (err: any) {
+      const msg = err?.message || String(err)
+      setError(msg)
+      throw err
+    } finally {
+      setAiBusy('')
+    }
+  }
+
+  async function saveScriptSnapshot(targetScript = script, source = 'wizard_manual_save') {
+    const clean = String(targetScript || '').trim()
+    if (clean.length < 12 || clean === lastSavedScriptRef.current) return null
+    try {
+      const data = await apiPost('/api/video/script-dedup/save', dedupPayload(clean, source), 120000)
+      lastSavedScriptRef.current = clean
+      const report = (data?.dedup_report || null) as ScriptDedupReport | null
+      if (report) setScriptDedupReport(report)
+      syncProject({ script: clean, script_dedup_report: report })
+      return data
+    } catch (err: any) {
+      setAiStatus(`文案已保留在编辑器，但写入查重库失败：${err?.message || String(err)}`)
+      return null
     }
   }
 
@@ -2252,7 +2367,9 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
       manual_shot_plan: nextShots.length ? nextShots : shotPlan,
       shot_overrides: nextShots.length ? nextShots : shotPlan,
     })
-    noteButton(`已保存第 ${focusIndex + 1} 句，并同步到口播、配音、镜头和字幕。`)
+    setScriptDedupReport(null)
+    void saveScriptSnapshot(nextScript, 'wizard_segment_edit')
+    noteButton(`已保存第 ${focusIndex + 1} 句，并同步到口播、配音、镜头、字幕和查重库。`)
   }
 
   function saveSelectedSegment() {
@@ -2907,6 +3024,15 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
             <button className="aiw-primary" type="button" disabled={!!aiBusy} onClick={() => void aiGenerateScriptAndVoice()}>
               {aiBusy || 'DeepSeek 重写文案并重调配音'}
             </button>
+            <button className="aiw-muted" type="button" disabled={!!aiBusy || script.length < 12} onClick={() => void aiGenerateScriptAndVoice(sourceResult, { forceNewAngle: true })}>
+              换角度重写
+            </button>
+            <button className="aiw-muted" type="button" disabled={!!aiBusy || script.length < 12} onClick={() => void checkScriptDedup()}>
+              只查重
+            </button>
+            <button className="aiw-muted" type="button" disabled={script.length < 12} onClick={() => void saveScriptSnapshot(script, 'wizard_manual_button')}>
+              保存到查重库
+            </button>
             <button className="aiw-muted" type="button" onClick={sanitizeWholeScript}>
               清理 / 和换行符
             </button>
@@ -2915,13 +3041,43 @@ export default function VideoCreationWizard({ project, setProject, goTab }: Prop
             </button>
           </div>
 
+          {scriptDedupReport ? (
+            <div className={`aiw-dedupPanel ${String(scriptDedupReport.decision || 'pass')}`}>
+              <div className="aiw-dedupHeadline">
+                <div>
+                  <b>文案原创度 {Number(scriptDedupReport.originality_score ?? 100).toFixed(0)}%</b>
+                  <span>最高相似度 {Number(scriptDedupReport.similarity_score ?? 0).toFixed(0)}%</span>
+                </div>
+                <em>{scriptDedupReport.decision === 'block' ? '已拦截' : scriptDedupReport.decision === 'rewrite' ? '需换角度' : scriptDedupReport.decision === 'warn' ? '接近历史' : '可以使用'}</em>
+              </div>
+              <div className="aiw-dedupMeta">
+                <span>角度：{scriptDedupReport.angle || '未识别'}</span>
+                <span>结构：{scriptDedupReport.structure || '未识别'}</span>
+                <span>Hook：{scriptDedupReport.hook_type || '未识别'}</span>
+                <span>CTA：{scriptDedupReport.cta_type || '未识别'}</span>
+              </div>
+              {!!scriptDedupReport.top_matches?.length && (
+                <div className="aiw-dedupMatches">
+                  {scriptDedupReport.top_matches.slice(0, 3).map((item, index) => (
+                    <div key={item.id || index}>
+                      <strong>{Number(item.similarity || 0).toFixed(0)}%</strong>
+                      <span>{item.title || '历史文案'} · {item.angle || item.structure || '历史内容'}</span>
+                      <small>{item.script_preview || ''}</small>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          ) : null}
+
           <textarea
             className="aiw-scriptTextarea"
             value={script}
-            onChange={(e) => setScript(e.target.value)}
+            onChange={(e) => { setScript(e.target.value); setScriptDedupReport(null) }}
             onBlur={() => {
               const cleaned = joinSegmentTexts(splitScript(script).map((item) => item.text))
               if (cleaned && cleaned !== script) setScript(cleaned)
+              if (cleaned) void saveScriptSnapshot(cleaned, 'wizard_manual_blur')
             }}
           />
 

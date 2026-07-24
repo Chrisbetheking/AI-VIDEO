@@ -1094,3 +1094,53 @@ body::after {
 @media (max-width: 520px) {
   .aiw-coverageMetrics { grid-template-columns: 1fr; }
 }
+
+/* V36 文案历史查重：保持原工作台风格，不新增突兀弹窗。 */
+.aiw-dedupPanel {
+  display: grid;
+  gap: 10px;
+  margin: 10px 0 12px;
+  padding: 12px 14px;
+  border: 1px solid rgba(148, 163, 184, 0.34);
+  border-radius: 14px;
+  background: rgba(15, 23, 42, 0.035);
+}
+
+.aiw-dedupPanel.pass { border-color: rgba(16, 185, 129, 0.38); }
+.aiw-dedupPanel.warn { border-color: rgba(245, 158, 11, 0.48); }
+.aiw-dedupPanel.rewrite,
+.aiw-dedupPanel.block { border-color: rgba(239, 68, 68, 0.5); }
+
+.aiw-dedupHeadline,
+.aiw-dedupHeadline > div,
+.aiw-dedupMeta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.aiw-dedupHeadline { justify-content: space-between; }
+.aiw-dedupHeadline b { font-size: 15px; }
+.aiw-dedupHeadline span,
+.aiw-dedupMeta span { font-size: 12px; color: var(--aiw-muted, #64748b); }
+.aiw-dedupHeadline em {
+  padding: 4px 9px;
+  border-radius: 999px;
+  font-style: normal;
+  font-size: 12px;
+  background: rgba(148, 163, 184, 0.15);
+}
+
+.aiw-dedupMatches { display: grid; gap: 7px; }
+.aiw-dedupMatches > div {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr);
+  gap: 2px 9px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: rgba(148, 163, 184, 0.09);
+}
+.aiw-dedupMatches strong { grid-row: 1 / span 2; align-self: center; }
+.aiw-dedupMatches span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.aiw-dedupMatches small { color: var(--aiw-muted, #64748b); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

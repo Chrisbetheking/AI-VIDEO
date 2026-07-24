@@ -539,11 +539,21 @@ class MemoryContextResponse(BaseModel):
 
 class ScriptVersionSave(BaseModel):
     title: str = Field(default='', max_length=300)
+    topic: str = Field(default='', max_length=500)
     hook: str = Field(default='', max_length=2000)
     script: str = Field(default='', max_length=20000)
+    cta: str = Field(default='', max_length=2000)
     description: str = Field(default='', max_length=8000)
     tags: List[str] = Field(default_factory=list)
     source: str = Field(default='manual', max_length=120)
+    angle: str = Field(default='', max_length=300)
+    structure: str = Field(default='', max_length=120)
+    hook_type: str = Field(default='', max_length=120)
+    cta_type: str = Field(default='', max_length=120)
+    status: str = Field(default='manual_saved', max_length=120)
+    task_id: str = Field(default='', max_length=300)
+    dedup_report: dict = Field(default_factory=dict)
+    metadata: dict = Field(default_factory=dict)
     raw: dict = Field(default_factory=dict)
 
 

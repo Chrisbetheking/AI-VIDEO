@@ -9,6 +9,15 @@ from typing import Any
 from fastapi import APIRouter, FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
+from app.config import get_settings
+from app.services.memory import MemoryStore
+from app.services.script_dedup_v10_40_8_36 import (
+    VERSION as SCRIPT_DEDUP_VERSION,
+    ScriptDedupEngine,
+    build_rewrite_feedback,
+    persist_script_record,
+)
+
 router = APIRouter(prefix="/api/video/wizard-ai", tags=["wizard-ai"])
 
 BAD_WORDS = {
@@ -58,6 +67,13 @@ class ScriptRequest(BaseModel):
     content_brain_context: list[dict[str, Any]] = Field(default_factory=list)
     source_result: Any = None
     require_llm: bool = True
+    dedup_enabled: bool = True
+    dedup_auto_rewrite: bool = True
+    dedup_max_rewrites: int = Field(default=2, ge=0, le=3)
+    force_new_angle: bool = False
+    requested_angle: str = ""
+    requested_structure: str = ""
+    save_history: bool = True
 
 class VoiceRequest(BaseModel):
     script: str = ""
@@ -96,7 +112,7 @@ def _extract_json(text: str) -> dict[str, Any]:
     return {"raw_text": text, "parse_warning": "DeepSeek 返回不是严格 JSON，已保留 raw_text。"}
 
 
-def _call_deepseek_json(system_prompt: str, user_payload: dict[str, Any], require_llm: bool = True) -> dict[str, Any]:
+def _call_deepseek_json(system_prompt: str, user_payload: dict[str, Any], require_llm: bool = True, temperature: float = 0.55) -> dict[str, Any]:
     cfg = _deepseek_cfg()
     if not cfg["api_key"]:
         if require_llm:
@@ -105,7 +121,7 @@ def _call_deepseek_json(system_prompt: str, user_payload: dict[str, Any], requir
 
     body = {
         "model": cfg["model"],
-        "temperature": 0.35,
+        "temperature": max(0.1, min(float(temperature), 1.2)),
         "response_format": {"type": "json_object"},
         "messages": [
             {"role": "system", "content": system_prompt},
@@ -235,7 +251,7 @@ def _fallback_voice(segments: list[dict[str, Any]], script_mode: str) -> dict[st
 @router.get("/health")
 def health() -> dict[str, Any]:
     cfg = _deepseek_cfg()
-    return {"ok": True, "provider": "wizard_ai_deepseek_v1", "deepseek_configured": cfg["configured"], "model": cfg["model"], "base_url": cfg["base_url"]}
+    return {"ok": True, "provider": "wizard_ai_deepseek_v36", "script_dedup_version": SCRIPT_DEDUP_VERSION, "deepseek_configured": cfg["configured"], "model": cfg["model"], "base_url": cfg["base_url"]}
 
 
 @router.post("/generate-topic")
@@ -253,7 +269,14 @@ def generate_topic(req: TopicRequest) -> dict[str, Any]:
     payload = req.model_dump(exclude={"require_llm"})
     payload["manual_keywords"] = "、".join([x["value"] for x in _sanitize_keywords([{"value": x} for x in re.split(r"[，,、\s]+", req.manual_keywords or "")])])
     payload["content_brain_context"] = _compact_brain_context(req.content_brain_context)
-    data = _call_deepseek_json(system, payload, require_llm=req.require_llm)
+    topic_brief = ScriptDedupEngine(get_settings()).generation_brief(
+        topic=req.current_topic or f"{req.city}{req.content_type}",
+        force_new_angle=True,
+    )
+    payload["script_dedup_brief"] = topic_brief
+    payload["required_fresh_angle"] = topic_brief.get("recommended_angle")
+    payload["required_fresh_structure"] = topic_brief.get("recommended_structure")
+    data = _call_deepseek_json(system, payload, require_llm=req.require_llm, temperature=0.72)
     topic = _clean(data.get("topic") or data.get("title") or req.current_topic)
     if not topic or re.search(r"(模板|OpenClaw|内容大脑|数字人|评论区答疑|R2素材|62\.?|规则)", topic):
         raise HTTPException(status_code=502, detail="DeepSeek 返回的主题为空或仍含系统脏词，已阻止写入。")
@@ -275,6 +298,7 @@ def generate_topic(req: TopicRequest) -> dict[str, Any]:
         "llm_mode": data.get("llm_mode"),
         "model": data.get("_llm_model"),
         "usage": data.get("_llm_usage"),
+        "dedup_brief": topic_brief,
     }
 
 @router.post("/analyze-keywords")
@@ -300,45 +324,158 @@ def analyze_keywords(req: KeywordRequest) -> dict[str, Any]:
 def generate_script(req: ScriptRequest) -> dict[str, Any]:
     target_chars_min = max(55, int(req.target_duration_seconds or 30) * 4)
     target_chars_max = max(80, int(req.target_duration_seconds or 30) * 6)
+    settings = get_settings()
+    memory = MemoryStore(settings)
+    dedup = ScriptDedupEngine(settings)
+    dedup.backfill_from_memory(memory)
+    brief = dedup.generation_brief(
+        topic=req.topic,
+        requested_angle=req.requested_angle,
+        requested_structure=req.requested_structure,
+        force_new_angle=req.force_new_angle,
+    )
+
     system = f"""
-你是海外房产短视频中文口播编导，必须调用真实输入进行创作。
-输出严格 JSON：{{"title":"", "script":"", "segments":[{{"index":1,"text":""}}], "selected_keywords":[], "content_plan":[], "risk_notes":[]}}
+你是海外房产短视频中文口播编导。必须基于真实输入创作，并通过历史文案查重门禁。
+输出严格 JSON：{{"title":"", "hook":"", "script":"", "cta":"", "angle":"", "structure":"", "segments":[{{"index":1,"text":""}}], "selected_keywords":[], "content_plan":[], "risk_notes":[]}}
 要求：
 - 口播中文自然，像真人顾问，不要像拼标签；禁止把关键词列表、模板名、卡片编号直接念出来。
 - 目标长度 {target_chars_min}-{target_chars_max} 个中文字符左右。
-- 结构：开头钩子 → 判断逻辑 → 专业/生活拆解 → 评论区承接。
+- 本次主角度必须优先采用：{brief.get('recommended_angle')}。
+- 本次结构必须优先采用：{brief.get('recommended_structure')}。不要固定套用“钩子→三个判断→评论区留言”。
+- 最近已用角度：{json.dumps(brief.get('recent_angles') or [], ensure_ascii=False)}，这些进入冷却，不能继续做主角度。
+- 最近已用结构：{json.dumps(brief.get('recent_structures') or [], ensure_ascii=False)}，这些进入冷却。
+- 禁止只做同义词替换；开头钩子、主体论证路径、结尾 CTA 至少更换两项。
 - 根据 script_mode 区分：lead 引流，professional 专业，life 生活日常，sales 成交承接。
 - 必须过滤无意义词：纯数字、62、风格、模板、OpenClaw、内容大脑、镜头、房产、选题、评论区答疑模板、数字人模板、成片沉淀。
 - 不能编造具体楼盘、户型、价格、收益、学校、ROI、官方信息。
 - 吉隆坡内容不能乱写海边/沙滩/岛屿。
 """.strip()
+
     payload = req.model_dump(exclude={"require_llm"})
     payload["manual_keywords"] = "、".join([x["value"] for x in _sanitize_keywords([{"value": x} for x in re.split(r"[，,、\s]+", req.manual_keywords or "")])])
     payload["content_brain_context"] = _compact_brain_context(req.content_brain_context)
     payload["keywords"] = _sanitize_keywords(req.keywords)
-    data = _call_deepseek_json(system, payload, require_llm=req.require_llm)
-    script = _clean(data.get("script"))
-    if not script:
-        raise HTTPException(status_code=502, detail="DeepSeek 没有返回 script，已阻止假生成。")
-    segments = data.get("segments") if isinstance(data.get("segments"), list) else _fallback_segments(script)
-    clean_segments = []
-    for idx, seg in enumerate(segments, start=1):
-        if not isinstance(seg, dict):
-            seg = {"text": str(seg)}
-        text = _clean(seg.get("text"))
-        if text:
-            clean_segments.append({"id": str(seg.get("id") or f"seg_{idx}"), "index": int(seg.get("index") or idx), "text": text})
+    payload["dedup_brief"] = brief
+
+    attempts: list[dict[str, Any]] = []
+    max_attempts = 1 + (int(req.dedup_max_rewrites) if req.dedup_enabled and req.dedup_auto_rewrite else 0)
+    final_data: dict[str, Any] = {}
+    final_report: dict[str, Any] = {}
+    final_script = ""
+    final_segments: list[dict[str, Any]] = []
+    final_hook = ""
+    final_cta = ""
+
+    for attempt_index in range(max_attempts):
+        call_payload = dict(payload)
+        call_payload["dedup_attempt"] = attempt_index + 1
+        if attempts:
+            call_payload["rewrite_feedback"] = attempts[-1]["rewrite_feedback"]
+        data = _call_deepseek_json(
+            system,
+            call_payload,
+            require_llm=req.require_llm,
+            temperature=0.72 + min(attempt_index, 2) * 0.08,
+        )
+        script = _clean(data.get("script"))
+        if not script:
+            raise HTTPException(status_code=502, detail="DeepSeek 没有返回 script，已阻止假生成。")
+        segments = data.get("segments") if isinstance(data.get("segments"), list) else _fallback_segments(script)
+        clean_segments: list[dict[str, Any]] = []
+        for idx, seg in enumerate(segments, start=1):
+            if not isinstance(seg, dict):
+                seg = {"text": str(seg)}
+            text = _clean(seg.get("text"))
+            if text:
+                clean_segments.append({"id": str(seg.get("id") or f"seg_{idx}"), "index": int(seg.get("index") or idx), "text": text})
+        clean_segments = clean_segments or _fallback_segments(script)
+        hook = _clean(data.get("hook")) or (clean_segments[0]["text"] if clean_segments else "")
+        cta = _clean(data.get("cta")) or (clean_segments[-1]["text"] if clean_segments else "")
+        report = dedup.analyze(
+            script=script,
+            topic=req.topic,
+            title=_clean(data.get("title")) or req.topic,
+            hook=hook,
+            cta=cta,
+        ) if req.dedup_enabled else {
+            "ok": True,
+            "decision": "pass",
+            "rewrite_required": False,
+            "similarity_score": 0,
+            "originality_score": 100,
+        }
+        final_data, final_report = data, report
+        final_script, final_segments, final_hook, final_cta = script, clean_segments, hook, cta
+        if not report.get("rewrite_required"):
+            break
+        feedback = build_rewrite_feedback(report, brief)
+        attempts.append({
+            "attempt": attempt_index + 1,
+            "similarity_score": report.get("similarity_score"),
+            "decision": report.get("decision"),
+            "rewrite_feedback": feedback,
+        })
+        if req.save_history:
+            persist_script_record(settings, memory, {
+                "title": _clean(data.get("title")) or req.topic,
+                "topic": req.topic,
+                "hook": hook,
+                "script": script,
+                "cta": cta,
+                "source": "wizard_ai_rejected_attempt",
+                "status": "rejected_similarity",
+                "force_new_record": True,
+                "metadata": {"attempt": attempt_index + 1, "request": req.model_dump(exclude={"require_llm"})},
+            }, report=report)
+
+    if final_report.get("rewrite_required"):
+        raise HTTPException(status_code=409, detail={
+            "message": "文案与历史内容仍然相似，自动换角度后未达到通过线，已阻止进入配音和成片。",
+            "dedup_report": final_report,
+            "attempts": attempts,
+            "recommended_angle": brief.get("recommended_angle"),
+            "recommended_structure": brief.get("recommended_structure"),
+        })
+
+    saved: dict[str, Any] = {}
+    if req.save_history:
+        saved = persist_script_record(settings, memory, {
+            "title": _clean(final_data.get("title")) or req.topic,
+            "topic": req.topic,
+            "hook": final_hook,
+            "script": final_script,
+            "cta": final_cta,
+            "angle": _clean(final_data.get("angle")) or final_report.get("angle") or brief.get("recommended_angle"),
+            "structure": _clean(final_data.get("structure")) or final_report.get("structure") or brief.get("recommended_structure"),
+            "source": "wizard_ai_generate_script",
+            "status": "generated_warn" if final_report.get("decision") in {"warn", "rewrite"} else "generated_pass",
+            "metadata": {
+                "attempts": attempts,
+                "request": req.model_dump(exclude={"require_llm"}),
+                "dedup_brief": brief,
+            },
+        }, report=final_report)
+
     return {
         "ok": True,
-        "title": _clean(data.get("title")) or req.topic,
-        "script": script,
-        "segments": clean_segments or _fallback_segments(script),
-        "selected_keywords": _sanitize_keywords(data.get("selected_keywords")),
-        "content_plan": data.get("content_plan") or [],
-        "risk_notes": data.get("risk_notes") or [],
-        "llm_mode": data.get("llm_mode"),
-        "model": data.get("_llm_model"),
-        "usage": data.get("_llm_usage"),
+        "title": _clean(final_data.get("title")) or req.topic,
+        "hook": final_hook,
+        "script": final_script,
+        "cta": final_cta,
+        "segments": final_segments,
+        "selected_keywords": _sanitize_keywords(final_data.get("selected_keywords")),
+        "content_plan": final_data.get("content_plan") or [],
+        "risk_notes": final_data.get("risk_notes") or [],
+        "angle": _clean(final_data.get("angle")) or final_report.get("angle") or brief.get("recommended_angle"),
+        "structure": _clean(final_data.get("structure")) or final_report.get("structure") or brief.get("recommended_structure"),
+        "dedup_report": final_report,
+        "dedup_attempts": attempts,
+        "dedup_brief": brief,
+        "script_history_record": saved,
+        "llm_mode": final_data.get("llm_mode"),
+        "model": final_data.get("_llm_model"),
+        "usage": final_data.get("_llm_usage"),
     }
 
 

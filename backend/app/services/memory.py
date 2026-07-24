@@ -307,15 +307,36 @@ class MemoryStore:
         return self.insert('trend_radar_records', payload)
 
     def save_script_version(self, payload: Dict[str, Any]) -> Dict[str, Any]:
-        # 文案历史只作为审计/回看，不允许因为 Supabase 400/字段缓存/RLS 问题阻断主流程。
-        # 如果 Supabase 写入失败，insert 会自动降级写本地 memory.json；再失败也只返回 warning。
+        # V36：所有入口的文案都先写本地 SQLite 查重库，再镜像到 Supabase/script_versions。
+        # 查重库是本机持久主索引，不依赖 Supabase 网络；Supabase 仍用于跨设备备份。
+        clean_payload = _strip_none(_clean(payload)) if isinstance(payload, dict) else {}
+        skip_mirror = bool(clean_payload.pop('_skip_dedup_mirror', False))
+        if not skip_mirror:
+            try:
+                from app.services.script_dedup_v10_40_8_36 import ScriptDedupEngine
+
+                ScriptDedupEngine(self.settings).save({
+                    **clean_payload,
+                    'metadata': {
+                        **(clean_payload.get('metadata') if isinstance(clean_payload.get('metadata'), dict) else {}),
+                        'mirrored_from_memory_store': True,
+                    },
+                })
+            except Exception as mirror_exc:
+                clean_payload.setdefault('raw', {})
+                if isinstance(clean_payload.get('raw'), dict):
+                    clean_payload['raw']['dedup_mirror_warning'] = (
+                        f'{type(mirror_exc).__name__}: {mirror_exc}'
+                    )
+
+        # 文案历史不能因为 Supabase 字段缓存/RLS 问题阻断主流程。
         try:
-            return self.insert('script_versions', payload, require_supabase=False)
+            return self.insert('script_versions', clean_payload, require_supabase=False)
         except Exception as exc:
             return {
                 'ok': False,
                 '_memory_warning': f'script_versions 保存失败但已放行文案生成：{type(exc).__name__}: {exc}',
-                **(_strip_none(_clean(payload)) if isinstance(payload, dict) else {}),
+                **clean_payload,
             }
 
     def save_learning_event(self, payload: Dict[str, Any]) -> Dict[str, Any]:

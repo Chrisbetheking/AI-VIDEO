@@ -18,6 +18,10 @@ from app.schemas import (
 )
 from app.services.deepseek import normalize_copy, _as_list, _as_str
 from app.services.llm import LLMError, chat_json
+from app.services.script_dedup_v10_40_8_36 import (
+    ScriptDedupEngine,
+    build_rewrite_feedback,
+)
 
 
 def _voice_segment_from_dict(item: Dict[str, Any]) -> VoiceSegment:
@@ -31,19 +35,22 @@ def _voice_segment_from_dict(item: Dict[str, Any]) -> VoiceSegment:
     )
 
 
-def _fallback(req: OneClickGenerateRequest, warning: str = '') -> OneClickGenerateResponse:
+def _fallback(req: OneClickGenerateRequest, warning: str = '', brief: Dict[str, Any] | None = None) -> OneClickGenerateResponse:
     topic = req.industry or '行业获客短视频'
-    hook = f'如果你正在考虑{topic}，先别急着做决定。'
+    brief = brief or {}
+    angle = str(brief.get('recommended_angle') or '数据核验')
+    structure = str(brief.get('recommended_structure') or '一分钟审计')
+    hook = f'这条不讲{topic}的老套路，直接做一遍{structure}。'
     script = f'''{hook}
-很多人一上来只看价格、只看表面资料，最后真正影响结果的关键点反而没搞清楚。
-我们会先看你的目标、预算、时间、家庭规划和风险边界，再判断什么方案适合你。
-这件事不是让你马上成交，而是先帮你少走弯路。
-如果你也想做一次清晰的判断，可以先私信我，把你的情况简单说一下。'''
+这次只聚焦{angle}，不把价格、区域、用途和成交话术全部塞进一条视频。
+先列出必须核验的证据，再区分已经确认的信息和仍需确认的信息。
+资料不完整的地方明确留空，不用模糊承诺替代事实。
+看完这份判断，你再决定下一步要不要继续。'''
     copy = GeneratedCopy(
-        title=f'{topic}别只看表面',
+        title=f'{topic}｜{angle} {structure}',
         hook=hook,
         script=script,
-        description='先做需求判断，再决定方案；适合正在认真比较的人。',
+        description=f'围绕{angle}做一次{structure}，只讲一个问题，避免重复堆叠。',
         tags=['老板口播', '获客', '咨询', topic[:12]],
         shots=['老板正面口播', '痛点大字字幕', '服务流程截图', '客户咨询场景', '结尾私信引导'],
         kb_refs=[],
@@ -53,7 +60,7 @@ def _fallback(req: OneClickGenerateRequest, warning: str = '') -> OneClickGenera
         project_title=copy.title,
         summary='已生成一套可同步到文案、配音、拍摄、剪辑和发布模块的一键方案。',
         copy=copy,
-        voice_director=VoiceDirectorResponse(style=req.style, director_notes=['开头压痛点，中段给判断标准，结尾引导私信。'], rewritten_script=script, segments=segments),
+        voice_director=VoiceDirectorResponse(style=req.style, director_notes=[f'本次采用{structure}，围绕{angle}单点展开；结尾不套用固定私信话术。'], rewritten_script=script, segments=segments),
         shooting_plan=ShootingPlanResponse(
             summary='围绕老板口播 + 资料/B-roll 快切完成拍摄。',
             shot_tasks=[ShotTask(scene='老板开场口播', duration='0-5秒', camera='正面半身，轻微推近', content=hook, props='干净背景/办公桌', priority='必拍')],
@@ -62,8 +69,8 @@ def _fallback(req: OneClickGenerateRequest, warning: str = '') -> OneClickGenera
             checklist=['确认真人形象/声音授权', '确认违禁词和夸大承诺', '确认结尾 CTA'],
         ),
         edit_plan=EditPlanResponse(
-            rhythm='前 3 秒强痛点，中段每 4-6 秒切一个素材，结尾 CTA 定格。',
-            timeline=['0-3秒：痛点字幕放大', '3-18秒：老板口播 + 素材快切', '18-30秒：流程/信任背书', '结尾：私信咨询引导'],
+            rhythm='按语义密度切镜：普通解释少切，具体对象和证据出现时再切。',
+            timeline=['开场：直接提出本次唯一问题', '中段：按证据和判断变化切镜', '结尾：给下一步行动，不复用固定CTA'],
             broll_keywords=['咨询', '资料', '流程', '案例', '城市/行业场景'],
             subtitle_style='抖音口播大字字幕，关键词高亮，短句分行，重点词放大。',
             music_style='低音量轻节奏，不压人声。',
@@ -160,8 +167,16 @@ def _normalize_oneclick(req: OneClickGenerateRequest, payload: Dict[str, Any]) -
 
 
 async def generate_one_click(settings: Settings, req: OneClickGenerateRequest) -> OneClickGenerateResponse:
-    system = '你是短视频获客生产线总导演。负责一次性生成文案、分镜、配音导演、剪辑计划、字幕风格、图文海报提示词和发布文案。必须输出严格 JSON，不能输出 markdown。'
-    user = f'''
+    dedup = ScriptDedupEngine(settings)
+    brief = dedup.generation_brief(topic=req.industry or req.selling_points, force_new_angle=True)
+    system = '你是短视频获客生产线总导演。负责一次性生成文案、分镜、配音导演、剪辑计划、字幕风格、图文海报提示词和发布文案。必须输出严格 JSON，不能输出 markdown。禁止复用历史文案结构。'
+    feedback: Dict[str, Any] = {}
+    attempts: List[Dict[str, Any]] = []
+    result: OneClickGenerateResponse | None = None
+    report: Dict[str, Any] = {}
+
+    for attempt in range(1, 4):
+        user = f'''
 请为以下项目生成一套可以直接同步到系统各模块的“一键生成方案”。
 行业：{req.industry or '未填写'}
 目标客户：{req.audience or '未填写'}
@@ -177,22 +192,67 @@ async def generate_one_click(settings: Settings, req: OneClickGenerateRequest) -
 额外要求：
 {req.instruction or '适合老板口播、数字人或素材混剪；字幕要有抖音口播效果，不要太干。'}
 
+V36 查重冷却：
+- 本次主角度：{brief.get('recommended_angle')}
+- 本次结构：{brief.get('recommended_structure')}
+- 最近角度不得继续做主角度：{json.dumps(brief.get('recent_angles') or [], ensure_ascii=False)}
+- 最近结构不得继续套用：{json.dumps(brief.get('recent_structures') or [], ensure_ascii=False)}
+- 禁止复用句式：{json.dumps(brief.get('avoid_phrases') or [], ensure_ascii=False)}
+- 第 {attempt} 次生成，上轮反馈：{json.dumps(feedback, ensure_ascii=False)}
+- 不得只换同义词；钩子、论证路径、CTA 至少改变两项。
+
 输出 JSON 顶层字段：
 project_title, summary, copy, voice_director, shooting_plan, edit_plan, subtitle, image_prompts, publish_title, publish_description, next_actions, warnings。
 
 字段要求：
-copy={{title, hook, script, description, tags, shots, kb_refs}}
+copy={{title, hook, script, description, tags, shots, kb_refs, cta}}
 voice_director={{style, director_notes, rewritten_script, segments}}，segments 每项必须有 text, emotion, speed_ratio, volume_ratio, pitch_ratio, pause_after_ms。
 shooting_plan={{summary, shot_tasks, broll_list, teleprompter, checklist}}，shot_tasks 每项必须有 scene, duration, camera, content, props, priority。
 edit_plan={{rhythm, timeline, broll_keywords, subtitle_style, music_style, cover_ideas, warnings}}
 subtitle={{template, keywords, srt_tips, cover_text_options}}，keywords 每项必须有 word, reason, effect。
 image_prompts 给 3 条中文海报/封面生成提示词，适合 Qwen-Image 或即梦图片生成。
 '''.strip()
-    try:
-        payload = await chat_json(settings, system, user, temperature=0.68, timeout=120)
-        return _normalize_oneclick(req, payload)
-    except Exception as exc:
-        return _fallback(req, f'AI 一键生成调用失败，已用本地兜底方案：{type(exc).__name__}: {str(exc)[:300]}')
+        try:
+            payload = await chat_json(settings, system, user, temperature=min(1.05, 0.72 + attempt * 0.08), timeout=120)
+            result = _normalize_oneclick(req, payload)
+        except Exception as exc:
+            result = _fallback(req, f'AI 一键生成调用失败，已用 V36 新角度兜底：{type(exc).__name__}: {str(exc)[:300]}', brief)
+
+        copy = result.copy
+        raw_copy = (result.raw or {}).get('copy') if isinstance(result.raw, dict) else {}
+        report = dedup.analyze(
+            script=copy.script,
+            topic=req.industry,
+            title=copy.title,
+            hook=copy.hook,
+            cta=str((raw_copy or {}).get('cta') or result.publish_description),
+        )
+        if not report.get('rewrite_required'):
+            break
+        feedback = build_rewrite_feedback(report, brief)
+        attempts.append({
+            'attempt': attempt,
+            'decision': report.get('decision'),
+            'similarity_score': report.get('similarity_score'),
+            'rewrite_feedback': feedback,
+        })
+
+    if result is None:
+        result = _fallback(req, 'V36 未获得可用 AI 结果，使用新角度兜底。', brief)
+        report = dedup.analyze(script=result.copy.script, topic=req.industry, title=result.copy.title, hook=result.copy.hook, cta=result.publish_description)
+
+    result.raw = {
+        **(result.raw or {}),
+        'script_dedup_version': '10.40.8.36',
+        'dedup_report': report,
+        'dedup_attempts': attempts,
+        'dedup_brief': brief,
+    }
+    if report.get('decision') in {'warn', 'rewrite'}:
+        result.warnings.append(f"文案查重最高相似度 {report.get('similarity_score')}%，已完成换角度重写；建议发布前再人工看一遍。")
+    if report.get('decision') == 'block':
+        result.warnings.append('文案仍与历史高度重复，已标记为阻止发布；请在文案页换角度后再生成。')
+    return result
 
 
 async def revise_one_click(settings: Settings, current: OneClickGenerateResponse, instruction: str, *, industry: str = '', audience: str = '', selling_points: str = '') -> OneClickGenerateResponse:

@@ -301,37 +301,68 @@ export function generateLocalScript(
   const plan = computeVideoPlan(duration, 0, 7)
   const seed = makeSeed(topic, market, duration, nonce)
 
-  const openings = [
-    `${topic}，别先急着问价格，第一步先判断你买它到底解决什么问题。`,
-    `很多人看${market}房产，一上来就看价格，其实这一步最容易错。`,
-    `${topic}这件事，真正拉开差距的不是谁先下手，而是谁先把逻辑想清楚。`,
-    `如果你准备看${market}房产，先别被样板间和宣传图带着走。`,
-    `今天不讲鸡血，直接讲${topic}最容易踩的判断误区。`,
+  const angles = [
+    {
+      opening: `签${market}房产合同前，先把付款节点按时间排开。`,
+      points: [
+        '定金、签约、施工和交付分别什么时候付款，要先放进现金流表。',
+        '口头承诺不能替代合同条款，看不懂的地方必须交给律师逐项确认。',
+        '能付得起总价，不代表每个付款节点都没有压力。',
+      ],
+      ending: '先算清付款节奏，再决定是否继续。',
+    },
+    {
+      opening: `买${market}房产，成交价只是第一张账单。`,
+      points: [
+        '物业费、税费、维修和空置期，才决定长期持有压力。',
+        '把一次性费用和每年持续费用分开，不要只看宣传页上的总价。',
+        '资料没有写清楚的费用，必须列入待核验清单。',
+      ],
+      ending: '先把长期账单算出来，再谈这套房适不适合。',
+    },
+    {
+      opening: '样板间看着大，不等于实际住起来顺手。',
+      points: [
+        '先走一遍日常动线，再看采光、收纳和家具摆放。',
+        '自住要代入一家人的生活，出租要代入租客的真实使用。',
+        '户型图和现场尺寸不一致时，以正式资料和实测为准。',
+      ],
+      ending: '下一次看房，先把一天怎么住走一遍。',
+    },
+    {
+      opening: `地图上的十分钟，不一定等于${market}高峰期的十分钟。`,
+      points: [
+        '通勤、商场、学校和医院，要按真实路线逐一核验。',
+        '生活半径不是项目周围有什么，而是你每天真的会去哪里。',
+        '具体对象出现时再切镜，普通解释不用机械地每三秒换画面。',
+      ],
+      ending: '看房当天，亲自走一次最常用的路线。',
+    },
+    {
+      opening: '规划可以听，但每一句都要找到对应证据。',
+      points: [
+        '把已经建成、正在施工和仍停留在宣传阶段的内容分开。',
+        '资料不足的地方明确标记待确认，不用想象替代事实。',
+        '现场、合同和正式文件之间有冲突时，先停下来核验。',
+      ],
+      ending: '先确认今天已经有什么，再判断未来值不值得等。',
+    },
+    {
+      opening: `有位客户预算没问题，却差点在${topic}这件事上选错方向。`,
+      points: [
+        '他一直比较表面条件，后来才发现真正优先的是家庭需求和使用频率。',
+        '案例不是让你照抄答案，而是提醒你先把自己的需求排序。',
+        '先写出最不能妥协的一项，再开始比较项目。',
+      ],
+      ending: '答案不是哪个项目最火，而是哪种选择更符合你的排序。',
+    },
   ]
 
-  const points = [
-    `先看预算和用途：自住、出租、第二居所和家庭配置，判断标准完全不一样。`,
-    `再看区域和人群：谁会住、谁会租、未来谁来接手，这比单看总价更重要。`,
-    `第三看资料真实性：户型、价格、交付、周边和管理费，都要回到官方文件核验。`,
-    `别只问“值不值”，先问“适不适合我现在的用途和现金流”。`,
-    `如果是投资，要把租客来源、空置风险和转手难度放在一起看。`,
-    `如果是家庭配置，要把教育、养老、通勤和长期生活半径放在一起算。`,
-    `同样预算，买错区域，后面的出租和转手都会很被动。`,
-    `同样项目，买错户型，现金流和流动性也可能完全不一样。`,
-    `真正靠谱的判断，不靠一句“推荐”，而是靠预算、用途、城市和退出路径。`,
-  ]
-
-  const endings = [
-    `想少踩坑，先把预算、目标城市和自住/投资用途讲清楚，再去匹配项目。`,
-    `评论区留下你的预算和用途，我按自住、投资、家庭配置三个方向帮你拆。`,
-    `别急着定项目，先把需求筛清楚，后面看房才不会被带节奏。`,
-    `真实房源、户型、价格和周边信息，最终都以官方资料和实地核验为准。`,
-  ]
-
-  const shuffledPoints = Array.from({ length: points.length }, (_, i) => pick(points, seed, i * 3 + 2))
-  const uniquePoints = Array.from(new Set(shuffledPoints))
+  const selected = pick(angles, seed, 7)
+  const shuffled = selected.points.map((_, i) => pick(selected.points, seed, i * 5 + 3))
+  const uniquePoints = Array.from(new Set(shuffled))
   const neededMiddle = Math.max(1, plan.segmentCount - 2)
-  const lines = [pick(openings, seed, 1), ...uniquePoints.slice(0, neededMiddle), pick(endings, seed, 99)]
+  const lines = [selected.opening, ...uniquePoints.slice(0, neededMiddle), selected.ending]
   return lines.slice(0, plan.segmentCount).join('\n')
 }
 
@@ -347,7 +378,7 @@ export function splitScriptToSegments(
     .map((x) => x.trim())
     .filter(Boolean)
 
-  const fallback = generateLocalScript('马来西亚买房，别只看价格', '马来西亚', duration).split('\n')
+  const fallback = generateLocalScript('马来西亚房产单点判断', '马来西亚', duration).split('\n')
   const lines = rough.length ? rough : fallback
   const picked = lines.slice(0, plan.segmentCount)
 
@@ -596,13 +627,29 @@ export async function generateAIScriptPlan(project: ProjectDraft, dryRun = false
     lead_notes: [
       ...(project.leads || []).map((x: any) => x?.text || x?.original_text || x?.script_hook || JSON.stringify(x)).slice(0, 8),
     ].join('\n'),
-    style: '短、狠、直接、口语化、有转化、适合抖音',
+    style: '短、狠、直接、口语化、有转化、适合抖音，但禁止重复历史结构',
+    dedup_enabled: true,
+    dedup_auto_rewrite: true,
+    dedup_max_rewrites: 2,
+    force_new_angle: Boolean(project.forceNewScriptAngle),
+    requested_angle: project.requestedScriptAngle || '',
+    requested_structure: project.requestedScriptStructure || '',
+    save_history: true,
     dry_run: dryRun,
   }, 180000)
 }
 
 export function projectFromAIScriptPlan(project: ProjectDraft, data: any): ProjectDraft {
-  const script = safeText(data?.script, generateLocalScript(project.topic, project.market, project.targetDuration))
+  if (data?.status === 'blocked_by_script_dedup' || data?.dedup_report?.blocked) {
+    return {
+      ...project,
+      scriptDedupBlocked: true,
+      scriptDedupReport: data?.dedup_report || null,
+      scriptDedupMessage: data?.message || '文案与历史内容高度重复，已阻止进入生成。',
+      scriptProvider: data?.provider || 'script_dedup_blocked',
+    }
+  }
+  const script = safeText(data?.script, project.script || generateLocalScript(project.topic, project.market, project.targetDuration))
   const rawSegments = Array.isArray(data?.segments) ? data.segments : []
 
   const fallbackSegments = splitScriptToSegments(script, project.targetDuration, project.materialSeconds, project.aiShotSeconds)
@@ -626,6 +673,10 @@ export function projectFromAIScriptPlan(project: ProjectDraft, data: any): Proje
     cta: safeText(data?.cta, project.cta),
     riskNote: safeText(data?.risk_note, project.riskNote),
     scriptProvider: data?.provider || 'unknown',
+    scriptDedupBlocked: false,
+    scriptDedupReport: data?.dedup_report || null,
+    scriptDedupAttempts: data?.dedup_attempts || [],
+    scriptDedupBrief: data?.dedup_brief || null,
   }
 }
 

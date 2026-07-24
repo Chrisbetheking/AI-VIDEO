@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 
 from app.config import get_settings
 from app.services.storage import maybe_upload_to_r2
+from app.services.script_dedup_v10_40_8_36 import ScriptDedupEngine
 
 try:
     from app.services.comment_lead_provider import DB_PATH as COMMENT_LEAD_DB_PATH
@@ -498,31 +499,82 @@ def suggest_topics(req: SuggestTopicsRequest) -> dict[str, Any]:
     cards = data.get("cards") or []
     seed_text = "\n".join(f"{c.get('title')} {c.get('content')} {' '.join(c.get('tags') or [])}" for c in cards)
     base_tags = _split_tags(f"{req.query} {req.city} {req.market} {req.content_type} {seed_text}")
-
-    templates = [
-        "{city}买房别只看价格，先看这三个判断标准",
-        "{city}自住和投资，选房逻辑完全不一样",
-        "预算有限怎么买{city}公寓？先筛区域和用途",
-        "评论区问得最多：{city}哪里更适合出租？",
-        "买{market}前，先把预算、区域、用途说清楚",
-        "为什么同样预算，有人买得稳，有人买完后悔？",
-        "{city}房产别只拍地标，真正该看房内和配套",
-        "华人客户最关心的{city}买房问题，一条讲清楚",
-    ]
     city = req.city or "吉隆坡"
     market = req.market or "马来西亚房产"
-    topics = []
-    for idx, tpl in enumerate(templates[: max(1, min(req.limit, 20))], start=1):
-        title = tpl.format(city=city, market=market)
-        topics.append({
-            "id": f"topic_{idx}",
+    engine = ScriptDedupEngine(get_settings())
+    brief = engine.generation_brief(topic=f"{city} {market} {req.query}", force_new_angle=True)
+
+    # V36 不再只给“价格/自住投资/出租”八个固定模板。候选覆盖真实成本、
+    # 合同、户型、交付、物业、流程、家庭需求与现场实测，再由历史库过滤。
+    templates = [
+        ("持有成本", "成本账单", "{city}买房后每年还要花什么？把持有成本算清楚", "成交价不是最后一笔钱，真正影响长期压力的是后面的账单。"),
+        ("合同付款", "一分钟审计", "签{market}合同前，先核对这几个付款节点", "同一个项目，付款节奏不同，现金压力可能完全不同。"),
+        ("户型实用", "现场实测", "样板间看着大，实际住起来顺不顺？现场看这几处", "宣传面积很漂亮，但真正决定体验的是动线、采光和收纳。"),
+        ("交付规划", "红旗清单", "项目规划说得很好，哪些信号需要先警惕？", "规划不是不能听，而是每一句都要找到对应证据。"),
+        ("转售流动性", "决策树", "以后可能转手，今天选房要先看什么？", "买的时候只看喜欢，卖的时候就可能被流动性卡住。"),
+        ("客户案例", "客户案例", "一位客户预算够，为什么最后却换了区域？", "这次不是讲标准答案，而是复盘一次真实决策过程。"),
+        ("流程手续", "问答拆解", "外国人在{market}买房，流程到底从哪一步开始？", "流程不难，难的是把每个节点和责任人对上。"),
+        ("物业管理", "一分钟审计", "同样是公寓，物业管理差距会体现在哪里？", "大厅好看只是第一印象，长期体验要看维护和管理。"),
+        ("家庭需求", "决策树", "一家人一起住，选房顺序应该怎么排？", "同一套房对单身、夫妻和三代同住，答案完全不同。"),
+        ("数据核验", "一分钟审计", "看房资料很多，哪些信息必须自己核验？", "资料越多越不能只看宣传页，要把来源和日期对上。"),
+        ("区域通勤", "现场实测", "别只看地图距离，实际通勤要这样测", "地图上的十分钟，不一定等于高峰期的十分钟。"),
+        ("生活配套", "前后对比", "配套写得很全，真正每天会用到的是哪些？", "生活半径不是项目周围有什么，而是你每天真的会去哪里。"),
+        ("出租租客", "问答拆解", "出租前先回答：你的租客为什么要住这里？", "租客来源不是一句‘附近有人上班’就能说明白。"),
+        ("价格预算", "成本账单", "同样预算，为什么有人越买越轻松，有人压力越来越大？", "预算不是总价上限，而是整个持有周期的承受能力。"),
+        ("自住投资", "前后对比", "自住和投资不能用同一张评分表", "一套房同时满足所有目标，往往只是宣传话术。"),
+        ("现场看房", "红旗清单", "第一次看房，先别拍视频，先找这几个细节", "真正有用的现场记录，不是地标，而是容易忽略的细节。"),
+        ("交付质量", "前后对比", "样板间和实际交付，应该怎么对照？", "看得见的装修只是表面，交付标准要回到正式文件。"),
+        ("贷款现金流", "决策树", "贷款比例怎么定，才不会把现金流压得太紧？", "能贷多少和适合贷多少，是两回事。"),
+        ("二手选择", "误区纠正", "新房一定比二手房更适合海外买家吗？", "新旧不是唯一标准，关键是需求、成本和可核验程度。"),
+        ("购房退出", "单一观点论证", "买之前先想退出路径，会不会太早？", "越早想清楚怎么退出，越不容易被单一卖点绑住。"),
+    ]
+
+    requested = max(1, min(req.limit, 20))
+    topics: list[dict[str, Any]] = []
+    rejected: list[dict[str, Any]] = []
+    # Put the engine-recommended fresh angle first, then evaluate all candidates.
+    templates.sort(key=lambda item: 0 if item[0] == brief.get("recommended_angle") else 1)
+    for angle, structure, title_tpl, hook in templates:
+        title = title_tpl.format(city=city, market=market)
+        report = engine.analyze(script=f"{title}。{hook}", topic=title, title=title, hook=hook, cta="")
+        item = {
+            "id": f"topic_{len(topics) + 1}",
             "title": title,
-            "hook": f"很多人一上来就问价格，但{city}买房真正先看的是需求、区域和后续流动性。",
-            "tags": base_tags[:10],
+            "hook": hook,
+            "angle": angle,
+            "structure": structure,
+            "originality_score": report.get("originality_score"),
+            "similarity_score": report.get("similarity_score"),
+            "dedup_decision": report.get("decision"),
+            "tags": list(dict.fromkeys([angle, structure, *base_tags]))[:10],
             "source_card_count": len(cards),
-            "suggested_visuals": ["城市建立镜头", "房内客厅", "阳台城市景", "大堂/泳池/健身房", "顾问带看", "评论区CTA"],
-        })
-    return {"ok": True, "topics": topics, "source_cards": cards[:20]}
+            "suggested_visuals": ["真实人物/咨询场景", "对应业务证据", "现场细节", "文件或数据核验", "独立CTA画面"],
+        }
+        if report.get("decision") in {"block", "rewrite"}:
+            rejected.append(item)
+            continue
+        topics.append(item)
+        if len(topics) >= requested:
+            break
+
+    # When the history is already very dense, return the least-similar rejected
+    # candidates with an explicit warning instead of silently falling back to the old templates.
+    if len(topics) < requested:
+        rejected.sort(key=lambda item: float(item.get("similarity_score") or 0))
+        for item in rejected:
+            item["dedup_decision"] = "warn"
+            topics.append(item)
+            if len(topics) >= requested:
+                break
+
+    return {
+        "ok": True,
+        "version": "10.40.8.36-script-topic-rotation",
+        "topics": topics,
+        "source_cards": cards[:20],
+        "dedup_brief": brief,
+        "filtered_duplicate_count": len(rejected),
+    }
 
 
 @router.post("/export-obsidian")

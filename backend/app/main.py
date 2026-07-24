@@ -5731,6 +5731,15 @@ except Exception as _content_brain_exc:
 # ===== /CONTENT BRAIN BACKEND PROVIDER =====
 
 
+# ===== V10.40.8.36 SCRIPT MEMORY + DEDUP =====
+try:
+    from app.services.script_dedup_v10_40_8_36 import install_script_dedup
+    install_script_dedup(app, get_settings, get_memory)
+    print("V10_40_8_36_SCRIPT_DEDUP_LOADED", flush=True)
+except Exception as _script_dedup_exc:
+    print("V10_40_8_36_SCRIPT_DEDUP_LOAD_FAILED", repr(_script_dedup_exc), flush=True)
+# ===== /V10.40.8.36 SCRIPT MEMORY + DEDUP =====
+
 
 # ===== WIZARD AI DEEPSEEK PROVIDER =====
 try:
