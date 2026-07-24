@@ -19,12 +19,13 @@ from typing import Any, Callable
 
 from fastapi import Depends, HTTPException, Request
 
-VERSION = "10.40.8.35-final-master-integrity-workflow-cleanup"
+VERSION = "10.40.8.36.1-final-intent-validation-hotfix"
+# V10_40_8_36_1_FINAL_INTENT_VALIDATION_HOTFIX
 # V10_40_8_35_FINAL_MASTER_INTEGRITY_WORKFLOW_CLEANUP
 # V10_40_8_34_DEDUP_KEYWORD_ENTITY_CTA
 # V10_40_8_33_SEMANTIC_RELEVANCE_CAPTION_HIERARCHY
 # V10_40_8_32_REFERENCE_KINETIC_TYPOGRAPHY
-INSTALL_MARKER = "V10_40_8_35_FINAL_MASTER_INTEGRITY_WORKFLOW_CLEANUP"
+INSTALL_MARKER = "V10_40_8_36_1_FINAL_INTENT_VALIDATION_HOTFIX"
 _INSTALLED = False
 _LOCK = threading.RLock()
 
@@ -1717,6 +1718,7 @@ def install_dynamic_edit_v2(app: Any, get_settings: Callable[..., Any]) -> None:
                 "clean_single_caption_layer": True,
                 "real_tts_child_master_promoted": True,
                 "post_tts_final_master_integrity": True,
+                "final_intent_metadata_revalidation": True,
                 "strict_actual_repeat_count_gate": True,
                 "successful_dynamic_workdir_cleanup": True,
                 "parent_job_semantic_metadata_synced": True,

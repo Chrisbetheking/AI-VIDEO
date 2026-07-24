@@ -32,7 +32,8 @@ from app.services.a10_r4_output_guard_v10_40_8_12 import (
     measure_audio_loudness,
 )
 
-VERSION = "10.40.8.35-final-master-integrity-workflow-cleanup"
+VERSION = "10.40.8.36.1-final-intent-validation-hotfix"
+# V10_40_8_36_1_FINAL_INTENT_VALIDATION_HOTFIX
 # V10_40_8_35_FINAL_MASTER_INTEGRITY_WORKFLOW_CLEANUP
 # V10_40_8_34_DEDUP_KEYWORD_ENTITY_CTA
 # V10_40_8_33_SEMANTIC_RELEVANCE_CAPTION_HIERARCHY
@@ -381,6 +382,45 @@ def _v35_asset_intent_keys(asset: dict[str, Any]) -> set[str]:
     return keys
 
 
+def _v361_clip_intent_keys(clip: dict[str, Any], family: str = "") -> set[str]:
+    """Rebuild concrete scene keys from the final clip metadata.
+
+    V35 used only ``visual_family`` during the final report pass. That lost
+    concrete school/office/people tags which had already been used to accept
+    the selected asset, causing a false post-render integrity failure.
+    """
+    resolved_family = str(family or clip.get("visual_family") or "").strip().lower()
+    text = _v35_clip_text(clip)
+    inferred = _v35_visual_family(text)
+    keys: set[str] = set()
+
+    if resolved_family and resolved_family != "other":
+        keys.add(resolved_family)
+    if inferred and inferred != "other":
+        keys.add(inferred)
+
+    if re.search(r"租客|白领|学生|访客|客户|工作人员|tenant|visitor|customer|staff", text, re.I):
+        keys.add("people")
+    if re.search(r"大学|学校|学院|校园|student|university|school|campus", text, re.I):
+        keys.add("school")
+    if re.search(r"写字楼|办公|商务区|公司|office|business district|cowork", text, re.I):
+        keys.add("office")
+    if re.search(r"通勤|交通|地铁|轻轨|单轨|轨道|道路|高速|公交|metro|rail|train|road|commute", text, re.I):
+        keys.add("traffic")
+    if re.search(r"商场|购物|商业配套|超市|餐饮|零售|shopping|mall|retail|supermarket", text, re.I):
+        keys.add("mall")
+    if re.search(r"医院|医疗|诊所|医务|hospital|clinic|medical", text, re.I):
+        keys.add("hospital")
+    if re.search(r"施工|工地|在建|建设现场|交付进度|construction|building site", text, re.I):
+        keys.add("construction")
+    if re.search(r"地图|区位|路线图|规划图|总平图|map|location plan|master plan", text, re.I):
+        keys.add("map")
+    if re.search(r"住宅|公寓|户型|样板间|楼盘|售楼处|沙盘|社区|condo|apartment|residential|showroom|sales gallery", text, re.I):
+        keys.add("residential")
+
+    return keys
+
+
 def _v35_intent_match(
     requested: set[str], candidate_keys: set[str], family: str,
 ) -> bool:
@@ -479,9 +519,7 @@ def _v35_finalize_real_tts_master(
             family = inferred_family
         requested = _v35_intent_keys(clip.get("semantic_requested_intents") or [])
         cta = _v35_is_final_cta(clip, index, len(originals))
-        current_keys = {family} if family != "other" else set()
-        if family == "people":
-            current_keys.add("people")
+        current_keys = _v361_clip_intent_keys(clip, family)
         previous_family = str(finalized[-1].get("visual_family") or "") if finalized else ""
 
         invalid_reasons: list[str] = []
@@ -595,8 +633,14 @@ def _v35_finalize_real_tts_master(
     for index, clip in enumerate(finalized):
         requested = _v35_intent_keys(clip.get("semantic_requested_intents") or [])
         family = str(clip.get("visual_family") or "")
-        if not _v35_intent_match(requested, {family}, family):
-            mismatches.append({"index": index + 1, "family": family, "requested": sorted(requested)})
+        final_keys = _v361_clip_intent_keys(clip, family)
+        if not _v35_intent_match(requested, final_keys, family):
+            mismatches.append({
+                "index": index + 1,
+                "family": family,
+                "candidate_keys": sorted(final_keys),
+                "requested": sorted(requested),
+            })
         if index > 0:
             previous = str(finalized[index - 1].get("visual_family") or "")
             if family == previous and family in _V35_GENERIC_FAMILIES:
@@ -2022,6 +2066,7 @@ def install_existing_video_editor(
                 "source_interval_overlap_guard": True,
                 "whole_video_repeat_report": True,
                 "post_tts_final_master_integrity": True,
+                "final_intent_metadata_revalidation": True,
                 "successful_workdir_cleanup": True,
                 "stale_workdir_cleanup_24h": True,
             "strict_visual_single_use": True,
