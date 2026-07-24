@@ -32,7 +32,9 @@ from app.services.a10_r4_output_guard_v10_40_8_12 import (
     measure_audio_loudness,
 )
 
-VERSION = "10.40.8.37-inline-keyword-entity-microcut-cta"
+VERSION = "10.40.8.37.1.1-cta-classifier-traffic-intent-hotfix"
+# V10_40_8_37_1_1_CTA_CLASSIFIER_TRAFFIC_INTENT_HOTFIX
+# V10_40_8_37_1_ADAPTIVE_UNIQUE_ASSET_CAPACITY
 # V10_40_8_37_INLINE_KEYWORD_ENTITY_MICROCUT_CTA
 # V10_40_8_36_1_FINAL_INTENT_VALIDATION_HOTFIX
 # V10_40_8_35_FINAL_MASTER_INTEGRITY_WORKFLOW_CLEANUP
@@ -358,7 +360,7 @@ def _v35_intent_keys(values: Any) -> set[str]:
             keys.add("construction")
         if re.search(r"地图|区位|位置|路线|规划图|map|location", value, re.I):
             keys.add("map")
-        if re.search(r"通勤|交通|地铁|轻轨|轨道|道路|metro|rail|road|commute", value, re.I):
+        if re.search(r"通勤|交通|地铁|轻轨|轨道|道路|traffic|transport|transit|metro|rail|road|commute", value, re.I):
             keys.add("traffic")
         if re.search(r"办公|写字楼|商务|公司|office|business", value, re.I):
             keys.add("office")
@@ -429,6 +431,13 @@ def _v35_intent_match(
         return True
     if requested & candidate_keys:
         return True
+    # Route maps and real transport scenes are interchangeable for a generic
+    # commute / transport request.  This widens the unique candidate pool
+    # without falling back to unrelated residential or landmark footage.
+    if requested == {"traffic"} and ("map" in candidate_keys or family == "map"):
+        return True
+    if requested == {"map"} and ("traffic" in candidate_keys or family == "traffic"):
+        return True
     if "residential" in requested and family in {"residential", "people", "office"}:
         return True
     tenant_group = {"people", "office", "school"}
@@ -438,14 +447,30 @@ def _v35_intent_match(
 
 
 def _v35_is_final_cta(clip: dict[str, Any], index: int, total: int) -> bool:
+    """Identify only an actionable final CTA, not every rhetorical question.
+
+    V37.1 treated any last sentence containing a question mark as a CTA.  A
+    normal content question such as "你的主要通勤工具是什么？" was then
+    forced to use a people scene and could no longer merge with the preceding
+    traffic shot when unique traffic capacity was exhausted.
+    """
     if index != total - 1:
         return False
-    text = str(clip.get("narration") or clip.get("text") or "")
-    beat = str(clip.get("beat_type") or "").lower()
-    return bool(
-        beat in {"cta", "question"}
-        or re.search(r"评论|留言|私信|关注|你.*(?:吗|呢|？|\?)|自住还是投资", text, re.I)
+    if bool(clip.get("is_cta")):
+        return True
+    beat = str(clip.get("beat_type") or "").strip().lower()
+    if beat == "cta":
+        return True
+    text = str(clip.get("narration") or clip.get("text") or "").strip()
+    if not text:
+        return False
+    actionable = re.search(
+        r"评论|留言|私信|关注|联系|咨询|预约|点击|领取|发送|发来|告诉我|"
+        r"打在评论区|把.{0,24}(?:项目|预算|报价|户型|通勤方式).{0,12}(?:发来|告诉我|留言|私信)",
+        text,
+        re.I,
     )
+    return bool(actionable)
 
 
 def _v35_apply_asset_to_clip(
@@ -489,6 +514,126 @@ def _v35_apply_asset_to_clip(
     return updated
 
 
+def _v371_focus_entity(clip: dict[str, Any]) -> str:
+    return str(
+        clip.get("focus_entity")
+        or clip.get("micro_entity")
+        or clip.get("entity")
+        or ""
+    ).strip().lower()
+
+
+def _v371_distinct_concrete_focus(
+    previous: dict[str, Any], current: dict[str, Any],
+) -> bool:
+    previous_focus = _v371_focus_entity(previous)
+    current_focus = _v371_focus_entity(current)
+    return bool(
+        previous_focus
+        and current_focus
+        and previous_focus != current_focus
+        and (
+            previous.get("entity_micro_cut")
+            or current.get("entity_micro_cut")
+        )
+    )
+
+
+def _v371_adjacent_family_violation(
+    previous: dict[str, Any] | None, current: dict[str, Any], family: str = "",
+) -> bool:
+    if not previous:
+        return False
+    previous_family = str(previous.get("visual_family") or "").strip().lower()
+    current_family = str(family or current.get("visual_family") or "").strip().lower()
+    if not previous_family or previous_family != current_family:
+        return False
+    if current_family not in _V35_GENERIC_FAMILIES:
+        return False
+    # Two unique clips may legitimately be adjacent when they visualize two
+    # different named entities, for example metro then road, school then mall.
+    if (
+        _v35_clip_identity(previous) != _v35_clip_identity(current)
+        and _v371_distinct_concrete_focus(previous, current)
+    ):
+        return False
+    return True
+
+
+def _v371_can_merge_as_semantic_hold(
+    previous: dict[str, Any] | None, current: dict[str, Any], *, total: int, index: int,
+) -> bool:
+    if not previous:
+        return False
+    if _v35_is_final_cta(current, index, total):
+        return False
+    if _v371_distinct_concrete_focus(previous, current):
+        return False
+    previous_family = str(previous.get("visual_family") or "").strip().lower()
+    current_family = str(current.get("visual_family") or "").strip().lower()
+    previous_requested = _v35_intent_keys(previous.get("semantic_requested_intents") or [])
+    current_requested = _v35_intent_keys(current.get("semantic_requested_intents") or [])
+    same_asset = bool(
+        _v35_clip_identity(previous)
+        and _v35_clip_identity(previous) == _v35_clip_identity(current)
+    )
+    semantic_overlap = bool(previous_requested & current_requested)
+    same_family = bool(previous_family and previous_family == current_family)
+    combined = float(previous.get("duration") or previous.get("duration_seconds") or 0.0) + float(
+        current.get("duration") or current.get("duration_seconds") or 0.0
+    )
+    # A semantic hold is preferable to repeating the same source or aborting
+    # the whole task, but it must not recreate the previous nine-second hold.
+    return bool((same_asset or semantic_overlap or same_family) and combined <= 7.2)
+
+
+def _v371_merge_into_previous(
+    previous: dict[str, Any], current: dict[str, Any], *, reasons: list[str],
+) -> dict[str, Any]:
+    merged = dict(previous)
+    previous_duration = float(previous.get("duration") or previous.get("duration_seconds") or 0.0)
+    current_duration = float(current.get("duration") or current.get("duration_seconds") or 0.0)
+    duration = round(max(0.3, previous_duration + current_duration), 3)
+    merged["duration"] = duration
+    merged["duration_seconds"] = duration
+    merged["start_time"] = float(previous.get("start_time") or 0.0)
+    merged["end_time"] = round(merged["start_time"] + duration, 3)
+
+    previous_text = str(previous.get("narration") or previous.get("text") or "").strip()
+    current_text = str(current.get("narration") or current.get("text") or "").strip()
+    if current_text and current_text not in previous_text:
+        merged["narration"] = " ".join(item for item in (previous_text, current_text) if item)
+        if previous.get("text") is not None or current.get("text") is not None:
+            merged["text"] = merged["narration"]
+
+    requested = []
+    for item in [
+        *(previous.get("semantic_requested_intents") or []),
+        *(current.get("semantic_requested_intents") or []),
+    ]:
+        value = str(item or "").strip()
+        if value and value not in requested:
+            requested.append(value)
+    if requested:
+        merged["semantic_requested_intents"] = requested
+
+    merged_units = [
+        *([dict(item) for item in previous.get("merged_semantic_units") or [] if isinstance(item, dict)]),
+        {
+            "source_index": current.get("index"),
+            "focus_entity": _v371_focus_entity(current),
+            "narration": current_text,
+            "duration": round(current_duration, 3),
+            "reasons": list(reasons),
+        },
+    ]
+    merged["merged_semantic_units"] = merged_units
+    merged["semantic_hold_merged"] = True
+    merged["semantic_hold_reason"] = ",".join(reasons)
+    merged["cadence_mode"] = "adaptive_semantic_hold"
+    return merged
+
+
 def _v35_finalize_real_tts_master(
     settings: Any,
     clips: list[dict[str, Any]],
@@ -506,6 +651,7 @@ def _v35_finalize_real_tts_master(
     intent_counts: dict[str, int] = {}
     finalized: list[dict[str, Any]] = []
     replacements: list[dict[str, Any]] = []
+    consolidations: list[dict[str, Any]] = []
     max_landmarks = max(1, int(len(originals) * 0.20))
 
     for index, original in enumerate(originals):
@@ -534,7 +680,9 @@ def _v35_finalize_real_tts_master(
             invalid_reasons.append("cta_requires_people_scene")
         if family == "city_landmark" and family_counts.get(family, 0) >= max_landmarks:
             invalid_reasons.append("landmark_share_cap")
-        if previous_family and family == previous_family and family in _V35_GENERIC_FAMILIES:
+        if _v371_adjacent_family_violation(
+            finalized[-1] if finalized else None, clip, family
+        ):
             invalid_reasons.append("adjacent_generic_family")
 
         if invalid_reasons:
@@ -568,7 +716,17 @@ def _v35_finalize_real_tts_master(
                 score += sum(90.0 / (1 + intent_counts.get(key, 0)) for key in overlap)
                 if candidate_id in alternative_ids:
                     score += 45.0
-                if previous_family and candidate_family == previous_family and candidate_family in _V35_GENERIC_FAMILIES:
+                candidate_preview = {
+                    **clip,
+                    "asset_id": candidate_id,
+                    "source_asset_id": candidate_id,
+                    "visual_family": candidate_family,
+                }
+                if _v371_adjacent_family_violation(
+                    finalized[-1] if finalized else None,
+                    candidate_preview,
+                    candidate_family,
+                ):
                     continue
                 if previous_family and candidate_family != previous_family:
                     score += 35.0
@@ -578,8 +736,27 @@ def _v35_finalize_real_tts_master(
 
             ranked.sort(key=lambda item: item[0], reverse=True)
             if not ranked:
+                previous_clip = finalized[-1] if finalized else None
+                if _v371_can_merge_as_semantic_hold(
+                    previous_clip, clip, total=len(originals), index=index
+                ):
+                    old_previous = dict(previous_clip or {})
+                    merged = _v371_merge_into_previous(
+                        old_previous, clip, reasons=invalid_reasons
+                    )
+                    finalized[-1] = merged
+                    consolidations.append({
+                        "source_index": index + 1,
+                        "merged_into_index": len(finalized),
+                        "asset_id": _v35_clip_identity(merged),
+                        "visual_family": merged.get("visual_family"),
+                        "reasons": list(invalid_reasons),
+                        "duration": merged.get("duration"),
+                        "mode": "adaptive_semantic_hold",
+                    })
+                    continue
                 raise ValueError(
-                    "V35 最终镜头硬门禁无法找到合格唯一素材："
+                    "V37.1 最终镜头容量门禁无法找到唯一素材且不可安全合并："
                     f"index={index + 1}, reasons={invalid_reasons}, "
                     f"requested={sorted(requested)}, narration={narration[:80]}"
                 )
@@ -642,13 +819,19 @@ def _v35_finalize_real_tts_master(
                 "candidate_keys": sorted(final_keys),
                 "requested": sorted(requested),
             })
-        if index > 0:
-            previous = str(finalized[index - 1].get("visual_family") or "")
-            if family == previous and family in _V35_GENERIC_FAMILIES:
-                adjacent_family_violations.append({"index": index + 1, "family": family})
+        if index > 0 and _v371_adjacent_family_violation(
+            finalized[index - 1], clip, family
+        ):
+            adjacent_family_violations.append({
+                "index": index + 1,
+                "family": family,
+                "previous_focus_entity": _v371_focus_entity(finalized[index - 1]),
+                "focus_entity": _v371_focus_entity(clip),
+            })
     report = {
         "version": VERSION,
         "passed": not duplicates and not mismatches and not adjacent_family_violations,
+        "original_clip_count": len(originals),
         "clip_count": len(finalized),
         "unique_asset_count": len(set(identities)),
         "repeat_count": len(identities) - len(set(identities)),
@@ -657,6 +840,9 @@ def _v35_finalize_real_tts_master(
         "adjacent_family_violations": adjacent_family_violations,
         "replacement_count": len(replacements),
         "replacements": replacements,
+        "consolidation_count": len(consolidations),
+        "consolidations": consolidations,
+        "adaptive_unique_asset_capacity": True,
         "family_counts": family_counts,
         "landmark_count": family_counts.get("city_landmark", 0),
         "landmark_limit": max_landmarks,
@@ -2071,6 +2257,11 @@ def install_existing_video_editor(
                 "concrete_entity_micro_cut": True,
                 "semantic_density_pacing": True,
                 "parallel_entity_one_item_one_shot": True,
+                "adaptive_semantic_hold_when_unique_asset_exhausted": True,
+                "adjacent_family_distinct_entity_allowed": True,
+                "unique_asset_capacity_downshift": True,
+                "explicit_actionable_cta_classifier": True,
+                "canonical_traffic_intent_labels": True,
                 "successful_workdir_cleanup": True,
                 "stale_workdir_cleanup_24h": True,
             "strict_visual_single_use": True,
