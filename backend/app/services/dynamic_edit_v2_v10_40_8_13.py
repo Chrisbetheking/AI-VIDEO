@@ -19,7 +19,8 @@ from typing import Any, Callable
 
 from fastapi import Depends, HTTPException, Request
 
-VERSION = "10.40.8.37.1.1-cta-classifier-traffic-intent-hotfix"
+VERSION = "10.40.8.37.1.2-semantic-cta-visual-fallback"
+# V10_40_8_37_1_2_SEMANTIC_CTA_VISUAL_FALLBACK
 # V10_40_8_37_1_1_CTA_CLASSIFIER_TRAFFIC_INTENT_HOTFIX
 # V10_40_8_37_1_ADAPTIVE_UNIQUE_ASSET_CAPACITY
 # V10_40_8_37_INLINE_KEYWORD_ENTITY_MICROCUT_CTA
@@ -28,7 +29,7 @@ VERSION = "10.40.8.37.1.1-cta-classifier-traffic-intent-hotfix"
 # V10_40_8_34_DEDUP_KEYWORD_ENTITY_CTA
 # V10_40_8_33_SEMANTIC_RELEVANCE_CAPTION_HIERARCHY
 # V10_40_8_32_REFERENCE_KINETIC_TYPOGRAPHY
-INSTALL_MARKER = "V10_40_8_37_1_ADAPTIVE_UNIQUE_ASSET_CAPACITY"
+INSTALL_MARKER = "V10_40_8_37_1_2_SEMANTIC_CTA_VISUAL_FALLBACK"
 _INSTALLED = False
 _LOCK = threading.RLock()
 
@@ -1741,6 +1742,9 @@ def install_dynamic_edit_v2(app: Any, get_settings: Callable[..., Any]) -> None:
                 "unique_asset_capacity_downshift": True,
                 "explicit_actionable_cta_classifier": True,
                 "canonical_traffic_intent_labels": True,
+                "semantic_cta_prefers_concrete_intent": True,
+                "cta_people_scene_only_without_concrete_intent": True,
+                "cta_semantic_hold_when_unique_asset_exhausted": True,
                 "semantic_sticker_effects": True,
                 "effect_delivery_quality_gate": True,
                 "reference_driven_teaching_effects": True,

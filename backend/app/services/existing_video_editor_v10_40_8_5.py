@@ -32,7 +32,8 @@ from app.services.a10_r4_output_guard_v10_40_8_12 import (
     measure_audio_loudness,
 )
 
-VERSION = "10.40.8.37.1.1-cta-classifier-traffic-intent-hotfix"
+VERSION = "10.40.8.37.1.2-semantic-cta-visual-fallback"
+# V10_40_8_37_1_2_SEMANTIC_CTA_VISUAL_FALLBACK
 # V10_40_8_37_1_1_CTA_CLASSIFIER_TRAFFIC_INTENT_HOTFIX
 # V10_40_8_37_1_ADAPTIVE_UNIQUE_ASSET_CAPACITY
 # V10_40_8_37_INLINE_KEYWORD_ENTITY_MICROCUT_CTA
@@ -465,12 +466,44 @@ def _v35_is_final_cta(clip: dict[str, Any], index: int, total: int) -> bool:
     if not text:
         return False
     actionable = re.search(
-        r"评论|留言|私信|关注|联系|咨询|预约|点击|领取|发送|发来|告诉我|"
-        r"打在评论区|把.{0,24}(?:项目|预算|报价|户型|通勤方式).{0,12}(?:发来|告诉我|留言|私信)",
+        r"评论|留言|私信|关注|联系|咨询|预约|点击|领取|发送|发来|发给我|告诉我|"
+        r"打在评论区|把.{0,36}(?:项目|预算|报价|户型|通勤方式|上班地点|交通工具|需求|区域)"
+        r".{0,18}(?:发来|发给我|告诉我|留言|私信)",
         text,
         re.I,
     )
     return bool(actionable)
+
+
+_V3712_CONCRETE_CTA_INTENTS = {
+    "traffic", "map", "school", "office", "mall", "hospital",
+    "residential", "construction",
+}
+
+
+def _v3712_cta_requires_people_scene(
+    clip: dict[str, Any], index: int, total: int, requested: set[str],
+) -> bool:
+    """Require a people shot only for a generic consultation CTA.
+
+    An actionable CTA may still carry a concrete visual subject.  For example,
+    "把上班地点和交通工具发来" is both a CTA and a traffic/map beat.
+    Forcing every CTA to people footage discarded the concrete intent and
+    caused the final gate to fail when the library had no unused people clip.
+    """
+    if not _v35_is_final_cta(clip, index, total):
+        return False
+    concrete = requested & _V3712_CONCRETE_CTA_INTENTS
+    return not bool(concrete)
+
+
+def _v3712_cta_has_concrete_intent(
+    clip: dict[str, Any], index: int, total: int, requested: set[str],
+) -> bool:
+    return bool(
+        _v35_is_final_cta(clip, index, total)
+        and requested & _V3712_CONCRETE_CTA_INTENTS
+    )
 
 
 def _v35_apply_asset_to_clip(
@@ -565,14 +598,22 @@ def _v371_can_merge_as_semantic_hold(
 ) -> bool:
     if not previous:
         return False
-    if _v35_is_final_cta(current, index, total):
+    current_requested = _v35_intent_keys(
+        current.get("semantic_requested_intents") or []
+    )
+    is_cta = _v35_is_final_cta(current, index, total)
+    # A generic consultation CTA should keep a dedicated people ending.  A CTA
+    # that explicitly talks about traffic, map, school, etc. may safely remain
+    # on that concrete scene when unique asset capacity is exhausted.
+    if is_cta and not _v3712_cta_has_concrete_intent(
+        current, index, total, current_requested
+    ):
         return False
     if _v371_distinct_concrete_focus(previous, current):
         return False
     previous_family = str(previous.get("visual_family") or "").strip().lower()
     current_family = str(current.get("visual_family") or "").strip().lower()
     previous_requested = _v35_intent_keys(previous.get("semantic_requested_intents") or [])
-    current_requested = _v35_intent_keys(current.get("semantic_requested_intents") or [])
     same_asset = bool(
         _v35_clip_identity(previous)
         and _v35_clip_identity(previous) == _v35_clip_identity(current)
@@ -584,7 +625,10 @@ def _v371_can_merge_as_semantic_hold(
     )
     # A semantic hold is preferable to repeating the same source or aborting
     # the whole task, but it must not recreate the previous nine-second hold.
-    return bool((same_asset or semantic_overlap or same_family) and combined <= 7.2)
+    # Concrete CTAs receive a small allowance because they are the spoken
+    # continuation of the same visual decision, not a new scene request.
+    limit = 7.8 if is_cta else 7.2
+    return bool((same_asset or semantic_overlap or same_family) and combined <= limit)
 
 
 def _v371_merge_into_previous(
@@ -616,6 +660,13 @@ def _v371_merge_into_previous(
             requested.append(value)
     if requested:
         merged["semantic_requested_intents"] = requested
+
+    if bool(current.get("is_cta")) or str(
+        current.get("beat_type") or ""
+    ).strip().lower() == "cta":
+        merged["is_cta"] = True
+        merged["beat_type"] = "cta"
+        merged["cta_semantic_hold_merged"] = True
 
     merged_units = [
         *([dict(item) for item in previous.get("merged_semantic_units") or [] if isinstance(item, dict)]),
@@ -666,6 +717,9 @@ def _v35_finalize_real_tts_master(
             family = inferred_family
         requested = _v35_intent_keys(clip.get("semantic_requested_intents") or [])
         cta = _v35_is_final_cta(clip, index, len(originals))
+        cta_people_required = _v3712_cta_requires_people_scene(
+            clip, index, len(originals), requested
+        )
         current_keys = _v361_clip_intent_keys(clip, family)
         previous_family = str(finalized[-1].get("visual_family") or "") if finalized else ""
 
@@ -676,7 +730,7 @@ def _v35_finalize_real_tts_master(
             invalid_reasons.append("duplicate_asset_id")
         if not _v35_intent_match(requested, current_keys, family):
             invalid_reasons.append("requested_intent_mismatch")
-        if cta and family != "people":
+        if cta_people_required and family != "people":
             invalid_reasons.append("cta_requires_people_scene")
         if family == "city_landmark" and family_counts.get(family, 0) >= max_landmarks:
             invalid_reasons.append("landmark_share_cap")
@@ -707,13 +761,17 @@ def _v35_finalize_real_tts_master(
                 overlap = requested & candidate_keys
                 if not _v35_intent_match(requested, candidate_keys, candidate_family):
                     continue
-                if cta and candidate_family != "people":
+                if cta_people_required and candidate_family != "people":
                     continue
                 if candidate_family == "city_landmark" and family_counts.get("city_landmark", 0) >= max_landmarks:
                     continue
                 score = _score(query, asset, 0)
                 score += 150.0 * len(overlap)
                 score += sum(90.0 / (1 + intent_counts.get(key, 0)) for key in overlap)
+                if cta and requested & _V3712_CONCRETE_CTA_INTENTS:
+                    # Prefer the concrete CTA subject (traffic/map/etc.) over a
+                    # generic consultation shot when both are available.
+                    score += 70.0 * len(overlap)
                 if candidate_id in alternative_ids:
                     score += 45.0
                 candidate_preview = {
@@ -756,7 +814,7 @@ def _v35_finalize_real_tts_master(
                     })
                     continue
                 raise ValueError(
-                    "V37.1 最终镜头容量门禁无法找到唯一素材且不可安全合并："
+                    "V37.1.2 最终镜头容量门禁无法找到唯一素材且不可安全合并："
                     f"index={index + 1}, reasons={invalid_reasons}, "
                     f"requested={sorted(requested)}, narration={narration[:80]}"
                 )
@@ -843,6 +901,9 @@ def _v35_finalize_real_tts_master(
         "consolidation_count": len(consolidations),
         "consolidations": consolidations,
         "adaptive_unique_asset_capacity": True,
+        "semantic_cta_visual_policy": True,
+        "cta_people_scene_only_without_concrete_intent": True,
+        "cta_semantic_hold_when_unique_asset_exhausted": True,
         "family_counts": family_counts,
         "landmark_count": family_counts.get("city_landmark", 0),
         "landmark_limit": max_landmarks,
@@ -2262,6 +2323,9 @@ def install_existing_video_editor(
                 "unique_asset_capacity_downshift": True,
                 "explicit_actionable_cta_classifier": True,
                 "canonical_traffic_intent_labels": True,
+                "semantic_cta_prefers_concrete_intent": True,
+                "cta_people_scene_only_without_concrete_intent": True,
+                "cta_semantic_hold_when_unique_asset_exhausted": True,
                 "successful_workdir_cleanup": True,
                 "stale_workdir_cleanup_24h": True,
             "strict_visual_single_use": True,
