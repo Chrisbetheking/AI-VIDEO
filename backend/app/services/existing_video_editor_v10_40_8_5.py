@@ -32,7 +32,8 @@ from app.services.a10_r4_output_guard_v10_40_8_12 import (
     measure_audio_loudness,
 )
 
-VERSION = "10.40.8.37.1.3-global-capacity-preconsolidation"
+VERSION = "10.40.8.37.1.4-global-candidate-matrix-reservation"
+# V10_40_8_37_1_4_GLOBAL_CANDIDATE_MATRIX_RESERVATION
 # V10_40_8_37_1_3_GLOBAL_CAPACITY_PRECONSOLIDATION
 # V10_40_8_37_1_1_CTA_CLASSIFIER_TRAFFIC_INTENT_HOTFIX
 # V10_40_8_37_1_ADAPTIVE_UNIQUE_ASSET_CAPACITY
@@ -1008,6 +1009,294 @@ def _v371_merge_into_previous(
     return merged
 
 
+
+_V3714_GENERIC_CTA_FALLBACK_FAMILIES = {
+    "people", "office", "residential", "map",
+}
+
+
+def _v3714_clip_candidate_rows(
+    clip: dict[str, Any],
+    *,
+    index: int,
+    total: int,
+    library: list[dict[str, Any]],
+) -> list[tuple[float, str, dict[str, Any], str, set[str]]]:
+    """Return all semantically valid assets for one final spoken beat.
+
+    V37.1.3 only counted currently-bound unique ids.  That is insufficient:
+    an early generic sentence can consume the only people/consultation asset,
+    leaving the final CTA impossible even though a valid whole-video assignment
+    existed.  V37.1.4 builds the candidate matrix before the sequential gate.
+    """
+    narration = str(clip.get("narration") or clip.get("text") or "")
+    requested = _v35_intent_keys(
+        clip.get("semantic_requested_intents") or []
+    )
+    cta = _v35_is_final_cta(clip, index, total)
+    generic_cta = bool(
+        cta and not (requested & _V3712_CONCRETE_CTA_INTENTS)
+    )
+    current_id = _v35_clip_identity(clip)
+    alternative_ids = {
+        str(item.get("asset_id") or "").strip()
+        for item in (clip.get("alternative_assets") or [])
+        if isinstance(item, dict)
+    }
+
+    people_assets = []
+    for asset in library:
+        aid = _asset_id(asset)
+        if not aid or not _asset_url(asset):
+            continue
+        family = _v35_visual_family(_asset_text(asset))
+        if family == "people":
+            people_assets.append(aid)
+    hard_people = bool(generic_cta and people_assets)
+
+    query = " ".join([
+        narration,
+        " ".join(
+            str(item or "")
+            for item in (clip.get("semantic_requested_intents") or [])
+        ),
+    ])
+    rows: list[tuple[float, str, dict[str, Any], str, set[str]]] = []
+    for asset in library:
+        aid = _asset_id(asset)
+        if not aid or not _asset_url(asset):
+            continue
+        family = _v35_visual_family(_asset_text(asset))
+        keys = _v35_asset_intent_keys(asset)
+
+        if hard_people and family != "people":
+            continue
+        if not hard_people:
+            if generic_cta and not people_assets:
+                if family not in _V3714_GENERIC_CTA_FALLBACK_FAMILIES:
+                    continue
+            elif not _v3713_contextual_intent_match(
+                requested, keys, family, narration
+            ):
+                continue
+
+        overlap = requested & keys
+        score = _score(query, asset, 0)
+        score += 180.0 * len(overlap)
+        if aid == current_id:
+            score += 150.0
+        if aid in alternative_ids:
+            score += 55.0
+        if generic_cta and family == "people":
+            score += 900.0
+        elif generic_cta and not people_assets:
+            score += {
+                "office": 220.0,
+                "residential": 160.0,
+                "map": 100.0,
+                "people": 260.0,
+            }.get(family, 0.0)
+        if family == "city_landmark" and not re.search(
+            r"吉隆坡|klcc|双子塔|地标", narration, re.I
+        ):
+            score -= 320.0
+        rows.append((score, aid, asset, family, keys))
+
+    rows.sort(key=lambda item: (item[0], item[1]), reverse=True)
+    return rows
+
+
+def _v3714_unique_candidate_assignment(
+    originals: list[dict[str, Any]],
+    library: list[dict[str, Any]],
+) -> tuple[dict[int, str], dict[int, list[tuple[float, str, dict[str, Any], str, set[str]]]]]:
+    """Maximum-cardinality deterministic matching with scarcity first."""
+    total = len(originals)
+    matrix = {
+        index: _v3714_clip_candidate_rows(
+            clip,
+            index=index,
+            total=total,
+            library=library,
+        )
+        for index, clip in enumerate(originals)
+    }
+
+    def priority(index: int) -> tuple[int, int, int, int]:
+        clip = originals[index]
+        requested = _v35_intent_keys(
+            clip.get("semantic_requested_intents") or []
+        )
+        cta = _v35_is_final_cta(clip, index, total)
+        hard_cta = int(bool(
+            cta and not (requested & _V3712_CONCRETE_CTA_INTENTS)
+        ))
+        concrete = int(bool(requested))
+        return (
+            len(matrix.get(index) or []),
+            -hard_cta,
+            -concrete,
+            index,
+        )
+
+    order = sorted(range(total), key=priority)
+    asset_to_clip: dict[str, int] = {}
+    clip_to_asset: dict[int, str] = {}
+
+    def place(index: int, visiting: set[int]) -> bool:
+        if index in visiting:
+            return False
+        visiting = set(visiting)
+        visiting.add(index)
+        for _, aid, _, _, _ in matrix.get(index) or []:
+            occupant = asset_to_clip.get(aid)
+            if occupant is None:
+                asset_to_clip[aid] = index
+                clip_to_asset[index] = aid
+                return True
+            # During an augmenting-path reassignment, the occupant must try a
+            # different asset.  Treating its current edge as success leaves a
+            # stale duplicate entry in clip_to_asset and defeats reservation.
+            if occupant == index:
+                continue
+            if place(occupant, visiting):
+                asset_to_clip[aid] = index
+                clip_to_asset[index] = aid
+                return True
+        return False
+
+    for index in order:
+        place(index, set())
+    return clip_to_asset, matrix
+
+
+def _v3714_preflight_global_candidate_matrix(
+    originals: list[dict[str, Any]],
+    library: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], dict[int, str], list[dict[str, Any]], dict[str, Any]]:
+    """Prove a unique whole-video assignment before the sequential gate.
+
+    If the candidate matrix is not fully matchable, merge only semantically
+    safe adjacent beats and rebuild the matrix.  This prevents first-success /
+    second-failure behavior caused by greedy early asset consumption.
+    """
+    working = [dict(item) for item in originals]
+    consolidations: list[dict[str, Any]] = []
+    attempts = 0
+
+    while working and attempts < 32:
+        attempts += 1
+        assignment, matrix = _v3714_unique_candidate_assignment(
+            working, library
+        )
+        unmatched = [
+            index for index in range(len(working))
+            if index not in assignment
+        ]
+        if not unmatched:
+            for index, clip in enumerate(working, start=1):
+                clip["index"] = index
+            report = {
+                "version": VERSION,
+                "passed": True,
+                "attempts": attempts,
+                "clip_count": len(working),
+                "assigned_count": len(assignment),
+                "unmatched_indices": [],
+                "candidate_counts": {
+                    str(index + 1): len(matrix.get(index) or [])
+                    for index in range(len(working))
+                },
+                "reserved_asset_ids": sorted(set(assignment.values())),
+                "consolidation_count": len(consolidations),
+            }
+            return working, assignment, consolidations, report
+
+        identity_counts: dict[str, int] = {}
+        for item in working:
+            identity = _v35_clip_identity(item)
+            if identity:
+                identity_counts[identity] = identity_counts.get(identity, 0) + 1
+
+        candidates: list[tuple[float, int]] = []
+        total = len(working)
+        unmatched_set = set(unmatched)
+        for idx in range(1, total):
+            score = _v3713_pair_merge_score(
+                working[idx - 1],
+                working[idx],
+                index=idx,
+                total=total,
+                identity_counts=identity_counts,
+            )
+            if score is None:
+                continue
+            if idx in unmatched_set or idx - 1 in unmatched_set:
+                score += 320.0
+            candidates.append((score, idx))
+
+        if not candidates:
+            report = {
+                "version": VERSION,
+                "passed": False,
+                "attempts": attempts,
+                "clip_count": len(working),
+                "assigned_count": len(assignment),
+                "unmatched_indices": [index + 1 for index in unmatched],
+                "candidate_counts": {
+                    str(index + 1): len(matrix.get(index) or [])
+                    for index in range(len(working))
+                },
+                "reserved_asset_ids": sorted(set(assignment.values())),
+                "consolidation_count": len(consolidations),
+            }
+            return working, assignment, consolidations, report
+
+        candidates.sort(key=lambda item: (item[0], -item[1]), reverse=True)
+        score, idx = candidates[0]
+        previous = dict(working[idx - 1])
+        current = dict(working[idx])
+        merged = _v3713_merge_adjacent_pair(
+            previous,
+            current,
+            reasons=["global_candidate_matrix_unmatched_preconsolidation"],
+            identity_counts=identity_counts,
+        )
+        merged["global_candidate_matrix_preconsolidated"] = True
+        merged["candidate_matrix_merge_score"] = round(score, 3)
+        working[idx - 1:idx + 1] = [merged]
+        consolidations.append({
+            "source_index": current.get("index") or idx + 1,
+            "merged_into_index": idx,
+            "asset_id": _v35_clip_identity(merged),
+            "visual_family": merged.get("visual_family"),
+            "duration": merged.get("duration"),
+            "score": round(score, 3),
+            "mode": "global_candidate_matrix_unmatched_preconsolidation",
+        })
+
+    assignment, matrix = _v3714_unique_candidate_assignment(
+        working, library
+    )
+    report = {
+        "version": VERSION,
+        "passed": len(assignment) == len(working),
+        "attempts": attempts,
+        "clip_count": len(working),
+        "assigned_count": len(assignment),
+        "unmatched_indices": [
+            index + 1 for index in range(len(working))
+            if index not in assignment
+        ],
+        "candidate_counts": {
+            str(index + 1): len(matrix.get(index) or [])
+            for index in range(len(working))
+        },
+        "reserved_asset_ids": sorted(set(assignment.values())),
+        "consolidation_count": len(consolidations),
+    }
+    return working, assignment, consolidations, report
+
 def _v35_finalize_real_tts_master(
     settings: Any,
     clips: list[dict[str, Any]],
@@ -1022,17 +1311,51 @@ def _v35_finalize_real_tts_master(
         _v3713_preconsolidate_to_bound_capacity(originals)
 
     library = _load_library_assets(settings)
+    originals, global_assignment, matrix_consolidations, matrix_report = \
+        _v3714_preflight_global_candidate_matrix(originals, library)
+    if matrix_report.get("passed") is not True:
+        raise ValueError(
+            "V37.1.4 渲染前全局候选素材矩阵不可行："
+            + json.dumps(matrix_report, ensure_ascii=False)
+        )
+
     by_id = {_asset_id(asset): asset for asset in library if _asset_id(asset)}
+    people_asset_ids = {
+        _asset_id(asset)
+        for asset in library
+        if _asset_id(asset)
+        and _asset_url(asset)
+        and _v35_visual_family(_asset_text(asset)) == "people"
+    }
     used: set[str] = set()
     family_counts: dict[str, int] = {}
     intent_counts: dict[str, int] = {}
     finalized: list[dict[str, Any]] = []
     replacements: list[dict[str, Any]] = []
-    consolidations: list[dict[str, Any]] = list(capacity_preconsolidations)
+    consolidations: list[dict[str, Any]] = [
+        *capacity_preconsolidations,
+        *matrix_consolidations,
+    ]
     max_landmarks = max(1, int(len(originals) * 0.20))
 
     for index, original in enumerate(originals):
         clip = dict(original)
+        assigned_id = str(global_assignment.get(index) or "").strip()
+        original_bound_id = _v35_clip_identity(clip)
+        if assigned_id and assigned_id in by_id and assigned_id != original_bound_id:
+            clip = _v35_apply_asset_to_clip(
+                clip,
+                by_id[assigned_id],
+                reason="V37.1.4 全局候选矩阵预分配",
+            )
+            replacements.append({
+                "index": index + 1,
+                "old_asset_id": original_bound_id,
+                "new_asset_id": assigned_id,
+                "new_asset_name": clip.get("asset_name"),
+                "reasons": ["global_candidate_matrix_assignment"],
+                "score": None,
+            })
         aid = _v35_clip_identity(clip)
         family = str(clip.get("visual_family") or "").strip().lower()
         inferred_family = _v35_visual_family(_v35_clip_text(clip))
@@ -1043,8 +1366,15 @@ def _v35_finalize_real_tts_master(
             family = inferred_family
         requested = _v35_intent_keys(clip.get("semantic_requested_intents") or [])
         cta = _v35_is_final_cta(clip, index, len(originals))
-        cta_people_required = _v3712_cta_requires_people_scene(
+        cta_people_preferred = _v3712_cta_requires_people_scene(
             clip, index, len(originals), requested
+        )
+        # Generic CTA people footage is a hard rule only when the library has
+        # at least one real people/consultation asset.  The global matrix
+        # reserves that scarce asset for the final CTA before earlier generic
+        # beats are assigned.
+        cta_people_required = bool(
+            cta_people_preferred and people_asset_ids
         )
         current_keys = _v361_clip_intent_keys(clip, family)
         previous_family = str(finalized[-1].get("visual_family") or "") if finalized else ""
@@ -1080,9 +1410,16 @@ def _v35_finalize_real_tts_master(
                 " ".join(str(item or "") for item in (clip.get("semantic_requested_intents") or [])),
             ])
             ranked: list[tuple[float, dict[str, Any], str, set[str]]] = []
+            future_reserved = {
+                str(global_assignment.get(position) or "").strip()
+                for position in range(index + 1, len(originals))
+                if str(global_assignment.get(position) or "").strip()
+            }
             for asset in library:
                 candidate_id = _asset_id(asset)
                 if not candidate_id or candidate_id in used or not _asset_url(asset):
+                    continue
+                if candidate_id in future_reserved and candidate_id != assigned_id:
                     continue
                 candidate_text = _asset_text(asset)
                 candidate_family = _v35_visual_family(candidate_text)
@@ -1155,7 +1492,7 @@ def _v35_finalize_real_tts_master(
                     })
                     continue
                 raise ValueError(
-                    "V37.1.3 最终镜头容量门禁无法找到唯一素材且不可安全合并："
+                    "V37.1.4 最终镜头全局预排程后仍无法找到唯一素材且不可安全合并："
                     f"index={index + 1}, reasons={invalid_reasons}, "
                     f"requested={sorted(requested)}, narration={narration[:80]}"
                 )
@@ -1250,6 +1587,12 @@ def _v35_finalize_real_tts_master(
         "cta_semantic_hold_when_unique_asset_exhausted": True,
         "global_capacity_preconsolidation": True,
         "map_amenity_contextual_match": True,
+        "global_candidate_matrix_preflight": True,
+        "scarce_asset_reservation": True,
+        "generic_cta_people_asset_reservation": True,
+        "render_preflight_feasibility_proof": True,
+        "candidate_matrix_report": matrix_report,
+        "candidate_matrix_consolidation_count": len(matrix_consolidations),
         "capacity_preconsolidation_count": len(capacity_preconsolidations),
         "family_counts": family_counts,
         "landmark_count": family_counts.get("city_landmark", 0),
@@ -2676,6 +3019,10 @@ def install_existing_video_editor(
                 "global_capacity_preconsolidation": True,
                 "map_amenity_contextual_match": True,
                 "contextual_capacity_hold": True,
+                "global_candidate_matrix_preflight": True,
+                "scarce_asset_reservation": True,
+                "generic_cta_people_asset_reservation": True,
+                "render_preflight_feasibility_proof": True,
                 "successful_workdir_cleanup": True,
                 "stale_workdir_cleanup_24h": True,
             "strict_visual_single_use": True,
