@@ -108,6 +108,7 @@ from app.services.doubao import extract_with_doubao
 from app.services.digital_human import call_external_digital_human_worker, call_fal_lipsync, query_fal_lipsync, call_jimeng_digital_human, query_jimeng_digital_human, create_photo_scene_avatar_image, create_static_avatar_preview, extract_hook_text
 from app.services.collector import get_collector_cookie_status, save_collector_cookie_text
 from app.services.kb import KnowledgeBase
+from app.services.r2_kb_access_gate import install_r2_kb_access_gate
 from app.services.memory import MemoryStore, MemoryWriteError
 from app.services.publisher import create_publish_package
 from app.services.storage import maybe_upload_to_r2, maybe_delete_from_r2, maybe_list_r2_objects, read_last_storage_error, test_r2_connection
@@ -147,6 +148,7 @@ from app.services.v10_34_production_provider import (
 
 app = FastAPI(title='AI-VIDEO 正式版 API', version='1.0.0')
 settings = get_settings()
+install_r2_kb_access_gate(app)
 _auto_collector_task: asyncio.Task | None = None
 _auto_agent_jobs: dict[str, dict] = {}
 
