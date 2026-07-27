@@ -19,7 +19,8 @@ from typing import Any, Callable
 
 from fastapi import Depends, HTTPException, Request
 
-VERSION = "10.40.8.37.1.4-global-candidate-matrix-reservation"
+VERSION = "10.40.8.37.1.5-semantic-adjacency-soft-fallback"
+# V10_40_8_37_1_5_SEMANTIC_ADJACENCY_SOFT_FALLBACK
 # V10_40_8_37_1_4_GLOBAL_CANDIDATE_MATRIX_RESERVATION
 # V10_40_8_37_1_3_GLOBAL_CAPACITY_PRECONSOLIDATION
 # V10_40_8_37_1_1_CTA_CLASSIFIER_TRAFFIC_INTENT_HOTFIX
@@ -30,7 +31,7 @@ VERSION = "10.40.8.37.1.4-global-candidate-matrix-reservation"
 # V10_40_8_34_DEDUP_KEYWORD_ENTITY_CTA
 # V10_40_8_33_SEMANTIC_RELEVANCE_CAPTION_HIERARCHY
 # V10_40_8_32_REFERENCE_KINETIC_TYPOGRAPHY
-INSTALL_MARKER = "V10_40_8_37_1_4_GLOBAL_CANDIDATE_MATRIX_RESERVATION"
+INSTALL_MARKER = "V10_40_8_37_1_5_SEMANTIC_ADJACENCY_SOFT_FALLBACK"
 _INSTALLED = False
 _LOCK = threading.RLock()
 
@@ -1753,6 +1754,8 @@ def install_dynamic_edit_v2(app: Any, get_settings: Callable[..., Any]) -> None:
                 "scarce_asset_reservation": True,
                 "generic_cta_people_asset_reservation": True,
                 "render_preflight_feasibility_proof": True,
+                "semantic_adjacent_same_family_soft_fallback": True,
+                "adjacent_family_is_soft_when_unique_and_semantic": True,
                 "semantic_sticker_effects": True,
                 "effect_delivery_quality_gate": True,
                 "reference_driven_teaching_effects": True,

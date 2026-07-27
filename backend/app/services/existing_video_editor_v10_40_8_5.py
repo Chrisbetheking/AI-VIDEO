@@ -32,7 +32,7 @@ from app.services.a10_r4_output_guard_v10_40_8_12 import (
     measure_audio_loudness,
 )
 
-VERSION = "10.40.8.37.1.4-global-candidate-matrix-reservation"
+VERSION = "10.40.8.37.1.5-semantic-adjacency-soft-fallback"
 # V10_40_8_37_1_4_GLOBAL_CANDIDATE_MATRIX_RESERVATION
 # V10_40_8_37_1_3_GLOBAL_CAPACITY_PRECONSOLIDATION
 # V10_40_8_37_1_1_CTA_CLASSIFIER_TRAFFIC_INTENT_HOTFIX
@@ -896,6 +896,59 @@ def _v371_distinct_concrete_focus(
     )
 
 
+def _v3715_semantic_same_family_allowed(
+    previous: dict[str, Any], current: dict[str, Any], family: str,
+) -> bool:
+    """Allow two different real assets from one scene family when both are semantically valid.
+
+    Adjacent-family diversity is a visual preference, not an integrity rule.
+    A sentence list such as 商场 / 超市 / 便利店 legitimately needs consecutive
+    mall-family shots.  The hard invariants remain: different asset IDs and
+    semantic compatibility for the current beat.
+    """
+    previous_id = _v35_clip_identity(previous)
+    current_id = _v35_clip_identity(current)
+    if not previous_id or not current_id or previous_id == current_id:
+        return False
+
+    family = str(family or current.get("visual_family") or "").strip().lower()
+    if family not in _V35_GENERIC_FAMILIES:
+        return False
+
+    previous_requested = _v35_intent_keys(
+        previous.get("semantic_requested_intents") or []
+    )
+    current_requested = _v35_intent_keys(
+        current.get("semantic_requested_intents") or []
+    )
+    previous_keys = _v361_clip_intent_keys(
+        previous, str(previous.get("visual_family") or family)
+    )
+    current_keys = _v361_clip_intent_keys(current, family)
+    narration = str(current.get("narration") or current.get("text") or "")
+
+    current_is_semantic = _v3713_contextual_intent_match(
+        current_requested, current_keys, family, narration
+    )
+    if not current_is_semantic:
+        return False
+
+    # A concrete requested beat (for example requested=[mall], narration=超市)
+    # must not fail merely because the previous unique shot is also mall.
+    if family in current_requested:
+        return True
+
+    # Metadata can be lost during real-TTS replanning.  Recover intent from the
+    # bound clip itself and allow the pair when both unique assets truly belong
+    # to the same requested scene family.
+    if family in current_keys and (
+        family in previous_requested or family in previous_keys
+    ):
+        return True
+
+    return False
+
+
 def _v371_adjacent_family_violation(
     previous: dict[str, Any] | None, current: dict[str, Any], family: str = "",
 ) -> bool:
@@ -913,6 +966,8 @@ def _v371_adjacent_family_violation(
         _v35_clip_identity(previous) != _v35_clip_identity(current)
         and _v371_distinct_concrete_focus(previous, current)
     ):
+        return False
+    if _v3715_semantic_same_family_allowed(previous, current, current_family):
         return False
     return True
 
@@ -1518,7 +1573,8 @@ def _v35_finalize_real_tts_master(
         previous_family = str(finalized[-1].get("visual_family") or "") if finalized else ""
         clip["sequence_guard"] = {
             "adjacent_same_asset_forbidden": True,
-            "adjacent_generic_family_forbidden": True,
+            "adjacent_generic_family_preference": True,
+            "adjacent_same_family_unique_semantic_allowed": True,
             "previous_asset_id": previous_asset_id,
             "previous_visual_family": previous_family,
             "passed": True,
@@ -1591,6 +1647,8 @@ def _v35_finalize_real_tts_master(
         "scarce_asset_reservation": True,
         "generic_cta_people_asset_reservation": True,
         "render_preflight_feasibility_proof": True,
+        "semantic_adjacent_same_family_soft_fallback": True,
+        "adjacent_family_is_soft_when_unique_and_semantic": True,
         "candidate_matrix_report": matrix_report,
         "candidate_matrix_consolidation_count": len(matrix_consolidations),
         "capacity_preconsolidation_count": len(capacity_preconsolidations),
@@ -3023,6 +3081,8 @@ def install_existing_video_editor(
                 "scarce_asset_reservation": True,
                 "generic_cta_people_asset_reservation": True,
                 "render_preflight_feasibility_proof": True,
+                "semantic_adjacent_same_family_soft_fallback": True,
+                "adjacent_family_is_soft_when_unique_and_semantic": True,
                 "successful_workdir_cleanup": True,
                 "stale_workdir_cleanup_24h": True,
             "strict_visual_single_use": True,
